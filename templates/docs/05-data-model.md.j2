@@ -1,0 +1,59 @@
+# Data Model - ${repository_name}
+
+本页面按领域聚合数据模型，展示核心实体、服务模型和持久化策略。详细模型定义请参考 `ai/source-of-truth/data-models.yaml`。
+
+## 核心数据模型
+
+${core_models_section}
+
+核心模型是跨服务共享的基础实体，定义系统的基础数据结构。
+
+### 核心模型列表
+
+${core_models_table}
+
+---
+
+## 服务数据模型
+
+${service_models_section}
+
+服务模型是特定于服务或模块的实体，封装业务逻辑所需的数据结构。
+
+### 按服务分组
+
+${service_models_by_module}
+
+---
+
+## 数据库与迁移策略
+
+${database_migration_section}
+
+### 数据库形状
+
+${database_shape}
+
+### 迁移策略
+
+${migration_strategy}
+
+### 跨模块数据边界
+
+${cross_module_boundaries}
+
+---
+
+## 模型索引
+
+${model_index_table}
+
+---
+
+## 阅读导航
+
+- [项目概览](00-overview.md) - 快速了解项目定位和能力
+- [系统架构](01-architecture.md) - 了解三层架构设计
+- [模块地图](03-module-map.md) - 查看模块依赖关系
+- [API 契约](04-api-contracts.md) - 了解服务间接口
+- [Section 页](sections/data-model/index.md) - 按数据模型专题深入阅读

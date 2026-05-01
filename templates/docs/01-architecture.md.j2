@@ -1,0 +1,168 @@
+# ${repository_name} - 系统架构
+
+${architecture_description}
+
+## 系统分层
+
+${three_layer_overview}
+
+### 三层架构图
+
+```mermaid
+graph TB
+    subgraph "Layer 1: Runtime Storage (.repo-wiki/)"
+        R1[("Index Store<br/>(SQLite + FTS)")]
+        R2[("Knowledge Graph<br/>(JSON)")]
+        R3[("Vector Cache<br/>(Chroma)")]
+        R4[("Generation Cache<br/>(SQLite)")]
+    end
+
+    subgraph "Layer 2: Source of Truth (ai/source-of-truth/)"
+        S1["module-index.yaml<br/>Module Registry"]
+        S2["api-index.yaml<br/>API Registry"]
+        S3["data-models.yaml<br/>Data Model Registry"]
+        S4["repo-map.yaml<br/>Repository Metadata"]
+        S5["task-catalog.yaml<br/>Task Definitions"]
+    end
+
+    subgraph "Layer 3: Document Center (docs/)"
+        D1["00-overview.md<br/>Project Overview"]
+        D2["01-architecture.md<br/>System Design"]
+        D3["03-module-map.md<br/>Module Map"]
+        D4["docs/sections/<br/>Section Docs"]
+        D5["docs/modules/<br/>Module Docs"]
+        D6["docs/phases/<br/>Phase Docs"]
+    end
+
+    R1 --> S1
+    R2 --> S2
+    R3 --> S3
+    S1 --> D1
+    S2 --> D3
+    S3 --> D3
+    S1 --> D4
+    S2 --> D4
+    D1 --> D2
+    D2 --> D4
+    D4 --> D5
+    D1 -.-> D6
+```
+
+## 服务协作关系
+
+${service_collaboration}
+
+### 服务交互流程
+
+```mermaid
+sequenceDiagram
+    participant Scanner
+    participant Indexer
+    participant Generator
+    participant Adapter
+    participant Docs
+
+    Scanner->>Indexer: Scan repository
+    Indexer->>Indexer: Extract modules, APIs, models
+    Indexer->>Indexer: Build knowledge graph
+    Indexer->>Indexer: Store index state
+
+    Indexer->>Generator: Source of truth (module-index, etc.)
+    Generator->>Generator: Generate overview docs
+    Generator->>Generator: Generate section docs
+    Generator->>Generator: Generate module docs
+    Generator->>Docs: Write markdown files
+
+    Adapter->>Adapter: Generate .claude/CLAUDE.md
+    Adapter->>Adapter: Generate .codex/config.toml
+```
+
+## 核心链路
+
+${core_data_flow}
+
+### 数据流图
+
+```mermaid
+flowchart LR
+    A[("Source Code<br/>Files")] --> B[("Scanner<br/>Extract")]
+    B --> C[("Indexer<br/>Transform")]
+    C --> D[("State Store<br/>Persist")]
+    C --> E[("Graph Store<br/>Persist")]
+    C --> F[("Vector Store<br/>Persist")]
+
+    D --> G[("Source of Truth<br/>yaml/json")]
+    G --> H[("Generator<br/>Template Render")]
+    H --> I[("Document Center<br/>docs/")]
+
+    F --> J[("Retrieval<br/>Query")]
+    J --> H
+```
+
+## 存储与检索设计
+
+${storage_retrieval_design}
+
+### 存储层次说明
+
+| 存储位置 | 职责 | 格式 |
+|---------|------|------|
+| `.repo-wiki/index/` | 操作知识底座 | SQLite (FTS) |
+| `.repo-wiki/graph/` | 依赖关系和影响链 | JSON |
+| `.repo-wiki/cache/` | 生成缓存 | SQLite + diskcache |
+| `ai/source-of-truth/` | 结构化事实源 | YAML |
+
+### 检索流程
+
+```mermaid
+flowchart TD
+    A[("Query")] --> B{Retrieval Strategy}
+    B -->|Vector Search| C[("Embedding<br/>Model")]
+    C --> D[("Chroma<br/>Vector DB")]
+    D --> E[("Top-K<br/>Results")]
+
+    B -->|Keyword Search| F[("FTS<br/>Full-Text")]
+    F --> E
+
+    B -->|Graph Walk| G[("Knowledge<br/>Graph")]
+    G --> E
+
+    E --> H[("Context<br/>Builder")]
+    H --> I[("LLM<br/>Generation")]
+```
+
+## 增量更新与治理闭环
+
+${incremental_governance}
+
+### 增量更新流程
+
+```mermaid
+flowchart TD
+    A[("Git Change<br/>Detection")] --> B{Impact Analysis}
+    B -->|Module Changed| C[("Expand Impacted<br/>Modules")]
+    B -->|API Changed| D[("Update<br/>API Index")]
+    B -->|Model Changed| E[("Update<br/>Model Index")]
+
+    C --> F{Regeneration<br/>Needed?}
+    F -->|Yes| G[("Regenerate<br/>Affected Docs")]
+    F -->|No| H[("Skip<br/>Generation")]
+
+    G --> I[("Verify<br/>Output Quality")]
+    I -->|Pass| J[("Commit<br/>Documentation")]
+    I -->|Fail| K[("Log<br/>Issue")]
+
+    H --> J
+```
+
+### 治理检查点
+
+${governance_checkpoints}
+
+## 模块概览
+
+${module_overview_table}
+
+## 技术栈
+
+${tech_stack}

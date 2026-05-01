@@ -1,0 +1,8 @@
+Repository `repo-agent` is built with `javascript` and `express`.
+Use the module map and API contracts before opening source files.
+
+Module inventory:
+- `extensions` -> `extensions` (Handles models instanceof, in.)
+- `repo_wiki` -> `repo_wiki` (Handles API routes /path.)
+- `scripts` -> `scripts` (Handles exports AcceptanceEvidence, BaselineComparatorConfig.)
+- `tests` -> `tests` (Handles API routes /users, /users.)

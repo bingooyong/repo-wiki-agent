@@ -1,0 +1,103 @@
+{
+  "name": "repo-wiki-browser",
+  "displayName": "Repo Wiki Browser",
+  "description": "Browse repo-agent wiki outputs; Update Wiki runs a configurable terminal command (default: uv run repo-wiki generate). Does not bundle the Python repo-wiki CLI — uv and repo-wiki must be available in the integrated terminal environment.",
+  "version": "0.1.0",
+  "publisher": "repo-agent",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bingooyong/repo-agent"
+  },
+  "activationEvents": [
+    "onView:repoWikiBrowser.sidebar",
+    "onCommand:repoWikiBrowser.openViewer",
+    "onCommand:repoWikiBrowser.refreshTree",
+    "onCommand:repoWikiBrowser.runVerify",
+    "onCommand:repoWikiBrowser.updateWiki",
+    "onCommand:repoWikiBrowser.syncWiki",
+    "onCommand:repoWikiBrowser.openPage"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "repoWikiBrowser.openViewer",
+        "title": "Open Wiki Viewer",
+        "category": "Repo Wiki"
+      },
+      {
+        "command": "repoWikiBrowser.refreshTree",
+        "title": "Refresh Wiki Tree",
+        "category": "Repo Wiki"
+      },
+      {
+        "command": "repoWikiBrowser.runVerify",
+        "title": "Run Verification (--ci)",
+        "category": "Repo Wiki"
+      },
+      {
+        "command": "repoWikiBrowser.updateWiki",
+        "title": "Update Wiki",
+        "category": "Repo Wiki"
+      },
+      {
+        "command": "repoWikiBrowser.syncWiki",
+        "title": "Sync Wiki",
+        "category": "Repo Wiki"
+      }
+    ],
+    "views": {
+      "repo-wiki-browser": [
+        {
+          "type": "webview",
+          "id": "repoWikiBrowser.sidebar",
+          "name": "REPO WIKI",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "repo-wiki-browser",
+          "title": "Repo Wiki",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Repo Wiki",
+      "properties": {
+        "repoWikiBrowser.generateCommand": {
+          "type": "string",
+          "default": "uv run repo-wiki generate --profile qoder-like",
+          "description": "Shell command sent to the integrated terminal for Update Wiki. Default expects `uv` on PATH and a workspace where `repo-wiki` resolves (e.g. via project pyproject). Override if you use pipx, conda, or `python -m repo_wiki`. The extension does not embed the Python CLI."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "@vscode/test-electron": "^2.3.0",
+    "@vscode/test-cli": "^0.0.4",
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT"
+}

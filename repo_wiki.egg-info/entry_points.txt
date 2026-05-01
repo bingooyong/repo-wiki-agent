@@ -1,0 +1,2 @@
+[console_scripts]
+repo-wiki = repo_wiki.cli:app

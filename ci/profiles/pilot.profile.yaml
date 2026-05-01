@@ -1,0 +1,45 @@
+# ci/profiles/pilot.profile.yaml
+profile: pilot
+description: Exploratory gate for pilot testing
+version: "1.0"
+
+criteria:
+  hard_gate_failures: 1
+  soft_gate_failures: 5
+  overall_score: 0.60
+  structural_score: 0.65
+  quality_score: 0.55
+
+verify_config:
+  command: "repo-wiki verify --ci --profile pilot --pilot-mode"
+  exit_code_map:
+    0: "ALL_PASS"
+    1: "HARD_GATE_FAIL (logged)"
+    2: "SOFT_GATE_FAIL (logged)"
+
+compare_config:
+  command: "scripts/qoder_baseline_comparison --target docs/ --baseline qoder-style/ --pilot"
+  score_threshold: 0.60
+
+pilot_config:
+  test_duration_days: 14
+  repos:
+    - repo-agent
+    - AI_API_Atlas
+  collect_metrics: true
+
+failure_messages:
+  HARD_GATE_FAIL: |
+    HARD gate failure in pilot mode (logged only).
+    Evidence: {evidence_bundle}/verify-result.json
+    Action: Log and continue. Analyze at pilot end.
+
+  SOFT_GATE_FAIL: |
+    SOFT gate failures in pilot mode (logged only).
+    Evidence: {evidence_bundle}/verify-result.json
+    Action: Log and continue. Analyze at pilot end.
+
+  PILOT_COMPLETE: |
+    Pilot phase data collected.
+    Evidence: {evidence_bundle}/pilot-metrics.json
+    Action: Generate pilot report.

@@ -1,0 +1,38 @@
+{
+  "commands": {
+    "build": "npm run build",
+    "lint": "npm run lint",
+    "start": "npm run start",
+    "test": "npm run test"
+  },
+  "module_references": [
+    "extensions",
+    "repo_wiki",
+    "scripts",
+    "tests"
+  ],
+  "tasks": [
+    {
+      "commands": [
+        "repo-wiki init"
+      ],
+      "description": "Full bootstrap workflow",
+      "name": "init"
+    },
+    {
+      "commands": [
+        "repo-wiki update"
+      ],
+      "description": "Impacted module regeneration",
+      "name": "update"
+    },
+    {
+      "commands": [
+        "repo-wiki verify",
+        "repo-wiki verify --ci"
+      ],
+      "description": "Governance checks",
+      "name": "verify"
+    }
+  ]
+}

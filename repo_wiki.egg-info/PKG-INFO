@@ -1,0 +1,30 @@
+Metadata-Version: 2.4
+Name: repo-wiki
+Version: 0.1.0
+Summary: Local-first repository wiki generator MVP
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic>=2.7
+Requires-Dist: PyYAML>=6.0
+Requires-Dist: rich>=13.7
+Requires-Dist: typer>=0.12
+Requires-Dist: pathspec>=0.12
+Requires-Dist: httpx>=0.27
+Requires-Dist: python-dotenv>=1.0
+Requires-Dist: pytest-asyncio>=1.3.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.2; extra == "dev"
+
+# repo-wiki
+
+Local-first repository wiki generator MVP.
+
+## Commands
+- `python -m repo_wiki.main init`
+- `python -m repo_wiki.main index`
+- `python -m repo_wiki.main update`
+- `python -m repo_wiki.main search "<query>"`
+- `python -m repo_wiki.main graph <module>`
+- `python -m repo_wiki.main sync`
+- `python -m repo_wiki.main verify --ci`
+- `python -m repo_wiki.main cost-estimate`

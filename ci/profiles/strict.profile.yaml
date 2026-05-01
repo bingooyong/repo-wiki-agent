@@ -1,0 +1,40 @@
+# ci/profiles/strict.profile.yaml
+profile: strict
+description: Production release gate with zero tolerance
+version: "1.0"
+
+criteria:
+  hard_gate_failures: 0
+  soft_gate_failures: 0
+  overall_score: 0.85
+  structural_score: 0.90
+  quality_score: 0.80
+
+verify_config:
+  command: "repo-wiki verify --ci --profile strict"
+  exit_code_map:
+    0: "ALL_PASS"
+    1: "HARD_GATE_FAIL"
+    2: "SOFT_GATE_FAIL"
+
+compare_config:
+  command: "scripts/qoder_baseline_comparison --target docs/ --baseline qoder-style/"
+  score_threshold: 0.85
+
+failure_messages:
+  HARD_GATE_FAIL: |
+    HARD gate failure detected.
+    Evidence: {evidence_bundle}/verify-result.json
+    Required action: Fix structural issues before release.
+    Contact: Agent_QualityRelease for rollback.
+
+  SOFT_GATE_FAIL: |
+    SOFT gate failure detected.
+    Evidence: {evidence_bundle}/compare-result.json
+    Required action: Review quality issues before release.
+    Contact: Agent_QualityRelease for waiver.
+
+  SCORE_BELOW_THRESHOLD: |
+    Overall score below threshold (required: >= 0.85)
+    Evidence: {evidence_bundle}/compare-result.json
+    Required action: Improve quality before release.

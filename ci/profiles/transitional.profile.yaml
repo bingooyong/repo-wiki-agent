@@ -1,0 +1,46 @@
+# ci/profiles/transitional.profile.yaml
+profile: transitional
+description: Compatibility transitional gate
+version: "1.0"
+
+criteria:
+  hard_gate_failures: 0
+  soft_gate_failures: 3
+  overall_score: 0.70
+  structural_score: 0.75
+  quality_score: 0.65
+  legacy_compatibility: true
+
+verify_config:
+  command: "repo-wiki verify --ci --profile transitional --legacy-compat"
+  exit_code_map:
+    0: "ALL_PASS"
+    1: "HARD_GATE_FAIL"
+    2: "SOFT_GATE_FAIL (within tolerance)"
+
+compare_config:
+  command: "scripts/qoder_baseline_comparison --target docs/ --baseline qoder-style/ --allow-legacy"
+  score_threshold: 0.70
+
+legacy_support:
+  qxx_pattern: "^Q\\d{2}-.+\\.md$"
+  sxx_pattern: "^S\\d{2}-.+\\.md$"
+  min_q_files: 4
+  min_s_files: 4
+  min_total: 8
+
+failure_messages:
+  HARD_GATE_FAIL: |
+    HARD gate failure in transitional mode.
+    Evidence: {evidence_bundle}/verify-result.json
+    Required action: Fix structural issues.
+
+  SOFT_GATE_FAIL: |
+    SOFT gate failures within tolerance (<=3).
+    Evidence: {evidence_bundle}/verify-result.json
+    Action: Log and continue. Review at next cycle.
+
+  LEGACY_COMPAT_ACTIVATED: |
+    Legacy Qxx/Sxx compatibility mode activated.
+    Evidence: {evidence_bundle}/verify-result.json
+    Note: This is expected during migration period.

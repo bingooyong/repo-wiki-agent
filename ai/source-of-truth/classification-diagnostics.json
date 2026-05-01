@@ -1,0 +1,17 @@
+{
+  "total_modules": 4,
+  "low_confidence_modules": [],
+  "fallback_classifications": [],
+  "service_family_coverage": {
+    "typescript-frontend": 1,
+    "python-backend": 3
+  },
+  "runtime_role_coverage": {
+    "api-server": 4
+  },
+  "summary": {
+    "high_confidence_count": 4,
+    "low_confidence_count": 0,
+    "fallback_count": 0
+  }
+}

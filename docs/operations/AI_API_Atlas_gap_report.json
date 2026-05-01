@@ -1,0 +1,379 @@
+{
+  "target_root": "/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas",
+  "baseline_root": "/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas",
+  "dimensions": [
+    {
+      "dimension": "directory_hierarchy",
+      "status": "PASS",
+      "score": 1.0,
+      "gaps": [],
+      "metrics": {
+        "target_structure": {
+          "exists": true,
+          "subdirs": [
+            "annual_closeout",
+            "ATLAS_平台文档中心",
+            "sections",
+            "agent-guides",
+            "security",
+            "training",
+            "数据库",
+            "operations",
+            "image",
+            "rollout",
+            "00UI自动化",
+            "00设计文档",
+            "集成手册",
+            "Audit",
+            "企业 API 知识库与契约驱动测试平台",
+            "ATLAS_场景剧本_对象术语",
+            "api-atlas-agent",
+            "modules",
+            "assets",
+            "onboarding"
+          ],
+          "overview_files": [
+            "00-overview.md",
+            "Phase_105_Design_And_Code_Alignment_Planning_2026-04-12.md",
+            "Phase_93_VulnerableApp_Suite_Config_Plan.md",
+            "Phase_104_AI_Requirement_Quality_Shift_Left_Design_2026-04-12.md",
+            "Phase_124_Architecture_Consistency_And_Operations_Quantification_Planning_2026-04-18.md",
+            "Phase_120_Configurable_Audit_Report_Template_And_Requirement_Review_Activity_Planning_2026-04-15.md",
+            "cloudcc-crm-schema-analysis-2026-03-12.md",
+            "04-api-contracts.md",
+            "Phase_126_Multi_Model_Review_And_Prompt_Engineering_Planning_2026-04-18.md",
+            "03-module-map.md",
+            "Phase_107_AI_Quality_Center_Acceptance_Closure_And_Evidence_Hardening_Planning_2026-04-13.md",
+            "VulnerableApp_Design.md",
+            "security_review.md",
+            "Phase_93_阶段B_API_Workspace在线验证报告_2026-04-06.md",
+            "产品版本资产导航与使用说明_2026-04-16.md",
+            "Phase_106_Test_Validation_And_Governance_Closed_Loop_Planning_2026-04-12.md",
+            "Phase_110_NFR_Audit_UX_And_Rule_Engine_Closure_Planning_2026-04-13.md",
+            "Phase_108_AI_Quality_Center_True_Closure_And_Trend_Evidence_Planning_2026-04-13.md",
+            "下一阶段规划_Phase25-工程效能与AI基座建设.md",
+            "Phase_93_VulnerableApp_Suite_Config_And_Linkage_Issues_Report.md",
+            "phase46-test-report-template.md",
+            "Phase_123_Version_Lifecycle_Experience_And_Gate_Closure_Planning_2026-04-17.md",
+            "Phase94_PLAN.md",
+            "工程架构文档.md",
+            "Phase_122_Version_Asset_Center_And_Unified_Evidence_Closure_Planning_2026-04-16.md",
+            "Phase_102_Platform_Stabilization_And_Dashboard_Perfection_2026-04-11.md",
+            "选型.md",
+            "Phase_119_Product_Domain_Model_Closure_And_Operational_Hardening_Planning_2026-04-15.md",
+            "Phase_93_VulnerableApp_验收报告_迭代_v1.md",
+            "Phase_112_NFR_Audit_Page_Redesign_Requirements_2026-04-14.md",
+            "使用手册.md",
+            "下一阶段规划_Phase19-24_详细任务拆解.md",
+            "backstage.md",
+            "Phase_123_Audit_Hold_Closure_And_Platform_Quality_Hardening_Planning_2026-04-17.md",
+            "Phase_93_平台问题诊断报告_2026-04-05.md",
+            "Phase_125_Review_Experience_And_Report_Enhancement_Planning_2026-04-18.md",
+            "Phase_93_阶段A验收报告_环境与UI验收_2026-04-05.md",
+            "下一阶段规划_Phase18-24_GLM.md",
+            "01-architecture.md",
+            "Phase_104_AI_Requirement_Quality_Shift_Left_Planning_2026-04-12.md",
+            "Phase_93_API_Workspace_VulnerableApp_知识体系_2026-04-15.md",
+            "phase46-regression-matrix.md",
+            "下一阶段规划_Phase18-24.md",
+            "沟通.md",
+            "安全主线实现情况.md",
+            "05-data-model.md",
+            "Phase_121_Homepage_Navigation_And_Contract_Runtime_Closure_Planning_2026-04-16.md",
+            "cloudcc-crm-ai-enablement-solution-2026-04-07.md",
+            "phase46-self-test-checklist.md",
+            "Phase_128_Annual_Closure_And_Knowledge_Asset_Planning_2026-04-18.md",
+            "Phase_93_优化_P0-1_断言生成逻辑BUG.md",
+            "部署手册.md",
+            "Phase_109_Document_Review_Audit_Quality_Optimization_Planning_2026-04-13.md",
+            "思路.md",
+            "Phase_93_当前状态报告_2026-04-05.md",
+            "差异分析0313.md",
+            "Phase_93_VulnerableApp_验收测试规划_2026-04-05.md",
+            "Phase_111_Multi_Product_Audit_Operations_And_Template_Versioning_Planning_2026-04-13.md",
+            "AI_Quality_Center_Phase_104_106_Master_Plan_2026-04-12.md",
+            "Phase_93_前端设计问题_2026-04-05.md",
+            "Phase_127_Requirement_Baseline_Forward_Traceability_Planning_2026-04-18.md"
+          ]
+        },
+        "baseline_structure": {
+          "exists": true,
+          "subdirs": [
+            "annual_closeout",
+            "ATLAS_平台文档中心",
+            "sections",
+            "agent-guides",
+            "security",
+            "training",
+            "数据库",
+            "operations",
+            "image",
+            "rollout",
+            "00UI自动化",
+            "00设计文档",
+            "集成手册",
+            "Audit",
+            "企业 API 知识库与契约驱动测试平台",
+            "ATLAS_场景剧本_对象术语",
+            "api-atlas-agent",
+            "modules",
+            "assets",
+            "onboarding"
+          ],
+          "overview_files": [
+            "00-overview.md",
+            "Phase_105_Design_And_Code_Alignment_Planning_2026-04-12.md",
+            "Phase_93_VulnerableApp_Suite_Config_Plan.md",
+            "Phase_104_AI_Requirement_Quality_Shift_Left_Design_2026-04-12.md",
+            "Phase_124_Architecture_Consistency_And_Operations_Quantification_Planning_2026-04-18.md",
+            "Phase_120_Configurable_Audit_Report_Template_And_Requirement_Review_Activity_Planning_2026-04-15.md",
+            "cloudcc-crm-schema-analysis-2026-03-12.md",
+            "04-api-contracts.md",
+            "Phase_126_Multi_Model_Review_And_Prompt_Engineering_Planning_2026-04-18.md",
+            "03-module-map.md",
+            "Phase_107_AI_Quality_Center_Acceptance_Closure_And_Evidence_Hardening_Planning_2026-04-13.md",
+            "VulnerableApp_Design.md",
+            "security_review.md",
+            "Phase_93_阶段B_API_Workspace在线验证报告_2026-04-06.md",
+            "产品版本资产导航与使用说明_2026-04-16.md",
+            "Phase_106_Test_Validation_And_Governance_Closed_Loop_Planning_2026-04-12.md",
+            "Phase_110_NFR_Audit_UX_And_Rule_Engine_Closure_Planning_2026-04-13.md",
+            "Phase_108_AI_Quality_Center_True_Closure_And_Trend_Evidence_Planning_2026-04-13.md",
+            "下一阶段规划_Phase25-工程效能与AI基座建设.md",
+            "Phase_93_VulnerableApp_Suite_Config_And_Linkage_Issues_Report.md",
+            "phase46-test-report-template.md",
+            "Phase_123_Version_Lifecycle_Experience_And_Gate_Closure_Planning_2026-04-17.md",
+            "Phase94_PLAN.md",
+            "工程架构文档.md",
+            "Phase_122_Version_Asset_Center_And_Unified_Evidence_Closure_Planning_2026-04-16.md",
+            "Phase_102_Platform_Stabilization_And_Dashboard_Perfection_2026-04-11.md",
+            "选型.md",
+            "Phase_119_Product_Domain_Model_Closure_And_Operational_Hardening_Planning_2026-04-15.md",
+            "Phase_93_VulnerableApp_验收报告_迭代_v1.md",
+            "Phase_112_NFR_Audit_Page_Redesign_Requirements_2026-04-14.md",
+            "使用手册.md",
+            "下一阶段规划_Phase19-24_详细任务拆解.md",
+            "backstage.md",
+            "Phase_123_Audit_Hold_Closure_And_Platform_Quality_Hardening_Planning_2026-04-17.md",
+            "Phase_93_平台问题诊断报告_2026-04-05.md",
+            "Phase_125_Review_Experience_And_Report_Enhancement_Planning_2026-04-18.md",
+            "Phase_93_阶段A验收报告_环境与UI验收_2026-04-05.md",
+            "下一阶段规划_Phase18-24_GLM.md",
+            "01-architecture.md",
+            "Phase_104_AI_Requirement_Quality_Shift_Left_Planning_2026-04-12.md",
+            "Phase_93_API_Workspace_VulnerableApp_知识体系_2026-04-15.md",
+            "phase46-regression-matrix.md",
+            "下一阶段规划_Phase18-24.md",
+            "沟通.md",
+            "安全主线实现情况.md",
+            "05-data-model.md",
+            "Phase_121_Homepage_Navigation_And_Contract_Runtime_Closure_Planning_2026-04-16.md",
+            "cloudcc-crm-ai-enablement-solution-2026-04-07.md",
+            "phase46-self-test-checklist.md",
+            "Phase_128_Annual_Closure_And_Knowledge_Asset_Planning_2026-04-18.md",
+            "Phase_93_优化_P0-1_断言生成逻辑BUG.md",
+            "部署手册.md",
+            "Phase_109_Document_Review_Audit_Quality_Optimization_Planning_2026-04-13.md",
+            "思路.md",
+            "Phase_93_当前状态报告_2026-04-05.md",
+            "差异分析0313.md",
+            "Phase_93_VulnerableApp_验收测试规划_2026-04-05.md",
+            "Phase_111_Multi_Product_Audit_Operations_And_Template_Versioning_Planning_2026-04-13.md",
+            "AI_Quality_Center_Phase_104_106_Master_Plan_2026-04-12.md",
+            "Phase_93_前端设计问题_2026-04-05.md",
+            "Phase_127_Requirement_Baseline_Forward_Traceability_Planning_2026-04-18.md"
+          ]
+        }
+      }
+    },
+    {
+      "dimension": "section_coverage",
+      "status": "FAIL",
+      "score": 0.0,
+      "gaps": [
+        {
+          "dimension": "section_coverage",
+          "severity": "MAJOR",
+          "description": "Missing required sections: project, architecture, services, data-model, api, operations, development, security, troubleshooting",
+          "target_path": "/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/docs/sections",
+          "baseline_path": null,
+          "recommendation": "Create section pages for: project, architecture, services, data-model, api, operations, development, security, troubleshooting",
+          "details": {
+            "missing_sections": [
+              "project",
+              "architecture",
+              "services",
+              "data-model",
+              "api",
+              "operations",
+              "development",
+              "security",
+              "troubleshooting"
+            ]
+          }
+        }
+      ],
+      "metrics": {
+        "target_sections": [],
+        "baseline_sections": []
+      }
+    },
+    {
+      "dimension": "heading_coverage",
+      "status": "FAIL",
+      "score": 0.0,
+      "gaps": [
+        {
+          "dimension": "heading_coverage",
+          "severity": "MAJOR",
+          "description": "00-overview.md missing required headings",
+          "target_path": "/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/docs/00-overview.md",
+          "baseline_path": null,
+          "recommendation": "Add headings: 项目定位, 核心问题, 核心能力",
+          "details": {
+            "missing_headings": [
+              "项目定位",
+              "核心问题",
+              "核心能力",
+              "快速开始",
+              "阅读导航",
+              "系统分层",
+              "服务协作",
+              "核心链路",
+              "存储与索引设计"
+            ]
+          }
+        },
+        {
+          "dimension": "heading_coverage",
+          "severity": "MAJOR",
+          "description": "01-architecture.md missing required headings",
+          "target_path": "/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/docs/01-architecture.md",
+          "baseline_path": null,
+          "recommendation": "Add headings: 项目定位, 核心问题, 核心能力",
+          "details": {
+            "missing_headings": [
+              "项目定位",
+              "核心问题",
+              "核心能力",
+              "快速开始",
+              "阅读导航",
+              "系统分层",
+              "服务协作",
+              "核心链路",
+              "存储与索引设计"
+            ]
+          }
+        }
+      ],
+      "metrics": {
+        "extracted_headings": {
+          "target_00-overview.md": [
+            "Modules",
+            "Inventory",
+            "Commands"
+          ],
+          "target_01-architecture.md": [
+            "API Surface",
+            "System Summary",
+            "Data Models",
+            "Module Boundaries"
+          ]
+        }
+      }
+    },
+    {
+      "dimension": "prose_density",
+      "status": "PARTIAL",
+      "score": 0.458,
+      "gaps": [
+        {
+          "dimension": "prose_density",
+          "severity": "MAJOR",
+          "description": "Overview docs have insufficient prose (157 < 500 chars)",
+          "target_path": "/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/docs",
+          "baseline_path": null,
+          "recommendation": "Add more narrative content explaining the project",
+          "details": {
+            "prose_chars": 157,
+            "min_required": 500
+          }
+        },
+        {
+          "dimension": "prose_density",
+          "severity": "MAJOR",
+          "description": "Overview docs have too many lists/tables (99.8% > 60.0%)",
+          "target_path": "/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/docs",
+          "baseline_path": null,
+          "recommendation": "Replace some lists with prose explanations",
+          "details": {
+            "list_ratio": 0.998,
+            "max_allowed": 0.6
+          }
+        }
+      ],
+      "metrics": {
+        "prose_chars": 157,
+        "list_items": 1668,
+        "table_rows": 0,
+        "list_ratio": 0.998
+      }
+    },
+    {
+      "dimension": "navigation_completeness",
+      "status": "PASS",
+      "score": 1.0,
+      "gaps": [],
+      "metrics": {
+        "sections_checked": 0
+      }
+    },
+    {
+      "dimension": "aggregation_quality",
+      "status": "PARTIAL",
+      "score": 0.5,
+      "gaps": [
+        {
+          "dimension": "aggregation_quality",
+          "severity": "MAJOR",
+          "description": "API contracts missing service/API grouping section",
+          "target_path": "/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/docs/04-api-contracts.md",
+          "baseline_path": null,
+          "recommendation": "Add grouping section that organizes APIs by service family or auth pattern",
+          "details": {}
+        },
+        {
+          "dimension": "aggregation_quality",
+          "severity": "MAJOR",
+          "description": "Data model missing three-section structure",
+          "target_path": "/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/docs/05-data-model.md",
+          "baseline_path": null,
+          "recommendation": "Organize into: Core Data Models, Service Data Models, Database & Migration",
+          "details": {}
+        }
+      ],
+      "metrics": {
+        "api_aggregation": {
+          "has_grouping": false,
+          "raw_endpoint_count": 0,
+          "has_conventions": false
+        },
+        "data_model_aggregation": {
+          "has_three_sections": false,
+          "raw_model_count": 0
+        }
+      }
+    }
+  ],
+  "summary": {
+    "generated_at": "2026-04-18",
+    "total_gaps": 7,
+    "critical_gaps": 0,
+    "major_gaps": 7,
+    "overall_score": 0.493,
+    "dimension_count": 6,
+    "passed_dimensions": 2,
+    "failed_dimensions": 2,
+    "partial_dimensions": 2
+  }
+}

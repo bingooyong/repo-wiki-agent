@@ -1,0 +1,300 @@
+# Policy Profiles Configuration
+
+**文档属性**: CI 配置文件
+**版本**: 1.0
+**日期**: 2026-04-25
+
+## Profiles Overview
+
+| Profile | 用途 | HARD Gate | SOFT Gate | 整体评分要求 |
+|---------|------|-----------|-----------|--------------|
+| `strict` | 生产发布 | 0 | 0 | >= 85% |
+| `transitional` | 兼容性过渡 | 0 | <= 3 | >= 70% |
+| `pilot` | 试点验证 | <= 1 | <= 5 | >= 60% |
+
+---
+
+## strict.profile
+
+```yaml
+# 生产环境使用的严格门禁
+# 使用场景: 正式发布、main 分支合并、里程碑版本
+
+profile: strict
+description: Production release gate with zero tolerance for quality issues
+version: "1.0"
+
+# 门禁判定标准
+criteria:
+  hard_gate_failures: 0          # 必须无 HARD gate 失败
+  soft_gate_failures: 0          # 必须无 SOFT gate 失败
+  overall_score: >= 0.85         # 整体评分 >= 85%
+  structural_score: >= 0.90      # 结构评分 >= 90%
+  quality_score: >= 0.80         # 质量评分 >= 80%
+
+# 验证命令
+verify_command: "repo-wiki verify --ci"
+compare_command: "repo-wiki compare --baseline qoder-style/ --target docs/"
+
+# 操作策略
+actions:
+  on_hard_gate_fail:
+    behavior: BLOCK_AND_ROLLBACK
+    message: "HARD gate failure detected. Blocking release and initiating rollback."
+    requires_approval: true
+    approval_authority: ManagerAgent
+
+  on_soft_gate_fail:
+    behavior: BLOCK_WITH_REVIEW
+    message: "SOFT gate failure detected. Blocking release pending review."
+    requires_approval: true
+    approval_authority: Agent_QualityRelease
+
+  on_score_below_threshold:
+    behavior: BLOCK_WITH_REVIEW
+    message: "Overall score below threshold. Manual review required."
+
+# 退出码策略
+exit_code_policy:
+  0: ALL_PASS - all gates cleared, release approved
+  1: HARD_GATE_FAIL - hard gate failures detected, release blocked
+  2: SOFT_GATE_FAIL - soft gate failures detected, release blocked pending review
+
+# 证据收集
+evidence:
+  verify_output: "verify-result.json"
+  compare_output: "compare-result.json"
+  evidence_bundle: ".repo-agent-eval/{date}/strict/"
+```
+
+---
+
+## transitional.profile
+
+```yaml
+# 兼容性过渡期使用的宽松门禁
+# 使用场景: 从旧格式迁移到新格式、Qxx/Sxx 兼容模式
+
+profile: transitional
+description: Compatibility transitional gate allowing legacy formats with review
+version: "1.0"
+
+# 门禁判定标准
+criteria:
+  hard_gate_failures: 0
+  soft_gate_failures: <= 3
+  overall_score: >= 0.70
+  structural_score: >= 0.75
+  quality_score: >= 0.65
+  acceptance_blocked: false
+  legacy_compatibility: true   # 启用 Qxx/Sxx 兼容性模式
+
+# 验证命令
+verify_command: "repo-wiki verify --ci --legacy-compat"
+compare_command: "repo-wiki compare --baseline qoder-style/ --target docs/ --allow-legacy"
+
+# 操作策略
+actions:
+  on_hard_gate_fail:
+    behavior: BLOCK_AND_ROLLBACK
+    message: "HARD gate failure in transitional mode. Blocking release."
+    requires_approval: true
+    approval_authority: ManagerAgent
+
+  on_soft_gate_fail:
+    behavior: ALLOW_WITH_LOG
+    message: "SOFT gate failures within tolerance. Logging and allowing."
+    requires_approval: false
+    log_level: WARN
+
+  on_legacy_compat_triggered:
+    behavior: ALLOW_WITH_NOTE
+    message: "Legacy Qxx/Sxx compatibility mode activated."
+    requires_approval: false
+
+# 退出码策略
+exit_code_policy:
+  0: ALL_PASS - all gates cleared, release approved
+  1: HARD_GATE_FAIL - hard gate failures, release blocked
+  2: SOFT_GATE_FAIL - soft gate failures within tolerance, log and continue
+
+# 证据收集
+evidence:
+  verify_output: "verify-result.json"
+  compare_output: "compare-result.json"
+  legacy_profile: ".repo-agent-eval/legacy-compat-{date}.json"
+```
+
+---
+
+## pilot.profile
+
+```yaml
+# 试点验证阶段使用的探索性门禁
+# 使用场景: 新功能验证、跨仓库试点、概念验证
+
+profile: pilot
+description: Exploratory gate for pilot testing with relaxed constraints
+version: "1.0"
+
+# 门禁判定标准
+criteria:
+  hard_gate_failures: <= 1      # 允许最多 1 个 HARD gate 失败
+  soft_gate_failures: <= 5      # 允许最多 5 个 SOFT gate 失败
+  overall_score: >= 0.60        # 整体评分 >= 60%
+  structural_score: >= 0.65
+  quality_score: >= 0.55
+  pilot_repos:
+    - repo-agent
+    - AI_API_Atlas
+  test_duration_days: 14        # 试点周期
+
+# 验证命令
+verify_command: "repo-wiki verify --ci --pilot-mode"
+compare_command: "repo-wiki compare --baseline qoder-style/ --target docs/ --pilot"
+
+# 操作策略
+actions:
+  on_hard_gate_fail:
+    behavior: LOG_AND_CONTINUE
+    message: "HARD gate failure in pilot mode. Logging and continuing."
+    requires_approval: false
+    log_level: ERROR
+
+  on_soft_gate_fail:
+    behavior: LOG_AND_CONTINUE
+    message: "SOFT gate failures detected. Logging and continuing."
+    requires_approval: false
+    log_level: WARN
+
+  on_pilot_complete:
+    behavior: GENERATE_REPORT
+    message: "Pilot phase complete. Generating pilot report."
+    output: ".repo-agent-eval/pilot-report-{date}.json"
+
+# 退出码策略
+exit_code_policy:
+  0: ALL_PASS - pilot gates cleared
+  1: HARD_GATE_FAIL - hard gate failures logged, pilot continues
+  2: SOFT_GATE_FAIL - soft gate failures logged, pilot continues
+
+# 证据收集
+evidence:
+  verify_output: "verify-result.json"
+  compare_output: "compare-result.json"
+  pilot_metrics: ".repo-agent-eval/pilot-metrics.json"
+  pilot_evidence: ".repo-agent-eval/pilot-{date}/"
+```
+
+---
+
+## Profile Selection Guide
+
+### 如何选择 Profile
+
+| 场景 | 推荐 Profile |
+|------|-------------|
+| 正式生产发布 | strict |
+| main/master 分支合并 | strict |
+| 里程碑版本发布 | strict |
+| 从旧格式迁移期间 | transitional |
+| Qxx/Sxx 兼容模式运行中 | transitional |
+| 新功能试点验证 | pilot |
+| 跨仓库概念验证 | pilot |
+| 开发分支测试 | pilot |
+
+### Profile 切换流程
+
+1. **试点阶段** (pilot)
+   - 验证新功能可行性
+   - 收集反馈和数据
+   - 调整 profile 配置
+
+2. **过渡阶段** (transitional)
+   - 应用到所有仓库
+   - 监控关键指标
+   - 准备完全切换
+
+3. **生产阶段** (strict)
+   - 完全切换到严格标准
+   - 持续监控质量
+   - 不断优化基线
+
+---
+
+## Validation Checks
+
+每个 profile 必须通过以下验证检查：
+
+### strict.profile 检查清单
+
+```
+[ ] verify --ci 返回 exit_code = 0
+[ ] 所有 12 个 checks 状态为 PASS
+[ ] hard_gate_failures = 0
+[ ] soft_gate_failures = 0
+[ ] overall_score >= 0.85
+[ ] structural_score >= 0.90
+[ ] quality_score >= 0.80
+[ ] compare 结果已保存
+[ ] 证据包已归档
+```
+
+### transitional.profile 检查清单
+
+```
+[ ] verify --ci 返回 exit_code <= 1
+[ ] hard_gate_failures = 0
+[ ] soft_gate_failures <= 3
+[ ] overall_score >= 0.70
+[ ] legacy_compatibility = true (如适用)
+[ ] compare 结果已保存
+[ ] 证据包已归档
+```
+
+### pilot.profile 检查清单
+
+```
+[ ] verify --ci 返回 exit_code <= 2
+[ ] hard_gate_failures <= 1
+[ ] soft_gate_failures <= 5
+[ ] overall_score >= 0.60
+[ ] 试点仓库列表已确认
+[ ] 试点周期已设定
+[ ] 证据包已归档
+[ ] pilot report 已生成
+```
+
+---
+
+## Evidence Bundle Format
+
+证据包必须包含以下文件：
+
+```
+.repo-agent-eval/{profile}-{date}/
+├── verify-result.json          # verify 命令输出
+├── compare-result.json         # compare 命令输出
+├── profile-config.yaml         # 使用的 profile 配置
+├── decision.yaml               # 发布/拒绝决策
+└── logs/
+    ├── verify.log
+    └── compare.log
+```
+
+### decision.yaml 格式
+
+```yaml
+---
+date: "2026-04-25T14:30:00Z"
+profile: strict
+overall_score: 0.87
+structural_score: 0.92
+quality_score: 0.85
+hard_gate_failures: []
+soft_gate_failures: []
+decision: GO
+authority: Agent_QualityRelease
+evidence_bundle: .repo-agent-eval/strict-2026-04-25/
+---
+```
