@@ -1,0 +1,16 @@
+project = "repo-wiki"
+
+[knowledge]
+path_1 = "ai/source-of-truth/api-index.yaml"
+path_2 = "ai/source-of-truth/data-models.yaml"
+path_3 = "ai/source-of-truth/module-index.yaml"
+path_4 = "ai/source-of-truth/repo-map.yaml"
+path_5 = "ai/source-of-truth/task-catalog.yaml"
+path_6 = "docs/00-overview.md"
+path_7 = "docs/01-architecture.md"
+path_8 = "docs/03-module-map.md"
+path_9 = "docs/04-api-contracts.md"
+path_10 = "docs/05-data-model.md"
+path_11 = "docs/modules/repo_wiki.md"
+path_12 = "docs/modules/scripts.md"
+path_13 = "docs/modules/tests.md"

@@ -1,0 +1,37 @@
+name: repo-wiki-verify
+
+on:
+  pull_request:
+  push:
+    branches: ["main", "master"]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic PyYAML rich typer pathspec pytest
+
+      - name: Generate artifacts
+        run: python -m repo_wiki.main init
+
+      - name: Verify governance
+        run: |
+          python -m repo_wiki.main verify --ci > verify-result.json
+          cat verify-result.json
+
+      - name: Upload verify result
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-result
+          path: verify-result.json

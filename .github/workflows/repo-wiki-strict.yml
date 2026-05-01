@@ -1,0 +1,64 @@
+name: repo-wiki-strict
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  PROFILE: strict
+  EVIDENCE_DIR: .repo-agent-eval/strict-${{ github.run_id }}
+
+jobs:
+  verify-and-compare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic PyYAML rich typer pathspec pytest bc
+
+      - name: Generate artifacts
+        run: python -m repo_wiki.main init
+
+      - name: Run verify (strict mode)
+        id: verify
+        run: |
+          python -m repo_wiki.main verify --ci --profile strict > verify-result.json || true
+          cat verify-result.json
+          echo "exit_code=$(python -c 'import json; print(json.load(open("verify-result.json"))["exit_code"])')" >> $GITHUB_OUTPUT
+
+      - name: Run baseline compare
+        id: compare
+        run: |
+          python -m scripts.qoder_baseline_comparison --target docs/ --baseline qoder-style/ --output compare-result.json || true
+          cat compare-result.json || echo "{}"
+
+      - name: Collect evidence
+        run: |
+          mkdir -p ${{ env.EVIDENCE_DIR }}
+          cp verify-result.json ${{ env.EVIDENCE_DIR }}/ 2>/dev/null || echo "{}" > ${{ env.EVIDENCE_DIR }}/verify-result.json
+          cp compare-result.json ${{ env.EVIDENCE_DIR }}/ 2>/dev/null || echo "{}" > ${{ env.EVIDENCE_DIR }}/compare-result.json
+
+      - name: Upload evidence bundle
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-bundle-strict-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_DIR }}
+
+      - name: Decision gate
+        run: |
+          bash ci/scripts/decision.sh --profile strict \
+            --verify verify-result.json \
+            --compare compare-result.json \
+            --evidence ${{ env.EVIDENCE_DIR }}

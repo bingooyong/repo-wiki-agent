@@ -1,0 +1,85 @@
+name: repo-wiki-pilot
+
+on:
+  push:
+    branches: [feature/*, pilot/*]
+  pull_request:
+
+env:
+  PROFILE: pilot
+  EVIDENCE_DIR: .repo-agent-eval/pilot-${{ github.run_id }}
+
+jobs:
+  verify-and-compare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic PyYAML rich typer pathspec pytest bc
+
+      - name: Generate artifacts
+        run: python -m repo_wiki.main init
+
+      - name: Run verify (pilot mode)
+        id: verify
+        run: |
+          python -m repo_wiki.main verify --ci --profile pilot > verify-result.json || true
+          cat verify-result.json
+
+      - name: Run baseline compare (pilot)
+        id: compare
+        run: |
+          python -m scripts.qoder_baseline_comparison \
+            --target docs/ \
+            --baseline qoder-style/ \
+            --output compare-result.json || true
+
+      - name: Collect pilot metrics
+        run: |
+          mkdir -p ${{ env.EVIDENCE_DIR }}
+          cp verify-result.json ${{ env.EVIDENCE_DIR }}/ 2>/dev/null || echo "{}" > ${{ env.EVIDENCE_DIR }}/verify-result.json
+          cp compare-result.json ${{ env.EVIDENCE_DIR }}/ 2>/dev/null || echo "{}" > ${{ env.EVIDENCE_DIR }}/compare-result.json
+
+          # Generate pilot metrics summary
+          python3 -c "
+import json, sys
+try:
+    v = json.load(open('verify-result.json'))
+    c = json.load(open('compare-result.json')) if __import__('os').path.exists('compare-result.json') else {}
+    metrics = {
+        'profile': 'pilot',
+        'verify_exit_code': v.get('exit_code', -1),
+        'verify_grade': v.get('grade', 'UNKNOWN'),
+        'hard_gate_failures': v.get('summary', {}).get('hard_gate_failures', 0),
+        'soft_gate_failures': v.get('summary', {}).get('soft_gate_failures', 0),
+        'overall_score': c.get('summary', {}).get('overall_score', 0) if c else 0,
+        'pilot_repos': ['repo-agent', 'AI_API_Atlas']
+    }
+    print(json.dumps(metrics, indent=2))
+except Exception as e:
+    print(f'{{\"error\": \"{e}\"}}')
+" > ${{ env.EVIDENCE_DIR }}/pilot-metrics.json 2>/dev/null || echo '{}' > ${{ env.EVIDENCE_DIR }}/pilot-metrics.json
+
+      - name: Upload evidence bundle
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-bundle-pilot-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_DIR }}
+
+      - name: Log decision (pilot allows failures)
+        run: |
+          bash ci/scripts/decision.sh --profile pilot \
+            --verify verify-result.json \
+            --compare compare-result.json \
+            --evidence ${{ env.EVIDENCE_DIR }} \
+            --allow-continue || true

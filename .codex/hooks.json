@@ -1,0 +1,11 @@
+{
+  "post_commands": [
+    {
+      "command": "repo-wiki verify --ci",
+      "on": [
+        "init",
+        "update"
+      ]
+    }
+  ]
+}
