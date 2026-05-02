@@ -26,6 +26,7 @@ class QoderLikeSeverityThreshold:
         "QODER_API_AGGREGATION_LOW",
         "QODER_DATA_MODEL_AGGREGATION_LOW",
         "QODER_STALE_GIT_COMMIT",
+        "QODER_DIRTY_WORKTREE",
         "QODER_ENDPOINT_PAGE_DUMP",
         "QODER_RAW_MODEL_PAGE_DUMP",
     }
@@ -90,6 +91,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_qoder_page_dumps(),
             self._check_qoder_prose_density(),
             self._check_qoder_stale_commit(),
+            self._check_qoder_dirty_worktree(),
         ]
 
         hard_failures = [c for c in checks if c.is_hard_gate_failure()]
@@ -601,6 +603,46 @@ class QoderLikeVerifierService(VerifierService):
             details={"current_commit": current, "wiki_commit": wiki},
             gate_type=GateType.HARD,
         )
+
+    def _check_qoder_dirty_worktree(self) -> CheckResult:
+        """Check if the worktree has uncommitted changes (dirty state).
+
+        In strict mode, a dirty worktree during generation is flagged as
+        QODER_DIRTY_WORKTREE since it indicates non-repeatable state.
+        """
+        if self._git_dirty(self.root):
+            return CheckResult(
+                name="qoder-dirty-worktree",
+                status="FAIL",
+                message="Target repository has uncommitted changes",
+                details={},
+                reason_code="QODER_DIRTY_WORKTREE",
+                gate_type=GateType.HARD,
+            )
+        return CheckResult(
+            name="qoder-dirty-worktree",
+            status="PASS",
+            message="Target repository worktree is clean",
+            details={},
+            gate_type=GateType.HARD,
+        )
+
+    def _git_dirty(self, path: Path) -> bool:
+        """Return True if the repository has uncommitted changes or untracked files."""
+        root = self._find_git_root(path)
+        if root is None:
+            return False
+        try:
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return bool(result.stdout.strip())
+        except Exception:
+            return False
 
     def _find_content_dir(self) -> Path | None:
         if self.root.exists() and self.root.is_dir() and self.root.name == "content":
