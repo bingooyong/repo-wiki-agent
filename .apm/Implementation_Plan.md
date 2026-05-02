@@ -1,6 +1,6 @@
 # repo-wiki MVP – APM Implementation Plan
 **Memory Strategy:** Layered Local Knowledge (`source-of-truth` + SQLite/FTS5 + ChromaDB + module graph)
-**Last Modification:** Preserved Phase 1-30 history and appended Phase 31-35 for the Qoder replacement quality closure track: strict gate freshness, Qoder-style information architecture deepening, evidence relevance, LLM repair loop, and final replacement acceptance.
+**Last Modification:** Phase 28-29 fully executed (6 tasks each, all Completed). Phase 30 Completed, Phase 31 Completed (GO). Phase 32 pending (4 tasks). Phase 33 partial (33_X completed). Phase 34 Completed. Phase 35 partial (35.4 Completed - GO dossier). Last update: 2026-05-02.
 **Project Overview:** Build an MVP implementation plan for `repo-wiki` that delivers repository scanning, deterministic `source-of-truth` outputs, local semantic indexing, module-level knowledge graph, documentation generation, AI adapter outputs, Git-diff-based incremental update, and verify governance without drifting beyond the frozen MVP scope.
 
 ## Implementation Principles
