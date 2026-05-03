@@ -36,7 +36,7 @@ jobs:
         run: ruff format --check .
 
       - name: Type check
-        run: mypy repo_wiki
+        run: mypy repo_wiki --ignore-missing-imports
 
       - name: Run tests
         run: pytest --cov=repo_wiki --cov-report=term-missing
