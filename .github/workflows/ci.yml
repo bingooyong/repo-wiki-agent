@@ -27,7 +27,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: uv pip install -e ".[dev]"
+        run: uv pip install --system -e ".[dev]"
 
       - name: Lint
         run: ruff check .
@@ -62,7 +62,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install repo-wiki
-        run: uv pip install -e .
+        run: uv pip install --system -e .
 
       - name: Verify docs
-        run: uv run repo-wiki verify --ci --profile qoder-like
+        run: python -m repo_wiki.main verify --ci --profile qoder-like

@@ -33,6 +33,7 @@ jobs:
 
       - name: Upload verify result
         uses: actions/upload-artifact@v4
+        if: success() || failure()
         with:
           name: verify-result
           path: verify-result.json
