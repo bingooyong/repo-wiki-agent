@@ -102,6 +102,7 @@
   },
   "license": "MIT",
   "overrides": {
-    "serialize-javascript": ">=7.0.5"
+    "serialize-javascript": ">=7.0.5",
+    "diff": ">=5.2.0"
   }
 }
