@@ -146,10 +146,10 @@
 - Manager judgment: `Completed`. 1252 tests pass. Data-model pages avoid raw dumps with relationship/storage evidence.
 
 ## Phase 27 – Qoder-compatible Output Layout and IDE Runtime Summary
-- Outcome summary: `Planned`. This phase aligns isolated output layout, manifest navigation, VS Code extension behavior, Markdown preview, stale prompts, and static viewer parity.
+- Outcome summary: `Completed`. Isolated qoder-like output layout (`.repo-agent-eval`), manifest navigation and commit metadata, VS Code extension nav tree integration, Markdown preview and stale wiki UX, static viewer parity pass.
 - Involved Agents: `Agent_PlatformCore`, `Agent_DocGen`, `Agent_IndexGraph`
-- Logs: `.apm/Memory/Phase_27_Qoder_compatible_Output_Layout_and_IDE_Runtime/Task_27_1_Qoder_like_output_profile.md`, `.apm/Memory/Phase_27_Qoder_compatible_Output_Layout_and_IDE_Runtime/Task_27_2_Content_layout_writer.md`, `.apm/Memory/Phase_27_Qoder_compatible_Output_Layout_and_IDE_Runtime/Task_27_3_Manifest_navigation_tree_and_commit_metadata.md`, `.apm/Memory/Phase_27_Qoder_compatible_Output_Layout_and_IDE_Runtime/Task_27_4_VS_Code_extension_nav_tree_integration.md`, `.apm/Memory/Phase_27_Qoder_compatible_Output_Layout_and_IDE_Runtime/Task_27_5_Markdown_preview_and_stale_wiki_UX.md`, `.apm/Memory/Phase_27_Qoder_compatible_Output_Layout_and_IDE_Runtime/Task_27_6_Static_viewer_parity_pass.md`
-- Manager judgment: `Planned`. Exit requires qoder-like output profile, manifest-driven IDE tree, Markdown preview, and stale update UX.
+- Logs: `.apm/Memory/Phase_27_Qoder_compatible_Output_Layout_and_IDE_Runtime/Task_27_1_Qoder_like_output_profile.md` through `Task_27_6_Static_viewer_parity_pass.md`
+- Manager judgment: `GO`. Qoder-compatible output and IDE integration achieved.
 
 ## Phase 28 – Generation Orchestration, Cost Control, and Incremental Update Summary
 - Outcome summary: `Completed`. Resumable generation with state machine (`pending/running/completed/failed/retryable`), LLM cost estimator and budget gate, concurrent scheduler, page-level invalidation from git diff, failure recovery with partial evidence, and update integration for qoder-like profile.
