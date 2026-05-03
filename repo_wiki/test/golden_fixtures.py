@@ -18,6 +18,147 @@ from typing import Any
 
 
 # =============================================================================
+# STRICT QODER-LIKE MARKDOWN (mock LLM outputs, offline CI-safe)
+# =============================================================================
+# These blobs intentionally satisfy `QoderLikeVerifierService` gates:
+# citations on pages >=100 chars, TOC headings, file:line cites, mermaid ratio,
+# aggregated API / data-model signals, prose density, bounded list dumps.
+
+
+def build_strict_qoder_mock_pages(language_label: str) -> dict[str, str]:
+    """Return doc_slug -> markdown for one golden fixture (five canonical pages)."""
+
+    ov_body = (
+        f"This {language_label} golden repository illustrates CI-stable wiki validation "
+        "without calling remote LLM endpoints. The narrative stays substantive so prose "
+        "density checks remain meaningful while fixtures remain small.\n\n"
+        "We summarize responsibilities, runtime assumptions, and operational boundaries "
+        "for downstream readers reviewing parity benchmarks.\n"
+    )
+    overview = f"""# Project Overview
+
+## Table of Contents
+- [Introduction](#introduction)
+
+## Introduction
+
+{ov_body}
+
+```mermaid
+graph LR
+  Client[{language_label}] --> Service[Core]
+```
+
+<cite>source:fixtures/golden/sample_repo/README.md:1-40</cite>
+"""
+
+    arch_body = (
+        "The architecture section explains layering decisions, dependency boundaries, "
+        "and how asynchronous workflows interact with persistence boundaries in this "
+        "fixture-only codebase snapshot.\n"
+    )
+    architecture = f"""# Architecture
+
+## Table of Contents
+- [Layers](#layers)
+
+## Layers
+
+{arch_body}
+
+```mermaid
+flowchart TD
+  A[Ingress] --> B[Domain]
+```
+
+<cite>source:fixtures/golden/sample_repo/README.md:41-80</cite>
+"""
+
+    svc_body = (
+        "Core services encapsulate domain workflows described by this benchmark fixture. "
+        "They expose narrow interfaces so reviewers can trace responsibilities without "
+        "reading production-sized repositories.\n"
+    )
+    services = f"""# Core Services
+
+## Table of Contents
+- [Scope](#scope)
+
+## Scope
+
+{svc_body}
+
+<cite>source:fixtures/golden/sample_repo/README.md:81-120</cite>
+"""
+
+    api_page = f"""# API Surface
+
+## Table of Contents
+- [Operations](#operations)
+
+## Operations
+
+Aggregated HTTP operations for the sample {language_label} service bundle appear below.
+
+GET /api/v1/items lists entities. POST /api/v1/items creates entities.
+PUT /api/v1/items/{{id}} replaces payloads. DELETE /api/v1/items/{{id}} removes rows.
+PATCH /api/v1/items/{{id}} applies partial mutation semantics used by clients.
+
+<cite>source:fixtures/golden/sample_repo/README.md:121-200</cite>
+
+```json
+{{"openapi":"3.0.0","info":{{"title":"fixture"}},"paths":{{}}}}
+```
+"""
+
+    dm_body = (
+        "Relational modeling demonstrates entity relationships for benchmark readers. "
+        "Schema migrations remain illustrative while satisfying aggregation heuristics.\n"
+    )
+    data_model = f"""# Data Model Overview
+
+## Table of Contents
+- [Persistence](#persistence)
+
+## Persistence
+
+Entity relationships connect principal aggregates described in this fixture narrative.
+
+{dm_body}
+
+```mermaid
+erDiagram
+  CUSTOMER ||--o{{ ORDER : places
+```
+
+Migration scripts evolve schema definitions alongside deployment workflows.
+
+<cite>source:fixtures/golden/sample_repo/sql/schema.sql:1-120</cite>
+
+```sql
+CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY);
+```
+"""
+
+    return {
+        "00-overview": overview,
+        "01-architecture": architecture,
+        "02-services": services,
+        "04-api": api_page,
+        "05-data-model": data_model,
+    }
+
+
+STRICT_QODER_TREE: dict[str, list[str]] = {
+    "项目概述": ["00-overview"],
+    "架构设计": ["01-architecture"],
+    "核心服务": ["02-services"],
+    "API参考": ["04-api"],
+    "数据模型": ["05-data-model"],
+}
+
+
+# =============================================================================
 # GOLDEN FIXTURE DEFINITIONS
 # =============================================================================
 
@@ -47,65 +188,8 @@ PYTHON_FIXTURE = GoldenFixture(
         "data_models": 8,
         "database_tables": 6,
     },
-    expected_wiki_tree={
-        "项目概述": ["00-overview"],
-        "架构设计": ["01-architecture"],
-        "核心服务": ["02-services", "03-modules"],
-        "API参考": ["04-api"],
-        "数据模型": ["05-data-model"],
-    },
-    mock_llm_output={
-        "00-overview": """# Project Overview
-
-## Table of Contents
-- [Introduction](#introduction)
-- [Quick Start](#quick-start)
-
-## Introduction
-
-This is a Python microservice project with authentication, user management,
-and order processing capabilities.
-
-<cite>source:README.md</cite>
-
-## Quick Start
-
-1. Install dependencies: `pip install -r requirements.txt`
-2. Configure environment: copy `.env.example` to `.env`
-3. Run the service: `python -m auth_service`
-
-## Architecture
-
-```mermaid
-graph LR
-    A[Client] --> B[API Gateway]
-    B --> C[Auth Service]
-    B --> D[User Service]
-    D --> E[(Database)]
-```
-
-<cite>source:docs/architecture.md</cite>
-""",
-        "architecture": """# Architecture
-
-## 系统分层
-
-The system follows a layered architecture:
-- **API Layer**: REST endpoints via FastAPI
-- **Service Layer**: Business logic
-- **Data Layer**: SQLAlchemy ORM
-
-## 核心链路
-
-1. Client sends request to API Gateway
-2. Gateway authenticates via Auth Service
-3. Auth Service validates JWT token
-4. Request forwarded to appropriate service
-5. Service queries database and returns response
-
-<cite>source:architecture.md</cite>
-""",
-    },
+    expected_wiki_tree=STRICT_QODER_TREE,
+    mock_llm_output=build_strict_qoder_mock_pages("Python"),
 )
 
 
@@ -122,24 +206,8 @@ TYPESCRIPT_FIXTURE = GoldenFixture(
         "api_calls": 8,
         "state_management": "redux",
     },
-    expected_wiki_tree={
-        "项目概述": ["00-overview"],
-        "架构设计": ["01-architecture"],
-        "开发指南": ["02-development"],
-    },
-    mock_llm_output={
-        "00-overview": """# Project Overview
-
-## Table of Contents
-- [Introduction](#introduction)
-
-## Introduction
-
-This is a React-based TypeScript frontend application.
-
-<cite>source:README.md</cite>
-""",
-    },
+    expected_wiki_tree=STRICT_QODER_TREE,
+    mock_llm_output=build_strict_qoder_mock_pages("TypeScript"),
 )
 
 
@@ -156,25 +224,8 @@ JAVA_FIXTURE = GoldenFixture(
         "services": 8,
         "entities": 10,
     },
-    expected_wiki_tree={
-        "项目概述": ["00-overview"],
-        "架构设计": ["01-architecture"],
-        "核心服务": ["02-services"],
-        "数据模型": ["03-data-model"],
-        "API参考": ["04-api"],
-    },
-    mock_llm_output={
-        "00-overview": """# Project Overview
-
-## Table of Contents
-
-## Introduction
-
-Java Spring Boot application with REST API.
-
-<cite>source:pom.xml</cite>
-""",
-    },
+    expected_wiki_tree=STRICT_QODER_TREE,
+    mock_llm_output=build_strict_qoder_mock_pages("Java"),
 )
 
 
@@ -191,33 +242,8 @@ SQL_FIXTURE = GoldenFixture(
         "stored_procedures": 8,
         "triggers": 4,
     },
-    expected_wiki_tree={
-        "数据模型": ["00-data-model"],
-        "部署运维": ["01-deployment"],
-    },
-    mock_llm_output={
-        "00-data-model": """# Data Model
-
-## Entity Relationship
-
-```mermaid
-erDiagram
-    CUSTOMER ||--o{ ORDER : places
-    ORDER ||--|{ LINE_ITEM : contains
-    PRODUCT ||--o{ LINE_ITEM : "ordered in"
-```
-
-## Tables
-
-| Table | Description |
-|-------|-------------|
-| customers | Customer information |
-| orders | Order headers |
-| line_items | Order line items |
-
-<cite>source:schema.sql</cite>
-""",
-    },
+    expected_wiki_tree=STRICT_QODER_TREE,
+    mock_llm_output=build_strict_qoder_mock_pages("SQL"),
 )
 
 

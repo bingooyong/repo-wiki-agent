@@ -2,6 +2,8 @@
 
 This guide covers installation procedures for repo-wiki and the VS Code extension.
 
+**Short path:** For a single ordered walkthrough (install → generate → view → update → verify), use [**Getting started**](../getting-started.md).
+
 ---
 
 ## 中文：安装、生成 Wiki、安装插件与更新
@@ -79,10 +81,16 @@ uv run repo-wiki generate --profile qoder-like
 - `ai/source-of-truth/`：结构化索引（YAML 等）
 - `.repo-wiki/`：运行时索引与本地状态
 
-校验（不重新生成内容）：
+**默认布局**（非 qoder-like 专用 Tree）的校验：
 
 ```bash
 uv run repo-wiki verify --ci
+```
+
+**qoder-like 严格校验**需指向 eval 运行目录或 run id（详见 [Getting started](../getting-started.md) 中的 Verify 一节）：
+
+```bash
+uv run repo-wiki verify --profile qoder-like --ci --output <run-id-或路径>
 ```
 
 其它子命令（增量更新、同步等）仍可用 `repo-wiki update`、`repo-wiki sync` 等，详见 `uv run repo-wiki --help`。
@@ -109,7 +117,7 @@ npx --yes @vscode/vsce package --out repo-wiki-browser-0.1.0.vsix
 1. 用编辑器**打开已生成 Wiki 的那个仓库文件夹**（工作区根目录即含 `docs/` 或 `.repo-agent-eval/` 等）。
 2. 点击左侧活动栏 **Repo Wiki** 图标，打开侧栏。
 3. 侧栏会显示文档树、Git 与 Wiki 版本差异提示、LLM 配置摘要（来自 `repo-wiki.yaml`）。
-4. 点击任意条目，会用内置 Markdown 预览打开对应页面。
+4. 使用命令 **Repo Wiki: Open Wiki Viewer**（或活动栏 **Repo Wiki** 图标）打开侧栏；点击条目会在编辑器中打开对应 Markdown，可用内置 **Markdown 预览**阅读（无单独的 `repo-wiki open` CLI 子命令）。
 
 ### 5. 如何更新 Wiki
 
@@ -164,31 +172,7 @@ pip install -e .
 uv run repo-wiki --help
 ```
 
-Expected output:
-```
- Usage: repo-wiki [OPTIONS] COMMAND [ARGS]...
-
- repo-wiki: local-first repository wiki generator
-
-╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --install-completion          Install completion for the current shell.      │
-│ --show-completion             Show completion for the current shell, to copy │
-│                               it or customize the installation.              │
-│ --help                        Show this message and exit.                    │
-╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│ init                                                                           │
-│ index                                                                        │
-│ update                                                                        │
-│ sync                                                                         │
-│ search                                                                       │
-│ graph                                                                        │
-│ generate       Generate wiki content using specified eval profile.           │
-│ verify         Run wiki verification checks without regenerating content.     │
-│ cost-estimate                                                                │
-│ config         Run LLM configuration diagnostics.                            │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
+You should see Typer/Rich help with **Commands** including `init`, `index`, `update`, `generate`, `improve`, `verify`, `compare`, `cost-estimate`, `config`, and others. Run the command locally for the authoritative list.
 
 ## VS Code Extension Installation
 
@@ -221,10 +205,10 @@ After installation, the following commands are available:
 
 | Command | Description |
 |---------|-------------|
-| `Repo Wiki: Open Viewer` | Open the wiki browser sidebar |
+| `Repo Wiki: Open Wiki Viewer` | Open the wiki browser sidebar |
 | `Repo Wiki: Refresh Wiki Tree` | Refresh the wiki file tree |
-| `Repo Wiki: Run Verification` | Run wiki verification in CI mode |
-| `Repo Wiki: Update Wiki` | Run configured generate command in terminal (default: `uv run repo-wiki generate --profile qoder-like`; see setting `repoWikiBrowser.generateCommand`) |
+| `Repo Wiki: Run Verification (--ci)` | Run wiki verification in CI mode (configure CLI in extension if needed) |
+| `Repo Wiki: Update Wiki` | Run configured generate command in terminal (default: `uv run repo-wiki generate --profile qoder-like`; see `repoWikiBrowser.generateCommand`) |
 | `Repo Wiki: Sync Wiki` | Sync wiki with repository |
 
 ## Workflow Reference
@@ -240,20 +224,21 @@ uv run repo-wiki index
 
 # Generate wiki content
 uv run repo-wiki generate --profile qoder-like
-
-# View generated wiki
-uv run repo-wiki open
 ```
+
+**Viewing:** use the **Repo Wiki** extension (**Open Wiki Viewer**) and Markdown preview, or open files under `docs/` or `.repo-agent-eval/<run>/content/`. There is no `repo-wiki open` command.
 
 ### Verify Workflow
 
 ```bash
-# Run verification in CI mode (strict)
-uv run repo-wiki verify --ci --profile qoder-like
+# Default profile: verify runtime wiki under project root
+uv run repo-wiki verify --ci
 
-# Run with custom profile
-uv run repo-wiki verify --ci --profile development
+# qoder-like: point at an eval run (run id, path, or .repo-agent-eval/<id>)
+uv run repo-wiki verify --profile qoder-like --ci --output <run-id-or-path>
 ```
+
+For default `qoder-like` output location and `--output` resolution, see the **Verify** section in [Getting started](../getting-started.md).
 
 ### Update Workflow
 
@@ -270,10 +255,10 @@ uv run repo-wiki search "authentication"
 
 ### Extension Workflow
 
-1. Open VS Code
+1. Open VS Code or Cursor
 2. Press `Ctrl+Shift+P` / `Cmd+Shift+P`
-3. Type "Repo Wiki: Open Viewer"
-4. The REPO WIKI sidebar will appear in the activity bar
+3. Run **Repo Wiki: Open Wiki Viewer** (command id `repoWikiBrowser.openViewer`)
+4. The **Repo Wiki** sidebar appears in the activity bar
 
 ## Extension Rebuild/Reinstall
 

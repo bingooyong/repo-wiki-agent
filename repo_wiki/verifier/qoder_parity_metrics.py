@@ -1,22 +1,22 @@
 """Qoder parity metric schema for structural and content quality measurement.
 
 This module defines:
-- Parity metrics for comparing qoder-like outputs against baseline
-- Observable output metrics (not internal Qoder details)
+- Parity metrics for comparing **observable rendered wiki outputs** (markdown trees)
+  against an expected structural/content baseline — **no proprietary tool internals**.
 - Severity levels and thresholds for each metric
-- Serialization schema for CI output
+- Serialization for CI and governance dashboards
 
 Phase 29 - Task 29.1: Qoder parity metric schema
 
-Metrics covered:
-- Page coverage and directory structure
-- Citation coverage and density
-- TOC presence and completeness
-- Mermaid diagram presence
-- Prose/list ratio (prose density)
-- API aggregation quality
-- Data-model aggregation quality
-- File reference integrity
+Metrics covered (aligned with `QoderLikeVerifierService` checks where applicable):
+- Page coverage (taxonomy / expected section presence)
+- Structural depth (directory tree depth sanity)
+- Citation coverage and citation density
+- File reference integrity (relative markdown links)
+- TOC presence
+- Mermaid coverage (pages with diagrams)
+- Prose density and prose vs list ratio
+- API and data-model aggregation quality
 """
 
 from __future__ import annotations
@@ -27,7 +27,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+# Public schema version for serialized metric registry (bump when definitions change).
+PARITY_METRIC_SCHEMA_VERSION = "1.0.0"
 
 
 # =============================================================================
@@ -57,6 +60,19 @@ class MetricStatus(Enum):
     SKIPPED = "skipped"
 
 
+class MetricUnit(str, Enum):
+    """Unit of `MetricResult.measured_value` / primary statistic (vendor-neutral)."""
+
+    FRACTION = "fraction"  # 0..1 portion (pages, groups, or pages meeting a predicate)
+    NORMALIZED_SCORE = "normalized_score"  # 0..1 composite score (may combine signals)
+    CITATIONS_PER_1K_PROSE_CHARS = "citations_per_1k_prose_chars"
+    TREE_DEPTH_LEVELS = "tree_depth_levels"  # integer depth of deepest file under content root
+    UNBOUNDED_RATIO = "unbounded_ratio"  # ratio that may exceed 1.0 (e.g. prose lines per list item)
+
+
+ThresholdCompareTarget = Literal["score", "measured_value"]
+
+
 # =============================================================================
 # PARITY METRIC DEFINITIONS
 # =============================================================================
@@ -64,13 +80,30 @@ class MetricStatus(Enum):
 @dataclass
 class ParityMetricDefinition:
     """Definition of a single parity metric."""
+
     name: str
     category: MetricCategory
     severity: MetricSeverity
     description: str
-    threshold: float  # Minimum acceptable value
+    unit: MetricUnit
+    threshold: float  # Minimum acceptable value (see threshold_compare)
+    threshold_compare: ThresholdCompareTarget  # Whether threshold applies to score or raw measured_value
     weight: float  # Contribution to overall score
     measurable: bool = True  # Can be measured from outputs
+
+    def to_schema_dict(self) -> dict[str, Any]:
+        """Serialize definition for registry export (no runtime paths or vendor data)."""
+        return {
+            "name": self.name,
+            "category": self.category.value,
+            "severity": self.severity.value,
+            "description": self.description,
+            "unit": self.unit.value,
+            "threshold": self.threshold,
+            "threshold_compare": self.threshold_compare,
+            "weight": self.weight,
+            "measurable": self.measurable,
+        }
 
 
 # Default parity metrics
@@ -80,24 +113,35 @@ PARITY_METRICS: dict[str, ParityMetricDefinition] = {
         name="page_coverage",
         category=MetricCategory.STRUCTURAL,
         severity=MetricSeverity.CRITICAL,
-        description="Percentage of expected pages present in output",
+        description=(
+            "Fraction of expected topical groups present (slug/path heuristics over markdown tree)"
+        ),
+        unit=MetricUnit.FRACTION,
         threshold=0.80,
+        threshold_compare="measured_value",
         weight=0.15,
     ),
     "directory_depth": ParityMetricDefinition(
         name="directory_depth",
         category=MetricCategory.STRUCTURAL,
         severity=MetricSeverity.MAJOR,
-        description="Matches expected directory structure depth",
+        description=(
+            "Directory depth sanity: normalized score from max tree depth; "
+            "measured_value is deepest path depth in levels"
+        ),
+        unit=MetricUnit.TREE_DEPTH_LEVELS,
         threshold=0.70,
+        threshold_compare="score",
         weight=0.10,
     ),
     "file_reference_integrity": ParityMetricDefinition(
         name="file_reference_integrity",
         category=MetricCategory.STRUCTURAL,
         severity=MetricSeverity.CRITICAL,
-        description="All file references in content point to existing files",
+        description="Fraction of relative markdown links that resolve to existing paths",
+        unit=MetricUnit.FRACTION,
         threshold=1.0,
+        threshold_compare="measured_value",
         weight=0.15,
     ),
 
@@ -106,32 +150,40 @@ PARITY_METRICS: dict[str, ParityMetricDefinition] = {
         name="citation_coverage",
         category=MetricCategory.CONTENT,
         severity=MetricSeverity.MAJOR,
-        description="Pages with at least one citation",
+        description="Fraction of markdown pages containing at least one citation marker",
+        unit=MetricUnit.FRACTION,
         threshold=0.70,
+        threshold_compare="measured_value",
         weight=0.10,
     ),
     "citation_density": ParityMetricDefinition(
         name="citation_density",
         category=MetricCategory.CONTENT,
         severity=MetricSeverity.MAJOR,
-        description="Citations per 1000 prose characters",
+        description="Citation tags per 1000 prose characters (repository-wide aggregate)",
+        unit=MetricUnit.CITATIONS_PER_1K_PROSE_CHARS,
         threshold=0.5,
+        threshold_compare="measured_value",
         weight=0.08,
     ),
     "toc_presence": ParityMetricDefinition(
         name="toc_presence",
         category=MetricCategory.CONTENT,
         severity=MetricSeverity.MAJOR,
-        description="Pages containing a table of contents",
+        description="Fraction of pages with an explicit TOC heading or TOC marker",
+        unit=MetricUnit.FRACTION,
         threshold=0.80,
+        threshold_compare="measured_value",
         weight=0.08,
     ),
     "mermaid_presence": ParityMetricDefinition(
         name="mermaid_presence",
         category=MetricCategory.CONTENT,
         severity=MetricSeverity.MINOR,
-        description="Pages containing Mermaid diagrams",
+        description="Fraction of pages containing a fenced Mermaid block",
+        unit=MetricUnit.FRACTION,
         threshold=0.30,
+        threshold_compare="measured_value",
         weight=0.05,
     ),
 
@@ -140,35 +192,91 @@ PARITY_METRICS: dict[str, ParityMetricDefinition] = {
         name="prose_density",
         category=MetricCategory.QUALITY,
         severity=MetricSeverity.MAJOR,
-        description="Ratio of prose characters to total content (excluding lists/tables/code)",
+        description="Prose character count divided by raw file length (noise-resistant heuristic)",
+        unit=MetricUnit.FRACTION,
         threshold=0.30,
+        threshold_compare="measured_value",
         weight=0.10,
     ),
     "prose_list_ratio": ParityMetricDefinition(
         name="prose_list_ratio",
         category=MetricCategory.QUALITY,
         severity=MetricSeverity.MINOR,
-        description="Ratio of prose paragraphs to list items",
+        description="Non-list lines vs markdown list items (structure balanced against bullet dumps)",
+        unit=MetricUnit.UNBOUNDED_RATIO,
         threshold=0.40,
+        threshold_compare="measured_value",
         weight=0.05,
     ),
     "api_aggregation": ParityMetricDefinition(
         name="api_aggregation",
         category=MetricCategory.QUALITY,
         severity=MetricSeverity.MAJOR,
-        description="API reference pages aggregate multiple endpoints with detail",
+        description="Fraction of API-tagged pages that show multi-endpoint aggregation signals",
+        unit=MetricUnit.FRACTION,
         threshold=0.60,
+        threshold_compare="measured_value",
         weight=0.07,
     ),
     "data_model_aggregation": ParityMetricDefinition(
         name="data_model_aggregation",
         category=MetricCategory.QUALITY,
         severity=MetricSeverity.MAJOR,
-        description="Data model pages show relationships and schemas",
+        description="Fraction of data-model pages that combine schema/relationship/diagram signals",
+        unit=MetricUnit.FRACTION,
         threshold=0.60,
+        threshold_compare="measured_value",
         weight=0.07,
     ),
 }
+
+
+def export_metric_schema(
+    *,
+    schema_version: str = PARITY_METRIC_SCHEMA_VERSION,
+) -> dict[str, Any]:
+    """Export the full metric registry as a JSON-serializable document.
+
+    Suitable for CI artifacts and benchmarks; contains only field definitions and thresholds,
+    not computed results or repository paths.
+    """
+    metrics_sorted = sorted(PARITY_METRICS.values(), key=lambda m: m.name)
+    return {
+        "schema_version": schema_version,
+        "schema_kind": "qoder_parity_metrics",
+        "metric_count": len(metrics_sorted),
+        "severity_levels": [
+            {
+                "value": MetricSeverity.CRITICAL.value,
+                "meaning": "Fails acceptance when metric status is fail",
+            },
+            {
+                "value": MetricSeverity.MAJOR.value,
+                "meaning": "Should fix; does not block via MetricResult.is_blocking",
+            },
+            {
+                "value": MetricSeverity.MINOR.value,
+                "meaning": "Deferrable; some metrics may map to PARTIAL instead of FAIL",
+            },
+            {"value": MetricSeverity.INFO.value, "meaning": "Informational only"},
+        ],
+        "categories": [c.value for c in MetricCategory],
+        "units": [u.value for u in MetricUnit],
+        "metrics": [m.to_schema_dict() for m in metrics_sorted],
+    }
+
+
+def metric_schema_to_json(
+    *,
+    schema_version: str = PARITY_METRIC_SCHEMA_VERSION,
+    indent: int | None = 2,
+) -> str:
+    """Serialize metric schema to JSON text."""
+    return json.dumps(
+        export_metric_schema(schema_version=schema_version),
+        ensure_ascii=False,
+        indent=indent,
+    )
 
 
 # =============================================================================
@@ -314,6 +422,21 @@ class ParityMetricExtractor:
         """
         self.root = Path(root)
 
+    @staticmethod
+    def _status_for_definition(
+        definition: ParityMetricDefinition,
+        score: float,
+        measured_value: float,
+        *,
+        allow_partial_below_threshold: bool = False,
+    ) -> MetricStatus:
+        cmp_val = score if definition.threshold_compare == "score" else measured_value
+        if cmp_val >= definition.threshold:
+            return MetricStatus.PASS
+        if allow_partial_below_threshold:
+            return MetricStatus.PARTIAL
+        return MetricStatus.FAIL
+
     def extract_all(self, baseline_root: Path | None = None) -> ParityReport:
         """Extract all parity metrics.
 
@@ -411,14 +534,15 @@ class ParityMetricExtractor:
         if missing:
             gaps.append(f"Missing pages: {', '.join(missing)}")
 
+        defn = PARITY_METRICS["page_coverage"]
         return MetricResult(
             metric_name="page_coverage",
-            status=MetricStatus.PASS if score >= 0.8 else MetricStatus.FAIL,
+            status=self._status_for_definition(defn, score, score),
             score=score,
             measured_value=score,
-            threshold=0.80,
-            severity=MetricSeverity.CRITICAL,
-            category=MetricCategory.STRUCTURAL,
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
             details={
                 "expected_groups": expected_groups,
                 "covered_groups": covered_groups,
@@ -443,14 +567,15 @@ class ParityMetricExtractor:
         # Expected depth is 2-3 levels (category/subcategory/page)
         score = 1.0 if 2 <= max_depth <= 4 else max(0, 1.0 - abs(max_depth - 3) / 3)
 
+        defn = PARITY_METRICS["directory_depth"]
         return MetricResult(
             metric_name="directory_depth",
-            status=MetricStatus.PASS if score >= 0.7 else MetricStatus.FAIL,
+            status=self._status_for_definition(defn, score, float(max_depth)),
             score=score,
-            measured_value=max_depth,
-            threshold=0.70,
-            severity=MetricSeverity.MAJOR,
-            category=MetricCategory.STRUCTURAL,
+            measured_value=float(max_depth),
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
             details={"max_depth": max_depth, "expected_range": [2, 4]},
             gaps=[] if 2 <= max_depth <= 4 else [f"Directory depth {max_depth} outside expected range [2, 4]"],
         )
@@ -481,14 +606,15 @@ class ParityMetricExtractor:
 
         score = 1.0 if not broken_refs else max(0, 1.0 - len(broken_refs) / 10)
 
+        defn = PARITY_METRICS["file_reference_integrity"]
         return MetricResult(
             metric_name="file_reference_integrity",
-            status=MetricStatus.PASS if score >= 1.0 else MetricStatus.FAIL,
+            status=self._status_for_definition(defn, score, score),
             score=score,
             measured_value=score,
-            threshold=1.0,
-            severity=MetricSeverity.CRITICAL,
-            category=MetricCategory.STRUCTURAL,
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
             details={"broken_refs": broken_refs, "total_refs": len(md_files)},
             gaps=[f"Broken references: {len(broken_refs)}"] if broken_refs else [],
         )
@@ -512,16 +638,19 @@ class ParityMetricExtractor:
 
         score = with_citations / len(md_files) if md_files else 0
 
+        defn = PARITY_METRICS["citation_coverage"]
         return MetricResult(
             metric_name="citation_coverage",
-            status=MetricStatus.PASS if score >= 0.7 else MetricStatus.FAIL,
+            status=self._status_for_definition(defn, score, score),
             score=score,
             measured_value=score,
-            threshold=0.70,
-            severity=MetricSeverity.MAJOR,
-            category=MetricCategory.CONTENT,
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
             details={"pages_with_citations": with_citations, "total_pages": len(md_files)},
-            gaps=[] if score >= 0.7 else [f"Only {with_citations}/{len(md_files)} pages have citations"],
+            gaps=[] if score >= defn.threshold else [
+                f"Only {with_citations}/{len(md_files)} pages have citations"
+            ],
         )
 
     def _measure_citation_density(self) -> MetricResult:
@@ -544,18 +673,21 @@ class ParityMetricExtractor:
                 continue
 
         density = (total_citations / total_prose_chars * 1000) if total_prose_chars > 0 else 0
-        score = min(1.0, density / 0.5) if density < 0.5 else 1.0 if density >= 0.5 else density / 0.5
+        defn = PARITY_METRICS["citation_density"]
+        score = min(1.0, density / defn.threshold) if density < defn.threshold else 1.0
 
         return MetricResult(
             metric_name="citation_density",
-            status=MetricStatus.PASS if density >= 0.5 else MetricStatus.FAIL,
+            status=self._status_for_definition(defn, score, density),
             score=score,
             measured_value=density,
-            threshold=0.5,
-            severity=MetricSeverity.MAJOR,
-            category=MetricCategory.CONTENT,
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
             details={"total_citations": total_citations, "prose_chars": total_prose_chars},
-            gaps=[] if density >= 0.5 else [f"Citation density {density:.2f} below threshold 0.5"],
+            gaps=[] if density >= defn.threshold else [
+                f"Citation density {density:.2f} below threshold {defn.threshold}"
+            ],
         )
 
     def _measure_toc_presence(self) -> MetricResult:
@@ -581,16 +713,17 @@ class ParityMetricExtractor:
 
         score = with_toc / len(md_files) if md_files else 0
 
+        defn = PARITY_METRICS["toc_presence"]
         return MetricResult(
             metric_name="toc_presence",
-            status=MetricStatus.PASS if score >= 0.8 else MetricStatus.FAIL,
+            status=self._status_for_definition(defn, score, score),
             score=score,
             measured_value=score,
-            threshold=0.80,
-            severity=MetricSeverity.MAJOR,
-            category=MetricCategory.CONTENT,
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
             details={"pages_with_toc": with_toc, "total_pages": len(md_files)},
-            gaps=[] if score >= 0.8 else [f"Only {with_toc}/{len(md_files)} pages have TOC"],
+            gaps=[] if score >= defn.threshold else [f"Only {with_toc}/{len(md_files)} pages have TOC"],
         )
 
     def _measure_mermaid_presence(self) -> MetricResult:
@@ -612,16 +745,25 @@ class ParityMetricExtractor:
 
         score = with_mermaid / len(md_files) if md_files else 0
 
+        defn = PARITY_METRICS["mermaid_presence"]
+        status = self._status_for_definition(
+            defn,
+            score,
+            score,
+            allow_partial_below_threshold=True,
+        )
         return MetricResult(
             metric_name="mermaid_presence",
-            status=MetricStatus.PASS if score >= 0.3 else MetricStatus.PARTIAL,
+            status=status,
             score=score,
             measured_value=score,
-            threshold=0.30,
-            severity=MetricSeverity.MINOR,
-            category=MetricCategory.CONTENT,
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
             details={"pages_with_mermaid": with_mermaid, "total_pages": len(md_files)},
-            gaps=[] if score >= 0.3 else [f"Only {with_mermaid}/{len(md_files)} pages have Mermaid"],
+            gaps=[] if score >= defn.threshold else [
+                f"Only {with_mermaid}/{len(md_files)} pages have Mermaid"
+            ],
         )
 
     def _measure_prose_density(self) -> MetricResult:
@@ -643,18 +785,21 @@ class ParityMetricExtractor:
                 continue
 
         ratio = total_prose / total_chars if total_chars > 0 else 0
-        score = ratio / 0.30 if ratio < 0.30 else 1.0
+        defn = PARITY_METRICS["prose_density"]
+        score = ratio / defn.threshold if ratio < defn.threshold else 1.0
 
         return MetricResult(
             metric_name="prose_density",
-            status=MetricStatus.PASS if ratio >= 0.30 else MetricStatus.FAIL,
+            status=self._status_for_definition(defn, score, ratio),
             score=score,
             measured_value=ratio,
-            threshold=0.30,
-            severity=MetricSeverity.MAJOR,
-            category=MetricCategory.QUALITY,
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
             details={"prose_chars": total_prose, "total_chars": total_chars},
-            gaps=[] if ratio >= 0.30 else [f"Prose density {ratio:.1%} below 30% threshold"],
+            gaps=[] if ratio >= defn.threshold else [
+                f"Prose density {ratio:.1%} below {defn.threshold:.0%} threshold"
+            ],
         )
 
     def _measure_prose_list_ratio(self) -> MetricResult:
@@ -680,18 +825,26 @@ class ParityMetricExtractor:
                 continue
 
         ratio = total_prose_paras / total_list_items if total_list_items > 0 else float("inf")
-        score = min(1.0, ratio / 0.4) if ratio < 0.4 else 1.0
+        defn = PARITY_METRICS["prose_list_ratio"]
+        effective_ratio = ratio if ratio != float("inf") else 1.0
+        score = min(1.0, effective_ratio / defn.threshold) if effective_ratio < defn.threshold else 1.0
 
         return MetricResult(
             metric_name="prose_list_ratio",
-            status=MetricStatus.PASS if ratio >= 0.4 else MetricStatus.FAIL,
+            status=self._status_for_definition(defn, score, effective_ratio),
             score=score,
-            measured_value=ratio,
-            threshold=0.40,
-            severity=MetricSeverity.MINOR,
-            category=MetricCategory.QUALITY,
-            details={"prose_paras": total_prose_paras, "list_items": total_list_items},
-            gaps=[] if ratio >= 0.4 else [f"Prose/list ratio {ratio:.2f} below 0.4 threshold"],
+            measured_value=effective_ratio,
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
+            details={
+                "prose_paras": total_prose_paras,
+                "list_items": total_list_items,
+                "no_list_items": total_list_items == 0,
+            },
+            gaps=[] if (ratio == float("inf") or ratio >= defn.threshold) else [
+                f"Prose/list ratio {ratio:.2f} below {defn.threshold} threshold"
+            ],
         )
 
     def _measure_api_aggregation(self) -> MetricResult:
@@ -723,16 +876,19 @@ class ParityMetricExtractor:
 
         score = aggregated_count / len(api_files) if api_files else 0
 
+        defn = PARITY_METRICS["api_aggregation"]
         return MetricResult(
             metric_name="api_aggregation",
-            status=MetricStatus.PASS if score >= 0.6 else MetricStatus.FAIL,
+            status=self._status_for_definition(defn, score, score),
             score=score,
             measured_value=score,
-            threshold=0.60,
-            severity=MetricSeverity.MAJOR,
-            category=MetricCategory.QUALITY,
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
             details={"aggregated_apis": aggregated_count, "total_api_pages": len(api_files)},
-            gaps=[] if score >= 0.6 else [f"Only {aggregated_count}/{len(api_files)} API pages are aggregated"],
+            gaps=[] if score >= defn.threshold else [
+                f"Only {aggregated_count}/{len(api_files)} API pages are aggregated"
+            ],
         )
 
     def _measure_data_model_aggregation(self) -> MetricResult:
@@ -788,16 +944,19 @@ class ParityMetricExtractor:
 
         score = aggregated_count / len(dm_files) if dm_files else 0
 
+        defn = PARITY_METRICS["data_model_aggregation"]
         return MetricResult(
             metric_name="data_model_aggregation",
-            status=MetricStatus.PASS if score >= 0.6 else MetricStatus.FAIL,
+            status=self._status_for_definition(defn, score, score),
             score=score,
             measured_value=score,
-            threshold=0.60,
-            severity=MetricSeverity.MAJOR,
-            category=MetricCategory.QUALITY,
+            threshold=defn.threshold,
+            severity=defn.severity,
+            category=defn.category,
             details={"aggregated_dm": aggregated_count, "total_dm_pages": len(dm_files)},
-            gaps=[] if score >= 0.6 else [f"Only {aggregated_count}/{len(dm_files)} data model pages are aggregated"],
+            gaps=[] if score >= defn.threshold else [
+                f"Only {aggregated_count}/{len(dm_files)} data model pages are aggregated"
+            ],
         )
 
     def _find_content_dir(self) -> Path | None:

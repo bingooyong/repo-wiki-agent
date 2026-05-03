@@ -67,7 +67,7 @@ class TestGetFileHash:
 
         hash_val = get_file_hash(test_file)
         assert hash_val is not None
-        assert len(hash_val) == 32  # MD5 hex length
+        assert len(hash_val) == 64  # SHA256 hex length
 
     def test_same_content_same_hash(self, tmp_path):
         """Test same content produces same hash."""
@@ -245,6 +245,91 @@ class TestGenerationAwareInvalidator:
         invalidated, skipped = invalidator.invalidate_from_git_diff("nonexistent-run")
         assert len(invalidated) == 0
         assert len(skipped) == 0
+
+    def test_one_service_change_only_invalidates_related_page(self, invalidator_setup):
+        """Changing one service should only invalidate related pages."""
+        invalidator, state_machine = invalidator_setup
+        run = state_machine.create_run(profile="test", total_pages=3)
+        state_machine.add_page(run.run_id, "service-a", "module", "docs/modules/service-a.md")
+        state_machine.add_page(run.run_id, "service-b", "module", "docs/modules/service-b.md")
+        state_machine.add_page(run.run_id, "00-overview", "overview", "docs/00-overview.md")
+        state_machine.complete_page(run.run_id, "service-a")
+        state_machine.complete_page(run.run_id, "service-b")
+        state_machine.complete_page(run.run_id, "00-overview")
+
+        invalidated, skipped = invalidator.invalidate_from_hash_comparison(
+            run_id=run.run_id,
+            baseline_hashes={"services/service-a/app.py": "aaa", "services/service-b/app.py": "bbb"},
+            current_hashes={"services/service-a/app.py": "changed", "services/service-b/app.py": "bbb"},
+        )
+
+        assert "service-a" in invalidated
+        assert "service-b" not in invalidated
+        assert "00-overview" not in invalidated
+        page_a = state_machine.get_page_state(run.run_id, "service-a")
+        page_b = state_machine.get_page_state(run.run_id, "service-b")
+        assert page_a is not None and page_a.state == PageState.PENDING
+        assert page_b is not None and page_b.state == PageState.COMPLETED
+
+    def test_git_clean_falls_back_to_hash(self, invalidator_setup, monkeypatch):
+        """When git reports clean, invalidator should use hash fallback if provided."""
+        invalidator, state_machine = invalidator_setup
+        run = state_machine.create_run(profile="test", total_pages=1)
+        state_machine.add_page(run.run_id, "service-a", "module", "docs/modules/service-a.md")
+        state_machine.complete_page(run.run_id, "service-a")
+
+        monkeypatch.setattr(
+            "repo_wiki.orchestration.generation_invalidation.get_git_diff",
+            lambda root, ref=None, file_filter=None: GitDiffResult(
+                changed_files=[],
+                deleted_files=[],
+                renamed_files={},
+                commit_range=None,
+                is_clean=True,
+            ),
+        )
+
+        invalidated, _, strategy = invalidator.invalidate_with_git_or_hash_fallback(
+            run_id=run.run_id,
+            baseline_hashes={"services/service-a/app.py": "aaa"},
+            current_hashes={"services/service-a/app.py": "bbb"},
+        )
+        assert strategy == "hash-fallback"
+        assert invalidated == ["service-a"]
+
+    def test_map_changed_file_to_page_via_evidence_span(self, invalidator_setup):
+        """Changed file should map to page via runtime evidence tables."""
+        invalidator, state_machine = invalidator_setup
+        run = state_machine.create_run(profile="test", total_pages=1)
+        state_machine.add_page(run.run_id, "service-a", "module", "docs/modules/service-a.md")
+        state_machine.complete_page(run.run_id, "service-a")
+
+        runtime_db = invalidator.root / ".repo-wiki" / "index" / "runtime.sqlite3"
+        runtime_db.parent.mkdir(parents=True, exist_ok=True)
+        import sqlite3
+        with sqlite3.connect(runtime_db) as conn:
+            conn.execute(
+                "CREATE TABLE evidence_span (id INTEGER PRIMARY KEY, file_path TEXT)"
+            )
+            conn.execute(
+                "CREATE TABLE page_source_map (evidence_id INTEGER, doc_slug TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO evidence_span(id, file_path) VALUES (1, ?)",
+                ("services/service-a/app.py",),
+            )
+            conn.execute(
+                "INSERT INTO page_source_map(evidence_id, doc_slug) VALUES (1, ?)",
+                ("service-a",),
+            )
+            conn.commit()
+
+        invalidated, _ = invalidator.invalidate_from_hash_comparison(
+            run_id=run.run_id,
+            baseline_hashes={"services/service-a/app.py": "aaa"},
+            current_hashes={"services/service-a/app.py": "changed"},
+        )
+        assert "service-a" in invalidated
 
 
 class TestCreateGenerationInvalidator:

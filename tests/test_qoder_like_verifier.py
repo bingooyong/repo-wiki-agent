@@ -380,3 +380,165 @@ The system follows a microservices architecture.
 
         threshold = QoderLikeSeverityThreshold()
         assert "QODER_DIRTY_WORKTREE" in threshold.STRICT_HARD_CODES
+
+    def test_citation_relevance_mismatch_hard_code_is_defined(self):
+        """Test that QODER_CITATION_RELEVANCE_MISMATCH is a defined hard code."""
+        from repo_wiki.verifier.qoder_strict_verifier import QoderLikeSeverityThreshold
+
+        threshold = QoderLikeSeverityThreshold()
+        assert "QODER_CITATION_RELEVANCE_MISMATCH" in threshold.STRICT_HARD_CODES
+
+
+class TestCitationRelevance:
+    """Tests for citation relevance verification."""
+
+    def test_citation_relevance_detects_wrong_service_binding(self, tmp_path):
+        """Test detection of citations bound to wrong service."""
+        content_dir = tmp_path / "content"
+        content_dir.mkdir()
+
+        # Create a billing page that cites authentication implementation
+        (content_dir / "billing-service.md").write_text("""# Billing Service
+
+## Overview
+
+The billing service handles payments and subscriptions.
+
+<cite>src/auth/session.py:1</cite>
+
+## Features
+
+- Payment processing
+- Invoice generation
+""")
+
+        verifier = QoderLikeVerifierService(tmp_path, strict=True)
+        result = verifier.verify(ci=True)
+
+        # Should detect mismatch
+        hard_codes = result.get("hard_gate_codes", [])
+        assert "QODER_CITATION_RELEVANCE_MISMATCH" in hard_codes
+
+    def test_citation_relevance_allows_shared_infrastructure(self, tmp_path):
+        """Test that shared infrastructure citations produce WARN not FAIL."""
+        content_dir = tmp_path / "content"
+        content_dir.mkdir()
+
+        # Create billing page citing shared utility
+        (content_dir / "billing-overview.md").write_text("""# Billing Service
+
+## Overview
+
+<cite>shared/utils/helpers.py:10</cite>
+
+## Features
+
+- Payment processing
+""")
+
+        verifier = QoderLikeVerifierService(tmp_path, strict=True)
+        result = verifier.verify(ci=True)
+
+        # Should warn but not fail on shared infra citation
+        checks = result.get("checks", [])
+        relevance_check = next((c for c in checks if c["name"] == "qoder-citation-relevance"), None)
+        assert relevance_check is not None
+        # Should be WARN, not FAIL
+        assert relevance_check["status"] in ("PASS", "WARN")
+
+    def test_citation_relevance_passes_for_matching_service(self, tmp_path):
+        """Test that citations matching page service pass."""
+        content_dir = tmp_path / "content"
+        content_dir.mkdir()
+
+        # Create billing page citing billing implementation
+        (content_dir / "billing-overview.md").write_text("""# Billing Service
+
+## Overview
+
+The billing service handles payments.
+
+<cite>src/billing/payment.py:1</cite>
+
+<cite>src/billing/invoice.py:5-10</cite>
+
+## Features
+
+- Payment processing
+- Invoice generation
+""")
+
+        verifier = QoderLikeVerifierService(tmp_path, strict=True)
+        result = verifier.verify(ci=True)
+
+        # Should pass
+        checks = result.get("checks", [])
+        relevance_check = next((c for c in checks if c["name"] == "qoder-citation-relevance"), None)
+        assert relevance_check is not None
+        assert relevance_check["status"] == "PASS"
+
+    def test_citation_relevance_api_page_with_api_citations(self, tmp_path):
+        """Test that API page with API citations passes."""
+        content_dir = tmp_path / "content"
+        content_dir.mkdir()
+
+        (content_dir / "api-reference.md").write_text("""# API Reference
+
+## Endpoints
+
+<cite>src/api/handler.py:1</cite>
+
+<cite>src/api/router.py:20</cite>
+""")
+
+        verifier = QoderLikeVerifierService(tmp_path, strict=True)
+        result = verifier.verify(ci=True)
+
+        checks = result.get("checks", [])
+        relevance_check = next((c for c in checks if c["name"] == "qoder-citation-relevance"), None)
+        assert relevance_check is not None
+        assert relevance_check["status"] == "PASS"
+
+    def test_citation_relevance_data_model_page_with_model_citations(self, tmp_path):
+        """Test that data model page with model citations passes."""
+        content_dir = tmp_path / "content"
+        content_dir.mkdir()
+
+        (content_dir / "data-models.md").write_text("""# Data Models
+
+## Core Models
+
+<cite>src/models/entity.py:1</cite>
+
+<cite>src/models/dto.py:10</cite>
+""")
+
+        verifier = QoderLikeVerifierService(tmp_path, strict=True)
+        result = verifier.verify(ci=True)
+
+        checks = result.get("checks", [])
+        relevance_check = next((c for c in checks if c["name"] == "qoder-citation-relevance"), None)
+        assert relevance_check is not None
+        assert relevance_check["status"] == "PASS"
+
+    def test_citation_relevance_wrong_service_multiple_mismatches(self, tmp_path):
+        """Test detection of multiple wrong-service citations."""
+        content_dir = tmp_path / "content"
+        content_dir.mkdir()
+
+        # Create API page citing billing and auth implementation
+        (content_dir / "api-overview.md").write_text("""# API Overview
+
+## Services
+
+<cite>src/billing/subscription.py:5</cite>
+
+<cite>src/auth/jwt.py:10</cite>
+""")
+
+        verifier = QoderLikeVerifierService(tmp_path, strict=True)
+        result = verifier.verify(ci=True)
+
+        # Should detect mismatches
+        hard_codes = result.get("hard_gate_codes", [])
+        assert "QODER_CITATION_RELEVANCE_MISMATCH" in hard_codes

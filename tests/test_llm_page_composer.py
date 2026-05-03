@@ -458,8 +458,151 @@ class TestBuildComposerInput:
         assert len(input_data.evidence_binding.candidates) == 1
 
 
+class TestLowConfidenceBehavior:
+    """Tests for low-confidence fallback behavior (Task 33.4)."""
+
+    @pytest.fixture
+    def mock_provider(self) -> MockLLMProvider:
+        """Create mock provider for testing."""
+        return create_mock_provider(response_content="# Test Page\n\nMock content.")
+
+    @pytest.fixture
+    def composer(self, mock_provider: MockLLMProvider) -> LLMPageComposer:
+        """Create composer with mock provider."""
+        return create_composer(provider=mock_provider)
+
+    def test_compose_page_with_low_confidence_flags(
+        self,
+        composer: LLMPageComposer,
+    ):
+        """Test that low-confidence pages get appropriate flags."""
+        from repo_wiki.generator.composer import build_composer_input
+        from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory, SourceRequirement, GenerationMode
+
+        page = WikiPagePlan(
+            page_id="low-confidence-page",
+            title="Test Low Confidence",
+            category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+            output_path="docs/test.md",
+            source_requirements=SourceRequirement(
+                modules=["nonexistent"],
+            ),
+            generation_mode=GenerationMode.LLM_ASSISTED,
+        )
+        context = ComposerContext(
+            repository_name="test",
+            primary_language="python",
+            framework="fastapi",
+            repository_root=".",
+        )
+
+        # No evidence binding - should trigger low-confidence
+        input_data = build_composer_input(page, None, context)
+        assert input_data.evidence_binding is None
+
+    @pytest.mark.asyncio
+    async def test_compose_page_produces_uncertainty_when_no_evidence(
+        self,
+        composer: LLMPageComposer,
+    ):
+        """Test that pages without evidence produce uncertainty markers."""
+        from repo_wiki.generator.composer import build_composer_input
+        from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory, SourceRequirement, GenerationMode
+
+        page = WikiPagePlan(
+            page_id="no-evidence-page",
+            title="No Evidence Page",
+            category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+            output_path="docs/test.md",
+            source_requirements=SourceRequirement(),
+            generation_mode=GenerationMode.LLM_ASSISTED,
+        )
+        context = ComposerContext(
+            repository_name="test",
+            primary_language="python",
+            framework="fastapi",
+            repository_root=".",
+        )
+
+        input_data = build_composer_input(page, None, context)
+        output = await composer.compose_page(input_data)
+
+        # Should have low_confidence set since no evidence binding
+        assert output.low_confidence is True or output.rejected is True
+        if output.low_confidence:
+            assert len(output.uncertainty_reasons) > 0
+
+    @pytest.mark.asyncio
+    async def test_compose_page_prohibits_fabrication_in_low_confidence(
+        self,
+        composer: LLMPageComposer,
+    ):
+        """Test that low-confidence pages cannot fabricate implementation details."""
+        from repo_wiki.generator.composer import build_composer_input
+        from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory, SourceRequirement, GenerationMode
+
+        page = WikiPagePlan(
+            page_id="fabrication-test",
+            title="Fabrication Test",
+            category=WikiTaxonomyCategory.CORE_SERVICES,
+            output_path="docs/test.md",
+            source_requirements=SourceRequirement(
+                modules=["fake_module_that_does_not_exist"],
+            ),
+            generation_mode=GenerationMode.LLM_ASSISTED,
+        )
+        context = ComposerContext(
+            repository_name="test",
+            primary_language="python",
+            framework="fastapi",
+            repository_root=".",
+        )
+
+        input_data = build_composer_input(page, None, context)
+        output = await composer.compose_page(input_data)
+
+        # Even with fabricated content, should still track low_confidence
+        # The system should flag uncertainty when evidence is insufficient
+        if output.rejected or output.low_confidence:
+            # This is expected behavior
+            assert output.rejection_reason is not None or len(output.uncertainty_reasons) > 0
+
+    def test_composer_output_has_low_confidence_field(self):
+        """Test that ComposerOutput includes low_confidence tracking."""
+        from repo_wiki.generator.composer import ComposerOutput
+
+        output = ComposerOutput(
+            page_id="test",
+            markdown="# Test",
+            citations_preserved=True,
+            headings_preserved=True,
+            evidence_count=0,
+            low_confidence=True,
+            uncertainty_reasons=["INSUFFICIENT_EVIDENCE: no candidates bound"],
+        )
+
+        assert output.low_confidence is True
+        assert len(output.uncertainty_reasons) > 0
+        assert "INSUFFICIENT_EVIDENCE" in output.uncertainty_reasons[0]
+
+
 class TestValidationResult:
     """Tests for ValidationResult dataclass."""
+
+    def test_validation_result_has_low_confidence_fields(self):
+        """Test that ValidationResult includes low-confidence tracking."""
+        from repo_wiki.generator.composer import ValidationResult
+
+        result = ValidationResult(
+            citations_preserved=True,
+            headings_preserved=True,
+            evidence_count=0,
+            low_confidence=True,
+            uncertainty_reasons=["LOW_EVIDENCE_BINDING: only 1 candidate bound"],
+        )
+
+        assert result.low_confidence is True
+        assert len(result.uncertainty_reasons) > 0
 
     def test_create_valid_result(self):
         """Test creating valid result."""

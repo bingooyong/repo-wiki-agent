@@ -59,6 +59,7 @@ repo_wiki/orchestration/__init__.py
 repo_wiki/orchestration/content_layout_writer.py
 repo_wiki/orchestration/cost_estimator.py
 repo_wiki/orchestration/eval_layout.py
+repo_wiki/orchestration/failure_recovery.py
 repo_wiki/orchestration/generation_invalidation.py
 repo_wiki/orchestration/generation_scheduler.py
 repo_wiki/orchestration/generation_state.py
@@ -67,6 +68,7 @@ repo_wiki/orchestration/partial_evidence.py
 repo_wiki/orchestration/qoder_update_integration.py
 repo_wiki/orchestration/runtime_store.py
 repo_wiki/orchestration/service.py
+repo_wiki/orchestration/trend_dashboard.py
 repo_wiki/planner/__init__.py
 repo_wiki/planner/api_topic_planner.py
 repo_wiki/planner/data_model_topic_planner.py
@@ -128,6 +130,7 @@ tests/test_evidence_schema.py
 tests/test_fixture_ingestion.py
 tests/test_generation_scheduler.py
 tests/test_generation_state_machine.py
+tests/test_golden_fixtures.py
 tests/test_golden_qoder_like_fixture.py
 tests/test_governance_dashboard.py
 tests/test_governance_regression.py
@@ -150,6 +153,7 @@ tests/test_phase12_sqlite_runtime.py
 tests/test_planner_persistence.py
 tests/test_qoder_adapter.py
 tests/test_qoder_comparator_paths.py
+tests/test_qoder_compare_cli.py
 tests/test_qoder_like_profile.py
 tests/test_qoder_like_update.py
 tests/test_qoder_like_verifier.py
@@ -169,6 +173,7 @@ tests/test_security.py
 tests/test_service_data_model_composer.py
 tests/test_service_family_api_composer.py
 tests/test_source_spans.py
+tests/test_trend_persistence.py
 tests/test_verifier.py
 tests/test_viewer.py
 tests/test_viewer_extension_nav_parity.py

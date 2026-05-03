@@ -8,6 +8,7 @@ import pytest
 from repo_wiki.orchestration.generation_state import (
     GenerationStateMachine,
     PageState,
+    RunState,
 )
 from repo_wiki.orchestration.partial_evidence import (
     EvidenceBundleCreator,
@@ -18,6 +19,9 @@ from repo_wiki.orchestration.partial_evidence import (
     PartialRunManifest,
     create_failure_recorder,
     create_partial_manifest,
+)
+from repo_wiki.orchestration.failure_recovery import (
+    FailureRecoveryManager,
 )
 
 
@@ -343,6 +347,91 @@ class TestEvidenceBundleCreator:
         assert "gen-test" in cmd
         assert "00-overview" in cmd
         assert "01-architecture" in cmd
+
+
+class TestFailureRecoveryManager:
+    """Tests for failure recovery and partial evidence acceptance."""
+
+    @pytest.fixture
+    def recovery_setup(self, tmp_path):
+        state_db = tmp_path / "state.sqlite3"
+        evidence_db = tmp_path / "evidence.sqlite3"
+        state_machine = GenerationStateMachine(state_db)
+        recorder = FailureEvidenceRecorder(state_machine, evidence_db)
+        manager = FailureRecoveryManager(state_machine, recorder)
+        return manager, recorder, state_machine
+
+    def test_record_failed_page_with_retry_command(self, recovery_setup):
+        manager, recorder, state_machine = recovery_setup
+        run = state_machine.create_run(profile="test", total_pages=1)
+        state_machine.add_page(run.run_id, "02-services", "module", "docs/02-services.md")
+        state_machine.start_page(run.run_id, "02-services")
+        state_machine.fail_page(run.run_id, "02-services", "provider timeout")
+
+        record = manager.record_failed_page(
+            run_id=run.run_id,
+            doc_slug="02-services",
+            reason_code=FailureReason.TIMEOUT,
+            provider_error="provider timeout",
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+        assert record is not None
+        assert "repo-wiki generate --run" in record.retry_command
+        assert "02-services" in record.retry_command
+        assert record.provider_error == "provider timeout"
+
+        failures = recorder.get_failures_for_run(run.run_id)
+        assert len(failures) == 1
+        assert failures[0].retry_command is not None
+
+    def test_partial_run_keeps_successful_pages_usable(self, recovery_setup):
+        manager, recorder, state_machine = recovery_setup
+        run = state_machine.create_run(profile="test", total_pages=3)
+        state_machine.start_run(run.run_id)
+        state_machine.add_page(run.run_id, "00-overview", "overview", "docs/00-overview.md")
+        state_machine.add_page(run.run_id, "01-architecture", "overview", "docs/01-architecture.md")
+        state_machine.add_page(run.run_id, "02-services", "module", "docs/02-services.md")
+
+        state_machine.start_page(run.run_id, "00-overview")
+        state_machine.complete_page(run.run_id, "00-overview")
+
+        state_machine.start_page(run.run_id, "01-architecture")
+        state_machine.fail_page(run.run_id, "01-architecture", "provider rate limited")
+        manager.record_failed_page(
+            run_id=run.run_id,
+            doc_slug="01-architecture",
+            reason_code=FailureReason.RATE_LIMIT_EXCEEDED,
+            provider_error="provider rate limited",
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+
+        state_machine.complete_run(run.run_id)
+        finished_run = state_machine.get_run(run.run_id)
+        assert finished_run is not None
+        assert finished_run.state == RunState.RETRYABLE
+
+        bundle = manager.build_partial_evidence_bundle(
+            run.run_id,
+            successful_page_content={
+                "00-overview": "# ok",
+                "01-architecture": "# should not be included",
+            },
+        )
+        assert bundle is not None
+        assert bundle.run_state == RunState.RETRYABLE
+        assert bundle.partial_manifest["is_partial"] is True
+        assert bundle.partial_manifest["usable_pages"] == ["00-overview"]
+        assert "01-architecture" in bundle.partial_manifest["retryable_pages"]
+        assert len(bundle.successful_pages) == 1
+        assert bundle.successful_pages[0]["doc_slug"] == "00-overview"
+        assert bundle.successful_pages[0]["usable"] is True
+
+        failed = {f.doc_slug: f for f in bundle.failed_pages}
+        assert "01-architecture" in failed
+        assert "repo-wiki generate --run" in failed["01-architecture"].retry_command
+        assert failed["01-architecture"].provider_error == "provider rate limited"
 
 
 class TestFactoryFunctions:

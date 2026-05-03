@@ -1,5 +1,7 @@
 # Phase 30 Final Go/No-Go Dossier
 
+> **Superseded for decision authority:** Use **`docs/go-no-go-dossier.md`** for the current evidence-linked determination (**Phase 35:** **Go** for Atlas strict; **conditional** general — Task 35.4). This file remains as historical draft context.
+
 **Date**: 2026-04-29
 **Agent**: Agent_QualityRelease
 **Status**: COMPLETED

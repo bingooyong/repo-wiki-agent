@@ -15,6 +15,7 @@ from repo_wiki.orchestration.generation_scheduler import (
     TokenBucketRateLimiter,
     create_scheduler,
 )
+from repo_wiki.orchestration.generation_state import RunState
 
 
 class TestSchedulerConfig:
@@ -306,6 +307,93 @@ class TestGenerationScheduler:
         assert completed == 0
         assert failed == 0
         assert len(errors) == 0
+
+    @pytest.mark.asyncio
+    async def test_run_pages_respects_concurrency_limit(self, scheduler_setup):
+        """Scheduler should not exceed configured max concurrency."""
+        scheduler, state_machine, _ = scheduler_setup
+        run = state_machine.create_run(profile="test", total_pages=4)
+        for idx in range(4):
+            state_machine.add_page(
+                run.run_id,
+                f"page-{idx}",
+                "module",
+                f"docs/modules/page-{idx}.md",
+            )
+
+        in_flight = 0
+        max_in_flight = 0
+        lock = asyncio.Lock()
+
+        async def generate_fn(**kwargs):  # noqa: ANN003
+            nonlocal in_flight, max_in_flight
+            async with lock:
+                in_flight += 1
+                max_in_flight = max(max_in_flight, in_flight)
+            await asyncio.sleep(0.05)
+            async with lock:
+                in_flight -= 1
+            return MagicMock(prompt_tokens=100, completion_tokens=50)
+
+        completed, failed, errors = await scheduler.run_pages(
+            run_id=run.run_id,
+            provider="openai",
+            model="gpt-4o-mini",
+            generate_fn=generate_fn,
+        )
+        assert completed == 4
+        assert failed == 0
+        assert errors == []
+        assert max_in_flight <= scheduler.config.max_concurrency
+
+    def test_run_pages_budget_gate_blocks_over_budget(self, scheduler_setup):
+        """Over-budget runs should be blocked and state should be failed."""
+        scheduler, state_machine, _ = scheduler_setup
+        scheduler.cost_estimator.default_budget_usd = 0.001
+        scheduler.budget_gate.default_budget_usd = 0.001
+        scheduler.budget_gate.allow_override = False
+
+        run = state_machine.create_run(profile="test", total_pages=1)
+        state_machine.add_page(run.run_id, "p1", "module", "docs/modules/p1.md")
+
+        mock_generate = AsyncMock(return_value=MagicMock(prompt_tokens=10, completion_tokens=10))
+        completed, failed, errors = scheduler.run_pages_sync(
+            run_id=run.run_id,
+            provider="openai",
+            model="gpt-4o",
+            generate_fn=mock_generate,
+            page_prompt_tokens={"p1": 1_000_000},
+            completion_tokens_per_page=500_000,
+        )
+        assert completed == 0
+        assert failed == 0
+        assert errors
+        assert errors[0][0] == "__run__"
+        mock_generate.assert_not_called()
+        final_run = state_machine.get_run(run.run_id)
+        assert final_run is not None
+        assert final_run.state == RunState.FAILED
+
+    def test_run_pages_marks_run_completed_on_success(self, scheduler_setup):
+        """Successful scheduling should close run lifecycle as completed."""
+        scheduler, state_machine, _ = scheduler_setup
+        run = state_machine.create_run(profile="test", total_pages=2)
+        state_machine.add_page(run.run_id, "p1", "module", "docs/modules/p1.md")
+        state_machine.add_page(run.run_id, "p2", "module", "docs/modules/p2.md")
+
+        mock_generate = AsyncMock(return_value=MagicMock(prompt_tokens=10, completion_tokens=10))
+        completed, failed, errors = scheduler.run_pages_sync(
+            run_id=run.run_id,
+            provider="openai",
+            model="gpt-4o-mini",
+            generate_fn=mock_generate,
+        )
+        assert completed == 2
+        assert failed == 0
+        assert errors == []
+        final_run = state_machine.get_run(run.run_id)
+        assert final_run is not None
+        assert final_run.state == RunState.COMPLETED
 
 
 class TestCreateScheduler:

@@ -93,6 +93,8 @@ class ComposerOutput:
     completion_tokens: int = 0
     provider: str = "mock"
     model: str = "mock-gpt"
+    low_confidence: bool = False
+    uncertainty_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -341,6 +343,8 @@ class LLMPageComposer:
                     completion_tokens=completion_tokens,
                     provider=self.provider_name,
                     model=self.model_name,
+                    low_confidence=validation_result.low_confidence,
+                    uncertainty_reasons=validation_result.uncertainty_reasons,
                 )
 
             return ComposerOutput(
@@ -356,6 +360,8 @@ class LLMPageComposer:
                 completion_tokens=completion_tokens,
                 provider=self.provider_name,
                 model=self.model_name,
+                low_confidence=validation_result.low_confidence,
+                uncertainty_reasons=validation_result.uncertainty_reasons,
             )
 
         except Exception as e:
@@ -370,6 +376,8 @@ class LLMPageComposer:
                 tokens_used=0,
                 provider=self.provider_name,
                 model=self.model_name,
+                low_confidence=False,
+                uncertainty_reasons=[],
             )
 
     def _build_context(self, input: ComposerInput) -> dict[str, Any]:
@@ -446,7 +454,9 @@ class LLMPageComposer:
 - 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
 - 至少保留 3 个 `<cite>file:start-end</cite>` 引用。
 - 使用段落解释为主，列表只用于核心组件或检查项。
-- 如果证据不足，明确写“当前证据显示”，不要过度推断。
+- 如果证据不足，明确写”当前证据显示”，不要过度推断。
+
+{self._build_low_confidence_guidance(input)}
 
 必须包含这些二级标题：
 {headings_text}
@@ -486,6 +496,37 @@ class LLMPageComposer:
         if len(cleaned) > max_chars:
             return cleaned[: max_chars - 3].rstrip() + "..."
         return cleaned
+
+    def _build_low_confidence_guidance(self, input: ComposerInput) -> str:
+        """Build guidance text for low-confidence pages based on evidence quality.
+
+        When evidence is insufficient, inject explicit uncertainty guidance
+        to prevent fabrication of implementation details.
+        """
+        if not input.evidence_binding:
+            return (
+                "\n\n[待确认] 证据状态：无可用源码证据。\n"
+                "生成时必须：\n"
+                "- 明确标注「待确认」段落\n"
+                "- 避免声称任何具体实现细节\n"
+                "- 仅描述可以从不完整推断中确认的事实\n"
+            )
+
+        candidate_count = len(input.evidence_binding.candidates)
+        insufficient = input.evidence_binding.insufficient_evidence
+
+        if insufficient or candidate_count < 3:
+            return (
+                f"\n\n[待确认] 证据状态：证据不足（仅 {candidate_count} 条候选）"
+                f"{'（标记为insufficient_evidence）' if insufficient else ''}。\n"
+                "生成时必须：\n"
+                "- 对每一个依赖推断的结论标注「待确认」\n"
+                "- 不允许编造模块名、API 端点、版本号或配置\n"
+                "- 使用「当前证据显示」而非「系统使用」\n"
+                "- 保留所有 `<cite>` 引用，即使推断不确定\n"
+            )
+
+        return ""
 
     async def _call_llm(self, prompt: str, title: str) -> ChatResponse:
         """Call LLM provider with prompt."""
@@ -551,12 +592,19 @@ class LLMPageComposer:
         """Validate composed output.
 
         Returns ValidationResult with preserved flags and rejection reason.
+
+        Low-confidence detection:
+        - Insufficient citations (less than 3) when evidence candidates exist
+        - Low evidence binding (fewer candidates than threshold)
+        - Missing required heading preservation
         """
         result = ValidationResult()
 
         # Count citations in evidence
         original_citations = []
+        candidate_count = 0
         if input.evidence_binding:
+            candidate_count = len(input.evidence_binding.candidates)
             for candidate in input.evidence_binding.candidates:
                 span = candidate.span
                 original_citations.append(f"{span.file_path}:{span.line_start}-{span.line_end}")
@@ -579,6 +627,30 @@ class LLMPageComposer:
         if len(content) > 150 and self._count_prose_chars(content) < 100:
             result.rejection_reason = "Insufficient prose content"
 
+        # Detect low-confidence conditions
+        uncertainty_reasons: list[str] = []
+
+        # No evidence binding at all - highest uncertainty
+        if input.evidence_binding is None:
+            uncertainty_reasons.append("NO_EVIDENCE_BINDING: no evidence candidates available")
+
+        # Low citation density when evidence exists
+        if candidate_count >= 3 and result.evidence_count < 3:
+            uncertainty_reasons.append(f"INSUFFICIENT_CITATIONS: only {result.evidence_count} citations found, expected at least 3")
+
+        # Low evidence binding
+        if candidate_count > 0 and candidate_count < 3:
+            uncertainty_reasons.append(f"LOW_EVIDENCE_BINDING: only {candidate_count} evidence candidates bound")
+
+        # Check for unsupported claims via content analysis
+        if self._detect_unsupported_claims(content):
+            uncertainty_reasons.append("UNSUPPORTED_CLAIMS: content may contain assertions not backed by evidence")
+
+        # Mark low-confidence if there are uncertainty reasons but no rejection
+        if uncertainty_reasons and not result.rejection_reason:
+            result.low_confidence = True
+            result.uncertainty_reasons = uncertainty_reasons
+
         # Mark rejected if any critical issue
         if result.rejection_reason:
             result.rejected = True
@@ -587,6 +659,34 @@ class LLMPageComposer:
         result.tokens_used = len(content.split()) * 4
 
         return result
+
+    def _detect_unsupported_claims(self, content: str) -> bool:
+        """Detect potential unsupported claims in content.
+
+        Looks for strong assertions without citation backing.
+        Returns True if potential unsupported claims detected.
+        """
+        import re
+
+        # Patterns that indicate strong claims requiring evidence
+        claim_patterns = [
+            r'\b(always|never|must|guaranteed|100%|impossible)\b',
+            r'\b(best|worst|fastest|slowest|optimal|pessimized)\b',
+            r'\b(cutting-edge|legacy|modern|outdated)\b',
+            r'\b(enterprise-grade|mission-critical|zero-downtime)\b',
+        ]
+
+        matches = 0
+        for pattern in claim_patterns:
+            if re.search(pattern, content, re.IGNORECASE):
+                matches += 1
+
+        # If multiple strong claim patterns found without citations, likely unsupported
+        cite_count = len(re.findall(r'<cite>', content))
+        if matches >= 3 and cite_count == 0:
+            return True
+
+        return False
 
     def _count_prose_chars(self, content: str) -> int:
         """Count prose characters (excluding markdown syntax).
@@ -626,6 +726,8 @@ class ValidationResult:
     rejected: bool = False
     rejection_reason: str | None = None
     tokens_used: int = 0
+    low_confidence: bool = False
+    uncertainty_reasons: list[str] = field(default_factory=list)
 
 
 # =============================================================================

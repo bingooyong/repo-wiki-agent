@@ -43,6 +43,14 @@ class DataModelTopicCategory:
     ENTITY_RELATIONSHIPS = "entity-relationships"
     ER_DIAGRAMS = "er-diagrams"
 
+    # Additional data model topics (Task 32.3 additions)
+    ENTITY = "entity"                    # Entity drill-down
+    MIGRATION = "migration"              # Migration details
+    TABLE_STRUCTURE = "table-structure"  # Table structure docs
+    INDEX_PERFORMANCE = "index-performance"  # Index and performance
+    AUDIT = "audit"                      # Audit trails
+    SECURITY = "security"                # Security models
+
 
 # Topic to page title mapping
 _TOPIC_TITLES: dict[str, str] = {
@@ -56,7 +64,26 @@ _TOPIC_TITLES: dict[str, str] = {
     DataModelTopicCategory.MIGRATION_STRATEGY: "迁移策略",
     DataModelTopicCategory.ENTITY_RELATIONSHIPS: "实体关系",
     DataModelTopicCategory.ER_DIAGRAMS: "ER图",
+    # Task 32.3 additions
+    DataModelTopicCategory.ENTITY: "实体",
+    DataModelTopicCategory.MIGRATION: "数据迁移",
+    DataModelTopicCategory.TABLE_STRUCTURE: "表结构",
+    DataModelTopicCategory.INDEX_PERFORMANCE: "索引与性能",
+    DataModelTopicCategory.AUDIT: "审计日志",
+    DataModelTopicCategory.SECURITY: "安全模型",
 }
+
+
+# Track seen page ID bases for duplicate detection
+_PAGE_ID_BASES: dict[str, int] = {}
+
+def _mark_page_id_base(base: str) -> str:
+    """Mark a page ID base as used, return deduplicated base."""
+    if base not in _PAGE_ID_BASES:
+        _PAGE_ID_BASES[base] = 0
+        return base
+    _PAGE_ID_BASES[base] += 1
+    return f"{base}-{_PAGE_ID_BASES[base]}"
 
 
 class DataModelTopicPlanner:
@@ -71,6 +98,7 @@ class DataModelTopicPlanner:
     - Creates entity relationship overview pages
     - Creates database architecture and migration strategy pages
     - Generates individual model pages with ER citations
+    - Task 32.3: Eliminates duplicate pages (e.g., "xxx 数据模型" vs "xxx 数据模型-2")
     """
 
     def __init__(
@@ -82,6 +110,7 @@ class DataModelTopicPlanner:
         self.snapshot = snapshot
         self.pages: list[WikiPagePlan] = []
         self._page_id_set: set[str] = set()
+        self._title_set: set[str] = set()  # Track titles to detect duplicates
 
     def generate(self) -> WikiPlanManifest:
         """Generate data model topic plan.
@@ -91,6 +120,7 @@ class DataModelTopicPlanner:
         """
         self.pages = []
         self._page_id_set = set()
+        self._title_set = set()  # Reset title set for duplicate detection
 
         # Generate data models overview page
         self._generate_data_models_overview()
@@ -110,6 +140,13 @@ class DataModelTopicPlanner:
         # Generate individual model pages
         self._generate_individual_model_pages()
 
+        # Task 32.3: Generate additional entity/persistence topics
+        self._generate_entity_drilldown_pages()
+        self._generate_table_structure_pages()
+        self._generate_index_performance_pages()
+        self._generate_audit_pages()
+        self._generate_security_pages()
+
         # Build navigation tree
         nav_tree = self._build_navigation_tree()
 
@@ -122,6 +159,31 @@ class DataModelTopicPlanner:
         )
 
         return manifest
+
+    def _check_duplicate_title(self, title: str) -> bool:
+        """Check if a page with similar title already exists.
+
+        Returns True if duplicate detected (title already exists or
+        differs only by suffix like "-2", "-3" etc).
+
+        This prevents "xxx 数据模型" and "xxx 数据模型-2" duplicates.
+        """
+        # Normalize title for comparison
+        normalized = title.lower().strip()
+
+        # Check against existing titles
+        for existing in self._title_set:
+            existing_norm = existing.lower().strip()
+            # Exact match
+            if normalized == existing_norm:
+                return True
+            # Match except for numeric suffix (-2, -3, etc)
+            import re
+            pattern = r'-\d+$'
+            if re.sub(pattern, '', normalized) == re.sub(pattern, '', existing_norm):
+                return True
+
+        return False
 
     def _make_page_id(self, base: str) -> str:
         """Create a unique page ID."""
@@ -155,6 +217,9 @@ class DataModelTopicPlanner:
         tags = tags or []
         if "data-model" not in tags:
             tags.append("data-model")
+
+        # Track title for duplicate detection
+        self._title_set.add(title)
 
         page = WikiPagePlan(
             page_id=page_id,
@@ -370,6 +435,122 @@ class DataModelTopicPlanner:
                 )
 
             sort_order += 10
+
+    def _generate_entity_drilldown_pages(self) -> None:
+        """Generate entity drill-down pages (Task 32.3)."""
+        # Entity detail page - links to service-level pages
+        self._add_page(
+            page_id=self._make_page_id("entity-detail"),
+            title="实体详情",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            parent="entity-relationships",
+            source_requirements=SourceRequirement(
+                data_models=[dm.name for dm in self.snapshot.data_models if dm.type == "python_class"]
+            ),
+            sort_order=12,
+            tags=["data-model", "entity", "drilldown"],
+        )
+
+        # Entity relationship matrix
+        self._add_page(
+            page_id=self._make_page_id("entity-matrix"),
+            title="实体关系矩阵",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            parent="entity-relationships",
+            sort_order=13,
+            tags=["data-model", "entity", "matrix"],
+        )
+
+    def _generate_table_structure_pages(self) -> None:
+        """Generate table structure pages (Task 32.3)."""
+        # Table structure overview
+        self._add_page(
+            page_id=self._make_page_id("table-structure-overview"),
+            title="表结构概览",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            parent="database-architecture",
+            source_requirements=SourceRequirement(
+                data_models=[dm.name for dm in self.snapshot.data_models if dm.type == "migration_table"]
+            ),
+            sort_order=22,
+            tags=["data-model", "table", "structure"],
+        )
+
+        # Table relationships
+        self._add_page(
+            page_id=self._make_page_id("table-relationships"),
+            title="表关系图",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            parent="table-structure-overview",
+            sort_order=23,
+            tags=["data-model", "table", "relationships"],
+        )
+
+    def _generate_index_performance_pages(self) -> None:
+        """Generate index and performance pages (Task 32.3)."""
+        # Index strategy
+        self._add_page(
+            page_id=self._make_page_id("index-strategy"),
+            title="索引策略",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            parent="database-architecture",
+            sort_order=24,
+            tags=["data-model", "index", "performance"],
+        )
+
+        # Performance tuning
+        self._add_page(
+            page_id=self._make_page_id("performance-tuning"),
+            title="性能调优",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            parent="index-strategy",
+            sort_order=25,
+            tags=["data-model", "performance", "tuning"],
+        )
+
+    def _generate_audit_pages(self) -> None:
+        """Generate audit trail pages (Task 32.3)."""
+        # Audit overview
+        self._add_page(
+            page_id=self._make_page_id("audit-overview"),
+            title="审计日志概览",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            parent="data-models-overview",
+            sort_order=40,
+            tags=["data-model", "audit", "logging"],
+        )
+
+        # Audit events
+        self._add_page(
+            page_id=self._make_page_id("audit-events"),
+            title="审计事件详情",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            parent="audit-overview",
+            sort_order=41,
+            tags=["data-model", "audit", "events"],
+        )
+
+    def _generate_security_pages(self) -> None:
+        """Generate security model pages (Task 32.3)."""
+        # Security overview
+        self._add_page(
+            page_id=self._make_page_id("security-models"),
+            title="安全模型",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            parent="data-models-overview",
+            sort_order=50,
+            tags=["data-model", "security", "access-control"],
+        )
+
+        # Security config models
+        self._add_page(
+            page_id=self._make_page_id("security-config"),
+            title="安全配置",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            parent="security-models",
+            sort_order=51,
+            tags=["data-model", "security", "config"],
+        )
 
     def _build_navigation_tree(self) -> list[NavNode]:
         """Build navigation tree for data model pages."""

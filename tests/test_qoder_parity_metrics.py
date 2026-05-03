@@ -1,6 +1,6 @@
 """Tests for Qoder parity metrics."""
 
-import tempfile
+import json
 from pathlib import Path
 
 import pytest
@@ -11,11 +11,13 @@ from repo_wiki.verifier.qoder_parity_metrics import (
     MetricSeverity,
     MetricStatus,
     PARITY_METRICS,
+    PARITY_METRIC_SCHEMA_VERSION,
     ParityMetricExtractor,
     ParityReport,
-    ParityMetricDefinition,
     create_parity_report,
+    export_metric_schema,
     load_parity_report,
+    metric_schema_to_json,
 )
 
 
@@ -42,6 +44,34 @@ class TestMetricDefinitions:
         """Test all thresholds are in valid range."""
         for metric in PARITY_METRICS.values():
             assert 0 <= metric.threshold <= 1.0, f"{metric.name} threshold out of range"
+
+    def test_definitions_have_unit_and_threshold_compare(self):
+        """Registry entries must document units and threshold semantics."""
+        for metric in PARITY_METRICS.values():
+            assert metric.unit.value
+            assert metric.threshold_compare in ("score", "measured_value")
+
+
+class TestMetricSchemaSerialization:
+    """Tests for exported metric schema (Task 29.1)."""
+
+    def test_export_metric_schema_shape(self):
+        schema = export_metric_schema()
+        assert schema["schema_version"] == PARITY_METRIC_SCHEMA_VERSION
+        assert schema["schema_kind"] == "qoder_parity_metrics"
+        assert schema["metric_count"] == len(PARITY_METRICS)
+        assert len(schema["metrics"]) == len(PARITY_METRICS)
+        names = {m["name"] for m in schema["metrics"]}
+        assert names == set(PARITY_METRICS.keys())
+
+    def test_metric_schema_json_roundtrip(self):
+        raw = metric_schema_to_json(indent=2)
+        data = json.loads(raw)
+        assert data["schema_version"] == PARITY_METRIC_SCHEMA_VERSION
+        first = data["metrics"][0]
+        assert "unit" in first
+        assert "threshold_compare" in first
+        assert "severity" in first
 
 
 class TestMetricResult:

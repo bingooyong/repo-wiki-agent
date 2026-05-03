@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+from repo_wiki.orchestration.generation_state import GenerationStateMachine, RunState
 
 
 # =============================================================================
@@ -123,6 +125,24 @@ class PageCostEstimate:
     prompt_tokens: int
     estimated_cost_usd: float
     within_page_budget: bool
+
+
+@dataclass
+class PagePlanCostInput:
+    """Lightweight page-plan inputs used for run-level cost estimates."""
+    page_id: str
+    estimated_prompt_tokens: int = 0
+    estimated_completion_tokens: int = 0
+
+
+@dataclass
+class BudgetGateDecision:
+    """Decision payload returned by budget gate checks."""
+    allowed: bool
+    overridden: bool
+    estimate: CostEstimate
+    reason_code: str | None = None
+    message: str | None = None
 
 
 class GenerationCostEstimator:
@@ -268,6 +288,49 @@ class GenerationCostEstimator:
             message=message,
         )
 
+    def estimate_run_cost_from_plan(
+        self,
+        run_id: str,
+        provider: str,
+        model: str,
+        pages: list[PagePlanCostInput],
+        prompt_tokens_per_page_overhead: int = 0,
+        completion_tokens_per_page_default: int = 500,
+        budget_override: float | None = None,
+    ) -> CostEstimate:
+        """Estimate run cost from page-plan level token hints.
+
+        Args:
+            run_id: Generation run ID
+            provider: LLM provider name
+            model: Model name
+            pages: Page-level token estimates from planner/prompt builder
+            prompt_tokens_per_page_overhead: Extra prompt tokens per page
+            completion_tokens_per_page_default: Fallback completion tokens when page doesn't provide one
+            budget_override: Override budget limit in USD
+
+        Returns:
+            CostEstimate with budget check.
+        """
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        for page in pages:
+            total_prompt_tokens += max(0, page.estimated_prompt_tokens) + max(0, prompt_tokens_per_page_overhead)
+            total_completion_tokens += (
+                max(0, page.estimated_completion_tokens)
+                if page.estimated_completion_tokens > 0
+                else max(0, completion_tokens_per_page_default)
+            )
+
+        return self.estimate_run_cost(
+            run_id=run_id,
+            provider=provider,
+            model=model,
+            total_prompt_tokens=total_prompt_tokens,
+            total_completion_tokens=total_completion_tokens,
+            budget_override=budget_override,
+        )
+
     def record_page_tokens(
         self,
         run_id: str,
@@ -395,18 +458,125 @@ class BudgetGate:
             budget_override=budget_override,
         )
 
-        if estimate.within_budget:
-            return True, estimate
+        decision = self._to_decision(estimate, budget_override)
+        return decision.allowed, decision.estimate
 
-        if budget_override is not None and self.allow_override:
-            # Override was explicitly provided, allow despite over-budget
+    def check_run_budget_from_plan(
+        self,
+        run_id: str,
+        provider: str,
+        model: str,
+        pages: list[PagePlanCostInput],
+        prompt_tokens_per_page_overhead: int = 0,
+        completion_tokens_per_page_default: int = 500,
+        budget_override: float | None = None,
+    ) -> BudgetGateDecision:
+        """Evaluate run budget using page-plan and prompt-size estimates."""
+        estimate = self.cost_estimator.estimate_run_cost_from_plan(
+            run_id=run_id,
+            provider=provider,
+            model=model,
+            pages=pages,
+            prompt_tokens_per_page_overhead=prompt_tokens_per_page_overhead,
+            completion_tokens_per_page_default=completion_tokens_per_page_default,
+            budget_override=budget_override,
+        )
+        return self._to_decision(estimate, budget_override)
+
+    def enforce_run_budget_with_state(
+        self,
+        *,
+        state_machine: GenerationStateMachine,
+        run_id: str,
+        provider: str,
+        model: str,
+        pages: list[PagePlanCostInput],
+        prompt_tokens_per_page_overhead: int = 0,
+        completion_tokens_per_page_default: int = 500,
+        budget_override: float | None = None,
+    ) -> BudgetGateDecision:
+        """Apply budget gate and update run lifecycle on denial.
+
+        If denied, the run is marked failed with a budget-specific error message.
+        """
+        decision = self.check_run_budget_from_plan(
+            run_id=run_id,
+            provider=provider,
+            model=model,
+            pages=pages,
+            prompt_tokens_per_page_overhead=prompt_tokens_per_page_overhead,
+            completion_tokens_per_page_default=completion_tokens_per_page_default,
+            budget_override=budget_override,
+        )
+        if decision.allowed:
+            return decision
+
+        # Budget denial happens before page work; force terminal failed state.
+        conn = state_machine._conn()
+        try:
+            conn.execute(
+                """
+                UPDATE generation_runs
+                SET state = ?, completed_at = ?, error_message = ?
+                WHERE run_id = ?
+                """,
+                (RunState.FAILED.value, datetime.now(UTC).isoformat(), decision.message or "Budget exceeded", run_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return decision
+
+    def _to_decision(
+        self,
+        estimate: CostEstimate,
+        budget_override: float | None,
+    ) -> BudgetGateDecision:
+        override_requested = budget_override is not None and self.allow_override
+        over_default_budget = estimate.estimated_cost_usd > self.default_budget_usd
+
+        if override_requested and over_default_budget and estimate.within_budget:
             estimate.message = (
                 f"Over-budget run allowed via override. "
                 f"Estimated cost: ${estimate.estimated_cost_usd:.4f}"
             )
-            return True, estimate
+            return BudgetGateDecision(
+                allowed=True,
+                overridden=True,
+                estimate=estimate,
+                reason_code="BUDGET_OVERRIDDEN",
+                message=estimate.message,
+            )
 
-        return False, estimate
+        if estimate.within_budget:
+            return BudgetGateDecision(
+                allowed=True,
+                overridden=False,
+                estimate=estimate,
+                reason_code=None,
+                message=None,
+            )
+
+        if budget_override is not None and self.allow_override:
+            estimate.message = (
+                f"Over-budget run allowed via override. "
+                f"Estimated cost: ${estimate.estimated_cost_usd:.4f}"
+            )
+            return BudgetGateDecision(
+                allowed=True,
+                overridden=True,
+                estimate=estimate,
+                reason_code="BUDGET_OVERRIDDEN",
+                message=estimate.message,
+            )
+
+        return BudgetGateDecision(
+            allowed=False,
+            overridden=False,
+            estimate=estimate,
+            reason_code=estimate.reason_code or "BUDGET_EXCEEDED",
+            message=estimate.message or "Budget exceeded",
+        )
 
     def check_page_budget(
         self,

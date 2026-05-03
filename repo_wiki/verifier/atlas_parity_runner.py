@@ -33,8 +33,11 @@ def _get_atlas_root() -> Path:
     env_path = os.environ.get("ATLAS_ROOT")
     if env_path:
         return Path(env_path)
-    # Default path for local development
-    return Path("/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas")
+    # Require ATLAS_ROOT environment variable for CI/CD
+    raise RuntimeError(
+        "ATLAS_ROOT environment variable not set. "
+        "This tool requires ATLAS_ROOT to be set for path safety."
+    )
 
 
 ATLAS_ROOT = _get_atlas_root()

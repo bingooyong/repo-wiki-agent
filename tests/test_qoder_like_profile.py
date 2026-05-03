@@ -39,7 +39,9 @@ def test_qoder_like_generate_writes_only_eval_run(tmp_path):
             "root": str(repo_root),
             "include": ["**/*"],
             "exclude": [".repo-agent-eval/**", ".qoder/**", ".repo-wiki/**"],
-        }
+        },
+        # Deterministic CI path: developers may have OPENAI_API_KEY; tests must not hit the network.
+        "llm": {"force_mock_llm": True},
     })
     profile = EvalOutputProfile(
         name="qoder-like",
@@ -71,5 +73,7 @@ def test_qoder_like_generate_writes_only_eval_run(tmp_path):
     assert llm_stats["effective_provider"] == "mock"
     assert llm_stats["model"] == "mock-gpt"
     assert llm_stats["estimated_tokens"] > 0
-    assert "api_key_env" not in json.dumps(manifest_payload).lower()
+    # llm summary may include api_key_env (variable name only, not the secret value).
+    full_dump = json.dumps(manifest_payload)
+    assert "sk-ant-api" not in full_dump and "sk-proj-" not in full_dump
     assert all((content_dir / entry["path"]).exists() for entry in manifest_payload["page_registry"])

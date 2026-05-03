@@ -1,5 +1,7 @@
 # LLM Provider Configuration Guide
 
+> **End-user source of truth:** For CLI flags (`repo-wiki config`), environment/YAML precedence, Minimax/OpenAI/Anthropic/local examples, mock vs real behavior, and troubleshooting, use **[`docs/configuration.md`](../configuration.md)**. This operations note may lag behind code; prefer that file when they disagree.
+
 This guide explains how to configure LLM providers for repo-wiki.
 
 ## Supported Providers

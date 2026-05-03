@@ -144,7 +144,7 @@ def improve_command(
         "REPO_WIKI_LLM_MAX_FAILURES": str(max(real_max_calls, 1)),
         "REPO_WIKI_LLM_REAL_MAX_CALLS": str(max(real_max_calls, 0)),
         "REPO_WIKI_LLM_CONCURRENCY": str(max(concurrency, 1)),
-        "REPO_WIKI_QODER_LIKE_MAX_PAGES": str(max(max_pages, 120)),
+        "REPO_WIKI_QODER_LIKE_MAX_PAGES": str(max(1, max_pages)),
         "REPO_WIKI_COMPACT_LLM_PROMPT": "1",
         "REPO_WIKI_LLM_COMPOSER_MAX_TOKENS": str(max(max_tokens, 256)),
         "REPO_WIKI_LLM_PRIORITY": priority,

@@ -537,6 +537,23 @@ def _qoder_like_relative_path(source_path: str, markdown: str | None = None) -> 
     return Path(filename)
 
 
+def _normalize_doc_path_for_filter(doc_path: str, project_root: Path | None) -> str:
+    """Map stored doc_path (absolute or relative) to a stable repo-relative POSIX path."""
+    raw = Path(doc_path)
+    if project_root is not None:
+        try:
+            root = project_root.resolve()
+            if raw.is_absolute():
+                resolved = raw.resolve()
+            else:
+                resolved = (root / raw).resolve()
+            rel = resolved.relative_to(root)
+            return rel.as_posix()
+        except (ValueError, OSError):
+            pass
+    return raw.as_posix()
+
+
 def _dedupe_relative_path(relative_path: Path, used_paths: set[str], source_path: str) -> Path:
     path = relative_path
     counter = 2
@@ -634,8 +651,22 @@ class ContentLayoutWriter:
                 selected.add(output_path)
         return selected
 
-    def load_selected_paths_from_sqlite(self, sqlite_path: Path) -> set[str]:
-        """Load selected planner output paths from runtime SQLite doc_hierarchy."""
+    def load_selected_paths_from_sqlite(
+        self,
+        sqlite_path: Path,
+        project_root: Path | None = None,
+    ) -> set[str]:
+        """Load selected planner output paths from runtime SQLite doc_hierarchy.
+
+        Paths in ``doc_hierarchy`` are often **absolute** (see runtime sync). Qoder-like
+        composition uses **repo-relative** paths like ``docs/pages/...``. Without
+        normalization, filtering in :meth:`write_markdown_pages` drops every page.
+
+        Args:
+            sqlite_path: Path to ``runtime.sqlite3``
+            project_root: Repository root; when set, absolute ``doc_path`` values are
+                converted to POSIX paths relative to this root when possible.
+        """
         if not sqlite_path.exists():
             return set()
         selected: set[str] = set()
@@ -645,7 +676,7 @@ class ContentLayoutWriter:
             for row in rows:
                 doc_path = row[0]
                 if isinstance(doc_path, str) and doc_path.endswith(".md"):
-                    selected.add(doc_path)
+                    selected.add(_normalize_doc_path_for_filter(doc_path, project_root))
         except Exception:
             return set()
         return selected

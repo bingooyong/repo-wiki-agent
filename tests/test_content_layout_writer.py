@@ -279,6 +279,34 @@ class TestWriteQoderLikeContent:
         assert written == ["API参考/API参考.md"]
         assert stats["files_written"] == 1
 
+    def test_load_selected_paths_from_sqlite_normalizes_absolute_paths(self, tmp_path):
+        """doc_hierarchy often stores absolute paths; plan uses repo-relative keys."""
+        profile = EvalOutputProfile(
+            name="qoder-like",
+            root=str(tmp_path / ".repo-agent-eval"),
+            create_subdirs=True,
+            content_subdir="content",
+        )
+        writer = ContentLayoutWriter(profile, "test-run")
+        repo = tmp_path / "target-repo"
+        api_dir = repo / "docs" / "pages" / "api"
+        api_dir.mkdir(parents=True)
+        md_file = api_dir / "api-overview.md"
+        md_file.write_text("# API参考\n")
+        sqlite_path = tmp_path / ".repo-wiki" / "index" / "runtime.sqlite3"
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+        abs_path = str(md_file.resolve())
+        with sqlite3.connect(sqlite_path) as conn:
+            conn.execute("CREATE TABLE doc_hierarchy (doc_path TEXT NOT NULL)")
+            conn.execute("INSERT INTO doc_hierarchy(doc_path) VALUES (?)", (abs_path,))
+            conn.commit()
+
+        raw_only = writer.load_selected_paths_from_sqlite(sqlite_path)
+        assert raw_only != {"docs/pages/api/api-overview.md"}
+
+        normalized = writer.load_selected_paths_from_sqlite(sqlite_path, project_root=repo)
+        assert normalized == {"docs/pages/api/api-overview.md"}
+
     def test_write_markdown_pages_filters_by_sqlite_plan(self, tmp_path):
         profile = EvalOutputProfile(
             name="qoder-like",

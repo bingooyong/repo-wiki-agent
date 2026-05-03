@@ -7,13 +7,16 @@ import pytest
 
 from repo_wiki.orchestration.cost_estimator import (
     BudgetExceeded,
+    BudgetGateDecision,
     BudgetGate,
     GenerationCostEstimator,
+    PagePlanCostInput,
     PageCostEstimate,
-    get_pricing,
     create_cost_estimator,
     create_budget_gate,
+    get_pricing,
 )
+from repo_wiki.orchestration.generation_state import GenerationStateMachine, RunState
 
 
 class TestGetPricing:
@@ -173,6 +176,27 @@ class TestGenerationCostEstimator:
         assert estimate.within_budget is True
         assert estimate.budget_limit_usd == 100.0
 
+    def test_estimate_run_cost_from_plan(self, tmp_path):
+        """Run estimate can be derived from page plan + prompt overhead."""
+        estimator = GenerationCostEstimator(tmp_path / "test.db", default_budget_usd=1.0)
+        pages = [
+            PagePlanCostInput(page_id="p1", estimated_prompt_tokens=1000, estimated_completion_tokens=300),
+            PagePlanCostInput(page_id="p2", estimated_prompt_tokens=2000, estimated_completion_tokens=0),
+        ]
+        estimate = estimator.estimate_run_cost_from_plan(
+            run_id="gen-plan",
+            provider="openai",
+            model="gpt-4o-mini",
+            pages=pages,
+            prompt_tokens_per_page_overhead=100,
+            completion_tokens_per_page_default=500,
+        )
+        # prompt: (1000+100) + (2000+100) = 3200
+        # completion: 300 + default 500 = 800
+        assert estimate.prompt_tokens == 3200
+        assert estimate.completion_tokens == 800
+        assert estimate.total_tokens == 4000
+
     def test_record_page_tokens(self, tmp_path):
         """Test recording actual token usage."""
         estimator = GenerationCostEstimator(tmp_path / "test.db")
@@ -282,6 +306,67 @@ class TestBudgetGate:
         # With $100 budget, cost ~$12.5 is within budget
         assert estimate.within_budget is True
         assert estimate.budget_limit_usd == 100.0
+
+    def test_check_run_budget_from_plan_blocks_without_override(self, tmp_path):
+        """Over-budget plan is blocked when no override is provided."""
+        estimator = GenerationCostEstimator(tmp_path / "test.db", default_budget_usd=0.001)
+        gate = BudgetGate(estimator, default_budget_usd=0.001, allow_override=True)
+        pages = [
+            PagePlanCostInput(page_id="p1", estimated_prompt_tokens=1_000_000, estimated_completion_tokens=500_000),
+        ]
+
+        decision = gate.check_run_budget_from_plan(
+            run_id="gen-test",
+            provider="openai",
+            model="gpt-4o",
+            pages=pages,
+        )
+        assert isinstance(decision, BudgetGateDecision)
+        assert decision.allowed is False
+        assert decision.overridden is False
+        assert decision.reason_code == "BUDGET_EXCEEDED"
+
+    def test_check_run_budget_from_plan_allows_with_override(self, tmp_path):
+        """Explicit override allows an otherwise over-budget run."""
+        estimator = GenerationCostEstimator(tmp_path / "test.db", default_budget_usd=0.001)
+        gate = BudgetGate(estimator, default_budget_usd=0.001, allow_override=True)
+        pages = [
+            PagePlanCostInput(page_id="p1", estimated_prompt_tokens=1_000_000, estimated_completion_tokens=500_000),
+        ]
+
+        decision = gate.check_run_budget_from_plan(
+            run_id="gen-test",
+            provider="openai",
+            model="gpt-4o",
+            pages=pages,
+            budget_override=100.0,
+        )
+        assert decision.allowed is True
+        assert decision.overridden is True
+        assert decision.reason_code == "BUDGET_OVERRIDDEN"
+
+    def test_enforce_run_budget_with_state_marks_run_failed(self, tmp_path):
+        """Denied budget should transition run lifecycle to failed."""
+        state_machine = GenerationStateMachine(tmp_path / "state.sqlite3")
+        run = state_machine.create_run(total_pages=1)
+        estimator = GenerationCostEstimator(tmp_path / "test.db", default_budget_usd=0.001)
+        gate = BudgetGate(estimator, default_budget_usd=0.001, allow_override=False)
+        pages = [
+            PagePlanCostInput(page_id="p1", estimated_prompt_tokens=1_000_000, estimated_completion_tokens=500_000),
+        ]
+
+        decision = gate.enforce_run_budget_with_state(
+            state_machine=state_machine,
+            run_id=run.run_id,
+            provider="openai",
+            model="gpt-4o",
+            pages=pages,
+        )
+        assert decision.allowed is False
+        final_run = state_machine.get_run(run.run_id)
+        assert final_run is not None
+        assert final_run.state == RunState.FAILED
+        assert final_run.error_message is not None
 
     def test_check_page_budget(self, tmp_path):
         """Test page budget check."""

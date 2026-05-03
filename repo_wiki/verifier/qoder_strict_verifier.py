@@ -17,6 +17,7 @@ class QoderLikeSeverityThreshold:
     STRICT_HARD_CODES = {
         "QODER_CONTENT_EMPTY",
         "QODER_CITATION_MISSING",
+        "QODER_CITATION_RELEVANCE_MISMATCH",
         "QODER_TOC_MISSING",
         "QODER_FILE_REF_BROKEN",
         "QODER_PAGE_DUMP",
@@ -80,6 +81,7 @@ class QoderLikeVerifierService(VerifierService):
         checks: list[CheckResult] = [
             self._check_qoder_content_presence(),
             self._check_qoder_citation_presence(),
+            self._check_qoder_citation_relevance(),
             self._check_qoder_toc_presence(),
             self._check_qoder_file_line_ref_coverage(),
             self._check_qoder_file_refs(),
@@ -204,6 +206,142 @@ class QoderLikeVerifierService(VerifierService):
             name="qoder-citation-presence",
             status="PASS",
             message="All pages have citations",
+            details={},
+            gate_type=GateType.HARD,
+        )
+
+    def _check_qoder_citation_relevance(self) -> CheckResult:
+        """Check that citations in pages are relevant to the page's service/topic.
+
+        This ensures that citations don't bind evidence to the wrong service:
+        - A billing page should not cite authentication implementation files
+        - An API reference page should not cite data model files unrelated to that API
+
+        High-confidence mismatches are HARD failures in strict profile.
+        Ambiguous cases that could be shared infrastructure are WARN only.
+        """
+        from repo_wiki.generator.io import read_text
+
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("citation-relevance", "No content directory")
+
+        md_files = list(content_dir.rglob("*.md"))
+        if not md_files:
+            return self._skip_check("citation-relevance", "No markdown pages")
+
+        # Pattern to extract citation paths and optional symbols
+        cite_pattern = re.compile(r'<cite>\s*([^<>:]+):[0-9]+(?:-[0-9]+)?\s*(?:\([^)]+\))?\s*</cite>')
+
+        mismatches: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+
+        # Known shared infrastructure paths that could appear in multiple services
+        SHARED_INFRA_PATTERNS = [
+            "shared/", "common/", "lib/", "utils/", "base/", "core/",
+            "vendor/", "deps/", "external/", "third_party/",
+        ]
+
+        # Map page filename keywords to expected service/module patterns
+        PAGE_SERVICE_MAP = {
+            "auth": ["auth", "login", "session", "token", "oauth", "sso"],
+            "billing": ["billing", "invoice", "payment", "subscription", "price"],
+            "api": ["api", "endpoint", "route", "handler", "controller", "rest"],
+            "data-model": ["model", "schema", "entity", "dto", "migration"],
+            "database": ["db", "database", "repo", "query", "sql"],
+        }
+
+        for page in md_files:
+            try:
+                content = read_text(page)
+            except Exception:
+                continue
+
+            page_name_lower = page.stem.lower()
+
+            # Extract all citations from this page
+            citations = cite_pattern.findall(content)
+            if not citations:
+                continue
+
+            for cite_path in citations:
+                # Skip external or absolute paths
+                if cite_path.startswith(("http://", "https://", "/")):
+                    continue
+
+                cite_path_lower = cite_path.lower()
+
+                # Check for shared infrastructure - these get a WARN not FAIL
+                is_shared = any(
+                    shared_pattern in cite_path_lower
+                    for shared_pattern in SHARED_INFRA_PATTERNS
+                )
+
+                # Determine expected service for this page
+                page_service = None
+                for service, keywords in PAGE_SERVICE_MAP.items():
+                    if any(kw in page_name_lower for kw in keywords):
+                        page_service = service
+                        break
+
+                if page_service is None:
+                    # Cannot determine expected service, skip
+                    continue
+
+                # Check if citation path contains evidence of wrong service
+                wrong_service_evidence = False
+                other_services = [k for k in PAGE_SERVICE_MAP if k != page_service]
+
+                for other_service in other_services:
+                    other_keywords = PAGE_SERVICE_MAP[other_service]
+                    # High confidence mismatch: page name suggests service A
+                    # but citation path contains strong indicators of service B
+                    if any(kw in cite_path_lower for kw in other_keywords):
+                        # Make sure it's not shared infrastructure
+                        if not is_shared:
+                            wrong_service_evidence = True
+                            break
+
+                if wrong_service_evidence:
+                    mismatches.append({
+                        "page": page.name,
+                        "citation": cite_path,
+                        "expected_service": page_service,
+                        "reason": "citation path indicates different service",
+                    })
+                elif is_shared:
+                    warnings.append({
+                        "page": page.name,
+                        "citation": cite_path,
+                        "reason": "shared infrastructure citation",
+                    })
+
+        if mismatches:
+            return CheckResult(
+                name="qoder-citation-relevance",
+                status="FAIL",
+                message=f"{len(mismatches)} citation relevance mismatches detected",
+                details={
+                    "mismatches": mismatches[:20],
+                    "warning_count": len(warnings),
+                },
+                reason_code="QODER_CITATION_RELEVANCE_MISMATCH",
+                gate_type=GateType.HARD,
+            )
+
+        if warnings:
+            return CheckResult(
+                name="qoder-citation-relevance",
+                status="WARN",
+                message=f"{len(warnings)} shared infrastructure citations (may be intentional)",
+                details={"shared_citations": warnings[:20]},
+                gate_type=GateType.HARD,
+            )
+
+        return CheckResult(
+            name="qoder-citation-relevance",
+            status="PASS",
+            message="All citations appear relevant to their pages",
             details={},
             gate_type=GateType.HARD,
         )

@@ -328,6 +328,12 @@ class PartialManifestBuilder:
                 failed.append(page.doc_slug)
                 if page.error_message:
                     failure_reasons[page.doc_slug] = page.error_message
+            elif page.state == PageState.RETRYABLE:
+                failed.append(page.doc_slug)
+                if page.error_message:
+                    failure_reasons[page.doc_slug] = page.error_message
+                else:
+                    failure_reasons[page.doc_slug] = FailureReason.UNKNOWN_ERROR.value
             elif page.state == PageState.SKIPPED:
                 skipped.append(page.doc_slug)
             elif page.state == PageState.PENDING:
@@ -338,8 +344,8 @@ class PartialManifestBuilder:
 
         # Can resume if there are pending pages and no running pages
         can_resume = (
-            len(pending) > 0 and
-            not any(p.state == PageState.RUNNING for p in pages)
+            (len(pending) > 0 or any(p.state == PageState.RETRYABLE for p in pages))
+            and not any(p.state == PageState.RUNNING for p in pages)
         )
 
         return PartialRunManifest(

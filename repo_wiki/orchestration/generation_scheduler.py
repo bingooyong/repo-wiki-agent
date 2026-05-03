@@ -19,20 +19,17 @@ Key features:
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Coroutine
 import logging
 
 from repo_wiki.orchestration.cost_estimator import (
     BudgetGate,
-    CostEstimate,
     GenerationCostEstimator,
+    PagePlanCostInput,
 )
 from repo_wiki.orchestration.generation_state import (
     GenerationStateMachine,
@@ -278,6 +275,11 @@ class GenerationScheduler:
         provider: str,
         model: str,
         generate_fn: Callable[..., Coroutine[Any, Any, Any]],
+        budget_override: float | None = None,
+        page_prompt_tokens: dict[str, int] | None = None,
+        default_prompt_tokens_per_page: int = 1200,
+        completion_tokens_per_page: int = 500,
+        enforce_budget_gate: bool = True,
         **kwargs: Any,
     ) -> tuple[int, int, list[tuple[str, str]]]:
         """Run page generation with concurrency control.
@@ -294,6 +296,7 @@ class GenerationScheduler:
         """
         # Create semaphore for concurrency control
         self._semaphore = asyncio.Semaphore(self.config.max_concurrency)
+        result_lock = asyncio.Lock()
 
         # Get pending pages
         pending_pages = self.state_machine.get_pending_pages(run_id)
@@ -301,6 +304,27 @@ class GenerationScheduler:
         completed = 0
         failed = 0
         errors: list[tuple[str, str]] = []
+
+        if enforce_budget_gate and pending_pages:
+            decision = self.budget_gate.enforce_run_budget_with_state(
+                state_machine=self.state_machine,
+                run_id=run_id,
+                provider=provider,
+                model=model,
+                pages=self._build_budget_inputs(
+                    pending_pages=pending_pages,
+                    page_prompt_tokens=page_prompt_tokens,
+                    default_prompt_tokens_per_page=default_prompt_tokens_per_page,
+                    completion_tokens_per_page=completion_tokens_per_page,
+                ),
+                budget_override=budget_override,
+                completion_tokens_per_page_default=completion_tokens_per_page,
+            )
+            if not decision.allowed:
+                return 0, 0, [("__run__", decision.message or "Budget exceeded")]
+
+        # Run starts once budget check is accepted.
+        self.state_machine.start_run(run_id)
 
         async def process_page(page: PageGenerationState) -> None:
             nonlocal completed, failed
@@ -341,17 +365,24 @@ class GenerationScheduler:
                             prompt_tokens=result.prompt_tokens,
                             completion_tokens=result.completion_tokens,
                         )
-                    completed += 1
+                    async with result_lock:
+                        completed += 1
                 else:
                     self.state_machine.fail_page(run_id, page.doc_slug, str(result))
-                    errors.append((page.doc_slug, str(result)))
-                    failed += 1
+                    async with result_lock:
+                        errors.append((page.doc_slug, str(result)))
+                        failed += 1
 
         # Create tasks for all pages
         tasks = [process_page(page) for page in pending_pages]
 
         # Run concurrently with semaphore
         await asyncio.gather(*tasks, return_exceptions=True)
+
+        if self.is_cancelled():
+            self.state_machine.cancel_run(run_id)
+        else:
+            self.state_machine.complete_run(run_id)
 
         return completed, failed, errors
 
@@ -361,6 +392,11 @@ class GenerationScheduler:
         provider: str,
         model: str,
         generate_fn: Callable[..., Coroutine[Any, Any, Any]],
+        budget_override: float | None = None,
+        page_prompt_tokens: dict[str, int] | None = None,
+        default_prompt_tokens_per_page: int = 1200,
+        completion_tokens_per_page: int = 500,
+        enforce_budget_gate: bool = True,
         **kwargs: Any,
     ) -> tuple[int, int, list[tuple[str, str]]]:
         """Synchronous wrapper for run_pages.
@@ -375,7 +411,39 @@ class GenerationScheduler:
         Returns:
             Tuple of (completed_count, failed_count, errors)
         """
-        return asyncio.run(self.run_pages(run_id, provider, model, generate_fn, **kwargs))
+        return asyncio.run(
+            self.run_pages(
+                run_id=run_id,
+                provider=provider,
+                model=model,
+                generate_fn=generate_fn,
+                budget_override=budget_override,
+                page_prompt_tokens=page_prompt_tokens,
+                default_prompt_tokens_per_page=default_prompt_tokens_per_page,
+                completion_tokens_per_page=completion_tokens_per_page,
+                enforce_budget_gate=enforce_budget_gate,
+                **kwargs,
+            )
+        )
+
+    def _build_budget_inputs(
+        self,
+        *,
+        pending_pages: list[PageGenerationState],
+        page_prompt_tokens: dict[str, int] | None,
+        default_prompt_tokens_per_page: int,
+        completion_tokens_per_page: int,
+    ) -> list[PagePlanCostInput]:
+        """Build page-plan cost inputs for budget checks."""
+        prompt_lookup = page_prompt_tokens or {}
+        return [
+            PagePlanCostInput(
+                page_id=page.doc_slug,
+                estimated_prompt_tokens=prompt_lookup.get(page.doc_slug, default_prompt_tokens_per_page),
+                estimated_completion_tokens=completion_tokens_per_page,
+            )
+            for page in pending_pages
+        ]
 
 
 class SchedulerError(Exception):

@@ -39,11 +39,24 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
+tests/fixtures/
+
+# Untracked docs (user generated or containing local paths)
+docs/installation.md
+docs/getting-started.md
+docs/configuration.md
+docs/go-no-go-dossier.md
+docs/release-gate-policy.md
+docs/rollback-plan.md
+docs/00-overview.md
+docs/phases/
+ai/source-of-truth/
 
 # Build outputs
 .repo-agent-eval/
 .repo-wiki/
 .qoder/
+.tmp/
 
 # Logs
 *.log

@@ -504,3 +504,168 @@ class TestDataModelTopicPlannerEdgeCases:
         # Should generate pages for all topic categories
         data_model_pages = manifest.pages_by_category(WikiTaxonomyCategory.DATA_MODELS)
         assert len(data_model_pages) >= 10
+
+
+class TestDataModelTopicPlannerDuplicateDetection:
+    """Tests for duplicate page detection (Task 32.3)."""
+
+    @pytest.fixture
+    def sample_identity(self):
+        """Sample repository identity."""
+        return RepositoryIdentity(
+            name="AI_API_Atlas",
+            display_name="AI API Atlas",
+            root_path="/test/ai-api-atlas",
+            language="python",
+            framework="fastapi",
+        )
+
+    @pytest.fixture
+    def sample_snapshot(self):
+        """Sample repository snapshot with data models."""
+        modules = [
+            Module(
+                name="repo_wiki",
+                path="repo_wiki",
+                responsibility="Core wiki functionality",
+                exports=["WikiService"],
+                depends_on=[],
+                depended_by=[],
+                interfaces=[],
+                data_models=["RepositoryInfo", "Module"],
+                owner="team-core",
+                doc_path="docs/modules/repo_wiki.md",
+                domain="core-platform",
+                service_family="python-backend",
+            ),
+        ]
+
+        data_models = [
+            DataModel(
+                name="RepositoryInfo",
+                type="python_class",
+                module="repo_wiki",
+                file_path="repo_wiki/core/contracts.py",
+            ),
+            DataModel(
+                name="Module",
+                type="python_class",
+                module="repo_wiki",
+                file_path="repo_wiki/core/contracts.py",
+            ),
+        ]
+
+        repository = RepositoryInfo(
+            name="AI_API_Atlas",
+            root_path="/test/ai-api-atlas",
+            language="python",
+            framework="fastapi",
+            package_manager="pip",
+            entry_points=["uvicorn main:app"],
+            key_directories=["repo_wiki", "tests", "docs"],
+        )
+
+        stats = RepositoryStats(
+            total_files=100,
+            scanned_files=80,
+            skipped_files=20,
+            module_count=1,
+            endpoint_count=0,
+            data_model_count=2,
+        )
+
+        return RepositorySnapshot(
+            repository=repository,
+            modules=modules,
+            endpoints=[],
+            data_models=data_models,
+            commands={"start": "uvicorn main:app", "build": "pip install -e .", "test": "pytest"},
+            stats=stats,
+        )
+
+    def test_no_duplicate_page_titles(self, sample_identity, sample_snapshot):
+        """Test that no pages have duplicate titles (e.g., 'xxx 数据模型-2')."""
+        planner = DataModelTopicPlanner(sample_identity, sample_snapshot)
+        manifest = planner.generate()
+
+        titles = [p.title for p in manifest.pages]
+        # Check for duplicate titles or titles with numeric suffixes that indicate duplication
+        import re
+        for title in titles:
+            # Should not have titles ending in -2, -3, etc (indicating duplicate)
+            assert not re.search(r'-\d+$', title), f"Found duplicate title suffix in: {title}"
+
+    def test_duplicate_detection_prevents_same_title_pages(self, sample_identity, sample_snapshot):
+        """Test that _check_duplicate_title detects similar titles."""
+        planner = DataModelTopicPlanner(sample_identity, sample_snapshot)
+
+        # Add first page
+        planner._title_set.add("测试页面")
+        assert planner._check_duplicate_title("测试页面") is True
+        assert planner._check_duplicate_title("其他页面") is False
+
+    def test_entity_drilldown_pages_exist(self, sample_identity, sample_snapshot):
+        """Test that Task 32.3 entity drilldown pages are generated."""
+        planner = DataModelTopicPlanner(sample_identity, sample_snapshot)
+        manifest = planner.generate()
+
+        page_ids = [p.page_id for p in manifest.pages]
+
+        # Task 32.3 entity drilldown pages
+        assert "entity-detail" in page_ids
+        assert "entity-matrix" in page_ids
+
+    def test_table_structure_pages_exist(self, sample_identity, sample_snapshot):
+        """Test that Task 32.3 table structure pages are generated."""
+        planner = DataModelTopicPlanner(sample_identity, sample_snapshot)
+        manifest = planner.generate()
+
+        page_ids = [p.page_id for p in manifest.pages]
+
+        assert "table-structure-overview" in page_ids
+        assert "table-relationships" in page_ids
+
+    def test_index_performance_pages_exist(self, sample_identity, sample_snapshot):
+        """Test that Task 32.3 index/performance pages are generated."""
+        planner = DataModelTopicPlanner(sample_identity, sample_snapshot)
+        manifest = planner.generate()
+
+        page_ids = [p.page_id for p in manifest.pages]
+
+        assert "index-strategy" in page_ids
+        assert "performance-tuning" in page_ids
+
+    def test_audit_pages_exist(self, sample_identity, sample_snapshot):
+        """Test that Task 32.3 audit pages are generated."""
+        planner = DataModelTopicPlanner(sample_identity, sample_snapshot)
+        manifest = planner.generate()
+
+        page_ids = [p.page_id for p in manifest.pages]
+
+        assert "audit-overview" in page_ids
+        assert "audit-events" in page_ids
+
+    def test_security_pages_exist(self, sample_identity, sample_snapshot):
+        """Test that Task 32.3 security pages are generated."""
+        planner = DataModelTopicPlanner(sample_identity, sample_snapshot)
+        manifest = planner.generate()
+
+        page_ids = [p.page_id for p in manifest.pages]
+
+        assert "security-models" in page_ids
+        assert "security-config" in page_ids
+
+    def test_service_level_links_preserved(self, sample_identity, sample_snapshot):
+        """Test that entity drilldown pages link to service-level pages."""
+        planner = DataModelTopicPlanner(sample_identity, sample_snapshot)
+        manifest = planner.generate()
+
+        # Find entity detail page
+        entity_detail = manifest.page_by_id("entity-detail")
+        assert entity_detail is not None
+        assert entity_detail.parent == "entity-relationships"
+
+        # Entity pages should have parent linking to entity-relationships
+        entity_matrix = manifest.page_by_id("entity-matrix")
+        assert entity_matrix is not None
+        assert entity_matrix.parent == "entity-relationships"

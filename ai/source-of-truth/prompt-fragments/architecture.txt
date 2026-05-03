@@ -1,7 +1,0 @@
-Architecture summary for `repo-agent`:
-Graph nodes: 3 modules.
-
-Prioritize context in this order:
-1. Module boundaries and dependencies
-2. API contracts
-3. Data models

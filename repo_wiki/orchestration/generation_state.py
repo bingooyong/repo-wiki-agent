@@ -720,6 +720,32 @@ class GenerationStateMachine:
         finally:
             conn.close()
 
+    def reset_page_for_regeneration(
+        self,
+        run_id: str,
+        doc_slug: str,
+        reason: str | None = None,
+    ) -> PageGenerationState | None:
+        """Reset page to pending so scheduler can regenerate it.
+
+        This keeps invalidation scoped to impacted pages while preserving run state.
+        """
+        conn = self._conn()
+        try:
+            conn.execute(
+                """
+                UPDATE page_generation_states
+                SET state = ?, error_message = ?, started_at = NULL, completed_at = NULL,
+                    output_hash = NULL
+                WHERE run_id = ? AND doc_slug = ?
+                """,
+                (PageState.PENDING.value, reason, run_id, doc_slug),
+            )
+            conn.commit()
+            return self.get_page_state(run_id, doc_slug)
+        finally:
+            conn.close()
+
     def get_page_state(
         self,
         run_id: str,

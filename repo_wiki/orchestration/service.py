@@ -428,11 +428,22 @@ class RepoWikiService:
 
         info("stage content started")
         stage.start("content")
+        plan_md_paths = {page.output_path for page in plan.pages if page.output_path.endswith(".md")}
         selected_paths = writer.load_selected_paths_from_sqlite(
-            self.root / ".repo-wiki" / "index" / "runtime.sqlite3"
+            self.root / ".repo-wiki" / "index" / "runtime.sqlite3",
+            project_root=self.root,
         )
-        if not selected_paths:
-            selected_paths = {page.output_path for page in plan.pages if page.output_path.endswith(".md")}
+        overlap = selected_paths & plan_md_paths if selected_paths else set()
+        if not selected_paths or not overlap:
+            # Empty DB, or nothing in common after normalizing absolute sqlite paths to relative.
+            selected_paths = plan_md_paths
+        elif len(overlap) < len(plan_md_paths):
+            # Runtime doc_hierarchy lists existing docs (often docs/*.md, docs/modules/*.md).
+            # Qoder-like plans target docs/pages/** — partial accidental overlap must not
+            # suppress most composed pages.
+            selected_paths = plan_md_paths
+        else:
+            selected_paths = overlap
         written_content, content_stats = writer.write_markdown_pages(
             composition["pages"],
             selected_source_paths=selected_paths,
@@ -523,7 +534,9 @@ class RepoWikiService:
         )
         base_plan = RuleFirstPlanner(identity, snapshot).generate()
         enhanced = enhance_plan_with_llm(base_plan, MockLLMProvider())
-        return self._normalize_qoder_like_plan(enhanced, minimum_pages=120)
+        max_budget = self._resolve_qoder_like_max_pages()
+        min_budget = min(self._resolve_qoder_like_min_pages(), max_budget)
+        return self._normalize_qoder_like_plan(enhanced, minimum_pages=min_budget)
 
     def _normalize_qoder_like_plan(self, plan: Any, minimum_pages: int) -> Any:
         from repo_wiki.planner.llm_planner import _RebuildPlanner
@@ -694,18 +707,33 @@ class RepoWikiService:
 
         return sorted(selected, key=lambda p: (p.sort_order, p.title))
 
+    def _clamp_qoder_page_budget(self, value: int) -> int:
+        """Keep page-plan sizes within a sane band (matches YAML `le=2000`)."""
+        return max(1, min(int(value), 2000))
+
+    def _resolve_qoder_like_min_pages(self) -> int:
+        """Minimum planned pages (taxonomy fill). Env overrides YAML `qoder_like.min_pages`."""
+        import os
+
+        raw = os.environ.get("REPO_WIKI_QODER_LIKE_MIN_PAGES")
+        if raw:
+            try:
+                return self._clamp_qoder_page_budget(int(raw))
+            except ValueError:
+                pass
+        return self._clamp_qoder_page_budget(self.config.qoder_like.min_pages)
+
     def _resolve_qoder_like_max_pages(self) -> int:
-        """Default to a Qoder-sized curated tree; allow explicit large runs when needed."""
+        """Curated cap for qoder-like runs; env overrides YAML ``qoder_like.max_pages`` (no legacy 120 floor)."""
         import os
 
         raw = os.environ.get("REPO_WIKI_QODER_LIKE_MAX_PAGES")
-        if not raw:
-            return 220
-        try:
-            value = int(raw)
-        except ValueError:
-            return 220
-        return max(120, value)
+        if raw:
+            try:
+                return self._clamp_qoder_page_budget(int(raw))
+            except ValueError:
+                pass
+        return self._clamp_qoder_page_budget(self.config.qoder_like.max_pages)
 
     def _qoder_output_path_for(self, category: Any, page_id: str) -> str:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
@@ -867,45 +895,16 @@ class RepoWikiService:
         return bindings
 
     def _resolve_qoder_like_llm(self) -> tuple[Any, LLMProviderConfig, dict[str, Any]]:
-        """Resolve real Minimax when configured, otherwise return a CI-safe mock provider."""
-        from repo_wiki.llm.config import LLMProviderConfig, get_api_key_from_env, resolve_llm_config
-        from repo_wiki.llm.diagnostics import create_provider_from_config
-        from repo_wiki.llm.providers import create_mock_provider
+        """Resolve real HTTP provider when API key is set and mock is not forced; else mock.
 
-        llm_config, warnings = resolve_llm_config(config=self.config.llm.model_dump())
-        api_key_present = bool(get_api_key_from_env(llm_config.api_key_env))
+        See :func:`repo_wiki.llm.qoder_like_provider.resolve_qoder_like_llm` for rules.
+        """
+        from repo_wiki.llm.qoder_like_provider import resolve_qoder_like_llm
 
-        if llm_config.provider == "minimax" and api_key_present:
-            provider = create_provider_from_config(llm_config)
-            effective_config = llm_config
-            mode = "real"
-        else:
-            effective_config = LLMProviderConfig(
-                provider="mock",
-                model="mock-gpt",
-                max_tokens=llm_config.max_tokens,
-                temperature=llm_config.temperature,
-                timeout=llm_config.timeout,
-                max_retries=llm_config.max_retries,
-            )
-            provider = create_mock_provider(
-                effective_config,
-                response_content=(
-                    "This page was generated by the LLMPageComposer mock provider for CI. "
-                    "It uses the same page-plan, evidence, prompt, and composer path as real providers."
-                ),
-            )
-            mode = "mock"
-
-        llm_summary = {
-            "requested_provider": llm_config.provider,
-            "effective_provider": getattr(provider, "name", effective_config.provider),
-            "model": effective_config.model,
-            "mode": mode,
-            "api_key_present": api_key_present,
-            "config_warnings": [reason.value for reason, _ in warnings],
-        }
-        return provider, effective_config, llm_summary
+        return resolve_qoder_like_llm(
+            llm_config_dict=self.config.llm.model_dump(),
+            force_mock_llm_config=bool(self.config.llm.force_mock_llm),
+        )
 
     async def _compose_qoder_like_pages(
         self,

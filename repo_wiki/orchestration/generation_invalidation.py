@@ -18,12 +18,11 @@ Key features:
 from __future__ import annotations
 
 import hashlib
+import json
+import sqlite3
 import subprocess
-import time
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from repo_wiki.orchestration.generation_state import (
     GenerationStateMachine,
@@ -62,7 +61,7 @@ def get_git_diff(
         GitDiffResult with changed, deleted, and renamed files
     """
     try:
-        # Get diff against ref or HEAD
+        # Get diff against ref or HEAD. Also include untracked files.
         base_ref = ref or "HEAD"
 
         # Get list of changed files
@@ -83,7 +82,7 @@ def get_git_diff(
                 is_clean=True,
             )
 
-        changed_files = []
+        changed_files: list[str] = []
         deleted_files = []
         renamed_files = {}
 
@@ -110,12 +109,29 @@ def get_git_diff(
             elif status.startswith("M") or status == "A":
                 changed_files.append(path)
 
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if untracked.returncode == 0:
+            for line in untracked.stdout.strip().split("\n"):
+                path = line.strip()
+                if not path:
+                    continue
+                if file_filter and not any(path.startswith(f) for f in file_filter):
+                    continue
+                if path not in changed_files:
+                    changed_files.append(path)
+
         return GitDiffResult(
             changed_files=changed_files,
             deleted_files=deleted_files,
             renamed_files=renamed_files,
             commit_range=(base_ref, "working tree"),
-            is_clean=bool(changed_files or deleted_files or renamed_files),
+            is_clean=not bool(changed_files or deleted_files or renamed_files),
         )
 
     except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
@@ -129,7 +145,7 @@ def get_git_diff(
 
 
 def get_file_hash(file_path: Path) -> str | None:
-    """Get MD5 hash of a file.
+    """Get SHA256 hash of a file.
 
     Args:
         file_path: Path to file
@@ -142,7 +158,7 @@ def get_file_hash(file_path: Path) -> str | None:
 
     try:
         with open(file_path, "rb") as f:
-            return hashlib.md5(f.read()).hexdigest()
+            return hashlib.sha256(f.read()).hexdigest()
     except Exception:
         return None
 
@@ -296,6 +312,7 @@ class GenerationAwareInvalidator:
         """
         self.state_machine = state_machine
         self.root = root
+        self._runtime_db_path = root / ".repo-wiki" / "index" / "runtime.sqlite3"
 
     def invalidate_from_git_diff(
         self,
@@ -318,15 +335,17 @@ class GenerationAwareInvalidator:
         if diff.is_clean:
             return [], []
 
-        # Map files to doc_slugs
+        # Map files to doc_slugs via evidence spans + path heuristics.
         all_affected = set()
 
         for changed_file in diff.changed_files:
             affected = self._map_file_to_pages(changed_file)
+            affected.extend(self._map_file_to_pages_via_evidence(changed_file))
             all_affected.update(affected)
 
         for deleted_file in diff.deleted_files:
             affected = self._map_file_to_pages(deleted_file)
+            affected.extend(self._map_file_to_pages_via_evidence(deleted_file))
             all_affected.update(affected)
 
         # Mark affected pages for regeneration
@@ -334,11 +353,12 @@ class GenerationAwareInvalidator:
         skipped = []
 
         for doc_slug in all_affected:
-            # Only invalidate pages that are in PENDING or COMPLETED state
-            # (not already running or failed)
+            # Only invalidate pages that can be safely re-queued.
             page_state = self.state_machine.get_page_state(run_id, doc_slug)
-            if page_state and page_state.state in (PageState.PENDING, PageState.COMPLETED):
-                self.state_machine.skip_page(run_id, doc_slug, "Regenerated due to file change")
+            if page_state and page_state.state in (PageState.PENDING, PageState.COMPLETED, PageState.RETRYABLE):
+                self.state_machine.reset_page_for_regeneration(
+                    run_id, doc_slug, "Invalidated by git diff"
+                )
                 invalidated.append(doc_slug)
             else:
                 skipped.append(doc_slug)
@@ -382,13 +402,44 @@ class GenerationAwareInvalidator:
 
         for doc_slug in all_affected:
             page_state = self.state_machine.get_page_state(run_id, doc_slug)
-            if page_state and page_state.state in (PageState.PENDING, PageState.COMPLETED):
-                self.state_machine.skip_page(run_id, doc_slug, "Regenerated due to content change")
+            if page_state and page_state.state in (PageState.PENDING, PageState.COMPLETED, PageState.RETRYABLE):
+                self.state_machine.reset_page_for_regeneration(
+                    run_id, doc_slug, "Invalidated by hash fallback"
+                )
                 invalidated.append(doc_slug)
             else:
                 skipped.append(doc_slug)
 
         return invalidated, skipped
+
+    def invalidate_with_git_or_hash_fallback(
+        self,
+        run_id: str,
+        *,
+        git_ref: str | None = None,
+        file_filter: list[str] | None = None,
+        baseline_hashes: dict[str, str] | None = None,
+        current_hashes: dict[str, str] | None = None,
+    ) -> tuple[list[str], list[str], str]:
+        """Invalidate pages using git diff first, hash comparison as fallback."""
+        diff = get_git_diff(self.root, git_ref, file_filter)
+        if not diff.is_clean:
+            invalidated, skipped = self.invalidate_from_git_diff(
+                run_id=run_id,
+                ref=git_ref,
+                file_filter=file_filter,
+            )
+            return invalidated, skipped, "git-diff"
+
+        if baseline_hashes is not None:
+            invalidated, skipped = self.invalidate_from_hash_comparison(
+                run_id=run_id,
+                baseline_hashes=baseline_hashes,
+                current_hashes=current_hashes,
+            )
+            return invalidated, skipped, "hash-fallback"
+
+        return [], [], "no-change"
 
     def _map_file_to_pages(self, file_path: str) -> list[str]:
         """Map a file path to affected doc_slugs.
@@ -422,6 +473,25 @@ class GenerationAwareInvalidator:
                 affected.append(module_name)
 
         return affected
+
+    def _map_file_to_pages_via_evidence(self, file_path: str) -> list[str]:
+        """Map changed source file to pages through evidence span/source map tables."""
+        if not self._runtime_db_path.exists():
+            return []
+        try:
+            with sqlite3.connect(self._runtime_db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT DISTINCT psm.doc_slug
+                    FROM evidence_span es
+                    JOIN page_source_map psm ON psm.evidence_id = es.id
+                    WHERE es.file_path = ? OR es.file_path LIKE ?
+                    """,
+                    (file_path, f"%{file_path}"),
+                ).fetchall()
+            return [str(row[0]) for row in rows if row and row[0]]
+        except sqlite3.DatabaseError:
+            return []
 
     def get_page_impact_summary(
         self,

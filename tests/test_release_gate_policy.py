@@ -2,12 +2,154 @@
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
+import yaml
 
 from repo_wiki.verifier.qoder_strict_verifier import (
     QoderLikeSeverityThreshold,
     QoderLikeVerifierService,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_DECISION_SH = REPO_ROOT / "ci" / "scripts" / "decision.sh"
+
+
+@pytest.fixture
+def bash_available():
+    if not shutil.which("bash"):
+        pytest.skip("bash not available for ci/scripts/decision.sh tests")
+
+
+def _run_decision(
+    profile: str,
+    verify: dict,
+    compare: dict,
+    tmp_path: Path,
+) -> int:
+    v_path = tmp_path / "verify-result.json"
+    c_path = tmp_path / "compare-result.json"
+    v_path.write_text(json.dumps(verify), encoding="utf-8")
+    c_path.write_text(json.dumps(compare), encoding="utf-8")
+    result = subprocess.run(
+        [
+            "bash",
+            str(_DECISION_SH),
+            "--profile",
+            profile,
+            "--verify",
+            str(v_path),
+            "--compare",
+            str(c_path),
+            "--evidence",
+            str(tmp_path),
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode
+
+
+class TestStrictProfileYamlContract:
+    """Policy thresholds in ci/profiles must match documented release gate policy."""
+
+    def test_strict_profile_yaml_thresholds(self):
+        profile_path = REPO_ROOT / "ci" / "profiles" / "strict.profile.yaml"
+        data = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+        assert data["profile"] == "strict"
+        crit = data["criteria"]
+        assert crit["hard_gate_failures"] == 0
+        assert crit["soft_gate_failures"] == 0
+        assert crit["overall_score"] == 0.85
+        assert data["compare_config"]["score_threshold"] == pytest.approx(0.85)
+
+
+class TestDecisionGateScript:
+    """Enforce ci/scripts/decision.sh behavior for PASS/FAIL vs fixture JSON."""
+
+    def test_strict_passes_clean_verify_and_score(self, bash_available, tmp_path):
+        code = _run_decision(
+            "strict",
+            {
+                "exit_code": 0,
+                "grade": "PASS",
+                "summary": {"hard_gate_failures": 0, "soft_gate_failures": 0},
+            },
+            {"summary": {"overall_score": 0.9}},
+            tmp_path,
+        )
+        assert code == 0
+
+    def test_strict_rejects_any_hard_failure(self, bash_available, tmp_path):
+        code = _run_decision(
+            "strict",
+            {
+                "exit_code": 1,
+                "grade": "FAIL",
+                "summary": {"hard_gate_failures": 1, "soft_gate_failures": 0},
+            },
+            {"summary": {"overall_score": 1.0}},
+            tmp_path,
+        )
+        assert code == 1
+
+    def test_strict_rejects_any_soft_failure(self, bash_available, tmp_path):
+        code = _run_decision(
+            "strict",
+            {
+                "exit_code": 0,
+                "grade": "PASS",
+                "summary": {"hard_gate_failures": 0, "soft_gate_failures": 1},
+            },
+            {"summary": {"overall_score": 1.0}},
+            tmp_path,
+        )
+        assert code == 1
+
+    def test_strict_rejects_low_overall_score(self, bash_available, tmp_path):
+        code = _run_decision(
+            "strict",
+            {
+                "exit_code": 0,
+                "grade": "PASS",
+                "summary": {"hard_gate_failures": 0, "soft_gate_failures": 0},
+            },
+            {"summary": {"overall_score": 0.84}},
+            tmp_path,
+        )
+        assert code == 1
+
+    def test_transitional_allows_soft_up_to_three(self, bash_available, tmp_path):
+        code = _run_decision(
+            "transitional",
+            {
+                "exit_code": 0,
+                "grade": "PASS",
+                "summary": {"hard_gate_failures": 0, "soft_gate_failures": 3},
+            },
+            {"summary": {"overall_score": 0.75}},
+            tmp_path,
+        )
+        assert code == 0
+
+    def test_transitional_rejects_soft_above_three(self, bash_available, tmp_path):
+        code = _run_decision(
+            "transitional",
+            {
+                "exit_code": 0,
+                "grade": "PASS",
+                "summary": {"hard_gate_failures": 0, "soft_gate_failures": 4},
+            },
+            {"summary": {"overall_score": 0.75}},
+            tmp_path,
+        )
+        assert code == 1
 
 
 class TestReleaseGatePolicy:

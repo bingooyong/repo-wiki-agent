@@ -49,6 +49,10 @@ class LlmConfig(BaseModel):
     model_verify: str = "claude-haiku-4-5-20251001"
     max_concurrent: int = 3
     cache: bool = True
+    force_mock_llm: bool = Field(
+        default=False,
+        description="If true, qoder-like composer always uses MockLLMProvider (CI / reproducible runs).",
+    )
 
 
 class OutputConfig(BaseModel):
@@ -56,6 +60,23 @@ class OutputConfig(BaseModel):
     ai_dir: str = "ai/source-of-truth/"
     index_dir: str = ".repo-wiki/"
     claude_dir: str = ".claude/"
+
+
+class QoderLikeConfig(BaseModel):
+    """Sizing for isolated qoder-like eval generation (page-plan floor and cap)."""
+
+    min_pages: int = Field(
+        default=24,
+        ge=1,
+        le=2000,
+        description="Minimum planned pages after taxonomy roots and optional 'deep-dive' top-up (before max cap).",
+    )
+    max_pages: int = Field(
+        default=220,
+        ge=1,
+        le=2000,
+        description="Upper bound on planned pages for qoder-like curation (env may override).",
+    )
 
 
 class SecurityConfig(BaseModel):
@@ -104,6 +125,7 @@ class RepoWikiConfig(BaseModel):
     scan: ScanConfig = Field(default_factory=ScanConfig)
     index: IndexConfig = Field(default_factory=IndexConfig)
     llm: LlmConfig = Field(default_factory=LlmConfig)
+    qoder_like: QoderLikeConfig = Field(default_factory=QoderLikeConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
 
