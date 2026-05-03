@@ -598,7 +598,9 @@ def headings_match_snapshot(
 
     diff_lines = ["Differences:"]
 
-    for i, (actual_line, expected_line) in enumerate(zip(actual_lines, expected_lines, strict=False)):
+    for i, (actual_line, expected_line) in enumerate(
+        zip(actual_lines, expected_lines, strict=False)
+    ):
         if actual_line != expected_line:
             diff_lines.append(f"Line {i}: got '{actual_line}', expected '{expected_line}'")
 

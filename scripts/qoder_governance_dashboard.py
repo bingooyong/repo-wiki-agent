@@ -255,9 +255,7 @@ class GovernanceDB:
                     1 for g in result.get("gaps", []) if g.get("severity") == "CRITICAL"
                 ),
                 major_gaps=sum(1 for g in result.get("gaps", []) if g.get("severity") == "MAJOR"),
-                benchmark_date=matrix_data.get(
-                    "generated_at", datetime.now(UTC).isoformat()
-                ),
+                benchmark_date=matrix_data.get("generated_at", datetime.now(UTC).isoformat()),
                 fixture_hash="",
             )
             self.insert_metric(metric)

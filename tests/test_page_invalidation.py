@@ -1,6 +1,5 @@
 """Tests for page invalidation with git diff and hash fallback."""
 
-
 import pytest
 
 from repo_wiki.orchestration.generation_invalidation import (

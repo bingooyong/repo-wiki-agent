@@ -4,7 +4,6 @@ These tests ensure the static viewer and VS Code extension
 render the same navigation hierarchy from the manifest.
 """
 
-
 from repo_wiki.viewer.static_viewer import (
     _convert_navigation_tree,
     build_nav_tree_from_manifest,

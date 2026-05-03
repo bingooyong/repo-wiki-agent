@@ -647,7 +647,12 @@ class FixtureIngestion:
         # Determine status
         if is_valid and not diagnostics:
             status = FixtureStatus.VALID
-        elif is_valid and any(d.severity == "WARNING" for d in diagnostics) or diagnostics and all(d.severity == "WARNING" for d in diagnostics):
+        elif (
+            is_valid
+            and any(d.severity == "WARNING" for d in diagnostics)
+            or diagnostics
+            and all(d.severity == "WARNING" for d in diagnostics)
+        ):
             status = FixtureStatus.PARTIAL
         else:
             status = FixtureStatus.INVALID

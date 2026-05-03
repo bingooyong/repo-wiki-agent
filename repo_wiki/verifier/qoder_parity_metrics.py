@@ -721,7 +721,11 @@ class ParityMetricExtractor:
             try:
                 content = f.read_text(encoding="utf-8")
                 # TOC detection: ## Table of Contents or ## 目录
-                if re.search(r"^#{1,6}\s+(Table of Contents|目录|Contents)", content, re.MULTILINE) or "[TOC]" in content or "[toc]" in content:
+                if (
+                    re.search(r"^#{1,6}\s+(Table of Contents|目录|Contents)", content, re.MULTILINE)
+                    or "[TOC]" in content
+                    or "[toc]" in content
+                ):
                     with_toc += 1
             except Exception:
                 continue

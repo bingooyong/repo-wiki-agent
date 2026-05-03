@@ -1,7 +1,5 @@
 """Tests for generation state machine."""
 
-
-
 from repo_wiki.orchestration.generation_state import (
     GenerationRun,
     GenerationStateMachine,

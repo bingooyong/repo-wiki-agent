@@ -1,6 +1,5 @@
 """Tests for qoder-style navigation metadata adapter and import bridge."""
 
-
 from repo_wiki.adapter.qoder_adapter import (
     CANONICAL_SECTIONS,
     VALIDATION_REASON_CODES,

@@ -1,7 +1,5 @@
 """Tests for LLM cost estimator and budget gate."""
 
-
-
 from repo_wiki.orchestration.cost_estimator import (
     BudgetExceeded,
     BudgetGate,

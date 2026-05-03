@@ -1,6 +1,5 @@
 """Tests for Chinese taxonomy baseline."""
 
-
 from repo_wiki.planner.schema import (
     DEFAULT_CHINESE_TAXONOMY,
     WikiTaxonomyCategory,

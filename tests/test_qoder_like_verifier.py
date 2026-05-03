@@ -1,6 +1,5 @@
 """Tests for Qoder-like strict verifier."""
 
-
 import pytest
 
 from repo_wiki.verifier.qoder_strict_verifier import (

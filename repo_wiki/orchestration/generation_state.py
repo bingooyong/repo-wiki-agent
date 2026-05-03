@@ -291,7 +291,11 @@ class GenerationStateMachine:
                 final_state = RunState.RETRYABLE
             elif stats["failed"] > 0 and stats["completed"] == 0:
                 final_state = RunState.FAILED
-            elif stats["skipped"] == stats["total"] and stats["total"] > 0 or stats["completed"] == stats["total"]:
+            elif (
+                stats["skipped"] == stats["total"]
+                and stats["total"] > 0
+                or stats["completed"] == stats["total"]
+            ):
                 final_state = RunState.COMPLETED
             elif stats["completed"] > 0:
                 final_state = RunState.COMPLETED  # Partial success

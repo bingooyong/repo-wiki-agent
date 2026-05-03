@@ -1,6 +1,5 @@
 """Tests for static repo-wiki viewer with tree navigation and Mermaid rendering."""
 
-
 from repo_wiki.viewer.static_viewer import (
     build_nav_tree_from_manifest,
     build_toc_html,

@@ -1,6 +1,5 @@
 """Tests for partial generation evidence bundle."""
 
-
 import pytest
 
 from repo_wiki.orchestration.failure_recovery import (

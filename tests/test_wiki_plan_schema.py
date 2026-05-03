@@ -1,6 +1,5 @@
 """Tests for wiki plan schema and navigation tree contracts."""
 
-
 from repo_wiki.planner.schema import (
     DEFAULT_CHINESE_TAXONOMY,
     GenerationMode,
