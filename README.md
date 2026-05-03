@@ -4,6 +4,8 @@
 
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/bingooyong/repo-wiki-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/bingooyong/repo-wiki-agent/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/bingooyong/repo-wiki-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/bingooyong/repo-wiki-agent)
 [![Strict Verify: PASS](https://img.shields.io/badge/Strict%20Verify-PASS-brightgreen)](#)
 [![Tests: 1200+](https://img.shields.io/badge/Tests-1200%2B-blue)](#)
 [![GO Decision: 2026-05-02](https://img.shields.io/badge/GO-2026--05--02-green)](#)

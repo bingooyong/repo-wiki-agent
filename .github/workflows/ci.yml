@@ -39,6 +39,13 @@ jobs:
       - name: Run tests
         run: pytest --cov=repo_wiki --cov-report=term-missing
 
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          verbose: true
+
   docs-verify:
     runs-on: ubuntu-latest
     steps:
