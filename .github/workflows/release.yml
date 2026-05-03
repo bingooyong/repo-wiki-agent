@@ -35,17 +35,26 @@ jobs:
           git tag "v${VERSION}" -m "Release v${VERSION}"
           git push origin "v${VERSION}"
 
+      - name: Determine release tag
+        id: release_tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=v${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Package VS Code extension
         run: |
           cd extensions/repo-wiki-browser
           npm ci
           npm run compile
-          npx vsce package --version ${{ github.ref_name || inputs.version }}
+          npx vsce package --version ${{ steps.release_tag.outputs.tag }}
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: repo-wiki-browser-${{ github.ref_name || inputs.version }}.vsix
+          name: repo-wiki-browser-${{ steps.release_tag.outputs.tag }}.vsix
           path: extensions/repo-wiki-browser/*.vsix
 
       - name: Create GitHub Release
