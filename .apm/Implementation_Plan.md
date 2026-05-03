@@ -1,6 +1,6 @@
 # repo-wiki MVP – APM Implementation Plan
 **Memory Strategy:** Layered Local Knowledge (`source-of-truth` + SQLite/FTS5 + ChromaDB + module graph)
-**Last Modification:** Phase 28-35 execution complete. Phase 28-31 Completed, Phase 32 Completed, Phase 33 Completed, Phase 34 Completed, Phase 35 Completed (GO). All phases closed. Last update: 2026-05-03.
+**Last Modification:** Phase 28-35 execution complete. Appended Phase 36-45 for post-acceptance correction and productization: fixed release directory contract, Qoder-compatible release interface, source/docs intelligence compiler, knowledge-model-driven IA, evidence-backed composition, and final product acceptance. Last update: 2026-05-03.
 **Project Overview:** Build an MVP implementation plan for `repo-wiki` that delivers repository scanning, deterministic `source-of-truth` outputs, local semantic indexing, module-level knowledge graph, documentation generation, AI adapter outputs, Git-diff-based incremental update, and verify governance without drifting beyond the frozen MVP scope.
 
 ## Implementation Principles
@@ -1467,6 +1467,7 @@ The Phase 14-16 review found useful implementation progress but also evidence co
 
 **Manager Status:** `Planned`
 **Objective:** Make the latest AI_API_Atlas Minimax run pass strict qoder-like verification before expanding replacement scope.
+**Current Evidence:** The newest eval directory by timestamp is `run-1777730692266`, but its manifest has `target_dirty=true` and no READY status. Existing manifests do not provide a fixed release directory or reliable publish contract.
 
 ### Task 31.1 – Commit freshness preflight - Agent_IndexGraph
 **Objective:** Record and verify target repository freshness around qoder-like generation.
@@ -1476,7 +1477,8 @@ The Phase 14-16 review found useful implementation progress but also evidence co
 2. Re-check target HEAD after generation completes.
 3. In strict mode, require a clean target worktree by default and emit `QODER_STALE_GIT_COMMIT` for stale generation metadata.
 4. If dirty runs are allowed for manual review, mark `target_dirty=true` and force comparison output to `NOT_READY`.
-5. Add stale commit and dirty tree regression tests.
+5. Add explicit manifest readiness fields so a release publisher can publish READY output to a fixed release directory instead of exposing newest directory mtime.
+6. Add stale commit, dirty tree, missing readiness, and release-publisher regression tests.
 
 ### Task 31.2 – Dump page retry policy - Agent_DocGen
 **Objective:** Retry pages that fail dump-page quality gates instead of accepting list-dominant output.
@@ -1498,9 +1500,9 @@ The Phase 14-16 review found useful implementation progress but also evidence co
 
 ### Task 31.4 – Strict gate rerun package - Agent_QualityRelease
 **Objective:** Produce a fresh AI_API_Atlas qoder-like run package that can clear strict verification.
-**Output:** Latest isolated run, strict report, comparison report, and manual review index.
+**Output:** Isolated candidate run, strict report, comparison report, and manual review index.
 **Guidance:** **Depends on: Task 31.3.**
-1. Generate under `/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/.repo-agent-eval/<run>` only.
+1. Generate under `/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/.repo-agent-eval/runs/<run>/repowiki/zh` only.
 2. Verify `.qoder/**` remains read-only and unmodified.
 3. Run `repo-wiki verify --profile qoder-like --ci`.
 4. Require `QODER_STALE_GIT_COMMIT`, `QODER_PAGE_DUMP`, and `QODER_PROSE_TOO_LOW` reason codes to be zero before declaring readiness.
@@ -1510,6 +1512,7 @@ The Phase 14-16 review found useful implementation progress but also evidence co
 
 **Manager Status:** `Planned`
 **Objective:** Deepen generated Wiki hierarchy so repo-agent matches Qoder-style topic decomposition instead of service-level aggregation only.
+**Current Evidence:** Qoder has `content/API参考/核心服务API/API台账服务API.md` grounded in `inventory-service`, while current repo-agent eval runs only generate `核心服务/API台账服务.md` and data-model pages for API台账服务, with no dedicated core-service API page.
 
 ### Task 32.1 – Qoder baseline topic mining - Agent_QualityRelease
 **Objective:** Mine Qoder baseline directory patterns without copying Qoder content.
@@ -1526,8 +1529,9 @@ The Phase 14-16 review found useful implementation progress but also evidence co
 **Guidance:** **Depends on: Task 32.1 and Task 22.6.**
 1. Plan `服务概述`, `架构设计`, `API接口文档`, `部署配置`, and `核心组件` pages for Python services.
 2. Generate business subdomain pages for core services when evidence supports them.
-3. Preserve stable slugs and manifest navigation ordering.
-4. Add planner tests for service subtopic expansion.
+3. Generate a dedicated `API参考/核心服务API/API台账服务/API台账服务API.md` or equivalent stable page for `inventory-service`.
+4. Preserve stable slugs and manifest navigation ordering.
+5. Add planner tests for service subtopic expansion and API台账服务 API page coverage.
 
 ### Task 32.3 – Data-model entity topic planner - Agent_DocGen
 **Objective:** Split data-model documentation into entity and persistence topics while eliminating duplicate pages.
@@ -1545,21 +1549,24 @@ The Phase 14-16 review found useful implementation progress but also evidence co
 1. Target directory depth of `4` with non-empty topic pages.
 2. Increase Qoder path common count from the current baseline toward at least `80`.
 3. Keep repo-agent page count within `90%-120%` of Qoder page count.
-4. Add hierarchy fixture tests and AI_API_Atlas path comparison evidence.
+4. Treat missing Qoder baseline counterparts such as `API参考/核心服务API/API台账服务API.md` as explicit comparison gaps.
+5. Add hierarchy fixture tests and AI_API_Atlas path comparison evidence.
 
 ## Phase 33: Evidence Ranking and Hallucination Control
 
 **Manager Status:** `Planned`
 **Objective:** Prevent page topics from binding to unrelated source evidence and make low-confidence content explicit.
+**Current Evidence:** Current repo-agent API台账服务 page says the topic maps to `inventory-service` but then claims the most relevant code is `ai-service`, which is a service ownership failure.
 
 ### Task 33.1 – Service ownership resolver - Agent_Scanner
 **Objective:** Resolve service ownership from repository structure, package metadata, runtime signals, and docs.
 **Output:** Service ownership resolver with confidence scoring and tests.
 **Guidance:** **Depends on: Task 32.4 and Task 23.3.**
 1. Use module paths, package names, ports, build files, and README cues to determine service ownership.
-2. Prevent GitLab, Jenkins, and MCP pages from binding unrelated `ai-service` evidence.
-3. Emit confidence and rejection reasons for ambiguous ownership.
-4. Add fixtures covering similarly named services and unrelated evidence.
+2. Force API台账服务/API inventory topics to resolve to `inventory-service` evidence such as `EndpointsController.java`, `ApiEndpointEntity.java`, and related repositories.
+3. Prevent GitLab, Jenkins, MCP, and inventory-service pages from binding unrelated `ai-service` evidence.
+4. Emit confidence and rejection reasons for ambiguous ownership.
+5. Add fixtures covering similarly named services and unrelated evidence.
 
 ### Task 33.2 – Page evidence scoring - Agent_IndexGraph
 **Objective:** Score evidence by page title, service slug, domain, runtime role, API relation, and data-model relation.
@@ -1592,15 +1599,17 @@ The Phase 14-16 review found useful implementation progress but also evidence co
 
 **Manager Status:** `Planned`
 **Objective:** Convert one-shot page generation into a measurable, retryable, and cache-aware quality loop.
+**Current Evidence:** Qoder's API台账服务 API page includes multiple Mermaid diagrams and flow explanations. Current repo-agent output has partial Mermaid coverage, but missing key API pages and low-quality service pages must be classified as repairable or rejected.
 
 ### Task 34.1 – Page quality classifier - Agent_AdapterGovernance
 **Objective:** Classify generated pages as `PASS`, `REPAIRABLE`, or `REJECTED`.
 **Output:** Page quality classifier using dump ratio, prose density, citation relevance, headings, and generic prose.
 **Guidance:** **Depends on: Task 33.4 and Task 24.5.**
 1. Classify each page after generation and before final manifest readiness.
-2. Use dump ratio, prose density, citation relevance, heading completeness, and generic prose signals.
-3. Persist classification results in the run evidence bundle.
-4. Add classifier tests for pass, repairable, and rejected pages.
+2. Use dump ratio, prose density, citation relevance, heading completeness, Mermaid coverage, flow explanation coverage, and generic prose signals.
+3. Reject API/service pages that should have flow diagrams but contain no Mermaid sequence/flow diagram.
+4. Persist classification results in the run evidence bundle.
+5. Add classifier tests for pass, repairable, rejected, and missing-Mermaid pages.
 
 ### Task 34.2 – Targeted repair prompts - Agent_DocGen
 **Objective:** Repair failed pages with page-type-specific prompts.
@@ -1608,8 +1617,9 @@ The Phase 14-16 review found useful implementation progress but also evidence co
 **Guidance:** **Depends on: Task 34.1.**
 1. Provide repair prompts for API, data-model, architecture, service, and operations pages.
 2. Rewrite only failed pages and preserve valid citations.
-3. Track before/after quality scores for each repaired page.
-4. Add mock-provider tests for targeted repair behavior.
+3. For API pages, require endpoint lifecycle prose plus Mermaid sequence or flow diagrams grounded in controller/repository evidence.
+4. Track before/after quality scores for each repaired page.
+5. Add mock-provider tests for targeted repair behavior.
 
 ### Task 34.3 – Cost-aware retry scheduler - Agent_PlatformCore
 **Objective:** Schedule repairs with bounded retries, token budgets, and visible progress.
@@ -1636,28 +1646,30 @@ The Phase 14-16 review found useful implementation progress but also evidence co
 
 ### Task 35.1 – AI_API_Atlas full pilot rerun - Agent_QualityRelease
 **Objective:** Run the final full AI_API_Atlas Minimax pilot after strict, IA, evidence, and repair improvements.
-**Output:** Full isolated run, strict report, qoder comparison report, and review checklist.
+**Output:** Full isolated candidate run, strict report, qoder comparison report, and review checklist.
 **Guidance:** **Depends on: Task 34.4.**
-1. Generate under `/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/.repo-agent-eval/<run>` only.
+1. Generate under `/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/.repo-agent-eval/runs/<run>/repowiki/zh` only.
 2. Verify `.qoder/**` remains read-only and unmodified.
 3. Produce strict report, qoder comparison report, and manual review checklist.
-4. Require fallback pages to be `<= 5%` before READY consideration.
+4. Verify only a READY candidate can be published to `.repo-agent-eval/repowiki/zh`.
+5. Require fallback pages to be `<= 5%` before READY consideration.
 
 ### Task 35.2 – Manual review pack - Agent_QualityRelease
 **Objective:** Build a 30-page manual review pack comparing repo-agent output to Qoder pages.
 **Output:** Manual review matrix with page pairs, gap notes, and acceptance status.
 **Guidance:** **Depends on: Task 35.1.**
 1. Select 30 representative pages covering overview, architecture, core services, Python services, data models, API, operations, security, and troubleshooting.
-2. Record the Qoder page, repo-agent page, gap summary, and acceptability for each pair.
-3. Require at least 24 of 30 pages to be acceptable for replacement readiness.
-4. Keep review artifacts inside the isolated evaluation output or operations evidence.
+2. Include Qoder `API参考/核心服务API/API台账服务API.md` and require the repo-agent counterpart to cite `inventory-service`.
+3. Record the Qoder page, repo-agent page, gap summary, Mermaid/flow coverage, and acceptability for each pair.
+4. Require at least 24 of 30 pages to be acceptable for replacement readiness.
+5. Keep review artifacts inside the isolated evaluation output or operations evidence.
 
 ### Task 35.3 – Plugin acceptance pass - Agent_PlatformCore
-**Objective:** Verify the VS Code plugin experience against latest READY and NOT_READY runs.
-**Output:** Plugin acceptance evidence for navigation, preview, stale prompt, and run selection.
+**Objective:** Verify the VS Code plugin experience against the fixed release directory and NOT_READY candidate runs.
+**Output:** Plugin acceptance evidence for navigation, preview, stale prompt, and release-directory loading.
 **Guidance:** **Depends on: Task 35.2 and Task 27.5.**
-1. Validate left navigation, Markdown preview, stale prompt, and run selection.
-2. Default the plugin to the latest READY run.
+1. Validate left navigation, Markdown preview, stale prompt, and release-directory loading.
+2. Default the plugin to `.repo-agent-eval/repowiki/zh/manifest.json`.
 3. Clearly label NOT_READY runs and prevent accidental replacement claims.
 4. Add extension compile/package smoke evidence.
 
@@ -1670,3 +1682,436 @@ The Phase 14-16 review found useful implementation progress but also evidence co
 3. Require strict verify PASS, qoder compare READY, `.qoder/**` read-only verification, and at least 24 accepted manual review pages.
 4. If not ready, return `NOT_READY` with non-zero CLI behavior or explicit failure state.
 5. Update Memory Root with the final Phase 35 judgment.
+
+## Phase 36: Release Directory Contract and Qoder Baseline Canonicalization
+
+**Manager Status:** `Planned`
+**Objective:** Stop treating any `.repo-agent-eval` run directory as the default Wiki. Candidate runs are process artifacts under `.repo-agent-eval/runs/<run>`, and only a gate-passed run may be published to the fixed release directory `.repo-agent-eval/repowiki/zh`. Make `.qoder/repowiki/zh` the single read-only comparison baseline.
+**Current Evidence:** `.repo-agent-eval/run-1777730692266` is the newest directory by mtime, but manifest has `target_dirty=true` and no readiness field. `.qoder/repowiki/zh` is a single baseline, while `.repo-agent-eval/*` contains many candidate and smoke runs.
+**Product Design Baseline:** All Phase 36-40 implementation must read `docs/wiki-systematic-construction-master-plan.md` first. That document defines the product-level Wiki construction system; Phase 36-40 implements the next slice of that system.
+
+### Task 36.1 – Eval run manifest readiness contract - Agent_IndexGraph
+**Objective:** Add a deterministic readiness contract to qoder-like run manifests.
+**Output:** Run manifest fields for `readiness`, `ready`, `not_ready_reasons`, `strict_report_path`, `comparison_report_path`, `target_dirty`, git freshness metadata, and candidate `repowiki/zh/content` plus `repowiki/zh/meta` roots.
+**Guidance:** **Depends on: Phase 35 Summary and Task 27.3.**
+1. Define READY, NOT_READY, and REVIEW_ONLY states for qoder-like eval runs.
+2. Require `target_dirty=true` to force NOT_READY or REVIEW_ONLY, never READY.
+3. Require candidate output to use `.repo-agent-eval/runs/<run>/repowiki/zh/content` and `.repo-agent-eval/runs/<run>/repowiki/zh/meta`.
+4. Preserve `target_head_before`, `target_head_after`, and `target_git_commit` consistency.
+5. Add regression tests for missing readiness, dirty target, stale git commit, missing content/meta roots, and strict report mismatch.
+
+### Task 36.2 – Fixed release publisher and directory contract - Agent_PlatformCore
+**Objective:** Publish only gate-passed READY runs to the fixed viewer/plugin directory `.repo-agent-eval/repowiki/zh`.
+**Output:** Release publisher used by CLI, compare, verify, viewer, and VS Code plugin.
+**Guidance:** **Depends on: Task 36.1 Output by Agent_IndexGraph and Task 27.5.**
+1. Write the default published Wiki to `.repo-agent-eval/repowiki/zh/content` and `.repo-agent-eval/repowiki/zh/meta`.
+2. Publish only a run with `ready=true` or `readiness=READY`; exclude dirty, missing-readiness, stale, and failed strict runs.
+3. Write `.repo-agent-eval/repowiki/zh/manifest.json`, `.repo-agent-eval/repowiki/zh/meta/release.json`, and `.repo-agent-eval/release-history.json`.
+4. Make publishing atomic: failed publish must leave the previous release untouched.
+5. Allow explicit run override for manual inspection without changing the published release.
+6. Add fixture tests proving `run-1777730692266`-style dirty/no-readiness manifests cannot be published.
+
+### Task 36.3 – Single Qoder baseline registry - Agent_QualityRelease
+**Objective:** Treat `/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/.qoder/repowiki/zh` as the canonical read-only baseline.
+**Output:** Baseline registry and compare preflight that distinguishes one Qoder baseline from many repo-agent candidate runs.
+**Guidance:** **Depends on: Task 36.2 and Task 29.2.**
+1. Register `.qoder/repowiki/zh` as a single baseline root with immutable content and manifest metadata.
+2. Verify baseline is read-only during compare and rerun flows.
+3. Prevent compare output from mixing multiple `.repo-agent-eval/*` directories as baselines.
+4. Add tests for baseline existence, read-only enforcement, and candidate-run selection.
+
+### Task 36.4 – Run inventory and cleanup report - Agent_QualityRelease
+**Objective:** Produce a report explaining which eval run is newest, which run is publishable READY, what is currently published, and why others are NOT_READY or REVIEW_ONLY.
+**Output:** Eval run inventory and release report with run id, generated time, dirty status, readiness, page count, Mermaid count, publish eligibility, selected release source, and rejection reason.
+**Guidance:** **Depends on: Task 36.3.**
+1. Scan `.repo-agent-eval/runs/*/manifest.json` and legacy `.repo-agent-eval/*/manifest.json` for migration diagnostics.
+2. Identify newest-by-mtime separately from publishable READY.
+3. Mark dirty/no-readiness runs as not publish candidates.
+4. Confirm `.repo-agent-eval/repowiki/zh` points to the published READY source run.
+5. Write a human-readable evidence report for Manager review.
+
+## Phase 37: Inventory-service API Coverage and Ownership Repair
+
+**Manager Status:** `Planned`
+**Objective:** Ensure API台账服务 API documentation exists, maps to `inventory-service`, and uses the same source area as Qoder's `API参考/核心服务API/API台账服务API.md`.
+**Current Evidence:** Qoder has `content/API参考/核心服务API/API台账服务API.md` citing `inventory-service/src/main/java/.../EndpointsController.java`, `EndpointDto.java`, `ApiEndpointEntity.java`, and repositories. Current repo-agent eval output has `核心服务/API台账服务.md` and data-model pages but no dedicated API台账服务 API page, and one page claims inventory-service while pointing to `ai-service`.
+**Product Design Baseline:** Implement this as a generic Service Registry, API surface, and ownership verification capability from `docs/wiki-systematic-construction-master-plan.md`; AI_API_Atlas is only the regression fixture.
+
+### Task 37.1 – Inventory service API topic gap fixture - Agent_QualityRelease
+**Objective:** Capture the missing API台账服务 API page as a hard regression fixture.
+**Output:** Fixture comparing Qoder `API台账服务API.md` to repo-agent expected path and evidence requirements.
+**Guidance:** **Depends on: Task 36.3.**
+1. Use Qoder `API参考/核心服务API/API台账服务API.md` as the expected baseline topic.
+2. Assert repo-agent must generate a stable counterpart under `API参考/核心服务API/...`.
+3. Require citations from `inventory-service`, not `ai-service`.
+4. Add comparison tests that fail when the page is absent.
+
+### Task 37.2 – Inventory service ownership override and resolver test - Agent_Scanner
+**Objective:** Fix ownership resolution for API inventory topics.
+**Output:** Ownership resolver behavior that maps API台账服务/API inventory pages to `inventory-service`.
+**Guidance:** **Depends on: Task 37.1 and Task 33.1.**
+1. Add resolver signals for service directory, controller package, entity names, repository names, and README service mapping.
+2. Treat `EndpointsController`, `ApiEndpointEntity`, `ApiParameterEntity`, and related repositories as strong inventory-service evidence.
+3. Reject `ai-service` evidence for API台账服务 unless the page is explicitly about AI service integration.
+4. Add regression tests for the current wrong-service binding.
+
+### Task 37.3 – Core service API planner coverage - Agent_DocGen
+**Objective:** Generate a dedicated API page for API台账服务.
+**Output:** Page plan and navigation entry for `API参考/核心服务API/API台账服务/API台账服务API.md` or an equivalent stable path.
+**Guidance:** **Depends on: Task 37.2 Output by Agent_Scanner and Task 32.2.**
+1. Add core-service API page planning for inventory-service.
+2. Include controller endpoints, DTOs, repositories, entities, frontend use sites, and related contract-service references when evidence exists.
+3. Preserve path stability and Qoder comparison pairing.
+4. Add planner tests for API台账服务 API coverage.
+
+### Task 37.4 – Inventory API composer evidence binding - Agent_DocGen
+**Objective:** Compose API台账服务 API documentation from inventory-service evidence.
+**Output:** Generated page with endpoint lifecycle, details/count flows, DTO/model explanation, citations, and diagrams.
+**Guidance:** **Depends on: Task 37.3 and Task 24.3.**
+1. Cite `EndpointsController.java`, `EndpointDto.java`, `ApiEndpointEntity.java`, `ApiEndpointRepository.java`, `ApiParameterRepository.java`, and `ApiParameterEntity.java` where present.
+2. Include frontend and contract-service references only as related integration evidence, not primary ownership.
+3. Fail composition if primary inventory-service evidence is missing.
+4. Add mock composer tests and AI_API_Atlas smoke evidence.
+
+## Phase 38: Mermaid-backed API Article Quality Uplift
+
+**Manager Status:** `Planned`
+**Objective:** Raise API and service article quality to Qoder-like narrative depth with required Mermaid diagrams and flow explanations.
+**Current Evidence:** Qoder's API台账服务 API page includes architecture, sequence, and ER-style Mermaid blocks. Current repo-agent output has some Mermaid globally, but key service/API pages can be missing, list-like, or diagram-light.
+**Product Design Baseline:** Implement the Page Contract, Diagram Plan Builder, and API document product standard defined in `docs/wiki-systematic-construction-master-plan.md`.
+
+### Task 38.1 – API Mermaid coverage gate - Agent_AdapterGovernance
+**Objective:** Add quality checks for expected Mermaid diagrams on API and service pages.
+**Output:** Strict/profile gate for missing Mermaid on page types that require flow, sequence, architecture, or ER diagrams.
+**Guidance:** **Depends on: Task 37.4 and Task 34.1.**
+1. Require at least one relevant Mermaid block for core service API pages.
+2. Require sequence or flow diagrams for endpoint lifecycle pages.
+3. Require ER diagrams for entity/data-model pages when relationship evidence exists.
+4. Add reason codes and regression fixtures for missing Mermaid.
+
+### Task 38.2 – API flow diagram planner - Agent_DocGen
+**Objective:** Plan diagrams from controller, repository, DTO, entity, and frontend evidence.
+**Output:** Diagram plan contract for sequence, flowchart, architecture, and ER diagrams.
+**Guidance:** **Depends on: Task 38.1 and Task 24.4.**
+1. Map endpoint list, detail, count, and parameter retrieval flows into Mermaid sequence diagrams.
+2. Map service/controller/repository/entity relationships into Mermaid flowcharts.
+3. Map entity relationships into ER diagrams when evidence supports them.
+4. Validate Mermaid syntax before writing pages.
+
+### Task 38.3 – API article skeleton repair - Agent_DocGen
+**Objective:** Replace low-quality API pages with Qoder-like article structure.
+**Output:** API article skeleton requiring overview, project structure, core components, architecture, detailed component analysis, dependency analysis, performance, troubleshooting, conclusion, and appendix when relevant.
+**Guidance:** **Depends on: Task 38.2 and Task 24.2.**
+1. Keep prose-first sections rather than endpoint dumps.
+2. Use endpoint tables only as bounded supporting material.
+3. Pair each major claim with citations or an explicit `待确认` note.
+4. Add tests for API台账服务 API and at least two other core service API pages.
+
+### Task 38.4 – Quality repair rerun for core API pages - Agent_QualityRelease
+**Objective:** Re-run and evaluate core API pages after Mermaid and skeleton repairs.
+**Output:** Core API page quality report with prose density, Mermaid count, citation relevance, and Qoder pairing status.
+**Guidance:** **Depends on: Task 38.3.**
+1. Generate an isolated AI_API_Atlas eval run.
+2. Measure API台账服务 API, GitLab MCP, Jenkins MCP, knowledge graph, security audit, and script generation API pages.
+3. Require no wrong-service evidence and required Mermaid coverage.
+4. Report failures as NOT_READY.
+
+## Phase 39: Qoder Comparison and Manual Review Hardening
+
+**Manager Status:** `Planned`
+**Objective:** Make comparison and manual review catch missing Qoder counterparts, wrong source ownership, and low-quality diagram-free pages.
+**Product Design Baseline:** Implement the Quality Gates, Baseline Strategy, and Readiness System defined in `docs/wiki-systematic-construction-master-plan.md`.
+
+### Task 39.1 – Qoder path-pair comparator hardening - Agent_QualityRelease
+**Objective:** Treat missing high-value Qoder counterpart pages as explicit comparison failures.
+**Output:** Comparator rules for required page pairs and gap severity.
+**Guidance:** **Depends on: Task 38.4 and Task 29.2.**
+1. Add required pair for Qoder `API参考/核心服务API/API台账服务API.md`.
+2. Mark missing core service API counterparts as FAIL, not a soft coverage gap.
+3. Include service ownership and citation locality in pair scoring.
+4. Add path-pair regression tests.
+
+### Task 39.2 – Manual review matrix v2 - Agent_QualityRelease
+**Objective:** Require manual review to include page quality dimensions that strict verify can miss.
+**Output:** Review matrix with Qoder path, repo-agent path, service ownership, Mermaid coverage, flow coverage, citation locality, and acceptance.
+**Guidance:** **Depends on: Task 39.1 and Phase 35 Summary.**
+1. Include API台账服务 API as a mandatory review row.
+2. Require at least 30 pages across overview, architecture, services, API, data models, operations, security, and troubleshooting.
+3. Require at least 24 accepted pages and zero P0 failures on mandatory rows.
+4. Store review artifacts inside the selected eval run or operations evidence.
+
+### Task 39.3 – READY decision schema v2 - Agent_AdapterGovernance
+**Objective:** Prevent strict PASS alone from becoming replacement GO.
+**Output:** Readiness schema requiring strict PASS, comparison READY, manual review pass, release publication, and plugin acceptance.
+**Guidance:** **Depends on: Task 39.2 and Task 36.1.**
+1. Separate strict verification from replacement readiness.
+2. Require manual review and Qoder comparison before GO.
+3. Surface NOT_READY reasons in CLI JSON and human reports.
+4. Add tests for strict PASS but manual review FAIL.
+
+### Task 39.4 – Plugin and viewer release-directory acceptance - Agent_PlatformCore
+**Objective:** Ensure the plugin and viewer read the fixed release directory `.repo-agent-eval/repowiki/zh`, not a dirty or newest-only run.
+**Output:** Plugin/viewer tests and evidence for release-directory loading and NOT_READY/no-release labeling.
+**Guidance:** **Depends on: Task 39.3 and Task 36.2.**
+1. Make plugin and viewer default to `.repo-agent-eval/repowiki/zh/manifest.json`.
+2. Do not recursively select `.repo-agent-eval/runs/*` for the default Wiki.
+3. If no READY release exists, show an explicit no-release state instead of falling back to newest run.
+4. Verify Markdown preview renders Mermaid diagrams from the release content directory.
+5. Add compile/package smoke evidence.
+
+## Phase 40: Final Replacement Readiness Rerun and Dossier
+
+**Manager Status:** `Planned`
+**Objective:** Run a final evidence-backed AI_API_Atlas replacement evaluation after Phase 36-39 corrections and issue a corrected go/no-go dossier.
+**Product Design Baseline:** Treat AI_API_Atlas only as a complex acceptance fixture. The final dossier must report both fixture readiness and generic repo AI agent product readiness against `docs/wiki-systematic-construction-master-plan.md`.
+
+### Task 40.1 – Clean AI_API_Atlas final rerun - Agent_QualityRelease
+**Objective:** Generate a clean qoder-like eval run and publish it to `.repo-agent-eval/repowiki/zh` only if all gates pass.
+**Output:** Isolated final run under `.repo-agent-eval/runs/<run>`, candidate manifest readiness, strict report, comparison report, inventory report, and fixed release directory output.
+**Guidance:** **Depends on: Task 39.4.**
+1. Require clean target repo or mark run NOT_READY.
+2. Generate candidate output under `.repo-agent-eval/runs/<run>/repowiki/zh` only.
+3. Verify `.qoder/**` remains read-only.
+4. Publish to `.repo-agent-eval/repowiki/zh` only after strict, comparison, manual review, and plugin gates pass.
+5. Produce manifest readiness fields and release publication evidence.
+
+### Task 40.2 – Inventory-service API acceptance evidence - Agent_QualityRelease
+**Objective:** Verify API台账服务 API output against Qoder and source evidence.
+**Output:** Acceptance evidence for page existence, source ownership, citations, Mermaid diagrams, and prose quality.
+**Guidance:** **Depends on: Task 40.1.**
+1. Confirm repo-agent generated the API台账服务 API page.
+2. Confirm primary citations are under `inventory-service`.
+3. Confirm Mermaid diagrams cover endpoint list/detail/count and entity relationships where evidence supports them.
+4. Compare against Qoder `API参考/核心服务API/API台账服务API.md`.
+
+### Task 40.3 – Final manual review and plugin acceptance - Agent_QualityRelease
+**Objective:** Complete manual and plugin acceptance before any GO claim.
+**Output:** 30-page review matrix, plugin/viewer evidence, and unresolved gap register.
+**Guidance:** **Depends on: Task 40.2 and Task 39.4.**
+1. Execute the mandatory 30-page manual review.
+2. Require API台账服务 API mandatory row to pass.
+3. Verify plugin/viewer use `.repo-agent-eval/repowiki/zh` and render Mermaid.
+4. Record any non-blocking residual risks separately from GO blockers.
+
+### Task 40.4 – Corrected final go/no-go dossier - Agent_QualityRelease
+**Objective:** Replace the premature strict-benchmark GO with a full replacement-readiness decision.
+**Output:** Corrected go/no-go dossier with strict, comparison, manual review, plugin, and release publication evidence.
+**Guidance:** **Depends on: Task 40.3.**
+1. State whether AI_API_Atlas can replace Qoder Repo Wiki with repo-agent output.
+2. Distinguish strict benchmark PASS from replacement GO.
+3. Require READY release publication, Qoder comparison READY, manual review pass, plugin acceptance, `.qoder/**` read-only verification, and inventory-service API acceptance.
+4. If any mandatory item fails, return NOT_READY and list exact blockers.
+5. Update Memory Root with the Phase 40 decision.
+
+## Phase 41: Qoder-compatible Release Interface and Meta Contract
+
+**Manager Status:** `Planned`
+**Objective:** Make `.repo-agent-eval/repowiki/zh/content` and `.repo-agent-eval/repowiki/zh/meta` the stable published Wiki interface, compatible with Qoder's directory model but stronger in manifest, evidence, quality, and release metadata.
+**Current Evidence:** Qoder publishes one stable `.qoder/repowiki/zh` tree with `content/` and `meta/repowiki-metadata.json`. repo-agent historically produced many `.repo-agent-eval/<run>` directories, which made plugin behavior and release readiness ambiguous.
+**Product Design Baseline:** Read `docs/wiki-source-code-and-docs-intelligence-plan.md` and `docs/wiki-systematic-construction-master-plan.md` before implementation.
+
+### Task 41.1 – Qoder directory and metadata interface inventory - Agent_QualityRelease
+**Objective:** Capture Qoder's published directory and metadata interface as a read-only compatibility fixture.
+**Output:** Interface inventory report for `.qoder/repowiki/zh/content` and `.qoder/repowiki/zh/meta/repowiki-metadata.json`.
+**Guidance:** **Depends on: Phase 40 decision and Qoder baseline registry.**
+1. Inspect Qoder content categories, nested paths, cite blocks, Mermaid usage, and metadata fields.
+2. Produce a machine-readable fixture summary without copying Qoder prose.
+3. Mark `.qoder/repowiki/zh` read-only and verify no task mutates it.
+4. Add fixture tests for required release directories and metadata file presence.
+
+### Task 41.2 – Repo-agent release meta schema - Agent_IndexGraph
+**Objective:** Define repo-agent release metadata that preserves Qoder compatibility while adding structured source/docs, page, evidence, diagram, and quality indexes.
+**Output:** `manifest.json`, `repowiki-metadata.json`, `navigation.json`, `page-registry.json`, `source-inventory.json`, `docs-inventory.json`, `service-registry.json`, `api-inventory.json`, `data-model-inventory.json`, `evidence-index.json`, `diagram-index.json`, `quality-report.json`, and `release.json` schemas.
+**Guidance:** **Depends on: Task 41.1.**
+1. Keep `content/` and `meta/` stable under `.repo-agent-eval/repowiki/zh`.
+2. Define schema fields, required/optional status, and versioning rules.
+3. Include `release_status=READY`, `source_run_id`, `target_git_commit`, `content_root`, and `meta_root`.
+4. Add JSON schema tests and compatibility fixtures.
+
+### Task 41.3 – Release writer and migration bridge - Agent_PlatformCore
+**Objective:** Publish a READY candidate run into the fixed release tree atomically.
+**Output:** Release writer that copies `.repo-agent-eval/runs/<run>/repowiki/zh` to `.repo-agent-eval/repowiki/zh` only when gates pass.
+**Guidance:** **Depends on: Task 41.2 and Task 36.2.**
+1. Support candidate run layout under `.repo-agent-eval/runs/<run>/repowiki/zh`.
+2. Write release files atomically and preserve previous release on failure.
+3. Provide migration diagnostics for legacy `.repo-agent-eval/<run>/content` directories.
+4. Add tests for failed publish, dirty run rejection, and successful release.
+
+### Task 41.4 – Plugin and viewer release contract enforcement - Agent_PlatformCore
+**Objective:** Make all viewer surfaces consume only the fixed release manifest by default.
+**Output:** Plugin/viewer tests and documentation proving only `.repo-agent-eval/repowiki/zh/manifest.json` is the default input.
+**Guidance:** **Depends on: Task 41.3 and Task 39.4.**
+1. Remove default recursive run discovery from plugin/viewer paths.
+2. Show explicit no-release state when release manifest is missing or not READY.
+3. Keep run browsing only as an explicit diagnostic mode if implemented.
+4. Add compile/package smoke and fixture tests.
+
+## Phase 42: Source and Documentation Discovery Compiler
+
+**Manager Status:** `Planned`
+**Objective:** Build a two-channel discovery compiler that scans source code, runtime configuration, and existing docs into a unified repository knowledge model.
+**Product Design Baseline:** Implement Sections 3-5 of `docs/wiki-source-code-and-docs-intelligence-plan.md`.
+
+### Task 42.1 – Multi-runtime source scanner v3 - Agent_Scanner
+**Objective:** Discover repository shape, services, runtimes, entrypoints, APIs, data models, frontend callers, deployment assets, and tests across common stacks.
+**Output:** `source-inventory.json` and scanner persistence for multi-language monorepos.
+**Guidance:** **Depends on: Phase 41 release schema.**
+1. Support Java/Spring, Python/FastAPI or Flask, TypeScript/React/Node, Go, Rust, Docker, compose, and CI assets.
+2. Identify runnable services, libraries, frontends, workers, MCP services, and CLIs.
+3. Extract service owners, entrypoints, API surfaces, data model signals, config, ports, and dependencies.
+4. Add fixtures for AI_API_Atlas and at least two smaller repositories.
+
+### Task 42.2 – Documentation scanner and authority classifier - Agent_IndexGraph
+**Objective:** Scan existing docs and classify their type, authority, freshness, specificity, and relation to source facts.
+**Output:** `docs-inventory.json` plus doc authority and freshness scoring.
+**Guidance:** **Depends on: Task 42.1.**
+1. Classify README, architecture docs, API docs, operations docs, planning docs, governance docs, and user guides.
+2. Treat planning and roadmap docs as historical/contextual unless source confirms current state.
+3. Detect stale file references and outdated service/API claims.
+4. Add tests for authoritative docs, stale docs, and conflicting docs.
+
+### Task 42.3 – Source-docs conflict resolver - Agent_AdapterGovernance
+**Objective:** Decide how source facts and docs facts are merged or rejected.
+**Output:** Conflict policy and verifier reason codes for source-doc mismatch, stale doc, unsupported doc claim, and missing source confirmation.
+**Guidance:** **Depends on: Task 42.2.**
+1. Prefer source/config/OpenAPI for current implementation facts.
+2. Use docs for intent, background, terminology, and historical decisions.
+3. Mark conflicts as `待确认` or `historical` instead of composing false current facts.
+4. Add strict/profile tests for stale docs and source-doc disagreement.
+
+### Task 42.4 – Repository Knowledge Model v3 persistence - Agent_IndexGraph
+**Objective:** Persist the unified source/docs knowledge model for downstream IA, evidence, diagrams, and release QA.
+**Output:** Repository Knowledge Model v3 tables/files with diff support and manifest summary.
+**Guidance:** **Depends on: Task 42.3.**
+1. Persist Repository, Service, ApiSurface, DataModel, FrontendConsumer, OperationAsset, DocArtifact, EvidenceSpan, and Conflict records.
+2. Support incremental update and stale model invalidation.
+3. Export model summary into release meta.
+4. Add schema, diff, and incremental update tests.
+
+## Phase 43: Knowledge-model-driven IA and Page Contract Factory
+
+**Manager Status:** `Planned`
+**Objective:** Generate Wiki directory, page graph, paths, and page contracts from the knowledge model instead of ad hoc topic heuristics.
+**Product Design Baseline:** Implement Sections 6-7 of `docs/wiki-source-code-and-docs-intelligence-plan.md`.
+
+### Task 43.1 – Taxonomy profile compiler - Agent_DocGen
+**Objective:** Compile a repository-specific information architecture from knowledge model facts and Qoder-compatible directory semantics.
+**Output:** Taxonomy profile and top-level/nested directory plan for `content/`.
+**Guidance:** **Depends on: Task 42.4.**
+1. Generate only directories supported by repository facts.
+2. Support project overview, architecture, services/modules, core services, Python services, API reference, data models, frontend, development, operations, security, testing, and troubleshooting.
+3. Use Qoder baseline as shape guidance, not content source.
+4. Add path stability and directory coverage tests.
+
+### Task 43.2 – Topic graph planner - Agent_DocGen
+**Objective:** Plan page nodes for service, API, data model, frontend, operations, security, and troubleshooting topics.
+**Output:** Page graph with page type, owner, required evidence, sibling/parent links, and Qoder counterpart mapping when available.
+**Guidance:** **Depends on: Task 43.1.**
+1. Split service overview from API reference, data model, deployment, and troubleshooting pages.
+2. Require API pages for services with API surfaces or explicit merge rationale.
+3. Require data pages for persistent models and important DTO/model families.
+4. Add regression coverage for inventory-service/API台账服务 API and similar ownership-sensitive topics.
+
+### Task 43.3 – Page contract factory - Agent_DocGen
+**Objective:** Create required section, evidence, diagram, and fallback contracts for every page type.
+**Output:** Page contracts for API, architecture, service, data model, frontend, operations, security, development, overview, and troubleshooting pages.
+**Guidance:** **Depends on: Task 43.2.**
+1. Define required sections and optional sections per page type.
+2. Define required source citations, docs citations, and diagram types.
+3. Define fallback behavior for insufficient evidence.
+4. Add tests that reject pages without contracts.
+
+### Task 43.4 – Navigation and path verifier - Agent_AdapterGovernance
+**Objective:** Verify generated navigation and paths before composition and release.
+**Output:** IA verifier with duplicate, empty, orphan, unstable path, missing overview, and missing counterpart checks.
+**Guidance:** **Depends on: Task 43.3.**
+1. Require every content directory to have an overview page.
+2. Detect duplicate pages, empty pages, orphan pages, and unstable slugs.
+3. Verify Qoder high-value counterpart mapping when baseline exists.
+4. Add verifier tests and report reason codes.
+
+## Phase 44: Evidence-backed Composition and Diagram Generation
+
+**Manager Status:** `Planned`
+**Objective:** Compose Qoder-quality pages from page contracts, evidence bundles, docs context, and verified Mermaid diagram plans.
+**Product Design Baseline:** Implement Sections 7-8 of `docs/wiki-source-code-and-docs-intelligence-plan.md`.
+
+### Task 44.1 – Evidence bundle builder v3 - Agent_IndexGraph
+**Objective:** Build page-specific evidence bundles that separate primary source evidence, supporting docs evidence, rejected evidence, and uncertainty.
+**Output:** Evidence bundles persisted into `evidence-index.json` and page registry.
+**Guidance:** **Depends on: Task 43.4 and Task 42.4.**
+1. Rank evidence by page owner, service, symbol, path, API relation, data relation, frontend caller, and doc authority.
+2. Keep source citations and docs citations distinct.
+3. Store rejected evidence with reasons.
+4. Add tests for wrong-service rejection and source-doc citation separation.
+
+### Task 44.2 – Diagram planner from code relations - Agent_DocGen
+**Objective:** Derive Mermaid diagrams from controller/service/repository/entity/frontend/deployment relations.
+**Output:** Diagram plans and `diagram-index.json` with syntax-validated Mermaid.
+**Guidance:** **Depends on: Task 44.1.**
+1. Generate sequence diagrams for endpoint lifecycles.
+2. Generate flowcharts for component and dependency relations.
+3. Generate ER diagrams for persistent model relationships.
+4. Generate deployment/runtime diagrams from Docker/compose/k8s evidence.
+5. Add Mermaid syntax and evidence-link tests.
+
+### Task 44.3 – Qoder-style article composer v3 - Agent_DocGen
+**Objective:** Generate pages with cite block, table of contents, required sections, grounded prose, Mermaid, section sources, and appendix where useful.
+**Output:** Composer implementation and fixtures for API, architecture, service, data model, frontend, operations, and troubleshooting pages.
+**Guidance:** **Depends on: Task 44.2 and Task 43.3.**
+1. Use page contracts as the skeleton, not free-form prompts.
+2. Require cite blocks and section source blocks.
+3. Prefer narrative explanation over endpoint/model dumps.
+4. Mark unsupported claims as `待确认` rather than hallucinating.
+5. Add mock-LLM and no-LLM fixtures.
+
+### Task 44.4 – Composition quality repair loop v3 - Agent_AdapterGovernance
+**Objective:** Reject or repair pages that fail contracts, evidence relevance, Mermaid coverage, prose quality, or source-doc conflict checks.
+**Output:** Quality loop with `PASS`, `REPAIRABLE`, `REJECTED`, and `NOT_READY` propagation to release readiness.
+**Guidance:** **Depends on: Task 44.3 and Task 34.4.**
+1. Enforce cite block, TOC, required sections, section source, Mermaid, and evidence relevance.
+2. Trigger targeted repair prompts for repairable pages.
+3. Prevent rejected pages from entering READY release.
+4. Add tests for strict PASS not being enough when page quality fails.
+
+## Phase 45: Product Release QA and Multi-repository Acceptance
+
+**Manager Status:** `Planned`
+**Objective:** Prove repo-agent can generate a fixed-release, source/docs-backed, Qoder-compatible repo-wiki across multiple repository shapes.
+**Product Design Baseline:** Implement Sections 9-10 of `docs/wiki-source-code-and-docs-intelligence-plan.md`.
+
+### Task 45.1 – Release package and meta completeness gate - Agent_PlatformCore
+**Objective:** Verify release package completeness before plugin or user consumption.
+**Output:** Release gate requiring `manifest.json`, `content/`, `meta/`, required meta files, quality summary, and source run lineage.
+**Guidance:** **Depends on: Task 44.4 and Task 41.3.**
+1. Validate release tree structure and required meta files.
+2. Verify every navigation page exists and every page has registry evidence.
+3. Verify `release_status=READY` only when all gates pass.
+4. Add release package tests.
+
+### Task 45.2 – Multi-repository acceptance fixture suite - Agent_QualityRelease
+**Objective:** Validate the system across representative repository shapes, not only AI_API_Atlas.
+**Output:** Acceptance matrix for complex monorepo, small backend, frontend app, Python service, and docs-heavy repository.
+**Guidance:** **Depends on: Task 45.1.**
+1. Include AI_API_Atlas as the complex fixture.
+2. Include at least four additional repository profiles.
+3. Measure service coverage, API coverage, docs freshness, Mermaid coverage, evidence relevance, and release package completeness.
+4. Report unsupported repository classes explicitly.
+
+### Task 45.3 – Viewer and plugin end-to-end acceptance - Agent_PlatformCore
+**Objective:** Prove the published release can be consumed reliably by the VS Code plugin and static viewer.
+**Output:** Viewer/plugin E2E evidence with navigation, Markdown preview, Mermaid rendering, no-release state, and stale release prompt.
+**Guidance:** **Depends on: Task 45.2 and Task 41.4.**
+1. Open only `.repo-agent-eval/repowiki/zh/manifest.json` by default.
+2. Verify content links, file links, Mermaid, and meta-driven navigation.
+3. Verify run directories are not default sources.
+4. Add compile/package and screenshot evidence.
+
+### Task 45.4 – Final product readiness dossier - Agent_QualityRelease
+**Objective:** Issue the product-level GO/NOT_READY decision for repo-agent repo-wiki generation.
+**Output:** Final product readiness dossier separating Qoder compatibility, generic repository readiness, and known limitations.
+**Guidance:** **Depends on: Task 45.3.**
+1. Summarize Phase 41-45 evidence.
+2. State whether repo-agent is ready as a generic repo-wiki product, not only an AI_API_Atlas replacement.
+3. List unsupported repository classes and required follow-up.
+4. Update Memory Root with the Phase 45 decision.

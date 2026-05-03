@@ -1,17 +1,13 @@
 """Tests for generation state machine."""
 
-import tempfile
-from pathlib import Path
 
-import pytest
 
 from repo_wiki.orchestration.generation_state import (
-    GenerationStateMachine,
     GenerationRun,
+    GenerationStateMachine,
     PageGenerationState,
     PageState,
     RunState,
-    create_generation_state_machine,
 )
 
 
@@ -196,8 +192,9 @@ class TestGenerationStateMachine:
         run = sm.create_run()
 
         # Original hash
-        sm.add_page(run.run_id, "00-overview", "overview", "docs/00-overview.md",
-                   input_hash="abc123")
+        sm.add_page(
+            run.run_id, "00-overview", "overview", "docs/00-overview.md", input_hash="abc123"
+        )
 
         # Mark as completed
         sm.start_page(run.run_id, "00-overview")
@@ -270,7 +267,7 @@ class TestGenerationRun:
 
     def test_run_creation(self):
         """Test creating a GenerationRun."""
-        from repo_wiki.orchestration.generation_state import GenerationRun, RunState
+        from repo_wiki.orchestration.generation_state import RunState
 
         run = GenerationRun(
             run_id="gen-test123",
@@ -289,7 +286,7 @@ class TestPageGenerationState:
 
     def test_page_state_creation(self):
         """Test creating a PageGenerationState."""
-        from repo_wiki.orchestration.generation_state import PageGenerationState, PageState
+        from repo_wiki.orchestration.generation_state import PageState
 
         page = PageGenerationState(
             run_id="gen-test123",

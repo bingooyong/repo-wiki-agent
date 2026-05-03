@@ -37,8 +37,10 @@ PARITY_METRIC_SCHEMA_VERSION = "1.0.0"
 # METRIC CATEGORIES AND ENUMS
 # =============================================================================
 
+
 class MetricCategory(Enum):
     """Categories of parity metrics."""
+
     STRUCTURAL = "structural"  # Hard requirements
     QUALITY = "quality"  # Soft requirements
     CONTENT = "content"  # Content-specific metrics
@@ -46,6 +48,7 @@ class MetricCategory(Enum):
 
 class MetricSeverity(Enum):
     """Severity levels for metric failures."""
+
     CRITICAL = "critical"  # Blocks acceptance
     MAJOR = "major"  # Should fix
     MINOR = "minor"  # Can defer
@@ -54,6 +57,7 @@ class MetricSeverity(Enum):
 
 class MetricStatus(Enum):
     """Status of a metric check."""
+
     PASS = "pass"
     FAIL = "fail"
     PARTIAL = "partial"
@@ -67,7 +71,9 @@ class MetricUnit(str, Enum):
     NORMALIZED_SCORE = "normalized_score"  # 0..1 composite score (may combine signals)
     CITATIONS_PER_1K_PROSE_CHARS = "citations_per_1k_prose_chars"
     TREE_DEPTH_LEVELS = "tree_depth_levels"  # integer depth of deepest file under content root
-    UNBOUNDED_RATIO = "unbounded_ratio"  # ratio that may exceed 1.0 (e.g. prose lines per list item)
+    UNBOUNDED_RATIO = (
+        "unbounded_ratio"  # ratio that may exceed 1.0 (e.g. prose lines per list item)
+    )
 
 
 ThresholdCompareTarget = Literal["score", "measured_value"]
@@ -76,6 +82,7 @@ ThresholdCompareTarget = Literal["score", "measured_value"]
 # =============================================================================
 # PARITY METRIC DEFINITIONS
 # =============================================================================
+
 
 @dataclass
 class ParityMetricDefinition:
@@ -87,7 +94,9 @@ class ParityMetricDefinition:
     description: str
     unit: MetricUnit
     threshold: float  # Minimum acceptable value (see threshold_compare)
-    threshold_compare: ThresholdCompareTarget  # Whether threshold applies to score or raw measured_value
+    threshold_compare: (
+        ThresholdCompareTarget  # Whether threshold applies to score or raw measured_value
+    )
     weight: float  # Contribution to overall score
     measurable: bool = True  # Can be measured from outputs
 
@@ -144,7 +153,6 @@ PARITY_METRICS: dict[str, ParityMetricDefinition] = {
         threshold_compare="measured_value",
         weight=0.15,
     ),
-
     # Content quality metrics
     "citation_coverage": ParityMetricDefinition(
         name="citation_coverage",
@@ -186,7 +194,6 @@ PARITY_METRICS: dict[str, ParityMetricDefinition] = {
         threshold_compare="measured_value",
         weight=0.05,
     ),
-
     # Prose and aggregation metrics
     "prose_density": ParityMetricDefinition(
         name="prose_density",
@@ -283,9 +290,11 @@ def metric_schema_to_json(
 # METRIC RESULT
 # =============================================================================
 
+
 @dataclass
 class MetricResult:
     """Result of a single metric measurement."""
+
     metric_name: str
     status: MetricStatus
     score: float  # 0.0 - 1.0
@@ -312,19 +321,18 @@ class MetricResult:
     @property
     def is_blocking(self) -> bool:
         """Check if this metric failure blocks acceptance."""
-        return (
-            self.status == MetricStatus.FAIL and
-            self.severity == MetricSeverity.CRITICAL
-        )
+        return self.status == MetricStatus.FAIL and self.severity == MetricSeverity.CRITICAL
 
 
 # =============================================================================
 # PARITY REPORT
 # =============================================================================
 
+
 @dataclass
 class ParityReport:
     """Complete parity assessment report."""
+
     target_root: Path
     baseline_root: Path | None
     run_id: str
@@ -411,6 +419,7 @@ class ParityReport:
 # PARITY METRIC EXTRACTOR
 # =============================================================================
 
+
 class ParityMetricExtractor:
     """Extracts parity metrics from generated content."""
 
@@ -492,13 +501,20 @@ class ParityMetricExtractor:
     def _generate_run_id(self) -> str:
         """Generate a run ID."""
         import uuid
+
         return f"parity-{uuid.uuid4().hex[:8]}"
 
     def _measure_page_coverage(self) -> MetricResult:
         """Measure page coverage."""
         expected_groups = {
             "overview": ["00-overview", "project-overview", "overview", "readme", "项目概述"],
-            "architecture": ["01-architecture", "architecture-overview", "architecture", "架构设计", "整体架构"],
+            "architecture": [
+                "01-architecture",
+                "architecture-overview",
+                "architecture",
+                "架构设计",
+                "整体架构",
+            ],
             "services": ["02-services", "core-services-index", "services", "核心服务"],
             "module-map": ["03-module", "module-relationships", "modules", "模块关系", "模块组织"],
             "api": ["04-api", "api-overview", "api", "API参考"],
@@ -577,7 +593,9 @@ class ParityMetricExtractor:
             severity=defn.severity,
             category=defn.category,
             details={"max_depth": max_depth, "expected_range": [2, 4]},
-            gaps=[] if 2 <= max_depth <= 4 else [f"Directory depth {max_depth} outside expected range [2, 4]"],
+            gaps=[]
+            if 2 <= max_depth <= 4
+            else [f"Directory depth {max_depth} outside expected range [2, 4]"],
         )
 
     def _measure_file_reference_integrity(self) -> MetricResult:
@@ -593,7 +611,7 @@ class ParityMetricExtractor:
             try:
                 content = md_file.read_text(encoding="utf-8")
                 # Find markdown links [text](path)
-                links = re.findall(r'\[([^\]]+)\]\(([^)]+)\)', content)
+                links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", content)
                 for _, path in links:
                     if path.startswith("#") or path.startswith("http"):
                         continue
@@ -648,9 +666,9 @@ class ParityMetricExtractor:
             severity=defn.severity,
             category=defn.category,
             details={"pages_with_citations": with_citations, "total_pages": len(md_files)},
-            gaps=[] if score >= defn.threshold else [
-                f"Only {with_citations}/{len(md_files)} pages have citations"
-            ],
+            gaps=[]
+            if score >= defn.threshold
+            else [f"Only {with_citations}/{len(md_files)} pages have citations"],
         )
 
     def _measure_citation_density(self) -> MetricResult:
@@ -665,7 +683,7 @@ class ParityMetricExtractor:
         for f in content_dir.rglob("*.md"):
             try:
                 content = f.read_text(encoding="utf-8")
-                citations = len(re.findall(r'<cite>[^<]+</cite>', content))
+                citations = len(re.findall(r"<cite>[^<]+</cite>", content))
                 prose = self._count_prose_chars(content)
                 total_citations += citations
                 total_prose_chars += prose
@@ -685,9 +703,9 @@ class ParityMetricExtractor:
             severity=defn.severity,
             category=defn.category,
             details={"total_citations": total_citations, "prose_chars": total_prose_chars},
-            gaps=[] if density >= defn.threshold else [
-                f"Citation density {density:.2f} below threshold {defn.threshold}"
-            ],
+            gaps=[]
+            if density >= defn.threshold
+            else [f"Citation density {density:.2f} below threshold {defn.threshold}"],
         )
 
     def _measure_toc_presence(self) -> MetricResult:
@@ -703,10 +721,7 @@ class ParityMetricExtractor:
             try:
                 content = f.read_text(encoding="utf-8")
                 # TOC detection: ## Table of Contents or ## 目录
-                if re.search(r'^#{1,6}\s+(Table of Contents|目录|Contents)', content, re.MULTILINE):
-                    with_toc += 1
-                # Or inline TOC marker
-                elif "[TOC]" in content or "[toc]" in content:
+                if re.search(r"^#{1,6}\s+(Table of Contents|目录|Contents)", content, re.MULTILINE) or "[TOC]" in content or "[toc]" in content:
                     with_toc += 1
             except Exception:
                 continue
@@ -723,7 +738,9 @@ class ParityMetricExtractor:
             severity=defn.severity,
             category=defn.category,
             details={"pages_with_toc": with_toc, "total_pages": len(md_files)},
-            gaps=[] if score >= defn.threshold else [f"Only {with_toc}/{len(md_files)} pages have TOC"],
+            gaps=[]
+            if score >= defn.threshold
+            else [f"Only {with_toc}/{len(md_files)} pages have TOC"],
         )
 
     def _measure_mermaid_presence(self) -> MetricResult:
@@ -761,9 +778,9 @@ class ParityMetricExtractor:
             severity=defn.severity,
             category=defn.category,
             details={"pages_with_mermaid": with_mermaid, "total_pages": len(md_files)},
-            gaps=[] if score >= defn.threshold else [
-                f"Only {with_mermaid}/{len(md_files)} pages have Mermaid"
-            ],
+            gaps=[]
+            if score >= defn.threshold
+            else [f"Only {with_mermaid}/{len(md_files)} pages have Mermaid"],
         )
 
     def _measure_prose_density(self) -> MetricResult:
@@ -797,9 +814,9 @@ class ParityMetricExtractor:
             severity=defn.severity,
             category=defn.category,
             details={"prose_chars": total_prose, "total_chars": total_chars},
-            gaps=[] if ratio >= defn.threshold else [
-                f"Prose density {ratio:.1%} below {defn.threshold:.0%} threshold"
-            ],
+            gaps=[]
+            if ratio >= defn.threshold
+            else [f"Prose density {ratio:.1%} below {defn.threshold:.0%} threshold"],
         )
 
     def _measure_prose_list_ratio(self) -> MetricResult:
@@ -816,9 +833,11 @@ class ParityMetricExtractor:
                 content = f.read_text(encoding="utf-8")
                 # Count prose paragraphs (non-empty lines that aren't lists)
                 lines = content.split("\n")
-                prose_paras = sum(1 for l in lines if l.strip() and not l.strip().startswith(("-", "*", "|")))
+                prose_paras = sum(
+                    1 for l in lines if l.strip() and not l.strip().startswith(("-", "*", "|"))
+                )
                 # Count list items
-                list_items = len(re.findall(r'^[\s]*[-*]\s+', content, re.MULTILINE))
+                list_items = len(re.findall(r"^[\s]*[-*]\s+", content, re.MULTILINE))
                 total_prose_paras += prose_paras
                 total_list_items += list_items
             except Exception:
@@ -827,7 +846,9 @@ class ParityMetricExtractor:
         ratio = total_prose_paras / total_list_items if total_list_items > 0 else float("inf")
         defn = PARITY_METRICS["prose_list_ratio"]
         effective_ratio = ratio if ratio != float("inf") else 1.0
-        score = min(1.0, effective_ratio / defn.threshold) if effective_ratio < defn.threshold else 1.0
+        score = (
+            min(1.0, effective_ratio / defn.threshold) if effective_ratio < defn.threshold else 1.0
+        )
 
         return MetricResult(
             metric_name="prose_list_ratio",
@@ -842,9 +863,9 @@ class ParityMetricExtractor:
                 "list_items": total_list_items,
                 "no_list_items": total_list_items == 0,
             },
-            gaps=[] if (ratio == float("inf") or ratio >= defn.threshold) else [
-                f"Prose/list ratio {ratio:.2f} below {defn.threshold} threshold"
-            ],
+            gaps=[]
+            if (ratio == float("inf") or ratio >= defn.threshold)
+            else [f"Prose/list ratio {ratio:.2f} below {defn.threshold} threshold"],
         )
 
     def _measure_api_aggregation(self) -> MetricResult:
@@ -867,7 +888,9 @@ class ParityMetricExtractor:
             try:
                 content = f.read_text(encoding="utf-8")
                 # Check for aggregated content (multiple endpoints, schemas, etc.)
-                has_endpoints = len(re.findall(r'(GET|POST|PUT|DELETE|PATCH)\s+', content, re.IGNORECASE)) >= 3
+                has_endpoints = (
+                    len(re.findall(r"(GET|POST|PUT|DELETE|PATCH)\s+", content, re.IGNORECASE)) >= 3
+                )
                 has_schemas = "schema" in content.lower() or "```json" in content.lower()
                 if has_endpoints and has_schemas:
                     aggregated_count += 1
@@ -886,9 +909,9 @@ class ParityMetricExtractor:
             severity=defn.severity,
             category=defn.category,
             details={"aggregated_apis": aggregated_count, "total_api_pages": len(api_files)},
-            gaps=[] if score >= defn.threshold else [
-                f"Only {aggregated_count}/{len(api_files)} API pages are aggregated"
-            ],
+            gaps=[]
+            if score >= defn.threshold
+            else [f"Only {aggregated_count}/{len(api_files)} API pages are aggregated"],
         )
 
     def _measure_data_model_aggregation(self) -> MetricResult:
@@ -954,9 +977,9 @@ class ParityMetricExtractor:
             severity=defn.severity,
             category=defn.category,
             details={"aggregated_dm": aggregated_count, "total_dm_pages": len(dm_files)},
-            gaps=[] if score >= defn.threshold else [
-                f"Only {aggregated_count}/{len(dm_files)} data model pages are aggregated"
-            ],
+            gaps=[]
+            if score >= defn.threshold
+            else [f"Only {aggregated_count}/{len(dm_files)} data model pages are aggregated"],
         )
 
     def _find_content_dir(self) -> Path | None:
@@ -982,7 +1005,7 @@ class ParityMetricExtractor:
         # Remove common prefixes
         for prefix in ["00-", "01-", "02-", "03-", "04-", "05-"]:
             if name.startswith(prefix):
-                return name[len(prefix):]
+                return name[len(prefix) :]
         return name
 
     def _count_prose_chars(self, content: str) -> int:
@@ -1030,6 +1053,7 @@ class ParityMetricExtractor:
 # FACTORY FUNCTIONS
 # =============================================================================
 
+
 def create_parity_report(
     target_root: Path,
     baseline_root: Path | None = None,
@@ -1066,16 +1090,18 @@ def load_parity_report(path: Path) -> ParityReport:
         blocking_reasons=data.get("blocking_reasons", []),
     )
     for m in data.get("metrics", []):
-        report.add_metric(MetricResult(
-            metric_name=m["metric_name"],
-            status=MetricStatus(m["status"]),
-            score=m["score"],
-            measured_value=m["measured_value"],
-            threshold=m["threshold"],
-            severity=MetricSeverity(m["severity"]),
-            category=MetricCategory(m["category"]),
-            gaps=m.get("gaps", []),
-            details=m.get("details", {}),
-        ))
+        report.add_metric(
+            MetricResult(
+                metric_name=m["metric_name"],
+                status=MetricStatus(m["status"]),
+                score=m["score"],
+                measured_value=m["measured_value"],
+                threshold=m["threshold"],
+                severity=MetricSeverity(m["severity"]),
+                category=MetricCategory(m["category"]),
+                gaps=m.get("gaps", []),
+                details=m.get("details", {}),
+            )
+        )
     report.summary = data.get("summary", {})
     return report

@@ -21,17 +21,32 @@ from pydantic import BaseModel, Field, field_validator
 
 from repo_wiki.core.errors import ErrorCategory, RepoWikiError
 
-
 # =============================================================================
 # EVAL OUTPUT PROFILES (Configuration)
 # =============================================================================
 
-PROTECTED_DIRS: frozenset[str] = frozenset([
-    "docs/", ".repo-wiki/", "ai/", ".apm/", ".claude/", ".codex/",
-    ".opencode/", "scripts/", "templates/", ".github/", ".vscode/",
-    "node_modules/", "dist/", "build/", "coverage/", ".venv/", "venv/",
-    ".qoder/",
-])
+PROTECTED_DIRS: frozenset[str] = frozenset(
+    [
+        "docs/",
+        ".repo-wiki/",
+        "ai/",
+        ".apm/",
+        ".claude/",
+        ".codex/",
+        ".opencode/",
+        "scripts/",
+        "templates/",
+        ".github/",
+        ".vscode/",
+        "node_modules/",
+        "dist/",
+        "build/",
+        "coverage/",
+        ".venv/",
+        "venv/",
+        ".qoder/",
+    ]
+)
 
 
 class EvalOutputProfile(BaseModel):
@@ -133,7 +148,9 @@ EVAL_PROFILES: dict[str, EvalOutputProfile] = {
     "default": EvalOutputProfile(name="default", root=".repo-agent-eval", create_subdirs=True),
     "ci": EvalOutputProfile(name="ci", root=".repo-agent-eval-ci", create_subdirs=False),
     "local": EvalOutputProfile(name="local", root="eval-output", create_subdirs=True),
-    "qoder-like": EvalOutputProfile(name="qoder-like", root=".repo-agent-eval", create_subdirs=True, content_subdir="content"),
+    "qoder-like": EvalOutputProfile(
+        name="qoder-like", root=".repo-agent-eval", create_subdirs=True, content_subdir="content"
+    ),
 }
 
 
@@ -150,6 +167,7 @@ def register_eval_profile(profile: EvalOutputProfile) -> None:
 # =============================================================================
 # EVAL MANIFEST SCHEMA
 # =============================================================================
+
 
 class EvalManifestFile(BaseModel):
     """A file entry in the eval manifest."""
@@ -185,78 +203,60 @@ class EvalManifest(BaseModel):
 
     # Git commit information
     target_git_commit: str | None = Field(
-        default=None,
-        description="Git commit hash of target repository at generation time"
+        default=None, description="Git commit hash of target repository at generation time"
     )
     wiki_git_commit: str | None = Field(
-        default=None,
-        description="Git commit hash where wiki content was generated from"
+        default=None, description="Git commit hash where wiki content was generated from"
     )
     target_head_before: str | None = Field(
-        default=None,
-        description="Full target repository HEAD before generation"
+        default=None, description="Full target repository HEAD before generation"
     )
     target_head_after: str | None = Field(
-        default=None,
-        description="Full target repository HEAD after generation"
+        default=None, description="Full target repository HEAD after generation"
     )
     target_dirty: bool = Field(
         default=False,
-        description="Whether target repository had uncommitted changes during generation"
+        description="Whether target repository had uncommitted changes during generation",
     )
     target_revision_source: str = Field(
-        default="git",
-        description="How target_git_commit was resolved: git or hash-fallback"
+        default="git", description="How target_git_commit was resolved: git or hash-fallback"
     )
     wiki_revision_source: str = Field(
-        default="git",
-        description="How wiki_git_commit was resolved: git or hash-fallback"
+        default="git", description="How wiki_git_commit was resolved: git or hash-fallback"
     )
     stale_detection: dict[str, Any] = Field(
         default_factory=dict,
-        description="Stale detection metadata derived from revision comparison"
+        description="Stale detection metadata derived from revision comparison",
     )
 
     # Directory structure
     content_root: str | None = Field(
-        default=None,
-        description="Root directory for generated content files"
+        default=None, description="Root directory for generated content files"
     )
     runtime_root: str | None = Field(
-        default=None,
-        description="Root directory for runtime files (cache, index, etc.)"
+        default=None, description="Root directory for runtime files (cache, index, etc.)"
     )
 
     # Navigation
     navigation_tree: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Hierarchical navigation tree structure"
+        default_factory=list, description="Hierarchical navigation tree structure"
     )
 
     # Page registry
     page_registry: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Registry of all generated pages with metadata"
+        default_factory=list, description="Registry of all generated pages with metadata"
     )
 
     files: list[EvalManifestFile] = Field(
-        default_factory=list,
-        description="All generated output files"
+        default_factory=list, description="All generated output files"
     )
     evidence: list[EvalManifestEvidence] = Field(
-        default_factory=list,
-        description="Evidence files (verify results, diffs, reports)"
+        default_factory=list, description="Evidence files (verify results, diffs, reports)"
     )
 
-    stats: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Statistics about the eval run"
-    )
+    stats: dict[str, Any] = Field(default_factory=dict, description="Statistics about the eval run")
 
-    metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional metadata"
-    )
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
 # =============================================================================
@@ -338,22 +338,26 @@ def generate_manifest(
         for path in sorted(output_dir.rglob("*")):
             if path.is_file():
                 rel_path = str(path.relative_to(output_dir))
-                files.append(EvalManifestFile(
-                    path=rel_path,
-                    size_bytes=path.stat().st_size,
-                    content_type=guess_content_type(path),
-                    hash_sha256=compute_file_hash(path),
-                ))
+                files.append(
+                    EvalManifestFile(
+                        path=rel_path,
+                        size_bytes=path.stat().st_size,
+                        content_type=guess_content_type(path),
+                        hash_sha256=compute_file_hash(path),
+                    )
+                )
 
     # Add evidence files
     if evidence_files:
         for ev in evidence_files:
-            evidence.append(EvalManifestEvidence(
-                path=ev.get("path", ""),
-                evidence_type=ev.get("type", "unknown"),
-                description=ev.get("description", ""),
-                created_at=ev.get("created_at", ""),
-            ))
+            evidence.append(
+                EvalManifestEvidence(
+                    path=ev.get("path", ""),
+                    evidence_type=ev.get("type", "unknown"),
+                    description=ev.get("description", ""),
+                    created_at=ev.get("created_at", ""),
+                )
+            )
 
     # Resolve content_root from profile if not provided
     if content_root is None:
@@ -367,7 +371,9 @@ def generate_manifest(
         "strategy": "git-or-hash",
         "target_revision_source": target_revision_source,
         "wiki_revision_source": wiki_revision_source,
-        "is_stale": bool(target_git_commit and wiki_git_commit and target_git_commit != wiki_git_commit),
+        "is_stale": bool(
+            target_git_commit and wiki_git_commit and target_git_commit != wiki_git_commit
+        ),
     }
 
     return EvalManifest(
@@ -587,6 +593,7 @@ def is_git_repository(repo_path: Path | str) -> bool:
 # PATH SAFETY VALIDATION
 # =============================================================================
 
+
 def validate_eval_root_safety(root: Path | str) -> tuple[bool, str, list[str]]:
     """Validate that an eval root is safe (doesn't overlap with protected dirs).
 
@@ -652,11 +659,11 @@ EVAL_OUTPUT_LAYOUT_CONTRACT: dict[str, Any] = {
                 "verify-result.json": "Verification results if verify was run",
                 "*.md": "Generated documentation outputs",
                 "*.sqlite": "Runtime database snapshot",
-            }
+            },
         },
         "latest/": {
             "description": "Symlink or copy of most recent run (optional)",
-        }
+        },
     },
     "protected_directories": sorted(PROTECTED_DIRS),
     "boundary_rules": [

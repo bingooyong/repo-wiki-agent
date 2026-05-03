@@ -16,26 +16,28 @@ Key features:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.core.contracts import Endpoint, RepositorySnapshot, extract_service_family_from_page_id
+from repo_wiki.core.contracts import (
+    Endpoint,
+    RepositorySnapshot,
+    extract_service_family_from_page_id,
+)
 from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.generator.composer import (
     ComposerContext,
-    ComposerInput,
     ComposerOutput,
     build_composer_input,
     create_composer,
 )
-from repo_wiki.llm.providers import MockLLMProvider, create_mock_provider
-from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
-
+from repo_wiki.llm.providers import MockLLMProvider
+from repo_wiki.planner.schema import WikiPagePlan
 
 # =============================================================================
 # SERVICE FAMILY API COMPOSER
 # =============================================================================
+
 
 class ServiceFamilyAPIComposer:
     """Composer for service-family based API reference articles.
@@ -138,21 +140,20 @@ class ServiceFamilyAPIComposer:
 
         # Otherwise filter by service family
         if service_family:
-            return [
-                ep for ep in self.snapshot.endpoints
-                if ep.service_family == service_family
-            ]
+            return [ep for ep in self.snapshot.endpoints if ep.service_family == service_family]
 
         # Check for special pages like authentication, health, etc.
         page_id = page_plan.page_id.lower()
         if "auth" in page_id:
             return [
-                ep for ep in self.snapshot.endpoints
+                ep
+                for ep in self.snapshot.endpoints
                 if ep.auth_required or ep.auth_type in ("bearer", "oauth", "api-key")
             ]
         if "health" in page_id:
             return [
-                ep for ep in self.snapshot.endpoints
+                ep
+                for ep in self.snapshot.endpoints
                 if "health" in ep.path.lower() or "ready" in ep.path.lower()
             ]
 
@@ -186,12 +187,10 @@ class ServiceFamilyAPIComposer:
         # Categorize endpoints
         auth_endpoints = [ep for ep in endpoints if ep.auth_required]
         health_endpoints = [
-            ep for ep in endpoints
-            if "health" in ep.path.lower() or "ready" in ep.path.lower()
+            ep for ep in endpoints if "health" in ep.path.lower() or "ready" in ep.path.lower()
         ]
         mutation_endpoints = [
-            ep for ep in endpoints
-            if ep.method in ("POST", "PUT", "PATCH", "DELETE")
+            ep for ep in endpoints if ep.method in ("POST", "PUT", "PATCH", "DELETE")
         ]
 
         context["auth_endpoint_count"] = len(auth_endpoints)
@@ -289,6 +288,7 @@ class ServiceFamilyAPIComposer:
         This is a synchronous wrapper that uses the underlying async method.
         """
         import asyncio
+
         return asyncio.run(self.compose_api_page_async(page_plan, evidence_binding))
 
     def format_endpoint_table(self, endpoints: list[Endpoint]) -> str:
@@ -306,10 +306,7 @@ class ServiceFamilyAPIComposer:
         # Limit to 10 representative endpoints
         representative = endpoints[:10]
 
-        lines = [
-            "| Method | Path | Auth | Description |",
-            "|--------|------|------|-------------|"
-        ]
+        lines = ["| Method | Path | Auth | Description |", "|--------|------|------|-------------|"]
 
         for ep in representative:
             auth_str = ep.auth_type if ep.auth_required else "none"
@@ -337,7 +334,9 @@ class ServiceFamilyAPIComposer:
 
         # Generate purpose based on endpoints
         auth_count = sum(1 for ep in endpoints if ep.auth_required)
-        mutation_count = sum(1 for ep in endpoints if ep.method in ("POST", "PUT", "PATCH", "DELETE"))
+        mutation_count = sum(
+            1 for ep in endpoints if ep.method in ("POST", "PUT", "PATCH", "DELETE")
+        )
         query_count = sum(1 for ep in endpoints if ep.method == "GET")
 
         purpose_parts = [f"The **{service_family}** service family"]
@@ -360,6 +359,7 @@ class ServiceFamilyAPIComposer:
 # =============================================================================
 # COMPOSER FACTORY
 # =============================================================================
+
 
 def create_service_family_composer(
     snapshot: RepositorySnapshot,
@@ -386,6 +386,7 @@ def create_service_family_composer(
 # =============================================================================
 # STANDALONE COMPOSITION HELPERS
 # =============================================================================
+
 
 def compose_service_family_article(
     page_plan: WikiPagePlan,

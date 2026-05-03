@@ -15,20 +15,18 @@ from __future__ import annotations
 
 import pytest
 
+from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 from repo_wiki.generator.mermaid_planner import (
-    MermaidDiagramType,
-    DiagramNode,
     DiagramEdge,
+    DiagramNode,
     DiagramPlan,
-    MermaidPlanner,
-    MermaidRenderer,
-    validate_mermaid_syntax,
+    MermaidDiagramType,
     create_planner,
     create_renderer,
-    plan_and_render_diagram,
     link_diagram_to_evidence,
+    plan_and_render_diagram,
+    validate_mermaid_syntax,
 )
-from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 
 
@@ -428,9 +426,7 @@ class TestPlanAndRenderDiagram:
             page_id="overview",
             page_type="overview",
             evidence_binding=None,
-            context={
-                "modules": [{"name": "auth", "path": "src/auth"}]
-            },
+            context={"modules": [{"name": "auth", "path": "src/auth"}]},
         )
 
         assert rendered is not None
@@ -443,11 +439,7 @@ class TestPlanAndRenderDiagram:
             page_id="api-ref",
             page_type="api",
             evidence_binding=None,
-            context={
-                "endpoints": [
-                    {"path": "/api/users", "method": "GET", "service": "users"}
-                ]
-            },
+            context={"endpoints": [{"path": "/api/users", "method": "GET", "service": "users"}]},
         )
 
         assert rendered is not None

@@ -124,7 +124,9 @@ class MinimaxProvider(LLMProvider):
             elif response.status_code != 200:
                 error_data = response.json() if response.content else {}
                 raise NonRetryableError(
-                    message=error_data.get("base_resp", {}).get("translated_error_message", f"Request failed: {response.status_code}"),
+                    message=error_data.get("base_resp", {}).get(
+                        "translated_error_message", f"Request failed: {response.status_code}"
+                    ),
                     code=ErrorCode.UNKNOWN,
                     details={"status": response.status_code},
                 )
@@ -191,7 +193,9 @@ class MinimaxProvider(LLMProvider):
             if response.status_code != 200:
                 error_data = response.json() if response.content else {}
                 raise NonRetryableError(
-                    message=error_data.get("error", {}).get("message", f"Request failed: {response.status_code}"),
+                    message=error_data.get("error", {}).get(
+                        "message", f"Request failed: {response.status_code}"
+                    ),
                     code=ErrorCode.UNKNOWN,
                     details={"status": response.status_code, "response": error_data},
                 )
@@ -315,16 +319,22 @@ class MinimaxProvider(LLMProvider):
             validations.append(("api_key_env", redacted_key, ValidationReason.REDACTED.value))
 
         # Max tokens
-        validations.append(("max_tokens", str(self._config.max_tokens), ValidationReason.VALID.value))
+        validations.append(
+            ("max_tokens", str(self._config.max_tokens), ValidationReason.VALID.value)
+        )
 
         # Temperature
-        validations.append(("temperature", str(self._config.temperature), ValidationReason.VALID.value))
+        validations.append(
+            ("temperature", str(self._config.temperature), ValidationReason.VALID.value)
+        )
 
         # Timeout
         validations.append(("timeout", str(self._config.timeout), ValidationReason.VALID.value))
 
         # Max retries
-        validations.append(("max_retries", str(self._config.max_retries), ValidationReason.VALID.value))
+        validations.append(
+            ("max_retries", str(self._config.max_retries), ValidationReason.VALID.value)
+        )
 
         return validations
 

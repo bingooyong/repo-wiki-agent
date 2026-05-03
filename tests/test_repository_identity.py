@@ -1,16 +1,13 @@
 """Tests for repository identity resolver."""
 
 import json
-import tempfile
 from pathlib import Path
 
-import pytest
-
 from repo_wiki.planner.identity import (
-    resolve_repository_identity,
+    _human_readable_name,
     detect_language_and_framework,
     detect_package_manager,
-    _human_readable_name,
+    resolve_repository_identity,
 )
 
 
@@ -20,11 +17,16 @@ class TestRepositoryIdentityResolver:
     def test_resolve_from_package_json(self, tmp_path: Path):
         """Test resolving identity from package.json."""
         package_json = tmp_path / "package.json"
-        package_json.write_text(json.dumps({
-            "name": "my-awesome-project",
-            "version": "2.0.0",
-            "description": "An awesome project",
-        }), encoding="utf-8")
+        package_json.write_text(
+            json.dumps(
+                {
+                    "name": "my-awesome-project",
+                    "version": "2.0.0",
+                    "description": "An awesome project",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         identity = resolve_repository_identity(tmp_path)
         assert identity.name == "my-awesome-project"
@@ -35,12 +37,15 @@ class TestRepositoryIdentityResolver:
     def test_resolve_from_pyproject_toml(self, tmp_path: Path):
         """Test resolving identity from pyproject.toml."""
         pyproject = tmp_path / "pyproject.toml"
-        pyproject.write_text("""
+        pyproject.write_text(
+            """
 [project]
 name = "my-python-project"
 version = "1.0.0"
 description = "A Python project"
-""", encoding="utf-8")
+""",
+            encoding="utf-8",
+        )
 
         identity = resolve_repository_identity(tmp_path)
         assert identity.name == "my-python-project"
@@ -49,12 +54,15 @@ description = "A Python project"
     def test_resolve_from_pom_xml(self, tmp_path: Path):
         """Test resolving identity from pom.xml."""
         pom = tmp_path / "pom.xml"
-        pom.write_text("""
+        pom.write_text(
+            """
 <project>
     <artifactId>my-java-project</artifactId>
     <version>1.5.0</version>
 </project>
-""", encoding="utf-8")
+""",
+            encoding="utf-8",
+        )
 
         identity = resolve_repository_identity(tmp_path)
         assert identity.name == "my-java-project"
@@ -69,7 +77,8 @@ description = "A Python project"
     def test_readme_description_extraction(self, tmp_path: Path):
         """Test extracting description from README."""
         readme = tmp_path / "README.md"
-        readme.write_text("""
+        readme.write_text(
+            """
 # My Project
 
 This is a detailed description of my project.
@@ -78,16 +87,22 @@ It does amazing things.
 ## Getting Started
 
 Quick start guide here.
-""", encoding="utf-8")
+""",
+            encoding="utf-8",
+        )
 
         identity = resolve_repository_identity(tmp_path)
         assert identity.description is not None
-        assert "amazing" in identity.description.lower() or "project" in identity.description.lower()
+        assert (
+            "amazing" in identity.description.lower() or "project" in identity.description.lower()
+        )
 
     def test_ai_api_atlas_not_workspace(self, tmp_path: Path):
         """Test that AI_API_Atlas project name is not 'workspace'."""
         # Create a fake AI_API_Atlas project structure
-        (tmp_path / "README.md").write_text("# AI API Atlas\n\nAn API documentation atlas.", encoding="utf-8")
+        (tmp_path / "README.md").write_text(
+            "# AI API Atlas\n\nAn API documentation atlas.", encoding="utf-8"
+        )
         (tmp_path / "repo_wiki").mkdir()
         (tmp_path / "tests").mkdir()
 
@@ -135,9 +150,9 @@ class TestLanguageDetection:
     def test_detect_nestjs_framework(self, tmp_path: Path):
         """Test detecting NestJS framework."""
         package_json = tmp_path / "package.json"
-        package_json.write_text(json.dumps({
-            "dependencies": {"@nestjs/core": "^10.0.0"}
-        }), encoding="utf-8")
+        package_json.write_text(
+            json.dumps({"dependencies": {"@nestjs/core": "^10.0.0"}}), encoding="utf-8"
+        )
 
         lang, framework = detect_language_and_framework(tmp_path)
         assert framework == "nestjs"

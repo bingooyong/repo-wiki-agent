@@ -300,8 +300,8 @@ class TestGateTypeEnforcement:
         # Default threshold (not strict) would allow soft gates
         # but we don't have non-strict implementation in qoder_strict_verifier
         # This test validates the enum exists
-        assert hasattr(GateType, 'HARD')
-        assert hasattr(GateType, 'SOFT')
+        assert hasattr(GateType, "HARD")
+        assert hasattr(GateType, "SOFT")
 
 
 class TestVerificationIntegration:

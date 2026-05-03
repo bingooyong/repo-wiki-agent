@@ -92,7 +92,10 @@ _SERVICE_FAMILY_SIGNALS: dict[str, tuple[frozenset[str], float]] = {
 }
 
 _RUNTIME_ROLE_SIGNALS: dict[str, tuple[frozenset[str], float]] = {
-    "api-server": (frozenset({"router", "endpoint", "handler", "get", "post", "put", "delete", "patch"}), 0.7),
+    "api-server": (
+        frozenset({"router", "endpoint", "handler", "get", "post", "put", "delete", "patch"}),
+        0.7,
+    ),
     "worker": (frozenset({"worker", "job", "task", "queue", "background", "async"}), 0.7),
     "data-pipeline": (frozenset({"pipeline", "stream", "batch", "etl", "transform"}), 0.7),
     "data-store": (frozenset({"db", "storage", "cache", "repository", "dal", "dao"}), 0.7),
@@ -144,7 +147,9 @@ class RepositoryScanner:
         skipped = 0
         total = 0
         max_bytes = self.config.security.max_file_size_kb * 1024
-        for dirpath, dirnames, filenames in os.walk(self.root, followlinks=self.config.scan.follow_symlinks):
+        for dirpath, dirnames, filenames in os.walk(
+            self.root, followlinks=self.config.scan.follow_symlinks
+        ):
             current_dir = Path(dirpath)
             try:
                 current_rel = current_dir.relative_to(self.root)
@@ -187,9 +192,13 @@ class RepositoryScanner:
                 self.last_security_warnings.extend(warnings)
                 scanned.append(ScannedFile(path=rel, text=sanitized))
                 if len(scanned) >= self.config.scan.max_file_count:
-                    stats = RepositoryStats(total_files=total, scanned_files=len(scanned), skipped_files=skipped)
+                    stats = RepositoryStats(
+                        total_files=total, scanned_files=len(scanned), skipped_files=skipped
+                    )
                     return scanned, stats
-        stats = RepositoryStats(total_files=total, scanned_files=len(scanned), skipped_files=skipped)
+        stats = RepositoryStats(
+            total_files=total, scanned_files=len(scanned), skipped_files=skipped
+        )
         return scanned, stats
 
     def _is_directory_pruned(self, rel_path: Path) -> bool:
@@ -222,7 +231,11 @@ class RepositoryScanner:
         }
         if any(part in generated_dirs for part in rel_path.parts):
             return True
-        for directory in set(self.config.scan.exclude_dirs) | set(self.config.security.deny_dirs) | generated_dirs:
+        for directory in (
+            set(self.config.scan.exclude_dirs)
+            | set(self.config.security.deny_dirs)
+            | generated_dirs
+        ):
             normalized = directory.strip("/")
             if normalized and normalized in rel_path.parts:
                 return True
@@ -306,7 +319,11 @@ class RepositoryScanner:
         return language if count > 0 else "unknown"
 
     def _detect_framework(self, files: list[ScannedFile]) -> str:
-        content = "\n".join(f.text for f in files if f.path.name in {"package.json", "pyproject.toml", "requirements.txt", "go.mod"})
+        content = "\n".join(
+            f.text
+            for f in files
+            if f.path.name in {"package.json", "pyproject.toml", "requirements.txt", "go.mod"}
+        )
         framework_signals = {
             "nestjs": ("@nestjs",),
             "express": ("express",),
@@ -359,9 +376,24 @@ class RepositoryScanner:
         language = self._detect_language(files)
         fallback = {
             "python": {"start": "python -m app", "test": "pytest -q", "lint": "ruff check ."},
-            "typescript": {"start": "npm run start", "build": "npm run build", "test": "npm run test", "lint": "npm run lint"},
-            "javascript": {"start": "npm run start", "build": "npm run build", "test": "npm run test", "lint": "npm run lint"},
-            "go": {"start": "go run ./cmd/...", "build": "go build ./...", "test": "go test ./...", "lint": "golangci-lint run"},
+            "typescript": {
+                "start": "npm run start",
+                "build": "npm run build",
+                "test": "npm run test",
+                "lint": "npm run lint",
+            },
+            "javascript": {
+                "start": "npm run start",
+                "build": "npm run build",
+                "test": "npm run test",
+                "lint": "npm run lint",
+            },
+            "go": {
+                "start": "go run ./cmd/...",
+                "build": "go build ./...",
+                "test": "go test ./...",
+                "lint": "golangci-lint run",
+            },
         }.get(language, {})
         for key, value in fallback.items():
             if not commands[key]:
@@ -375,7 +407,11 @@ class RepositoryScanner:
         for file in files:
             if file.path.name in {"main.py", "app.py", "server.py", "main.go"}:
                 entries.add(file.path.as_posix())
-            if len(file.path.parts) >= 3 and file.path.parts[0] == "cmd" and file.path.name == "main.go":
+            if (
+                len(file.path.parts) >= 3
+                and file.path.parts[0] == "cmd"
+                and file.path.name == "main.go"
+            ):
                 entries.add(file.path.parent.as_posix())
         return sorted(entries)
 
@@ -397,7 +433,9 @@ class RepositoryScanner:
                     interfaces=[],
                     data_models=[],
                     owner="unknown",
-                    doc_path=f"docs/modules/{module_path.replace('/', '-')}.md" if module_path != "." else "docs/modules/root.md",
+                    doc_path=f"docs/modules/{module_path.replace('/', '-')}.md"
+                    if module_path != "."
+                    else "docs/modules/root.md",
                 )
 
             export_names = self._extract_exports(file)
@@ -418,18 +456,31 @@ class RepositoryScanner:
         suffix = file.path.suffix.lower()
         exports: set[str] = set()
         if suffix == ".py":
-            exports.update(re.findall(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", file.text, re.MULTILINE))
-            exports.update(re.findall(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*[:(]", file.text, re.MULTILINE))
+            exports.update(
+                re.findall(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", file.text, re.MULTILINE)
+            )
+            exports.update(
+                re.findall(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*[:(]", file.text, re.MULTILINE)
+            )
         elif suffix in {".ts", ".tsx", ".js", ".jsx"}:
-            exports.update(re.findall(r"\bexport\s+(?:class|function|const|let|var|type|interface)\s+([A-Za-z_][A-Za-z0-9_]*)", file.text))
+            exports.update(
+                re.findall(
+                    r"\bexport\s+(?:class|function|const|let|var|type|interface)\s+([A-Za-z_][A-Za-z0-9_]*)",
+                    file.text,
+                )
+            )
         elif suffix == ".go":
-            exports.update(re.findall(r"^\s*func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", file.text, re.MULTILINE))
+            exports.update(
+                re.findall(r"^\s*func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", file.text, re.MULTILINE)
+            )
         elif suffix in {".java", ".kt"}:
             exports.update(re.findall(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)", file.text))
             exports.update(re.findall(r"\binterface\s+([A-Za-z_][A-Za-z0-9_]*)", file.text))
         return sorted(exports)
 
-    def _extract_endpoints(self, files: list[ScannedFile], modules: dict[str, Module]) -> list[Endpoint]:
+    def _extract_endpoints(
+        self, files: list[ScannedFile], modules: dict[str, Module]
+    ) -> list[Endpoint]:
         endpoints: list[Endpoint] = []
         for file in files:
             suffix = file.path.suffix.lower()
@@ -454,7 +505,9 @@ class RepositoryScanner:
                     )
                 )
 
-            for decorator, path_expr in re.findall(r"@(Get|Post|Put|Patch|Delete|Options|Head)\(\s*[\"']?([^\"')]+)[\"']?\)", text):
+            for decorator, path_expr in re.findall(
+                r"@(Get|Post|Put|Patch|Delete|Options|Head)\(\s*[\"']?([^\"')]+)[\"']?\)", text
+            ):
                 endpoints.append(
                     Endpoint(
                         method=decorator.upper(),
@@ -465,7 +518,11 @@ class RepositoryScanner:
                     )
                 )
 
-            for method, path_expr in re.findall(r"@(?:app|router|bp)\.(get|post|put|patch|delete|options|head)\(\s*[\"']([^\"']+)[\"']", text, re.IGNORECASE):
+            for method, path_expr in re.findall(
+                r"@(?:app|router|bp)\.(get|post|put|patch|delete|options|head)\(\s*[\"']([^\"']+)[\"']",
+                text,
+                re.IGNORECASE,
+            ):
                 endpoints.append(
                     Endpoint(
                         method=method.upper(),
@@ -476,7 +533,9 @@ class RepositoryScanner:
                     )
                 )
 
-            for path_expr, handler in re.findall(r"http\.HandleFunc\(\s*[\"']([^\"']+)[\"']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)", text):
+            for path_expr, handler in re.findall(
+                r"http\.HandleFunc\(\s*[\"']([^\"']+)[\"']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)", text
+            ):
                 endpoints.append(
                     Endpoint(
                         method="GET",
@@ -550,7 +609,9 @@ class RepositoryScanner:
             return match.group(1)
         return "handler"
 
-    def _extract_data_models(self, files: list[ScannedFile], modules: dict[str, Module]) -> list[DataModel]:
+    def _extract_data_models(
+        self, files: list[ScannedFile], modules: dict[str, Module]
+    ) -> list[DataModel]:
         models: list[DataModel] = []
         for file in files:
             suffix = file.path.suffix.lower()
@@ -562,31 +623,70 @@ class RepositoryScanner:
             path_str = file.path.as_posix()
             lower_path = path_str.lower()
             if suffix == ".py":
-                for name, base in re.findall(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\(([^)]+)\)\s*:", file.text, re.MULTILINE):
-                    if any(key in base for key in ("BaseModel", "Model", "SQLModel")) or any(h in lower_path for h in _MODEL_FILE_HINTS):
-                        models.append(DataModel(name=name, type="python_class", module=module_name, file_path=path_str))
+                for name, base in re.findall(
+                    r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\(([^)]+)\)\s*:", file.text, re.MULTILINE
+                ):
+                    if any(key in base for key in ("BaseModel", "Model", "SQLModel")) or any(
+                        h in lower_path for h in _MODEL_FILE_HINTS
+                    ):
+                        models.append(
+                            DataModel(
+                                name=name,
+                                type="python_class",
+                                module=module_name,
+                                file_path=path_str,
+                            )
+                        )
             elif suffix in {".ts", ".tsx", ".js", ".jsx"}:
                 for name in re.findall(
                     r"\b(?:interface|type|class)\s+([A-Za-z_][A-Za-z0-9_]*(?:DTO|Schema|Model|Entity)?)",
                     file.text,
                 ):
-                    if (
-                        name.lower().endswith(("dto", "schema", "model", "entity"))
-                        or any(h in lower_path for h in _MODEL_FILE_HINTS)
+                    if name.lower().endswith(("dto", "schema", "model", "entity")) or any(
+                        h in lower_path for h in _MODEL_FILE_HINTS
                     ):
-                        models.append(DataModel(name=name, type="ts_definition", module=module_name, file_path=path_str))
+                        models.append(
+                            DataModel(
+                                name=name,
+                                type="ts_definition",
+                                module=module_name,
+                                file_path=path_str,
+                            )
+                        )
             elif suffix == ".go":
-                for name in re.findall(r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b", file.text, re.MULTILINE):
+                for name in re.findall(
+                    r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b", file.text, re.MULTILINE
+                ):
                     if any(h in lower_path for h in _MODEL_FILE_HINTS):
-                        models.append(DataModel(name=name, type="go_struct", module=module_name, file_path=path_str))
+                        models.append(
+                            DataModel(
+                                name=name, type="go_struct", module=module_name, file_path=path_str
+                            )
+                        )
             elif suffix in {".java", ".kt"}:
                 for name in re.findall(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)", file.text):
-                    if any(h in lower_path for h in _MODEL_FILE_HINTS) or name.lower().endswith(("dto", "entity", "model")):
-                        models.append(DataModel(name=name, type="jvm_class", module=module_name, file_path=path_str))
+                    if any(h in lower_path for h in _MODEL_FILE_HINTS) or name.lower().endswith(
+                        ("dto", "entity", "model")
+                    ):
+                        models.append(
+                            DataModel(
+                                name=name, type="jvm_class", module=module_name, file_path=path_str
+                            )
+                        )
 
             if "migration" in lower_path or "alembic" in lower_path:
-                for table in re.findall(r"(?i)create\s+table\s+(?:if\s+not\s+exists\s+)?([A-Za-z_][A-Za-z0-9_]*)", file.text):
-                    models.append(DataModel(name=table, type="migration_table", module=module_name, file_path=path_str))
+                for table in re.findall(
+                    r"(?i)create\s+table\s+(?:if\s+not\s+exists\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+                    file.text,
+                ):
+                    models.append(
+                        DataModel(
+                            name=table,
+                            type="migration_table",
+                            module=module_name,
+                            file_path=path_str,
+                        )
+                    )
 
         dedup: dict[tuple[str, str, str], DataModel] = {}
         for model in models:
@@ -600,7 +700,9 @@ class RepositoryScanner:
         data_models: list[DataModel],
     ) -> None:
         by_name = {module.name: module for module in modules.values()}
-        referenced = {endpoint.module for endpoint in endpoints} | {model.module for model in data_models}
+        referenced = {endpoint.module for endpoint in endpoints} | {
+            model.module for model in data_models
+        }
         for module_name in sorted(x for x in referenced if x and x not in by_name):
             path = module_name
             modules[path] = Module(
@@ -616,7 +718,9 @@ class RepositoryScanner:
                 doc_path=f"docs/modules/{module_name.replace('/', '-')}.md",
             )
 
-    def _extract_dependencies(self, files: list[ScannedFile], modules: dict[str, Module]) -> dict[str, set[str]]:
+    def _extract_dependencies(
+        self, files: list[ScannedFile], modules: dict[str, Module]
+    ) -> dict[str, set[str]]:
         deps: dict[str, set[str]] = {module.path: set() for module in modules.values()}
         known_paths = list(modules.keys())
         for file in files:
@@ -624,7 +728,9 @@ class RepositoryScanner:
             if module_path not in deps:
                 continue
             text = file.text
-            candidates = set(re.findall(r"^\s*from\s+([A-Za-z0-9_./]+)\s+import\b", text, re.MULTILINE))
+            candidates = set(
+                re.findall(r"^\s*from\s+([A-Za-z0-9_./]+)\s+import\b", text, re.MULTILINE)
+            )
             candidates.update(re.findall(r"^\s*import\s+([A-Za-z0-9_./]+)", text, re.MULTILINE))
             candidates.update(re.findall(r"from\s+[\"']([^\"']+)[\"']", text))
             candidates.update(re.findall(r"import\s+[\"']([^\"']+)[\"']", text))
@@ -696,9 +802,15 @@ class RepositoryScanner:
             for dep in module.depends_on:
                 reverse_map.setdefault(dep, set()).add(module.name)
             module.interfaces = sorted(
-                {f"{endpoint.method} {endpoint.path}" for endpoint in endpoints if endpoint.module == module.name}
+                {
+                    f"{endpoint.method} {endpoint.path}"
+                    for endpoint in endpoints
+                    if endpoint.module == module.name
+                }
             )
-            module.data_models = sorted({model.name for model in data_models if model.module == module.name})
+            module.data_models = sorted(
+                {model.name for model in data_models if model.module == module.name}
+            )
 
         for module in modules.values():
             module.depended_by = sorted(reverse_map.get(module.name, set()))
@@ -768,7 +880,10 @@ class RepositoryScanner:
             module.runtime_role = runtime_role
 
     def _score_classification(
-        self, signals: str, classification_map: dict[str, tuple[frozenset[str], float]], context: str
+        self,
+        signals: str,
+        classification_map: dict[str, tuple[frozenset[str], float]],
+        context: str,
     ) -> tuple[str, float, str]:
         """Score and return the best classification match with confidence and reason."""
         best_match = "unknown"
@@ -801,7 +916,11 @@ class RepositoryScanner:
 
         # Python detection - check for .py files or path hints
         if "python" in path_lower or ".py" in signals_lower:
-            matched = [k for k in _SERVICE_FAMILY_SIGNALS["python-backend"][0] if k.lower() in signals_lower]
+            matched = [
+                k
+                for k in _SERVICE_FAMILY_SIGNALS["python-backend"][0]
+                if k.lower() in signals_lower
+            ]
             if matched:
                 return "python-backend", 0.8, f"Python signals: {', '.join(matched[:2])}"
             # Even if no keywords matched, .py is a strong signal
@@ -809,7 +928,11 @@ class RepositoryScanner:
                 return "python-backend", 0.7, "Python file extension detected"
         # TypeScript detection
         elif ".ts" in signals_lower or ".tsx" in signals_lower or "typescript" in path_lower:
-            matched = [k for k in _SERVICE_FAMILY_SIGNALS["typescript-frontend"][0] if k.lower() in signals_lower]
+            matched = [
+                k
+                for k in _SERVICE_FAMILY_SIGNALS["typescript-frontend"][0]
+                if k.lower() in signals_lower
+            ]
             if matched:
                 return "typescript-frontend", 0.8, f"TypeScript signals: {', '.join(matched[:2])}"
             if ".ts" in signals_lower or ".tsx" in signals_lower:
@@ -837,7 +960,13 @@ class RepositoryScanner:
 
         # Check interface patterns
         for role, (keywords, base_confidence) in _RUNTIME_ROLE_SIGNALS.items():
-            matches = [k for k in keywords if k.lower() in interfaces_text or k.lower() in models_text or k.lower() in signals.lower()]
+            matches = [
+                k
+                for k in keywords
+                if k.lower() in interfaces_text
+                or k.lower() in models_text
+                or k.lower() in signals.lower()
+            ]
             if matches:
                 return role, base_confidence, f"Role signals: {', '.join(matches[:2])}"
 
@@ -882,13 +1011,19 @@ class RepositoryScanner:
             endpoint.auth_required = endpoint.auth_type != "none"
 
             # Detect request body
-            endpoint.request_body = endpoint.method in ("POST", "PUT", "PATCH") and not self._is_webhook_path(endpoint.path)
+            endpoint.request_body = endpoint.method in (
+                "POST",
+                "PUT",
+                "PATCH",
+            ) and not self._is_webhook_path(endpoint.path)
 
             # Set common error codes
             endpoint.error_codes = [400, 401, 403, 404, 500]
 
             # Extract line number for handler citation
-            line_number = self._find_handler_line(endpoint, file_contents.get(endpoint.file_path, ""))
+            line_number = self._find_handler_line(
+                endpoint, file_contents.get(endpoint.file_path, "")
+            )
             endpoint.line_number = line_number
             endpoint.line_end = line_number + 10  # Approximate span
 

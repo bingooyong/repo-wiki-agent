@@ -12,29 +12,24 @@ import re
 
 import pytest
 
+from repo_wiki.llm import redact_secrets
 from repo_wiki.prompts import (
-    PagePromptType,
-    CitationStyle,
-    HeadingRequirement,
-    EvidenceRequirement,
-    StyleRequirement,
-    AntiHallucinationRequirement,
-    PagePromptContract,
-    PAGE_PROMPT_CONTRACTS,
-    get_contract_for_page_type,
-    get_contract_for_doc_type,
-    SYSTEM_PROMPT_FRAGMENT,
-    OVERVIEW_PROMPT_FRAGMENT,
-    SERVICE_PROMPT_FRAGMENT,
     API_PROMPT_FRAGMENT,
     DATA_PROMPT_FRAGMENT,
+    DEVELOPMENT_PROMPT_FRAGMENT,
     ENTITY_PROMPT_FRAGMENT,
     OPS_PROMPT_FRAGMENT,
-    DEVELOPMENT_PROMPT_FRAGMENT,
+    OVERVIEW_PROMPT_FRAGMENT,
+    PAGE_PROMPT_CONTRACTS,
+    SERVICE_PROMPT_FRAGMENT,
+    SYSTEM_PROMPT_FRAGMENT,
+    CitationStyle,
+    PagePromptType,
+    get_contract_for_doc_type,
+    get_contract_for_page_type,
     get_prompt_fragment,
     render_prompt_fragment,
 )
-from repo_wiki.llm import redact_secrets
 
 
 class TestPagePromptType:
@@ -147,9 +142,11 @@ class TestGetContractForPageType:
 
     def test_invalid_page_type_raises(self) -> None:
         """Test that invalid page type raises ValueError."""
+
         # Create an invalid page type (if possible) or use a mock
         class InvalidType:
             pass
+
         # We can't easily create an invalid enum value, so we test the function behavior
         # by checking that a ValueError is raised for truly invalid input
         with pytest.raises(ValueError):
@@ -283,7 +280,16 @@ class TestGetPromptFragment:
 
     def test_get_all_fragments(self) -> None:
         """Test getting all fragment types."""
-        fragment_names = ["system", "overview", "service", "api", "data", "entity", "ops", "development"]
+        fragment_names = [
+            "system",
+            "overview",
+            "service",
+            "api",
+            "data",
+            "entity",
+            "ops",
+            "development",
+        ]
         for name in fragment_names:
             fragment = get_prompt_fragment(name)
             assert fragment is not None

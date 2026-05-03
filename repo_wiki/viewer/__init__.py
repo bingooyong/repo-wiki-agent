@@ -1,10 +1,10 @@
 """repo-wiki viewer module for static wiki viewing and IDE integration."""
 
 from repo_wiki.viewer.static_viewer import (
+    build_nav_tree_from_manifest,
     build_toc_html,
     build_tree_html,
     build_viewer_html,
-    build_nav_tree_from_manifest,
     create_viewer_for_directory,
     extract_headings,
     get_label_from_path,

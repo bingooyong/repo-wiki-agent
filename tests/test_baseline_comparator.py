@@ -1,22 +1,18 @@
 """Tests for baseline comparator score integrity and calibration."""
+
 from __future__ import annotations
 
-from pathlib import Path
 import tempfile
-
-import pytest
+from pathlib import Path
 
 from repo_wiki.generator.io import write_text
 from scripts.qoder_baseline_comparison import (
-    QoderBaselineComparator,
-    GapReport,
-    DimensionResult,
+    QODER_REQUIRED_SECTIONS,
     DeltaType,
+    DimensionResult,
+    QoderBaselineComparator,
     ScoreBand,
     get_score_band,
-    QODER_REQUIRED_SECTIONS,
-    QODER_MIN_PROSE_CHARS,
-    QODER_MAX_LIST_RATIO,
 )
 
 
@@ -56,7 +52,7 @@ def _create_quality_target(root: Path) -> None:
     # Create quality overview with proper headings
     write_text(
         root / "docs/00-overview.md",
-        f"""# Overview
+        """# Overview
 
 ## 项目定位
 
@@ -221,7 +217,9 @@ class TestScoreIntegrity:
             report = comparator.compare_all()
 
             for dim in report.dimensions:
-                assert 0.0 <= dim.score <= 1.0, f"Score {dim.score} out of bounds for {dim.dimension}"
+                assert (
+                    0.0 <= dim.score <= 1.0
+                ), f"Score {dim.score} out of bounds for {dim.dimension}"
 
     def test_overall_score_is_weighted_sum(self) -> None:
         """Test that overall score is weighted sum of dimension scores (Phase 14)."""
@@ -378,11 +376,13 @@ class TestPhase14Calibration:
             # Structural weights: 0.20 * 3 = 0.60
             # Quality weights: ~0.133 * 3 = ~0.40
             structural_weight = sum(
-                entry["weight"] for entry in report.summary["weighted_breakdown"]
+                entry["weight"]
+                for entry in report.summary["weighted_breakdown"]
                 if entry["delta_type"] == "STRUCTURAL"
             )
             quality_weight = sum(
-                entry["weight"] for entry in report.summary["weighted_breakdown"]
+                entry["weight"]
+                for entry in report.summary["weighted_breakdown"]
                 if entry["delta_type"] == "QUALITY"
             )
 
@@ -447,4 +447,3 @@ class TestPhase14Calibration:
 
             # Structural failure should block acceptance regardless of quality
             assert report.summary["acceptance_blocked"] is True
-

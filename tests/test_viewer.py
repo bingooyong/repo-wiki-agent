@@ -1,6 +1,5 @@
 """Tests for static repo-wiki viewer with tree navigation and Mermaid rendering."""
 
-import pytest
 
 from repo_wiki.viewer.static_viewer import (
     build_nav_tree_from_manifest,
@@ -286,7 +285,11 @@ class TestBuildTreeHtml:
     def test_multiple_sections(self):
         nodes = [
             {"label": "Overview", "path": "docs/00-overview.md", "type": "overview"},
-            {"label": "Architecture", "path": "docs/sections/architecture/index.md", "type": "section"},
+            {
+                "label": "Architecture",
+                "path": "docs/sections/architecture/index.md",
+                "type": "section",
+            },
         ]
         html = build_tree_html(nodes)
         assert "Overview" in html
@@ -360,13 +363,12 @@ class TestMermaidOfflineSupport:
 
     def test_get_mermaid_script_uses_cdn_by_default(self):
         """By default, Mermaid script points to CDN."""
-        from repo_wiki.viewer.static_viewer import (
-            get_mermaid_script,
-            MERMAID_CDN_URL,
-            MERMAID_LOCAL_PATH,
-        )
         # Reset to default state
         import repo_wiki.viewer.static_viewer as viewer_module
+        from repo_wiki.viewer.static_viewer import (
+            MERMAID_CDN_URL,
+        )
+
         viewer_module.MERMAID_LOCAL_PATH = None
         script = get_mermaid_script()
         assert MERMAID_CDN_URL in script
@@ -375,7 +377,7 @@ class TestMermaidOfflineSupport:
     def test_get_mermaid_script_uses_local_when_configured(self):
         """When MERMAID_LOCAL_PATH is set, use local bundle."""
         import repo_wiki.viewer.static_viewer as viewer_module
-        from repo_wiki.viewer.static_viewer import get_mermaid_script
+
         original = viewer_module.MERMAID_LOCAL_PATH
         try:
             viewer_module.MERMAID_LOCAL_PATH = "/local/path/mermaid.min.js"
@@ -388,6 +390,7 @@ class TestMermaidOfflineSupport:
     def test_inject_mermaid_support_respects_local_path(self):
         """inject_mermaid_support uses current MERMAID_LOCAL_PATH setting."""
         import repo_wiki.viewer.static_viewer as viewer_module
+
         original = viewer_module.MERMAID_LOCAL_PATH
         try:
             viewer_module.MERMAID_LOCAL_PATH = "/offline/mermaid.min.js"
@@ -415,7 +418,11 @@ graph TD
         headings = extract_headings(content)
         nav_nodes = [
             {"label": "Main", "path": "docs/00-overview.md", "type": "overview"},
-            {"label": "Architecture", "path": "docs/sections/architecture/index.md", "type": "section"},
+            {
+                "label": "Architecture",
+                "path": "docs/sections/architecture/index.md",
+                "type": "section",
+            },
         ]
 
         html = build_viewer_html(

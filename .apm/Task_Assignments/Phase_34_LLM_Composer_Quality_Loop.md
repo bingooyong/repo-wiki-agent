@@ -18,22 +18,23 @@ ad_hoc_delegation: false
 Implementation Plan: **Task 34.1 - Page quality classifier** assigned to **Agent_AdapterGovernance**
 
 ## Context from Dependencies
-Depends on Task 33.4 and Task 24.5. Combine low-confidence fallback behavior with existing quality guardrails.
+Depends on Task 33.4 and Task 24.5. Combine low-confidence fallback behavior with existing quality guardrails. Use Qoder's API台账服务 API page as an example of expected Mermaid-backed API flow quality.
 
 ## Objective
 Classify generated pages as `PASS`, `REPAIRABLE`, or `REJECTED`.
 
 ## Detailed Instructions
 - Classify each page after generation and before final manifest readiness.
-- Use dump ratio, prose density, citation relevance, heading completeness, and generic prose signals.
+- Use dump ratio, prose density, citation relevance, heading completeness, Mermaid coverage, flow explanation coverage, and generic prose signals.
+- Reject API/service pages that should have flow diagrams but contain no Mermaid sequence/flow diagram.
 - Persist classification results in the run evidence bundle.
-- Add classifier tests for pass, repairable, and rejected pages.
+- Add classifier tests for pass, repairable, rejected, and missing-Mermaid pages.
 
 ## Expected Output
-- Deliverables: page quality classifier, persisted status, tests.
+- Deliverables: page quality classifier, Mermaid/flow coverage checks, persisted status, tests.
 - Compile command: `uv run repo-wiki --help`
 - Self-test command: `uv run pytest tests/test_quality_guardrails.py tests/test_qoder_like_verifier.py`
-- Completion rule: do not mark complete unless classification results are visible to verify/compare outputs.
+- Completion rule: do not mark complete unless classification results are visible to verify/compare outputs and missing Mermaid on API/service pages is actionable.
 
 ## Memory Logging
 Upon completion, you **MUST** log work in: `.apm/Memory/Phase_34_LLM_Composer_Quality_Loop/Task_34_1_Page_quality_classifier.md`
@@ -65,11 +66,12 @@ Repair failed pages with page-type-specific prompts.
 ## Detailed Instructions
 - Provide repair prompts for API, data-model, architecture, service, and operations pages.
 - Rewrite only failed pages and preserve valid citations.
+- For API pages, require endpoint lifecycle prose plus Mermaid sequence or flow diagrams grounded in controller/repository evidence.
 - Track before/after quality scores for each repaired page.
 - Add mock-provider tests for targeted repair behavior.
 
 ## Expected Output
-- Deliverables: targeted repair prompts, repair pipeline integration, before/after scoring, tests.
+- Deliverables: targeted repair prompts, Mermaid-backed API repair behavior, repair pipeline integration, before/after scoring, tests.
 - Compile command: `uv run repo-wiki --help`
 - Self-test command: `uv run pytest tests/test_llm_page_composer.py tests/test_quality_guardrails.py`
 - Completion rule: do not mark complete unless repair preserves citations and rewrites only failed pages.
@@ -155,4 +157,3 @@ Prevent stale low-quality cached pages from being reused after quality rules cha
 ## Memory Logging
 Upon completion, you **MUST** log work in: `.apm/Memory/Phase_34_LLM_Composer_Quality_Loop/Task_34_4_Cache_validity_by_quality_hash.md`
 ```
-

@@ -1,17 +1,13 @@
 """Tests for Qoder comparator path model repair."""
 
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from repo_wiki.verifier.qoder_comparator_paths import (
-    DEFAULT_SKIP_PATTERNS,
     QODER_TAXONOMY_CATEGORIES,
     PathModel,
-    PathModelConfig,
     PathModelRepair,
-    RepairedBaselineComparator,
     create_repaired_comparator,
     detect_and_normalize_path,
 )
@@ -164,7 +160,9 @@ class TestRepairedBaselineComparator:
         assert result["total_files"] == 2
         assert len(result["in_both"]) == 0  # No baseline
 
-    def test_compare_with_baseline(self, setup_repo_agent_eval_structure, setup_qoder_like_structure):
+    def test_compare_with_baseline(
+        self, setup_repo_agent_eval_structure, setup_qoder_like_structure
+    ):
         """Test comparing target with baseline."""
         comparator = create_repaired_comparator(
             setup_repo_agent_eval_structure,
@@ -215,9 +213,16 @@ class TestQoderTaxonomyCategories:
     def test_all_categories_defined(self):
         """Test all expected categories are defined."""
         expected = [
-            "项目概述", "架构设计", "核心服务", "Python服务",
-            "数据模型", "API参考", "部署运维", "开发指南",
-            "安全合规", "故障排除与维护",
+            "项目概述",
+            "架构设计",
+            "核心服务",
+            "Python服务",
+            "数据模型",
+            "API参考",
+            "部署运维",
+            "开发指南",
+            "安全合规",
+            "故障排除与维护",
         ]
         for cat in expected:
             assert cat in QODER_TAXONOMY_CATEGORIES

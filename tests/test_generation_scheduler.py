@@ -1,8 +1,6 @@
 """Tests for generation scheduler."""
 
 import asyncio
-import tempfile
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,7 +9,6 @@ from repo_wiki.orchestration.generation_scheduler import (
     GenerationScheduler,
     PageJob,
     SchedulerConfig,
-    SchedulerError,
     TokenBucketRateLimiter,
     create_scheduler,
 )
@@ -41,9 +38,7 @@ class TestSchedulerConfig:
 
     def test_get_rate_limit(self):
         """Test provider rate limit lookup."""
-        config = SchedulerConfig(
-            provider_rate_limits={"openai": 1000}
-        )
+        config = SchedulerConfig(provider_rate_limits={"openai": 1000})
         assert config.get_rate_limit("openai") == 1000
         assert config.get_rate_limit("anthropic") == 400  # Default
 
@@ -126,8 +121,8 @@ class TestGenerationScheduler:
     @pytest.fixture
     def scheduler_setup(self, tmp_path):
         """Set up scheduler with dependencies."""
+        from repo_wiki.orchestration.cost_estimator import BudgetGate, GenerationCostEstimator
         from repo_wiki.orchestration.generation_state import GenerationStateMachine
-        from repo_wiki.orchestration.cost_estimator import GenerationCostEstimator, BudgetGate
 
         state_db = tmp_path / "state.sqlite3"
         cost_db = tmp_path / "costs.sqlite3"
@@ -137,9 +132,7 @@ class TestGenerationScheduler:
         budget_gate = BudgetGate(cost_estimator)
         config = SchedulerConfig(max_concurrency=2, max_retries=2)
 
-        scheduler = GenerationScheduler(
-            state_machine, cost_estimator, budget_gate, config
-        )
+        scheduler = GenerationScheduler(state_machine, cost_estimator, budget_gate, config)
 
         return scheduler, state_machine, cost_estimator
 
@@ -168,8 +161,8 @@ class TestGenerationScheduler:
     def test_get_rate_limiter_custom(self, tmp_path):
         """Test custom rate limiter."""
         config = SchedulerConfig(provider_rate_limits={"openai": 1000})
+        from repo_wiki.orchestration.cost_estimator import BudgetGate, GenerationCostEstimator
         from repo_wiki.orchestration.generation_state import GenerationStateMachine
-        from repo_wiki.orchestration.cost_estimator import GenerationCostEstimator, BudgetGate
 
         state_db = tmp_path / "state.sqlite3"
         cost_db = tmp_path / "costs.sqlite3"
@@ -182,8 +175,8 @@ class TestGenerationScheduler:
         )
 
         # Recreate with custom config
+        from repo_wiki.orchestration.cost_estimator import BudgetGate, GenerationCostEstimator
         from repo_wiki.orchestration.generation_state import GenerationStateMachine
-        from repo_wiki.orchestration.cost_estimator import GenerationCostEstimator, BudgetGate
 
         state_db = tmp_path / "state.sqlite3"
         cost_db = tmp_path / "costs.sqlite3"
@@ -260,9 +253,7 @@ class TestGenerationScheduler:
         # Mock always failing generation
         mock_generate = AsyncMock(side_effect=Exception("always fails"))
 
-        success, error = await scheduler._generate_page(
-            job, "openai", "gpt-4o-mini", mock_generate
-        )
+        success, error = await scheduler._generate_page(job, "openai", "gpt-4o-mini", mock_generate)
 
         assert success is False
         assert "always fails" in error
@@ -283,9 +274,7 @@ class TestGenerationScheduler:
 
         mock_generate = AsyncMock()
 
-        success, error = await scheduler._generate_page(
-            job, "openai", "gpt-4o-mini", mock_generate
-        )
+        success, error = await scheduler._generate_page(job, "openai", "gpt-4o-mini", mock_generate)
 
         assert success is False
         assert "cancelled" in error.lower()

@@ -1,18 +1,12 @@
 """Tests for unified readiness report schema and evidence bundle."""
+
 from __future__ import annotations
 
-import json
 from pathlib import Path
-import tempfile
-
-import pytest
 
 from scripts.readiness_report import (
-    ReadinessReport,
-    AcceptanceEvidence,
-    ReadinessCriteria,
-    generate_readiness_report,
     SCHEMA_VERSION,
+    generate_readiness_report,
 )
 
 
@@ -154,9 +148,27 @@ class TestReadinessReportOutput:
                 "acceptance_blocked": False,
             },
             "dimensions": [
-                {"dimension": "directory_hierarchy", "status": "PASS", "score": 1.0, "score_band": "EXCELLENT", "delta_type": "STRUCTURAL"},
-                {"dimension": "section_coverage", "status": "PASS", "score": 0.9, "score_band": "GOOD", "delta_type": "STRUCTURAL"},
-                {"dimension": "heading_coverage", "status": "PASS", "score": 0.8, "score_band": "GOOD", "delta_type": "QUALITY"},
+                {
+                    "dimension": "directory_hierarchy",
+                    "status": "PASS",
+                    "score": 1.0,
+                    "score_band": "EXCELLENT",
+                    "delta_type": "STRUCTURAL",
+                },
+                {
+                    "dimension": "section_coverage",
+                    "status": "PASS",
+                    "score": 0.9,
+                    "score_band": "GOOD",
+                    "delta_type": "STRUCTURAL",
+                },
+                {
+                    "dimension": "heading_coverage",
+                    "status": "PASS",
+                    "score": 0.8,
+                    "score_band": "GOOD",
+                    "delta_type": "QUALITY",
+                },
             ],
         }
 

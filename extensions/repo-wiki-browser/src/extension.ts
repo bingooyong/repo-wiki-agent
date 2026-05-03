@@ -199,14 +199,14 @@ class RepoWikiSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private renderNoWikiRuns(workspaceRoot: string): string {
-        const evalPath = path.join(workspaceRoot, '.repo-agent-eval');
+        const releaseManifestPath = path.join(workspaceRoot, '.repo-agent-eval', 'repowiki', 'zh', 'manifest.json');
         return baseHtml(`
             <section class="panel">
                 <h1>REPO WIKI</h1>
-                <p class="muted">未检测到可用的 Wiki manifest。</p>
-                <p class="muted">请先生成：<code>.repo-agent-eval/&lt;run&gt;/manifest.json</code></p>
-                <p class="muted">当前仅支持读取 manifest 的 <code>navigation_tree</code>，不再回退扫描 <code>docs/</code>。</p>
-                <p class="muted">查找目录：<code>${escapeHtml(evalPath)}</code></p>
+                <p class="muted">未检测到已发布的 READY Wiki。</p>
+                <p class="muted">请先发布：<code>.repo-agent-eval/repowiki/zh/manifest.json</code></p>
+                <p class="muted">插件只读取 release manifest 的 <code>navigation_tree</code>，不回退扫描 run 目录或 <code>docs/</code>。</p>
+                <p class="muted">查找文件：<code>${escapeHtml(releaseManifestPath)}</code></p>
                 <div class="actions">
                     <button class="primary" data-command="update">更新 Wiki</button>
                     <button data-command="sync">同步</button>
@@ -243,7 +243,7 @@ class RepoWikiSidebarProvider implements vscode.WebviewViewProvider {
             ${llmPanel}
 
             <section class="run-panel">
-                <div class="run-panel-title">Run</div>
+                <div class="run-panel-title">Release</div>
                 <select id="runSelect" aria-label="Wiki Run">
                     ${runOptions}
                 </select>
@@ -401,45 +401,41 @@ function discoverWikiSource(workspaceRoot: string, preferredRunKey?: string): Wi
 }
 
 function discoverManifestRuns(workspaceRoot: string): ManifestRunSummary[] {
-    const evalRoot = path.join(workspaceRoot, '.repo-agent-eval');
-    if (!fs.existsSync(evalRoot)) {
+    const releaseRoot = path.join(workspaceRoot, '.repo-agent-eval', 'repowiki', 'zh');
+    const manifestPath = path.join(releaseRoot, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) {
         return [];
     }
-    const manifestPaths = collectManifestPaths(evalRoot, 4);
-    const runs: ManifestRunSummary[] = [];
-
-    for (const manifestPath of manifestPaths) {
-        try {
-            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
-            const navTree = manifest.navigation_tree;
-            if (!Array.isArray(navTree) || navTree.length === 0) {
-                continue;
-            }
-            const stat = fs.statSync(manifestPath);
-            const runId = pickString(manifest.run_id) ?? path.basename(path.dirname(manifestPath));
-            const generatedAt = pickString(manifest.generated_at);
-            const key = path.relative(evalRoot, path.dirname(manifestPath)).replace(/\\/g, '/');
-            const label = generatedAt
-                ? `${runId} · ${generatedAt}`
-                : `${runId} · ${new Date(stat.mtimeMs).toLocaleString()}`;
-            runs.push({
-                key,
-                label,
-                manifestPath,
-                manifestDir: path.dirname(manifestPath),
-                mtimeMs: stat.mtimeMs,
-                generatedAt,
-            });
-        } catch {
-            continue;
+    try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+        const navTree = manifest.navigation_tree;
+        if (!Array.isArray(navTree) || navTree.length === 0) {
+            return [];
         }
+        const releaseStatus = pickString(manifest.release_status) ?? pickString(manifest.readiness);
+        if (releaseStatus !== 'READY') {
+            return [];
+        }
+        const stat = fs.statSync(manifestPath);
+        const runId = pickString(manifest.release_id)
+            ?? pickString(manifest.source_run_id)
+            ?? pickString(manifest.run_id)
+            ?? 'release';
+        const generatedAt = pickString(manifest.published_at) ?? pickString(manifest.generated_at);
+        const label = generatedAt
+            ? `Release · ${runId} · ${generatedAt}`
+            : `Release · ${runId} · ${new Date(stat.mtimeMs).toLocaleString()}`;
+        return [{
+            key: 'repowiki/zh',
+            label,
+            manifestPath,
+            manifestDir: releaseRoot,
+            mtimeMs: stat.mtimeMs,
+            generatedAt,
+        }];
+    } catch {
+        return [];
     }
-
-    return runs.sort((a, b) => {
-        const aTime = Date.parse(a.generatedAt ?? '') || a.mtimeMs;
-        const bTime = Date.parse(b.generatedAt ?? '') || b.mtimeMs;
-        return bTime - aTime;
-    });
 }
 
 function resolveSelectedRun(runs: ManifestRunSummary[], preferredRunKey?: string): ManifestRunSummary {
@@ -450,38 +446,6 @@ function resolveSelectedRun(runs: ManifestRunSummary[], preferredRunKey?: string
         }
     }
     return runs[0];
-}
-
-function collectManifestPaths(root: string, maxDepth: number): string[] {
-    const found: string[] = [];
-    const stack: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }];
-    while (stack.length > 0) {
-        const current = stack.pop();
-        if (!current) {
-            continue;
-        }
-        const { dir, depth } = current;
-        const manifestPath = path.join(dir, 'manifest.json');
-        if (fs.existsSync(manifestPath)) {
-            found.push(manifestPath);
-        }
-        if (depth >= maxDepth) {
-            continue;
-        }
-        let entries: fs.Dirent[] = [];
-        try {
-            entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch {
-            continue;
-        }
-        for (const entry of entries) {
-            if (!entry.isDirectory() || entry.name.startsWith('.')) {
-                continue;
-            }
-            stack.push({ dir: path.join(dir, entry.name), depth: depth + 1 });
-        }
-    }
-    return found;
 }
 
 function loadWikiSourceFromRun(

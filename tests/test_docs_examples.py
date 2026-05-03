@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -82,7 +81,7 @@ class TestDocsExamplesValidation:
 
         # Import AFTER env is set
         from repo_wiki.llm import LLMProviderConfig
-        from repo_wiki.llm.diagnostics import run_llm_diagnostics, format_diagnostics_text
+        from repo_wiki.llm.diagnostics import format_diagnostics_text, run_llm_diagnostics
 
         config = LLMProviderConfig()
         result = run_llm_diagnostics(config=config)
@@ -138,8 +137,9 @@ class TestDocsExamplesValidation:
 
     def test_config_timeout_validation(self):
         """Test timeout validation."""
-        from repo_wiki.llm.config import LLMProviderConfig
         from pydantic import ValidationError
+
+        from repo_wiki.llm.config import LLMProviderConfig
 
         # Valid timeout
         config = LLMProviderConfig(timeout=120.0)
@@ -151,8 +151,9 @@ class TestDocsExamplesValidation:
 
     def test_config_temperature_validation(self):
         """Test temperature validation."""
-        from repo_wiki.llm.config import LLMProviderConfig
         from pydantic import ValidationError
+
+        from repo_wiki.llm.config import LLMProviderConfig
 
         # Valid temperature
         config = LLMProviderConfig(temperature=0.5)

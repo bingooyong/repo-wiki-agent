@@ -24,9 +24,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
-from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
-
 
 # ============================================================================
 # DIAGRAM TYPE DEFINITIONS
@@ -35,6 +34,7 @@ from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 
 class MermaidDiagramType(str, Enum):
     """Supported Mermaid diagram types."""
+
     FLOWCHART = "flowchart"
     SEQUENCE_DIAGRAM = "sequenceDiagram"
     ER_DIAGRAM = "erDiagram"
@@ -83,6 +83,7 @@ PAGE_TYPE_TO_DIAGRAM_PREFERENCE = {
 @dataclass
 class DiagramNode:
     """A node in a Mermaid diagram."""
+
     id: str
     label: str
     shape: str | None = None  # e.g., "round", "circle", "diamond"
@@ -92,6 +93,7 @@ class DiagramNode:
 @dataclass
 class DiagramEdge:
     """An edge/arrow in a Mermaid diagram."""
+
     from_node: str
     to_node: str
     label: str | None = None
@@ -101,6 +103,7 @@ class DiagramEdge:
 @dataclass
 class DiagramPlan:
     """Plan for generating a Mermaid diagram."""
+
     diagram_id: str
     diagram_type: MermaidDiagramType
     title: str
@@ -112,10 +115,14 @@ class DiagramPlan:
 
     # For sequence diagram
     sequence_participants: list[str] = field(default_factory=list)
-    sequence_messages: list[tuple[str, str, str]] = field(default_factory=list)  # (from, to, message)
+    sequence_messages: list[tuple[str, str, str]] = field(
+        default_factory=list
+    )  # (from, to, message)
 
     # For ER diagram
-    er_entities: list[dict[str, Any]] = field(default_factory=list)  # {entity, attributes, primary_key}
+    er_entities: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # {entity, attributes, primary_key}
 
     # For class diagram
     class_definitions: list[dict[str, Any]] = field(default_factory=list)
@@ -134,10 +141,13 @@ class DiagramPlan:
 
 class MermaidSyntaxError(Exception):
     """Raised when Mermaid syntax is invalid."""
+
     pass
 
 
-def validate_mermaid_syntax(diagram_code: str, diagram_type: MermaidDiagramType) -> tuple[bool, str]:
+def validate_mermaid_syntax(
+    diagram_code: str, diagram_type: MermaidDiagramType
+) -> tuple[bool, str]:
     """Validate Mermaid diagram syntax.
 
     Args:
@@ -178,15 +188,11 @@ def _validate_flowchart_syntax(code: str, lines: list[str]) -> list[str]:
 
     # Check for proper direction indicator
     has_direction = any(
-        re.match(r"^\s*(flowchart\s+[BTLR][R]?\s*|graph\s+[BTLR][R]?)", line)
-        for line in lines
+        re.match(r"^\s*(flowchart\s+[BTLR][R]?\s*|graph\s+[BTLR][R]?)", line) for line in lines
     )
     if not has_direction:
         # Also check for simple graph direction
-        has_direction = any(
-            re.match(r"^\s*(graph\s+[TDLR]\s*)", line)
-            for line in lines
-        )
+        has_direction = any(re.match(r"^\s*(graph\s+[TDLR]\s*)", line) for line in lines)
     if not has_direction:
         errors.append("Flowchart missing direction (TD/BT/LR/RL)")
 
@@ -228,10 +234,7 @@ def _validate_sequence_syntax(code: str, lines: list[str]) -> list[str]:
     errors = []
 
     # Check for sequenceDiagram header
-    has_header = any(
-        re.match(r"^\s*sequenceDiagram\s*$", line)
-        for line in lines
-    )
+    has_header = any(re.match(r"^\s*sequenceDiagram\s*$", line) for line in lines)
     if not has_header:
         errors.append("Sequence diagram missing 'sequenceDiagram' header")
 
@@ -255,10 +258,7 @@ def _validate_er_syntax(code: str, lines: list[str]) -> list[str]:
     errors = []
 
     # Check for erDiagram header
-    has_header = any(
-        re.match(r"^\s*erDiagram\s*$", line)
-        for line in lines
-    )
+    has_header = any(re.match(r"^\s*erDiagram\s*$", line) for line in lines)
     if not has_header:
         errors.append("ER diagram missing 'erDiagram' header")
 
@@ -276,10 +276,7 @@ def _validate_class_syntax(code: str, lines: list[str]) -> list[str]:
     errors = []
 
     # Check for classDiagram header
-    has_header = any(
-        re.match(r"^\s*classDiagram\s*$", line)
-        for line in lines
-    )
+    has_header = any(re.match(r"^\s*classDiagram\s*$", line) for line in lines)
     if not has_header:
         errors.append("Class diagram missing 'classDiagram' header")
 
@@ -298,8 +295,7 @@ def _validate_state_syntax(code: str, lines: list[str]) -> list[str]:
 
     # Check for stateDiagram header (accept variants like stateDiagram-v2)
     has_header = any(
-        re.match(r"^\s*stateDiagram[-a-z0-9]*\s*", line, re.IGNORECASE)
-        for line in lines
+        re.match(r"^\s*stateDiagram[-a-z0-9]*\s*", line, re.IGNORECASE) for line in lines
     )
     if not has_header:
         errors.append("State diagram missing 'stateDiagram' header")
@@ -355,43 +351,32 @@ class MermaidPlanner:
 
         # Get preferred diagram types for this page type
         preferred_types = PAGE_TYPE_TO_DIAGRAM_PREFERENCE.get(
-            page_type,
-            [MermaidDiagramType.FLOWCHART]
+            page_type, [MermaidDiagramType.FLOWCHART]
         )
 
         # Plan based on page type
         if page_type in ("overview", "architecture"):
-            diagram = self._plan_overview_architecture_diagram(
-                page_id, evidence_binding, context
-            )
+            diagram = self._plan_overview_architecture_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
 
         elif page_type in ("service", "section"):
-            diagram = self._plan_service_diagram(
-                page_id, evidence_binding, context
-            )
+            diagram = self._plan_service_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
 
         elif page_type == "api":
-            diagram = self._plan_api_diagram(
-                page_id, evidence_binding, context
-            )
+            diagram = self._plan_api_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
 
         elif page_type in ("data", "entity"):
-            diagram = self._plan_data_model_diagram(
-                page_id, evidence_binding, context
-            )
+            diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
 
         elif page_type == "ops":
-            diagram = self._plan_ops_diagram(
-                page_id, evidence_binding, context
-            )
+            diagram = self._plan_ops_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
 
@@ -547,21 +532,25 @@ class MermaidPlanner:
             entity_name = model.get("name", model.get("table", "unknown"))
             attributes = model.get("attributes", [])
             primary_key = model.get("primary_key", "id")
-            er_entities.append({
-                "entity": entity_name,
-                "attributes": attributes,
-                "primary_key": primary_key,
-            })
+            er_entities.append(
+                {
+                    "entity": entity_name,
+                    "attributes": attributes,
+                    "primary_key": primary_key,
+                }
+            )
 
         # If no explicit models, infer from modules
         if not er_entities:
             for module in modules[:5]:
                 module_name = module.get("name", "unknown")
-                er_entities.append({
-                    "entity": module_name,
-                    "attributes": [],
-                    "primary_key": "id",
-                })
+                er_entities.append(
+                    {
+                        "entity": module_name,
+                        "attributes": [],
+                        "primary_key": "id",
+                    }
+                )
 
         evidence_spans = []
         if evidence_binding:
@@ -665,9 +654,7 @@ class MermaidRenderer:
                 lines.append(f"    {node.id}(({node.label}))")
             elif node.shape == "diamond":
                 lines.append(f"    {node.id}{{{node.label}}}")
-            elif node.shape == "rounded":
-                lines.append(f"    {node.id}(({node.label}))")
-            elif node.shape == "round":
+            elif node.shape == "rounded" or node.shape == "round":
                 lines.append(f"    {node.id}(({node.label}))")
             elif node.shape == "rectangle":
                 lines.append(f"    {node.id}[{node.label}]")
@@ -758,9 +745,7 @@ class MermaidRenderer:
 
         return "\n".join(lines)
 
-    def render_diagram_with_validation(
-        self, plan: DiagramPlan
-    ) -> tuple[str | None, bool, str]:
+    def render_diagram_with_validation(self, plan: DiagramPlan) -> tuple[str | None, bool, str]:
         """Render a diagram and validate its syntax.
 
         Returns:

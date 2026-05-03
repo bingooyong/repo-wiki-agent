@@ -15,7 +15,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 # =============================================================================
 # MERMAID RENDERING
 # =============================================================================
@@ -26,6 +25,7 @@ MERMAID_BLOCK_PATTERN = re.compile(r"```mermaid\s*(.*?)\s*```", re.DOTALL)
 # Set MERMAID_LOCAL_PATH to a local file path to use bundled Mermaid
 MERMAID_CDN_URL = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"
 MERMAID_LOCAL_PATH: str | None = None  # Set to local path for offline use
+
 
 def get_mermaid_script() -> str:
     """Get the Mermaid initialization script with current configuration."""
@@ -56,6 +56,7 @@ def render_mermaid_safely(content: str) -> str:
     This replaces ```mermaid blocks with HTML that Mermaid.js can render.
     The output is safe for static HTML files.
     """
+
     def replace_mermaid_block(match: re.Match) -> str:
         diagram_code = match.group(1).strip()
         return f'<div class="mermaid">\n{diagram_code}\n</div>'
@@ -127,6 +128,7 @@ def inject_anchors(content: str) -> str:
 
     This enables in-page jumping from TOC links.
     """
+
     def replace_heading(match: re.Match) -> str:
         hashes = match.group(1)
         text = match.group(2).strip()
@@ -177,6 +179,7 @@ def build_nav_tree_from_manifest(manifest_data: dict[str, Any]) -> list[dict[str
     """Build navigation tree from eval manifest data.
 
     Uses navigation_tree field as the canonical navigation contract.
+    Falls back to files field for legacy manifests.
 
     New manifest structure (preferred):
     {
@@ -187,10 +190,22 @@ def build_nav_tree_from_manifest(manifest_data: dict[str, Any]) -> list[dict[str
         ...
     }
 
+    Legacy manifest structure:
+    {
+        "files": [
+            {"path": "docs/00-overview.md"},
+            ...
+        ]
+    }
+
     Returns a tree structure suitable for HTML rendering.
     """
     if "navigation_tree" in manifest_data and manifest_data["navigation_tree"]:
         return _convert_navigation_tree(manifest_data["navigation_tree"])
+
+    # Fallback to legacy files field
+    if "files" in manifest_data:
+        return _build_tree_from_files(manifest_data)
 
     return []
 
@@ -208,11 +223,13 @@ def _convert_navigation_tree(nav_tree: list[dict[str, Any]]) -> list[dict[str, A
 
     def flatten(node: dict[str, Any]) -> None:
         if node.get("type") == "page" and node.get("path"):
-            result.append({
-                "label": node.get("label", node.get("path", "")),
-                "path": node.get("path", ""),
-                "type": get_nav_type_from_path(node.get("path", "")),
-            })
+            result.append(
+                {
+                    "label": node.get("label", node.get("path", "")),
+                    "path": node.get("path", ""),
+                    "type": get_nav_type_from_path(node.get("path", "")),
+                }
+            )
         if "children" in node:
             for child in node["children"]:
                 flatten(child)
@@ -289,7 +306,13 @@ def get_nav_type_from_path(path: str) -> str:
     if normalized.startswith("content/"):
         normalized = "docs/" + normalized[8:]
 
-    if normalized.startswith("docs/0") and len(normalized) >= 8 and normalized[7] == "-" and normalized[5].isdigit() and normalized[6].isdigit():
+    if (
+        normalized.startswith("docs/0")
+        and len(normalized) >= 8
+        and normalized[7] == "-"
+        and normalized[5].isdigit()
+        and normalized[6].isdigit()
+    ):
         return "overview"
     elif normalized.startswith("docs/sections/"):
         return "section"
@@ -364,12 +387,9 @@ def build_tree_html(nodes: list[dict[str, Any]], base_path: str = "") -> str:
             current_section = node_type
 
         # Tree item
-        link = f'{base_path}{path}' if base_path else path
+        link = f"{base_path}{path}" if base_path else path
         icon = get_tree_icon(node_type)
-        lines.append(
-            f'<a class="tree-item tree-{node_type}" href="{link}">'
-            f'{icon} {label}</a>'
-        )
+        lines.append(f'<a class="tree-item tree-{node_type}" href="{link}">' f"{icon} {label}</a>")
 
     if current_section is not None:
         lines.append("</div>")
@@ -581,7 +601,9 @@ def render_markdown_to_html(markdown_content: str) -> str:
     content = re.sub(r"\*(.+?)\*", r"<em>\1</em>", content)
 
     # Code blocks (must be done before inline code)
-    content = re.sub(r"```(\w+)?\s*(.*?)\s*```", r"<pre><code>\2</code></pre>", content, flags=re.DOTALL)
+    content = re.sub(
+        r"```(\w+)?\s*(.*?)\s*```", r"<pre><code>\2</code></pre>", content, flags=re.DOTALL
+    )
 
     # Inline code
     content = re.sub(r"`([^`]+)`", r"<code>\1</code>", content)
@@ -618,6 +640,7 @@ def render_markdown_to_html(markdown_content: str) -> str:
 # VIEWER SERVICE
 # =============================================================================
 
+
 def create_viewer_for_directory(
     root_dir: Path,
     manifest_path: Path | None = None,
@@ -648,11 +671,13 @@ def create_viewer_for_directory(
             for md_file in sorted(docs_dir.rglob("*.md")):
                 rel_path = str(md_file.relative_to(root_dir))
                 node_type = get_nav_type_from_path(rel_path)
-                nav_nodes.append({
-                    "label": get_label_from_path(rel_path),
-                    "path": rel_path,
-                    "type": node_type,
-                })
+                nav_nodes.append(
+                    {
+                        "label": get_label_from_path(rel_path),
+                        "path": rel_path,
+                        "type": node_type,
+                    }
+                )
 
     return {
         "root_dir": str(root_dir),

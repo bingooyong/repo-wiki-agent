@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable, List, Mapping, Sequence
 
 
 def _now_iso() -> str:
@@ -290,7 +290,7 @@ class SQLiteStateStore:
                 )
         self.rebuild_fts()
 
-    def list_chunk_ids_for_file(self, file_path: str) -> List[str]:
+    def list_chunk_ids_for_file(self, file_path: str) -> list[str]:
         rows = self.conn.execute(
             "SELECT chunk_id FROM chunks WHERE file_path=? ORDER BY chunk_id", (file_path,)
         ).fetchall()
@@ -333,9 +333,9 @@ class SQLiteStateStore:
         path_prefix: str | None = None,
         language: str | None = None,
         artifact_types: Iterable[str] | None = None,
-    ) -> List[FTSResult]:
+    ) -> list[FTSResult]:
         where = ["chunks_fts MATCH ?"]
-        params: List[object] = [query]
+        params: list[object] = [query]
 
         if module_names:
             names = sorted(set(module_names))
@@ -392,9 +392,9 @@ class SQLiteStateStore:
         language: str | None = None,
         artifact_types: Iterable[str] | None = None,
         limit: int = 200,
-    ) -> List[dict]:
+    ) -> list[dict]:
         where = ["1=1"]
-        params: List[object] = []
+        params: list[object] = []
         if module_names:
             names = sorted(set(module_names))
             where.append(f"module_name IN ({','.join('?' for _ in names)})")
@@ -420,7 +420,7 @@ class SQLiteStateStore:
         rows = self.conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
 
-    def get_chunks_by_ids(self, chunk_ids: Sequence[str]) -> List[dict]:
+    def get_chunks_by_ids(self, chunk_ids: Sequence[str]) -> list[dict]:
         if not chunk_ids:
             return []
         placeholders = ",".join("?" for _ in chunk_ids)

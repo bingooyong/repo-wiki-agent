@@ -18,12 +18,12 @@ import pytest
 
 from repo_wiki.generator.io import write_text
 from repo_wiki.verifier.quality_guardrails import (
+    QoderProfileMetrics,
+    QoderProfileVerifier,
     QualityGateResult,
     QualityGuardrailsChecker,
     QualityIssue,
     QualityReasonCode,
-    QoderProfileMetrics,
-    QoderProfileVerifier,
     check_document_quality,
     create_quality_checker,
 )
@@ -134,7 +134,9 @@ class TestQoderProfileVerifier:
 
     def test_verify_document_with_citations(self, tmp_path: Path):
         doc_path = tmp_path / "test.md"
-        write_text(doc_path, """# Test
+        write_text(
+            doc_path,
+            """# Test
 
 This is a test document with substantial prose content.
 
@@ -147,7 +149,8 @@ More prose content here.
 ## Section 2
 
 Even more content.
-""")
+""",
+        )
         verifier = QoderProfileVerifier(tmp_path)
         result = verifier.verify_profile(doc_path)
         assert result.profile_found is True
@@ -181,7 +184,7 @@ document and provides adequate coverage.
         # Add a citation
         content_with_cite = content.replace(
             "The final section",
-            "See <cite>src/test.py:10</cite> for more info.\n\nThe final section"
+            "See <cite>src/test.py:10</cite> for more info.\n\nThe final section",
         )
         write_text(doc_path, content_with_cite)
 
@@ -203,9 +206,13 @@ class TestQualityGuardrailsChecker:
         assert result.passed is False
         assert any("not found" in issue.message.lower() for issue in result.issues)
 
-    def test_check_document_with_good_content(self, checker: QualityGuardrailsChecker, tmp_path: Path):
+    def test_check_document_with_good_content(
+        self, checker: QualityGuardrailsChecker, tmp_path: Path
+    ):
         doc_path = tmp_path / "good.md"
-        write_text(doc_path, """# Good Document
+        write_text(
+            doc_path,
+            """# Good Document
 
 This is a well-written document with substantial prose content
 that explains things in detail and provides proper context.
@@ -226,7 +233,8 @@ well-defined API contracts as shown in <cite>src/api.py:50-60</cite>.
 
 Data models are defined in <cite>src/models.py:1-20</cite> and follow
 a consistent pattern for serialization.
-""")
+""",
+        )
         result = checker.check_document(doc_path)
         # Good content should pass or have only warnings
         assert len(result.issues) == 0 or all(i.severity != "ERROR" for i in result.issues)
@@ -237,10 +245,7 @@ a consistent pattern for serialization.
         content = "# List Dump\n\n## Items\n\n" + "\n".join([f"- item{i}" for i in range(15)])
         write_text(doc_path, content)
         result = checker.check_document(doc_path)
-        assert any(
-            issue.reason_code == QualityReasonCode.LIST_DUMP
-            for issue in result.issues
-        )
+        assert any(issue.reason_code == QualityReasonCode.LIST_DUMP for issue in result.issues)
 
     def test_detects_low_prose_ratio(self, checker: QualityGuardrailsChecker, tmp_path: Path):
         doc_path = tmp_path / "low_prose.md"
@@ -249,21 +254,22 @@ a consistent pattern for serialization.
         write_text(doc_path, content)
         result = checker.check_document(doc_path)
         assert any(
-            issue.reason_code == QualityReasonCode.LOW_PROSE_RATIO
-            for issue in result.issues
+            issue.reason_code == QualityReasonCode.LOW_PROSE_RATIO for issue in result.issues
         )
 
     def test_detects_low_citation_density(self, checker: QualityGuardrailsChecker, tmp_path: Path):
         doc_path = tmp_path / "low_cite.md"
         # Create long content with no citations
-        content = """# Long Document
+        content = (
+            """# Long Document
 
-""" + "This is some prose content. " * 100
+"""
+            + "This is some prose content. " * 100
+        )
         write_text(doc_path, content)
         result = checker.check_document(doc_path)
         assert any(
-            issue.reason_code == QualityReasonCode.LOW_CITATION_DENSITY
-            for issue in result.issues
+            issue.reason_code == QualityReasonCode.LOW_CITATION_DENSITY for issue in result.issues
         )
 
     def test_detects_repeated_filler(self, checker: QualityGuardrailsChecker, tmp_path: Path):
@@ -279,7 +285,8 @@ additionally, the system utilizes best practices.
         result = checker.check_document(doc_path)
         # Should detect repeated filler
         filler_issues = [
-            i for i in result.issues
+            i
+            for i in result.issues
             if i.reason_code in (QualityReasonCode.REPEATED_FILLER, QualityReasonCode.GENERIC_PROSE)
         ]
         assert len(filler_issues) > 0
@@ -299,12 +306,13 @@ It provides the ability to handle massive workloads and enables rapid deployment
         result = checker.check_document(doc_path)
         # Should detect unsupported claims
         claim_issues = [
-            i for i in result.issues
-            if i.reason_code == QualityReasonCode.UNSUPPORTED_CLAIM
+            i for i in result.issues if i.reason_code == QualityReasonCode.UNSUPPORTED_CLAIM
         ]
         assert len(claim_issues) > 0
 
-    def test_detects_hallucinated_terminology(self, checker: QualityGuardrailsChecker, tmp_path: Path):
+    def test_detects_hallucinated_terminology(
+        self, checker: QualityGuardrailsChecker, tmp_path: Path
+    ):
         doc_path = tmp_path / "hallucinated.md"
         # Create content with hallucinated patterns
         content = """# Hallucinated
@@ -349,13 +357,16 @@ class TestConvenienceFunctions:
 # GOOD AND BAD SAMPLE TESTS
 # =============================================================================
 
+
 class TestGoodSamples:
     """Tests with good quality content samples."""
 
     def test_good_architecture_doc(self, tmp_path: Path):
         """Architecture doc with proper citations and prose."""
         doc_path = tmp_path / "01-architecture.md"
-        write_text(doc_path, """# Architecture
+        write_text(
+            doc_path,
+            """# Architecture
 
 See <cite>src/architecture.py:1-50</cite> for the core architecture implementation.
 
@@ -384,7 +395,8 @@ Each service maintains its own database and exposes well-defined interfaces.
 ## Storage Design
 
 Data persistence uses SQLite as documented in <cite>src/db.py:1-20</cite>.
-""")
+""",
+        )
         checker = QualityGuardrailsChecker(tmp_path)
         result = checker.check_document(doc_path)
         # Should pass with no errors
@@ -393,7 +405,9 @@ Data persistence uses SQLite as documented in <cite>src/db.py:1-20</cite>.
     def test_good_overview_doc(self, tmp_path: Path):
         """Overview doc with substantial prose."""
         doc_path = tmp_path / "00-overview.md"
-        write_text(doc_path, """# Project Overview
+        write_text(
+            doc_path,
+            """# Project Overview
 
 See <cite>src/main.py:1-10</cite> for the entry point.
 
@@ -421,7 +435,8 @@ based on the patterns and structure discovered in the codebase.
 ## Startup Commands
 
 Run `poetry install` to set up dependencies.
-""")
+""",
+        )
         checker = QualityGuardrailsChecker(tmp_path)
         result = checker.check_document(doc_path)
         assert all(issue.severity != "ERROR" for issue in result.issues)
@@ -433,7 +448,9 @@ class TestBadSamples:
     def test_pure_list_dump(self, tmp_path: Path):
         """Pure list without narrative."""
         doc_path = tmp_path / "bad.md"
-        write_text(doc_path, """# Module List
+        write_text(
+            doc_path,
+            """# Module List
 
 ## Items
 
@@ -448,19 +465,21 @@ class TestBadSamples:
 - item9
 - item10
 - item11
-""")
+""",
+        )
         checker = QualityGuardrailsChecker(tmp_path)
         result = checker.check_document(doc_path)
         list_dump_issues = [
-            i for i in result.issues
-            if i.reason_code == QualityReasonCode.LIST_DUMP
+            i for i in result.issues if i.reason_code == QualityReasonCode.LIST_DUMP
         ]
         assert len(list_dump_issues) > 0
 
     def test_generic_template_prose(self, tmp_path: Path):
         """Generic AI-generated template prose."""
         doc_path = tmp_path / "generic.md"
-        write_text(doc_path, """# System Documentation
+        write_text(
+            doc_path,
+            """# System Documentation
 
 It should be noted that this system is designed to utilize the latest
 technologies. Furthermore, it is important to note that the system
@@ -472,7 +491,8 @@ the system serves as a comprehensive solution.
 - Feature A
 - Feature B
 - Feature C
-""")
+""",
+        )
         checker = QualityGuardrailsChecker(tmp_path)
         result = checker.check_document(doc_path)
         assert len(result.issues) > 0
@@ -481,18 +501,20 @@ the system serves as a comprehensive solution.
         """Technical claims without citation backing."""
         doc_path = tmp_path / "claims.md"
         # Need 6+ claims to trigger unsupported claim detection
-        write_text(doc_path, """# Performance Claims
+        write_text(
+            doc_path,
+            """# Performance Claims
 
 This system always outperforms all alternatives. It never has downtime.
 The architecture must be the most scalable solution available.
 The system provides the ability to handle massive scale and utilizes best practices.
 It implements cutting-edge technology that ensures optimal performance.
-""")
+""",
+        )
         checker = QualityGuardrailsChecker(tmp_path)
         result = checker.check_document(doc_path)
         unsupported_issues = [
-            i for i in result.issues
-            if i.reason_code == QualityReasonCode.UNSUPPORTED_CLAIM
+            i for i in result.issues if i.reason_code == QualityReasonCode.UNSUPPORTED_CLAIM
         ]
         assert len(unsupported_issues) > 0
 
@@ -501,14 +523,15 @@ It implements cutting-edge technology that ensures optimal performance.
 # INTEGRATION WITH QODER PROFILE
 # =============================================================================
 
+
 class TestQoderProfileIntegration:
     """Tests for qoder profile verification integration."""
 
     def test_qoder_profile_verifier_interface(self, tmp_path: Path):
         """Test that QoderProfileVerifier provides expected interface."""
         verifier = QoderProfileVerifier(tmp_path)
-        assert hasattr(verifier, 'verify_profile')
-        assert hasattr(verifier, 'EXPECTED_SECTIONS')
+        assert hasattr(verifier, "verify_profile")
+        assert hasattr(verifier, "EXPECTED_SECTIONS")
 
     def test_profile_metrics_structure(self):
         """Test QoderProfileMetrics has expected structure."""
@@ -529,7 +552,9 @@ class TestQoderProfileIntegration:
         # Create a complete qoder-style document
         doc_path = tmp_path / "docs/sections/architecture/index.md"
         doc_path.parent.mkdir(parents=True, exist_ok=True)
-        write_text(doc_path, """# Architecture
+        write_text(
+            doc_path,
+            """# Architecture
 
 See <cite>src/arch.py:1-30</cite> for implementation.
 
@@ -542,7 +567,8 @@ The architecture follows a microservices pattern with clear boundaries.
 1. Layer 1
 2. Layer 2
 3. Layer 3
-""")
+""",
+        )
         # Run qoder profile verification
         verifier = QoderProfileVerifier(tmp_path)
         metrics = verifier.verify_profile(doc_path)

@@ -7,30 +7,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from repo_wiki.scanner.source_spans import (
     SourceSpan,
     SourceSpanExtractor,
+    _extract_java,
+    _extract_markdown,
+    # Language extractors
+    _extract_python,
+    _extract_sql,
+    _extract_typescript,
+    _extract_yaml,
     compute_span_digest,
     filter_spans_by_language,
     group_spans_by_file,
     spans_to_citations,
-    # Language extractors
-    _extract_python,
-    _extract_java,
-    _extract_typescript,
-    _extract_sql,
-    _extract_yaml,
-    _extract_markdown,
 )
-
 
 # ---------------------------------------------------------------------------
 # Python fixtures
 # ---------------------------------------------------------------------------
 
-PYTHON_SIMPLE = '''
+PYTHON_SIMPLE = """
 def hello():
     print("hello")
 
@@ -38,7 +35,7 @@ def hello():
 class MyClass:
     def method(self):
         pass
-'''
+"""
 
 PYTHON_MULTILINE = '''
 def complex_function(arg1, arg2, arg3=None):
@@ -62,7 +59,7 @@ async def async_handler():
 # Java fixtures
 # ---------------------------------------------------------------------------
 
-JAVA_SIMPLE = '''
+JAVA_SIMPLE = """
 public class MyService {
     private String name;
 
@@ -74,22 +71,22 @@ public class MyService {
         this.name = name;
     }
 }
-'''
+"""
 
-JAVA_INTERFACE = '''
+JAVA_INTERFACE = """
 public interface UserRepository {
     User findById(Long id);
 
     List<User> findAll();
 }
-'''
+"""
 
 
 # ---------------------------------------------------------------------------
 # TypeScript fixtures
 # ---------------------------------------------------------------------------
 
-TYPESCRIPT_SIMPLE = '''
+TYPESCRIPT_SIMPLE = """
 export class UserService {
     private users: User[] = [];
 
@@ -108,23 +105,23 @@ export interface User {
     id: number;
     name: string;
 }
-'''
+"""
 
-TYPESCRIPT_ARROW = '''
+TYPESCRIPT_ARROW = """
 const fetchData = async (url: string): Promise<Response> => {
     const response = await fetch(url);
     return response.json();
 };
 
 export const helper = (x: number) => x * 2;
-'''
+"""
 
 
 # ---------------------------------------------------------------------------
 # SQL fixtures
 # ---------------------------------------------------------------------------
 
-SQL_SIMPLE = '''
+SQL_SIMPLE = """
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -133,16 +130,16 @@ CREATE TABLE users (
 );
 
 CREATE INDEX idx_users_email ON users(email);
-'''
+"""
 
-SQL_VIEW = '''
+SQL_VIEW = """
 CREATE VIEW active_users AS
 SELECT id, name, email
 FROM users
 WHERE active = 1;
-'''
+"""
 
-SQL_FUNCTION = '''
+SQL_FUNCTION = """
 CREATE FUNCTION get_user_count()
 RETURNS INTEGER AS $$
 DECLARE
@@ -152,14 +149,14 @@ BEGIN
     RETURN count_val;
 END;
 $$ LANGUAGE plpgsql;
-'''
+"""
 
 
 # ---------------------------------------------------------------------------
 # YAML fixtures
 # ---------------------------------------------------------------------------
 
-YAML_SIMPLE = '''
+YAML_SIMPLE = """
 # Configuration file
 server:
   host: localhost
@@ -173,22 +170,22 @@ database:
 logging:
   level: info
   format: json
-'''
+"""
 
-YAML_NESTED = '''
+YAML_NESTED = """
 root_key:
   child1:
     value: 1
   child2:
     value: 2
-'''
+"""
 
 
 # ---------------------------------------------------------------------------
 # Markdown fixtures
 # ---------------------------------------------------------------------------
 
-MARKDOWN_SIMPLE = '''
+MARKDOWN_SIMPLE = """
 # Project Overview
 
 This is the overview section.
@@ -205,9 +202,9 @@ Here we describe the architecture.
 ## Usage
 
 How to use the project.
-'''
+"""
 
-MARKDOWN_CODE_BLOCKS = '''
+MARKDOWN_CODE_BLOCKS = """
 # API Documentation
 
 ## GET /users
@@ -228,12 +225,13 @@ Create a new user.
 def create_user(data):
     pass
 ```
-'''
+"""
 
 
 # ---------------------------------------------------------------------------
 # Python extractor tests
 # ---------------------------------------------------------------------------
+
 
 class TestPythonExtractor:
     def test_extract_function(self):
@@ -283,6 +281,7 @@ class TestPythonExtractor:
 # Java extractor tests
 # ---------------------------------------------------------------------------
 
+
 class TestJavaExtractor:
     def test_extract_class(self):
         file_path = Path("MyService.java")
@@ -319,6 +318,7 @@ class TestJavaExtractor:
 # TypeScript extractor tests
 # ---------------------------------------------------------------------------
 
+
 class TestTypeScriptExtractor:
     def test_extract_class(self):
         file_path = Path("UserService.ts")
@@ -353,6 +353,7 @@ class TestTypeScriptExtractor:
 # ---------------------------------------------------------------------------
 # SQL extractor tests
 # ---------------------------------------------------------------------------
+
 
 class TestSQLExtractor:
     def test_extract_table(self):
@@ -396,6 +397,7 @@ class TestSQLExtractor:
 # YAML extractor tests
 # ---------------------------------------------------------------------------
 
+
 class TestYAMLExtractor:
     def test_extract_keys(self):
         file_path = Path("config.yaml")
@@ -425,6 +427,7 @@ class TestYAMLExtractor:
 # ---------------------------------------------------------------------------
 # Markdown extractor tests
 # ---------------------------------------------------------------------------
+
 
 class TestMarkdownExtractor:
     def test_extract_headings(self):
@@ -458,6 +461,7 @@ class TestMarkdownExtractor:
 # ---------------------------------------------------------------------------
 # SourceSpan data class tests
 # ---------------------------------------------------------------------------
+
 
 class TestSourceSpan:
     def test_citation_format(self):
@@ -494,6 +498,7 @@ class TestSourceSpan:
 # Integration tests
 # ---------------------------------------------------------------------------
 
+
 class TestSourceSpanExtractorIntegration:
     """Test the full extractor with multiple files."""
 
@@ -529,10 +534,12 @@ class TestSourceSpanExtractorIntegration:
 
     def test_group_by_file(self):
         extractor = SourceSpanExtractor()
-        spans = extractor.extract_from_files([
-            (Path("test.py"), PYTHON_SIMPLE),
-            (Path("config.yaml"), YAML_SIMPLE),
-        ])
+        spans = extractor.extract_from_files(
+            [
+                (Path("test.py"), PYTHON_SIMPLE),
+                (Path("config.yaml"), YAML_SIMPLE),
+            ]
+        )
 
         grouped = group_spans_by_file(spans)
 
@@ -543,10 +550,12 @@ class TestSourceSpanExtractorIntegration:
 
     def test_filter_by_language(self):
         extractor = SourceSpanExtractor()
-        spans = extractor.extract_from_files([
-            (Path("test.py"), PYTHON_SIMPLE),
-            (Path("MyService.java"), JAVA_SIMPLE),
-        ])
+        spans = extractor.extract_from_files(
+            [
+                (Path("test.py"), PYTHON_SIMPLE),
+                (Path("MyService.java"), JAVA_SIMPLE),
+            ]
+        )
 
         python_only = filter_spans_by_language(spans, ["python"])
 
@@ -569,17 +578,18 @@ class TestSourceSpanExtractorIntegration:
 # Line accuracy tests
 # ---------------------------------------------------------------------------
 
+
 class TestLineAccuracy:
     """Critical tests to ensure line numbers are accurate."""
 
     def test_python_class_line_accuracy(self):
         """Verify Python class line numbers are accurate."""
-        content = '''# line 1
+        content = """# line 1
 # line 2
 
 class MyClass:  # line 4
     pass
-'''
+"""
         spans = _extract_python(Path("test.py"), content)
         my_class = next((s for s in spans if s.symbol == "MyClass"), None)
 
@@ -588,11 +598,11 @@ class MyClass:  # line 4
 
     def test_python_function_line_accuracy(self):
         """Verify Python function line numbers are accurate."""
-        content = '''# comment line
+        content = """# comment line
 
 def my_function():  # line 3
     return 42
-'''
+"""
         spans = _extract_python(Path("test.py"), content)
         my_func = next((s for s in spans if s.symbol == "my_function"), None)
 
@@ -601,12 +611,12 @@ def my_function():  # line 3
 
     def test_java_class_line_accuracy(self):
         """Verify Java class line numbers are accurate."""
-        content = '''package com.example;  // line 1
+        content = """package com.example;  // line 1
 
 public class MyClass {  // line 3
     public void method() {}
 }
-'''
+"""
         spans = _extract_java(Path("MyClass.java"), content)
         my_class = next((s for s in spans if s.symbol == "MyClass"), None)
 
@@ -615,7 +625,7 @@ public class MyClass {  // line 3
 
     def test_markdown_heading_line_accuracy(self):
         """Verify Markdown heading line numbers are accurate."""
-        content = '''# Title
+        content = """# Title
 
 Some text.
 
@@ -624,7 +634,7 @@ Some text.
 More text.
 
 ### Subsection
-'''
+"""
         spans = _extract_markdown(Path("README.md"), content)
 
         title = next((s for s in spans if s.symbol == "Title"), None)
@@ -638,12 +648,12 @@ More text.
 
     def test_sql_table_line_accuracy(self):
         """Verify SQL table definition line numbers are accurate."""
-        content = '''-- line 1
+        content = """-- line 1
 
 CREATE TABLE users (  -- line 3
     id INTEGER PRIMARY KEY
 );
-'''
+"""
         spans = _extract_sql(Path("schema.sql"), content)
         users = next((s for s in spans if s.symbol == "users"), None)
 
@@ -652,11 +662,11 @@ CREATE TABLE users (  -- line 3
 
     def test_yaml_key_line_accuracy(self):
         """Verify YAML key line numbers are accurate."""
-        content = '''key1: value1  # line 1
+        content = """key1: value1  # line 1
 
 key2:  # line 3
   nested: value
-'''
+"""
         spans = _extract_yaml(Path("config.yaml"), content)
         key2 = next((s for s in spans if s.symbol == "key2"), None)
 
@@ -665,12 +675,12 @@ key2:  # line 3
 
     def test_multifile_line_numbers_consistent(self):
         """Verify line numbers are consistent across multiple extractions."""
-        content1 = '''def foo():
+        content1 = """def foo():
     pass
-'''
-        content2 = '''def bar():
+"""
+        content2 = """def bar():
     pass
-'''
+"""
         extractor = SourceSpanExtractor()
 
         spans1 = extractor.extract_from_file(Path("a.py"), content1)
@@ -687,6 +697,7 @@ key2:  # line 3
 # ---------------------------------------------------------------------------
 # Utility function tests
 # ---------------------------------------------------------------------------
+
 
 class TestUtilityFunctions:
     def test_compute_span_digest(self):

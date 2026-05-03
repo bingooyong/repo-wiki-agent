@@ -6,9 +6,8 @@ API reference pages that are grouped logically rather than by raw endpoint count
 This planner extends the RuleFirstPlanner to provide API-specific planning
 with service family awareness, generating at least 15 planned API pages.
 """
-from __future__ import annotations
 
-from typing import Any
+from __future__ import annotations
 
 from repo_wiki.core.contracts import Endpoint, RepositorySnapshot
 from repo_wiki.planner.schema import (
@@ -214,7 +213,8 @@ class APITopicPlanner:
 
         # Auth endpoints index
         auth_endpoints = [
-            e for e in self.snapshot.endpoints
+            e
+            for e in self.snapshot.endpoints
             if e.auth_required or e.auth_type in ("bearer", "oauth", "api-key")
         ]
         if auth_endpoints:
@@ -336,9 +336,7 @@ class APITopicPlanner:
 
             # Add individual endpoint pages under topic
             for ep_idx, ep in enumerate(sorted(endpoints, key=lambda e: (e.method, e.path))):
-                ep_id = self._make_page_id(
-                    f"api-{ep.method.lower()}-{ep.path.replace('/', '-')}"
-                )
+                ep_id = self._make_page_id(f"api-{ep.method.lower()}-{ep.path.replace('/', '-')}")
                 self._add_page(
                     page_id=ep_id,
                     title=f"{ep.method} {ep.path}",

@@ -1,15 +1,11 @@
 """Tests for CLI update command."""
 
 import json
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
 from repo_wiki.cli import app
-
 
 runner = CliRunner()
 

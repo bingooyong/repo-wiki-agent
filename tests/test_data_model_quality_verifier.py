@@ -22,12 +22,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from repo_wiki.generator.io import write_json, write_text
-from repo_wiki.verifier.service import VerifierService, SeverityThreshold
-
+from repo_wiki.verifier.service import SeverityThreshold, VerifierService
 
 # =============================================================================
 # FIXTURES
 # =============================================================================
+
 
 def _write_minimum_artifacts(root: Path) -> None:
     """Write minimum artifacts for data model quality tests."""
@@ -58,7 +58,13 @@ def _write_minimum_artifacts(root: Path) -> None:
         root / "ai/source-of-truth/api-index.yaml",
         {
             "endpoints": [
-                {"method": "GET", "path": "/health", "module": "billing", "handler": "h", "file_path": "src/billing/api.py"},
+                {
+                    "method": "GET",
+                    "path": "/health",
+                    "module": "billing",
+                    "handler": "h",
+                    "file_path": "src/billing/api.py",
+                },
             ]
         },
     )
@@ -66,9 +72,24 @@ def _write_minimum_artifacts(root: Path) -> None:
         root / "ai/source-of-truth/data-models.yaml",
         {
             "models": [
-                {"name": "Invoice", "type": "python_class", "module": "billing", "file_path": "src/billing/model.py"},
-                {"name": "InvoiceDTO", "type": "dto", "module": "billing", "file_path": "src/billing/dto.py"},
-                {"name": "LineItem", "type": "python_class", "module": "billing", "file_path": "src/billing/model.py"},
+                {
+                    "name": "Invoice",
+                    "type": "python_class",
+                    "module": "billing",
+                    "file_path": "src/billing/model.py",
+                },
+                {
+                    "name": "InvoiceDTO",
+                    "type": "dto",
+                    "module": "billing",
+                    "file_path": "src/billing/dto.py",
+                },
+                {
+                    "name": "LineItem",
+                    "type": "python_class",
+                    "module": "billing",
+                    "file_path": "src/billing/model.py",
+                },
             ]
         },
     )
@@ -90,7 +111,10 @@ def _write_minimum_artifacts(root: Path) -> None:
     write_text(root / ".claude/CLAUDE.md", "`docs/00-overview.md`")
     write_text(root / "AGENTS.md", "`docs/01-architecture.md`\n`http://localhost:8007`")
     write_json(root / ".opencode/opencode.json", {"knowledge_paths": ["docs/00-overview.md"]})
-    write_text(root / ".codex/config.toml", 'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n')
+    write_text(
+        root / ".codex/config.toml",
+        'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n',
+    )
     write_json(root / ".codex/hooks.json", {"post_commands": []})
 
 
@@ -144,8 +168,20 @@ def _write_quality_artifacts(root: Path) -> None:
         root / "ai/source-of-truth/api-index.yaml",
         {
             "endpoints": [
-                {"method": "GET", "path": "/health", "module": "billing", "handler": "h", "file_path": "src/billing/api.py"},
-                {"method": "POST", "path": "/billing", "module": "billing", "handler": "create_billing", "file_path": "src/billing/api.py"},
+                {
+                    "method": "GET",
+                    "path": "/health",
+                    "module": "billing",
+                    "handler": "h",
+                    "file_path": "src/billing/api.py",
+                },
+                {
+                    "method": "POST",
+                    "path": "/billing",
+                    "module": "billing",
+                    "handler": "create_billing",
+                    "file_path": "src/billing/api.py",
+                },
             ]
         },
     )
@@ -187,12 +223,18 @@ def _write_quality_artifacts(root: Path) -> None:
     write_text(root / "ai/source-of-truth/prompt-fragments/architecture.txt", "arch")
 
     # Create source files for citations
-    write_text(root / "src/billing/api.py", "def health():\n    return 'ok'\n\ndef create_billing():\n    pass\n")
+    write_text(
+        root / "src/billing/api.py",
+        "def health():\n    return 'ok'\n\ndef create_billing():\n    pass\n",
+    )
     write_text(
         root / "src/billing/model.py",
         "class Invoice:\n    def __init__(self):\n        self.amount = 0\n\nclass LineItem:\n    def __init__(self):\n        self.quantity = 0\n",
     )
-    write_text(root / "src/billing/dto.py", "class InvoiceDTO:\n    def __init__(self):\n        self.amount = 0\n")
+    write_text(
+        root / "src/billing/dto.py",
+        "class InvoiceDTO:\n    def __init__(self):\n        self.amount = 0\n",
+    )
 
     # Write quality overview (200+ prose chars, 5+ sections, proper citations)
     write_text(
@@ -379,7 +421,17 @@ Invoices reference line items across services.
     )
 
     # Create section pages
-    sections = ["project", "architecture", "services", "data-model", "api", "operations", "development", "security", "troubleshooting"]
+    sections = [
+        "project",
+        "architecture",
+        "services",
+        "data-model",
+        "api",
+        "operations",
+        "development",
+        "security",
+        "troubleshooting",
+    ]
     for section in sections:
         write_text(
             root / f"docs/sections/{section}/index.md",
@@ -398,7 +450,10 @@ Describing the {section} section in detail with prose.
     write_text(root / ".claude/CLAUDE.md", "`docs/00-overview.md`")
     write_text(root / "AGENTS.md", "`docs/01-architecture.md`\n`http://localhost:8007`")
     write_json(root / ".opencode/opencode.json", {"knowledge_paths": ["docs/00-overview.md"]})
-    write_text(root / ".codex/config.toml", 'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n')
+    write_text(
+        root / ".codex/config.toml",
+        'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n',
+    )
     write_json(root / ".codex/hooks.json", {"post_commands": []})
 
 
@@ -623,8 +678,18 @@ def test_data_model_refs_detects_dangling(tmp_path: Path) -> None:
         tmp_path / "ai/source-of-truth/data-models.yaml",
         {
             "models": [
-                {"name": "Invoice", "type": "python_class", "module": "billing", "file_path": "src/billing/model.py"},
-                {"name": "UnknownModel", "type": "python_class", "module": "nonexistent", "file_path": "src/nonexistent/model.py"},
+                {
+                    "name": "Invoice",
+                    "type": "python_class",
+                    "module": "billing",
+                    "file_path": "src/billing/model.py",
+                },
+                {
+                    "name": "UnknownModel",
+                    "type": "python_class",
+                    "module": "nonexistent",
+                    "file_path": "src/nonexistent/model.py",
+                },
             ]
         },
     )
@@ -640,6 +705,7 @@ def test_model_type_classification_in_data_models_yaml(tmp_path: Path) -> None:
     _write_quality_artifacts(root=tmp_path)
 
     import yaml
+
     data_models_path = tmp_path / "ai/source-of-truth/data-models.yaml"
     with open(data_models_path) as f:
         data = yaml.safe_load(f)

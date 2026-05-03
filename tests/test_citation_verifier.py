@@ -42,11 +42,30 @@ def _write_minimum_artifacts(root: Path) -> None:
     )
     write_json(
         root / "ai/source-of-truth/api-index.yaml",
-        {"endpoints": [{"method": "GET", "path": "/health", "module": "billing", "handler": "h", "file_path": "src/billing/api.py"}]},
+        {
+            "endpoints": [
+                {
+                    "method": "GET",
+                    "path": "/health",
+                    "module": "billing",
+                    "handler": "h",
+                    "file_path": "src/billing/api.py",
+                }
+            ]
+        },
     )
     write_json(
         root / "ai/source-of-truth/data-models.yaml",
-        {"models": [{"name": "Invoice", "type": "python_class", "module": "billing", "file_path": "src/billing/model.py"}]},
+        {
+            "models": [
+                {
+                    "name": "Invoice",
+                    "type": "python_class",
+                    "module": "billing",
+                    "file_path": "src/billing/model.py",
+                }
+            ]
+        },
     )
     write_json(root / "ai/source-of-truth/task-catalog.yaml", {"tasks": []})
     write_text(root / "ai/source-of-truth/prompt-fragments/overview.txt", "overview")
@@ -67,7 +86,10 @@ def _write_minimum_artifacts(root: Path) -> None:
     write_text(root / ".claude/CLAUDE.md", "`docs/00-overview.md`")
     write_text(root / "AGENTS.md", "`docs/01-architecture.md`\n`http://localhost:8007`")
     write_json(root / ".opencode/opencode.json", {"knowledge_paths": ["docs/00-overview.md"]})
-    write_text(root / ".codex/config.toml", 'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n')
+    write_text(
+        root / ".codex/config.toml",
+        'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n',
+    )
     write_json(root / ".codex/hooks.json", {"post_commands": []})
 
 
@@ -75,7 +97,17 @@ def _create_sections_dir(root: Path) -> None:
     """Create sections directory with required sections."""
     sections_dir = root / "docs/sections"
     sections_dir.mkdir(parents=True, exist_ok=True)
-    for section in ["project", "architecture", "services", "data-model", "api", "operations", "development", "security", "troubleshooting"]:
+    for section in [
+        "project",
+        "architecture",
+        "services",
+        "data-model",
+        "api",
+        "operations",
+        "development",
+        "security",
+        "troubleshooting",
+    ]:
         section_dir = sections_dir / section
         section_dir.mkdir(parents=True, exist_ok=True)
         write_text(section_dir / "index.md", f"# {section}\n")
@@ -300,7 +332,9 @@ The project solves the core problem.
     )
 
     result = VerifierService(tmp_path).verify(ci=True)
-    citation_check = next((c for c in result["checks"] if c["name"] == "citation-source-empty"), None)
+    citation_check = next(
+        (c for c in result["checks"] if c["name"] == "citation-source-empty"), None
+    )
     assert citation_check is not None
     assert citation_check["status"] == "FAIL"
     assert citation_check["reason_code"] == "CITATION_SOURCE_EMPTY"
@@ -332,7 +366,9 @@ The project solves the core problem.
     )
 
     result = VerifierService(tmp_path).verify(ci=True)
-    citation_check = next((c for c in result["checks"] if c["name"] == "citation-source-empty"), None)
+    citation_check = next(
+        (c for c in result["checks"] if c["name"] == "citation-source-empty"), None
+    )
     assert citation_check is not None
     assert citation_check["status"] == "PASS"
 
@@ -538,7 +574,9 @@ Some content here.
     )
 
     result = VerifierService(tmp_path).verify(ci=True)
-    citation_check = next((c for c in result["checks"] if c["name"] == "citation-source-empty"), None)
+    citation_check = next(
+        (c for c in result["checks"] if c["name"] == "citation-source-empty"), None
+    )
     assert citation_check is not None
     assert citation_check["status"] == "FAIL"
     assert citation_check["gate_type"] == "HARD"

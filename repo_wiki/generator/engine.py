@@ -10,39 +10,31 @@ from .cache import GenerationCache
 from .context import ContextBuilder
 from .contracts import (
     CORE_DOCUMENT_CONTRACTS,
-    DocumentLayer,
     PHASE_DEFINITIONS,
     PROMPT_FRAGMENT_CONTRACTS,
     SECTION_DEFINITIONS,
     TASK_CATALOG_CONTRACT,
     all_phase_contracts,
     all_section_contracts,
-    get_contracts_by_layer,
-    is_governance_only_layer,
-    is_target_output_layer,
     module_document_contract,
     overview_to_section_link,
-    overview_to_module_link,
-    section_to_overview_link,
-    section_to_section_link,
-    validate_contract_coverage,
-    validate_overview_prose,
-    validate_overview_not_list_only,
-    validate_architecture_has_mermaid,
-    validate_architecture_not_module_enum,
-    validate_module_map_domain_grouped,
-    validate_module_map_not_directory_flat,
     validate_api_contract_grouped,
     validate_api_contract_not_endpoint_dump,
+    validate_architecture_has_mermaid,
+    validate_architecture_not_module_enum,
+    validate_architecture_rationale_exists,
+    validate_contract_coverage,
     validate_data_model_grouped,
     validate_data_model_not_dump,
-    validate_section_page_exists,
-    validate_section_page_content,
-    validate_section_cross_links,
-    validate_all_required_sections_exist,
+    validate_module_map_domain_grouped,
+    validate_module_map_not_directory_flat,
     validate_narrative_not_generic,
-    validate_architecture_rationale_exists,
     validate_overview_has_repository_specifics,
+    validate_overview_not_list_only,
+    validate_overview_prose,
+    validate_section_cross_links,
+    validate_section_page_content,
+    validate_section_page_exists,
 )
 from .io import ensure_dir, read_yamlish, stable_hash, write_json, write_text
 from .templates import TemplateRenderer
@@ -122,18 +114,38 @@ class NarrativeBuilder:
     def _derive_project_type(self) -> str:
         """Derive the project type from module analysis."""
         # Detect if this is a tooling project, library, service, etc.
-        if any("tool" in name.lower() or "cli" in name.lower() for m in self.modules if (name := m.get("name", ""))):
+        if any(
+            "tool" in name.lower() or "cli" in name.lower()
+            for m in self.modules
+            if (name := m.get("name", ""))
+        ):
             return "tooling"
-        if any("server" in name.lower() or "api" in name.lower() or "service" in name.lower()
-               for m in self.modules if (name := m.get("name", ""))):
+        if any(
+            "server" in name.lower() or "api" in name.lower() or "service" in name.lower()
+            for m in self.modules
+            if (name := m.get("name", ""))
+        ):
             return "service"
-        if any("lib" in name.lower() or "sdk" in name.lower() for m in self.modules if (name := m.get("name", ""))):
+        if any(
+            "lib" in name.lower() or "sdk" in name.lower()
+            for m in self.modules
+            if (name := m.get("name", ""))
+        ):
             return "library"
         return "application"
 
     def _detect_knowledge_management_signals(self) -> bool:
         """Detect if this is a knowledge management system."""
-        knowledge_signals = ["knowledge", "graph", "index", "retrieval", "embedding", "vector", "chroma", "sqlite"]
+        knowledge_signals = [
+            "knowledge",
+            "graph",
+            "index",
+            "retrieval",
+            "embedding",
+            "vector",
+            "chroma",
+            "sqlite",
+        ]
         name_lower = self.repo_name.lower()
         path_signals = []
         domain_signals = []
@@ -261,23 +273,29 @@ class NarrativeBuilder:
 
         # Detect problems based on project characteristics
         if self.is_document_generation_system:
-            problems.extend([
-                "文档与代码不同步，维护成本高",
-                "传统文档难以发现和检索",
-            ])
+            problems.extend(
+                [
+                    "文档与代码不同步，维护成本高",
+                    "传统文档难以发现和检索",
+                ]
+            )
 
         if self.is_knowledge_management_system:
-            problems.extend([
-                "代码结构复杂，难以快速理解",
-                "知识分散在代码中，难以聚合",
-            ])
+            problems.extend(
+                [
+                    "代码结构复杂，难以快速理解",
+                    "知识分散在代码中，难以聚合",
+                ]
+            )
 
         if not problems:
             # Generic problems for unknown project types
-            problems.extend([
-                "代码库规模增长带来的理解成本上升",
-                "模块间依赖关系不清晰",
-            ])
+            problems.extend(
+                [
+                    "代码库规模增长带来的理解成本上升",
+                    "模块间依赖关系不清晰",
+                ]
+            )
 
         # Format as prose, not bullet list
         problem_text = "；".join(problems[:-1]) + "。" if len(problems) > 1 else problems[0] + "。"
@@ -309,7 +327,9 @@ class NarrativeBuilder:
         # Derive capabilities from endpoints
         if self.endpoints:
             api_modules = set(e.get("module", "unknown") for e in self.endpoints)
-            capabilities.append(f"RESTful API 接口（{len(self.endpoints)} 个端点，跨越 {len(api_modules)} 个模块）")
+            capabilities.append(
+                f"RESTful API 接口（{len(self.endpoints)} 个端点，跨越 {len(api_modules)} 个模块）"
+            )
 
         # Derive capabilities from data models
         if self.models:
@@ -335,7 +355,11 @@ class NarrativeBuilder:
 
         # Format as prose
         if capabilities:
-            cap_text = "；".join(capabilities[:-1]) + "。" if len(capabilities) > 1 else capabilities[0] + "。"
+            cap_text = (
+                "；".join(capabilities[:-1]) + "。"
+                if len(capabilities) > 1
+                else capabilities[0] + "。"
+            )
             return f"{self.repo_name} 提供以下核心能力：{cap_text}"
         else:
             return f"{self.repo_name} 提供基础的代码分析和结构理解能力。"
@@ -456,9 +480,7 @@ class NarrativeBuilder:
 
         # Step 1: Scanning
         if self.modules:
-            flow_steps.append(
-                f"**代码扫描**：Scanner 遍历源代码，发现 {len(self.modules)} 个模块"
-            )
+            flow_steps.append(f"**代码扫描**：Scanner 遍历源代码，发现 {len(self.modules)} 个模块")
 
         # Step 2: Extraction
         extraction_parts = []
@@ -468,26 +490,18 @@ class NarrativeBuilder:
             extraction_parts.append(f"{len(self.models)} 个数据模型")
 
         if extraction_parts:
-            flow_steps.append(
-                f"**信息提取**：Indexer 从代码中提取 { '、'.join(extraction_parts)}"
-            )
+            flow_steps.append(f"**信息提取**：Indexer 从代码中提取 { '、'.join(extraction_parts)}")
         else:
             flow_steps.append("**信息提取**：Indexer 分析代码结构和符号")
 
         # Step 3: Storage
-        flow_steps.append(
-            "**状态持久化**：索引状态、图谱关系、向量嵌入分别存储"
-        )
+        flow_steps.append("**状态持久化**：索引状态、图谱关系、向量嵌入分别存储")
 
         # Step 4: Document generation
-        flow_steps.append(
-            "**文档生成**：Generator 根据模板和事实数据生成 Markdown"
-        )
+        flow_steps.append("**文档生成**：Generator 根据模板和事实数据生成 Markdown")
 
         # Step 5: Verification
-        flow_steps.append(
-            "**质量验证**：Verifier 检查文档结构和引用的有效性"
-        )
+        flow_steps.append("**质量验证**：Verifier 检查文档结构和引用的有效性")
 
         return "\n".join(flow_steps)
 
@@ -523,12 +537,12 @@ class NarrativeBuilder:
 # rather than just listing all endpoints verbatim.
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
 class APIEndpoint:
     """A single API endpoint with rich metadata for aggregation."""
+
     method: str
     path: str
     module: str
@@ -554,6 +568,7 @@ class APIEndpoint:
 @dataclass
 class APIEndpointGroup:
     """A group of API endpoints sharing common characteristics."""
+
     name: str
     domain: str
     service_family: str
@@ -593,7 +608,9 @@ class APIAggregator:
             auth_type = self._detect_auth_type(ep, module)
 
             # Detect request body from method and path patterns
-            has_body = ep.get("method") in ("POST", "PUT", "PATCH") and not self._is_webhook_path(ep.get("path", ""))
+            has_body = ep.get("method") in ("POST", "PUT", "PATCH") and not self._is_webhook_path(
+                ep.get("path", "")
+            )
 
             endpoint = APIEndpoint(
                 method=ep.get("method", "GET"),
@@ -673,7 +690,9 @@ class APIAggregator:
                 continue
 
             # Health/readiness endpoints are typically public
-            if method == "GET" and any(pattern in path for pattern in ["health", "ready", "status", "info"]):
+            if method == "GET" and any(
+                pattern in path for pattern in ["health", "ready", "status", "info"]
+            ):
                 ep.exposure_pattern = "public"
                 continue
 
@@ -796,7 +815,9 @@ class APIAggregator:
         # Add domain-specific codes if found
         if common_codes:
             summary_parts.append("")
-            summary_parts.append(f"**常见错误码**: {', '.join(str(c) for c in sorted(common_codes))}")
+            summary_parts.append(
+                f"**常见错误码**: {', '.join(str(c) for c in sorted(common_codes))}"
+            )
 
         return "\n".join(summary_parts)
 
@@ -843,7 +864,7 @@ class APIAggregator:
 
         lines = [
             "| 服务族/域 | 端点数 | 认证模式 | 暴露类型 |",
-            "|-----------|--------|----------|---------|"
+            "|-----------|--------|----------|---------|",
         ]
 
         for group_key in sorted(groups.keys()):
@@ -856,7 +877,9 @@ class APIAggregator:
             exposures = set(ep.exposure_pattern for ep in endpoints)
             exposure_summary = "/".join(sorted(exposures)) if exposures else "internal"
 
-            lines.append(f"| {group_key} | {len(endpoints)} | {auth_summary} | {exposure_summary} |")
+            lines.append(
+                f"| {group_key} | {len(endpoints)} | {auth_summary} | {exposure_summary} |"
+            )
 
         return "\n".join(lines)
 
@@ -873,7 +896,9 @@ class APIAggregator:
             module = self._module_lookup.get(sample_ep.module, {})
 
             detail_parts.append(f"### {group_key}\n")
-            detail_parts.append(f"**主题域**: {sample_ep.domain} | **服务族**: {sample_ep.service_family} | **运行时角色**: {sample_ep.runtime_role}")
+            detail_parts.append(
+                f"**主题域**: {sample_ep.domain} | **服务族**: {sample_ep.service_family} | **运行时角色**: {sample_ep.runtime_role}"
+            )
             detail_parts.append(f"**端点数量**: {len(endpoints)}\n")
 
             # Add calling convention summary for this group
@@ -898,12 +923,12 @@ class APIAggregator:
 # and cross-module references. Migration-aware aggregation for database schemas.
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
 class DataModel:
     """A data model with rich metadata for entity analysis."""
+
     name: str
     module: str
     type: str  # python_class, dataclass, pydantic, sqlalchemy, etc.
@@ -917,7 +942,9 @@ class DataModel:
     migration_related: bool = False
     ownership_modules: list[str] = None
     # Phase 26: Model classification for canonical resolver
-    model_category: str = "unknown"  # core_entity, dto, request_response, duplicated_projection, infrastructure
+    model_category: str = (
+        "unknown"  # core_entity, dto, request_response, duplicated_projection, infrastructure
+    )
     canonical_name: str = ""  # The canonical name this model resolves to
     is_canonical: bool = False  # Whether this is the canonical representation
     projections: list[str] = None  # Other names this entity is known by
@@ -931,6 +958,7 @@ class DataModel:
 
 class ModelCategory:
     """Model category constants for classification."""
+
     CORE_ENTITY = "core_entity"
     DTO = "dto"
     REQUEST_RESPONSE = "request_response"
@@ -941,6 +969,7 @@ class ModelCategory:
 @dataclass
 class CoreEntityGroup:
     """A core entity that spans multiple modules."""
+
     name: str
     models: list[DataModel]  # All representations (ORM, DTO, builder) of this entity
     module_count: int
@@ -951,11 +980,12 @@ class CoreEntityGroup:
 @dataclass
 class DatabaseSchema:
     """Database schema information for migration analysis."""
+
     schema_name: str
-    version: Optional[int] = None
+    version: int | None = None
     tables: list[str] = None
     indexes: list[str] = None
-    migration_table: Optional[str] = None
+    migration_table: str | None = None
 
 
 class DataModelAggregator:
@@ -1133,6 +1163,7 @@ class DataModelAggregator:
         # Build dedup keys based on normalized entity names
         # Pattern: remove _model, _dto, _entity, _builder suffixes to get base name
         import re
+
         dedup_map: dict[str, list[DataModel]] = {}
 
         for model in self.data_models:
@@ -1140,10 +1171,10 @@ class DataModelAggregator:
             name = model.name
             # Remove common suffixes (same pattern as CanonicalModelResolver._normalize_name)
             normalized = re.sub(
-                r'(_model|_dto|_entity|_builder|_factory|_schema|_table|_request|_response|_req|_resp|Dto|Entity|Model|Builder|Factory|Schema|Table|Request|Response|Req|Resp)$',
-                '',
+                r"(_model|_dto|_entity|_builder|_factory|_schema|_table|_request|_response|_req|_resp|Dto|Entity|Model|Builder|Factory|Schema|Table|Request|Response|Req|Resp)$",
+                "",
                 name,
-                flags=re.IGNORECASE
+                flags=re.IGNORECASE,
             )
             normalized = normalized.lower()
 
@@ -1257,7 +1288,7 @@ class DataModelAggregator:
             parts.append(f"  - 所属模块: {', '.join(model.ownership_modules)}")
             parts.append(f"  - 核心评分: {model.core_score:.1f} ({model.core_reason})")
             if model.migration_related:
-                parts.append(f"  - 迁移相关: 是")
+                parts.append("  - 迁移相关: 是")
             parts.append(f"  - 定义文件: `{model.file_path}`")
             parts.append("")
 
@@ -1333,13 +1364,13 @@ class DataModelAggregator:
 #   - infrastructure: Database tables, config, migrations
 
 import re
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 
 @dataclass
 class CanonicalModel:
     """A canonical model resolved from multiple projections."""
+
     dedup_key: str
     canonical_name: str
     category: str
@@ -1364,15 +1395,38 @@ class CanonicalModelResolver:
     # Suffix patterns that indicate non-canonical projections
     DTO_SUFFIXES = frozenset({"_dto", "_DTO", "Dto", "_request", "_response", "_req", "_resp"})
     ENTITY_SUFFIXES = frozenset({"_entity", "_Entity", "_model", "_Model", "_table", "_Table"})
-    REQUEST_RESPONSE_SUFFIXES = frozenset({"_request", "_Request", "_response", "_Response", "Request", "Response"})
-    BUILDER_SUFFIXES = frozenset({"_builder", "_Builder", "_factory", "_Factory", "Builder", "Factory"})
+    REQUEST_RESPONSE_SUFFIXES = frozenset(
+        {"_request", "_Request", "_response", "_Response", "Request", "Response"}
+    )
+    BUILDER_SUFFIXES = frozenset(
+        {"_builder", "_Builder", "_factory", "_Factory", "Builder", "Factory"}
+    )
 
     # High-frequency model name patterns (models that appear in many modules)
-    HIGH_FREQUENCY_PATTERNS = frozenset({
-        "user", "users", "config", "configuration", "settings", "base", "common",
-        "session", "token", "auth", "error", "result", "response", "request",
-        "metadata", "data", "item", "list", "page", "pagination",
-    })
+    HIGH_FREQUENCY_PATTERNS = frozenset(
+        {
+            "user",
+            "users",
+            "config",
+            "configuration",
+            "settings",
+            "base",
+            "common",
+            "session",
+            "token",
+            "auth",
+            "error",
+            "result",
+            "response",
+            "request",
+            "metadata",
+            "data",
+            "item",
+            "list",
+            "page",
+            "pagination",
+        }
+    )
 
     # Core domain names that suggest core entity status
     CORE_DOMAINS = frozenset({"core-platform", "persistence", "ai-services", "core"})
@@ -1385,10 +1439,10 @@ class CanonicalModelResolver:
         """Normalize model name to base entity key."""
         # Remove common suffixes (case-insensitive, matching various patterns)
         normalized = re.sub(
-            r'(_model|_dto|_entity|_builder|_factory|_schema|_table|_request|_response|_req|_resp|Dto|Entity|Model|Builder|Factory|Schema|Table|Request|Response|Req|Resp)$',
-            '',
+            r"(_model|_dto|_entity|_builder|_factory|_schema|_table|_request|_response|_req|_resp|Dto|Entity|Model|Builder|Factory|Schema|Table|Request|Response|Req|Resp)$",
+            "",
             name,
-            flags=re.IGNORECASE
+            flags=re.IGNORECASE,
         )
         return normalized.lower()
 
@@ -1447,7 +1501,7 @@ class CanonicalModelResolver:
         sorted_models = sorted(
             models,
             key=lambda m: (type_priority.get(m.type.lower(), 0), len(m.file_path)),
-            reverse=True
+            reverse=True,
         )
         authority = sorted_models[0]
         return authority.type, authority.file_path
@@ -1475,8 +1529,8 @@ class CanonicalModelResolver:
 
             # Determine if high-frequency
             is_high_freq = (
-                len(models) >= 3 or  # Shared across 3+ modules
-                any(pattern in dedup_key for pattern in self.HIGH_FREQUENCY_PATTERNS)
+                len(models) >= 3  # Shared across 3+ modules
+                or any(pattern in dedup_key for pattern in self.HIGH_FREQUENCY_PATTERNS)
             )
 
             high_freq_reason = ""
@@ -1506,15 +1560,17 @@ class CanonicalModelResolver:
             for m in models:
                 m.model_category = category
                 m.canonical_name = canonical_name
-                m.is_canonical = (m.name == canonical_name and m.type == authority_type)
+                m.is_canonical = m.name == canonical_name and m.type == authority_type
                 m.projections = [n for n in names if n != m.name]
 
         # Sort: high-frequency first, then by dedup key
         self.canonical_models.sort(
             key=lambda c: (
                 not c.is_high_frequency,  # High-frequency first
-                -len([m for m in self.data_models if m.dedup_key == c.dedup_key]),  # Then by projection count
-                c.dedup_key
+                -len(
+                    [m for m in self.data_models if m.dedup_key == c.dedup_key]
+                ),  # Then by projection count
+                c.dedup_key,
             )
         )
 
@@ -1597,6 +1653,7 @@ from typing import TypedDict
 
 class ReadingPath(TypedDict):
     """A reading path recommendation with explanation."""
+
     doc_path: str
     doc_title: str
     reason: str  # Why this document is recommended after/before current section
@@ -1698,7 +1755,9 @@ class SectionNarrativeBuilder:
         # Build content based on section type
         if self.section_slug in ("services", "python-services"):
             parts.append("## 核心服务组件\n")
-            parts.append("本节深入介绍系统中的核心服务组件。这些模块承担着系统的主要业务逻辑，是实现功能的核心单元。下面的每个组件都有明确的职责边界和运行时角色，它们通过标准接口进行通信，共同维持系统的正常运转。\n")
+            parts.append(
+                "本节深入介绍系统中的核心服务组件。这些模块承担着系统的主要业务逻辑，是实现功能的核心单元。下面的每个组件都有明确的职责边界和运行时角色，它们通过标准接口进行通信，共同维持系统的正常运转。\n"
+            )
             for m in section_modules[:5]:
                 name = m.get("name", "unknown")
                 domain = m.get("domain", "unknown")
@@ -1715,7 +1774,9 @@ class SectionNarrativeBuilder:
 
         elif self.section_slug == "data-model":
             parts.append("## 数据模型概述\n")
-            parts.append("本节介绍系统的数据模型设计。数据模型是系统状态管理的核心，定义了实体结构、关系约束和数据访问模式。良好的数据模型设计能够提高系统的一致性和可维护性。\n")
+            parts.append(
+                "本节介绍系统的数据模型设计。数据模型是系统状态管理的核心，定义了实体结构、关系约束和数据访问模式。良好的数据模型设计能够提高系统的一致性和可维护性。\n"
+            )
             # Get core models from core_context if available
             core_models = self.core_context.get("core_models_section", "")
             if core_models and "暂无" not in core_models:
@@ -1725,7 +1786,9 @@ class SectionNarrativeBuilder:
 
         elif self.section_slug == "api":
             parts.append("## API 端点概述\n")
-            parts.append("本节提供系统 API 接口的完整参考。API 是系统与外部交互的契约，定义了请求格式、响应结构和调用约定。理解 API 设计有助于集成开发和第三方对接。\n")
+            parts.append(
+                "本节提供系统 API 接口的完整参考。API 是系统与外部交互的契约，定义了请求格式、响应结构和调用约定。理解 API 设计有助于集成开发和第三方对接。\n"
+            )
             endpoint_count = len(self.endpoints)
             if endpoint_count > 0:
                 # Group by module
@@ -1736,13 +1799,17 @@ class SectionNarrativeBuilder:
 
                 parts.append(f"**端点总数**: {endpoint_count}")
                 parts.append("\n**按模块分布**:")
-                for module, count in sorted(by_module.items(), key=lambda x: x[1], reverse=True)[:5]:
+                for module, count in sorted(by_module.items(), key=lambda x: x[1], reverse=True)[
+                    :5
+                ]:
                     parts.append(f"- {module}: {count} 个端点")
 
         else:
             # Generic section content
             parts.append(f"## {self.section_title} 内容概览\n")
-            parts.append(f"本节介绍 {self.section_title} 的相关内容。以下模块和组件共同构成了系统的 {self.section_title} 能力，了解它们有助于深入理解系统设计和实现细节。\n")
+            parts.append(
+                f"本节介绍 {self.section_title} 的相关内容。以下模块和组件共同构成了系统的 {self.section_title} 能力，了解它们有助于深入理解系统设计和实现细节。\n"
+            )
             for m in section_modules[:5]:
                 name = m.get("name", "unknown")
                 responsibility = m.get("responsibility", "N/A")
@@ -1874,22 +1941,21 @@ class ReadingPathGenerator:
         rules = path_rules.get(self.section_slug, [])
 
         # Add overview always first
-        paths.append(ReadingPath(
-            doc_path="../../00-overview.md",
-            doc_title="项目概览",
-            reason="总览提供项目整体定位和能力",
-            order=-1  # Special order indicating it should be read before
-        ))
+        paths.append(
+            ReadingPath(
+                doc_path="../../00-overview.md",
+                doc_title="项目概览",
+                reason="总览提供项目整体定位和能力",
+                order=-1,  # Special order indicating it should be read before
+            )
+        )
 
         # Add other recommended paths
         for target_slug, target_title, reason, order in rules:
             doc_path = f"../{target_slug}/index.md"
-            paths.append(ReadingPath(
-                doc_path=doc_path,
-                doc_title=target_title,
-                reason=reason,
-                order=order
-            ))
+            paths.append(
+                ReadingPath(doc_path=doc_path, doc_title=target_title, reason=reason, order=order)
+            )
 
         # Sort by order
         paths.sort(key=lambda x: x["order"])
@@ -1908,7 +1974,9 @@ class ReadingPathGenerator:
         for i, path in enumerate(paths):
             order = path["order"]
             if order == -1:
-                parts.append(f"- [{path['doc_title']}]({path['doc_path']}) - {path['reason']}（建议首先阅读）")
+                parts.append(
+                    f"- [{path['doc_title']}]({path['doc_path']}) - {path['reason']}（建议首先阅读）"
+                )
             else:
                 parts.append(f"- [{path['doc_title']}]({path['doc_path']}) - {path['reason']}")
 
@@ -1983,7 +2051,9 @@ class GenerationEngine:
 
         # Layer 1: Core overview documents (existing MVP)
         for contract in CORE_DOCUMENT_CONTRACTS:
-            content, cached = self._render_with_cache(contract.name, contract.template_path, core_context)
+            content, cached = self._render_with_cache(
+                contract.name, contract.template_path, core_context
+            )
             target = self.root / contract.output_path
             write_text(target, content)
             written.append(contract.output_path)
@@ -1991,7 +2061,9 @@ class GenerationEngine:
             misses += 0 if cached else 1
 
         # Layer 2: Section layer documents (docs/sections/<section>/index.md)
-        section_docs, section_hits, section_misses = self._generate_section_docs(core_context, snapshot)
+        section_docs, section_hits, section_misses = self._generate_section_docs(
+            core_context, snapshot
+        )
         written.extend(section_docs)
         hits += section_hits
         misses += section_misses
@@ -2009,13 +2081,17 @@ class GenerationEngine:
             misses += phase_misses
 
         # Layer 4: Module layer documents (docs/modules/<module>.md)
-        module_docs, module_hits, module_misses = self._generate_module_docs(snapshot, impacted_modules)
+        module_docs, module_hits, module_misses = self._generate_module_docs(
+            snapshot, impacted_modules
+        )
         written.extend(module_docs)
         hits += module_hits
         misses += module_misses
 
         # Prompt fragments and task catalog
-        fragment_files, fragment_hits, fragment_misses = self._generate_prompt_fragments(core_context)
+        fragment_files, fragment_hits, fragment_misses = self._generate_prompt_fragments(
+            core_context
+        )
         written.extend(fragment_files)
         hits += fragment_hits
         misses += fragment_misses
@@ -2028,12 +2104,18 @@ class GenerationEngine:
         return GenerationRunResult(written_files=written, cache_hits=hits, cache_misses=misses)
 
     def _load_snapshot(self) -> dict[str, Any]:
-        repo_map = read_yamlish(self.source_root / "repo-map.yaml", {"repository": {}, "commands": {}})
+        repo_map = read_yamlish(
+            self.source_root / "repo-map.yaml", {"repository": {}, "commands": {}}
+        )
         module_index = read_yamlish(self.source_root / "module-index.yaml", {"modules": []})
         api_index = read_yamlish(self.source_root / "api-index.yaml", {"endpoints": []})
         data_models = read_yamlish(self.source_root / "data-models.yaml", {"models": []})
-        graph_data = read_yamlish(self.root / ".repo-wiki" / "graph" / "knowledge_graph.json", {"modules": {}})
-        retrieval = read_yamlish(self.root / ".repo-wiki" / "index" / "retrieval_candidates.json", {"modules": {}})
+        graph_data = read_yamlish(
+            self.root / ".repo-wiki" / "graph" / "knowledge_graph.json", {"modules": {}}
+        )
+        retrieval = read_yamlish(
+            self.root / ".repo-wiki" / "index" / "retrieval_candidates.json", {"modules": {}}
+        )
         return {
             "repo_map": repo_map,
             "module_index": module_index,
@@ -2045,21 +2127,34 @@ class GenerationEngine:
 
     def _build_core_context(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         repo = snapshot["repo_map"].get("repository", {}) or {}
-        modules = sorted(snapshot["module_index"].get("modules", []), key=lambda x: str(x.get("name", "")))
-        endpoints = sorted(snapshot["api_index"].get("endpoints", []), key=lambda x: (str(x.get("module", "")), str(x.get("path", ""))))
-        models = sorted(snapshot["data_models"].get("models", []), key=lambda x: (str(x.get("module", "")), str(x.get("name", ""))))
+        modules = sorted(
+            snapshot["module_index"].get("modules", []), key=lambda x: str(x.get("name", ""))
+        )
+        endpoints = sorted(
+            snapshot["api_index"].get("endpoints", []),
+            key=lambda x: (str(x.get("module", "")), str(x.get("path", ""))),
+        )
+        models = sorted(
+            snapshot["data_models"].get("models", []),
+            key=lambda x: (str(x.get("module", "")), str(x.get("name", ""))),
+        )
         commands = snapshot["repo_map"].get("commands", {}) or {}
 
         module_lines = [
-            f"- `{m.get('name', 'unknown')}` -> `{m.get('path', '')}` ({m.get('responsibility', 'N/A')})" for m in modules
+            f"- `{m.get('name', 'unknown')}` -> `{m.get('path', '')}` ({m.get('responsibility', 'N/A')})"
+            for m in modules
         ] or ["- No modules discovered yet."]
         api_lines = [
-            f"- `{e.get('method', 'GET')} {e.get('path', '/')}` (`{e.get('module', 'unknown')}`)" for e in endpoints
+            f"- `{e.get('method', 'GET')} {e.get('path', '/')}` (`{e.get('module', 'unknown')}`)"
+            for e in endpoints
         ] or ["- No API endpoints discovered yet."]
         model_lines = [
-            f"- `{d.get('name', 'unknown')}` (`{d.get('module', 'unknown')}`, {d.get('type', 'model')})" for d in models
+            f"- `{d.get('name', 'unknown')}` (`{d.get('module', 'unknown')}`, {d.get('type', 'model')})"
+            for d in models
         ] or ["- No data models discovered yet."]
-        command_lines = [f"- `{k}`: `{v}`" for k, v in sorted(commands.items())] or ["- start/build/test/lint are not extracted yet."]
+        command_lines = [f"- `{k}`: `{v}`" for k, v in sorted(commands.items())] or [
+            "- start/build/test/lint are not extracted yet."
+        ]
 
         graph_modules = snapshot["graph"].get("modules", {}) or {}
         graph_summary = f"Graph nodes: {len(graph_modules)} modules."
@@ -2134,7 +2229,9 @@ class GenerationEngine:
             joined = "\n".join(module_list)
             formatted_domain_groups[domain] = joined
             domain_groups_markdown_parts.append(f"### {domain}\n\n{joined}\n")
-        domain_groups_markdown = "\n".join(domain_groups_markdown_parts).strip() or "暂无可用领域分组信息。"
+        domain_groups_markdown = (
+            "\n".join(domain_groups_markdown_parts).strip() or "暂无可用领域分组信息。"
+        )
 
         # Build architecture description using NarrativeBuilder
         architecture_description = (
@@ -2169,10 +2266,16 @@ class GenerationEngine:
         )
 
         # Module overview table
-        module_overview_table = "\n".join([
-            f"| {m.get('name', 'unknown')} | {m.get('domain', 'N/A')} | {m.get('runtime_role', 'N/A')} | {m.get('responsibility', 'N/A')[:50]}... |"
-            for m in modules[:10]
-        ]) if modules else "| No modules | | | |"
+        module_overview_table = (
+            "\n".join(
+                [
+                    f"| {m.get('name', 'unknown')} | {m.get('domain', 'N/A')} | {m.get('runtime_role', 'N/A')} | {m.get('responsibility', 'N/A')[:50]}... |"
+                    for m in modules[:10]
+                ]
+            )
+            if modules
+            else "| No modules | | | |"
+        )
 
         # Tech stack
         tech_stack = (
@@ -2207,11 +2310,13 @@ class GenerationEngine:
         # Build domain overview table
         domain_summary_lines = [
             "| 业务域 | 服务族数量 | 模块数量 | 说明 |",
-            "|--------|-----------|----------|------|"
+            "|--------|-----------|----------|------|",
         ]
         for domain in sorted(domain_modules.keys()):
             service_families = domain_modules[domain]
-            module_count = sum(len(modules) for sf in service_families.values() for modules in sf.values())
+            module_count = sum(
+                len(modules) for sf in service_families.values() for modules in sf.values()
+            )
             domain_descriptions = {
                 "core-platform": "核心平台基础设施，包括核心运行时和存储层",
                 "ai-services": "AI 服务能力，包括向量索引、语义检索和知识图谱",
@@ -2222,10 +2327,12 @@ class GenerationEngine:
                 "tooling": "工具和脚本，用于构建、测试和部署",
                 "testing": "测试框架和测试工具",
                 "operations": "运维工具，包括部署、监控和日志",
-                "unknown": "未分类模块，需要领域分类"
+                "unknown": "未分类模块，需要领域分类",
             }
             description = domain_descriptions.get(domain, f"业务域: {domain}")
-            domain_summary_lines.append(f"| {domain} | {len(service_families)} | {module_count} | {description} |")
+            domain_summary_lines.append(
+                f"| {domain} | {len(service_families)} | {module_count} | {description} |"
+            )
         domain_overview_table = "\n".join(domain_summary_lines)
 
         # Build detailed domain groups
@@ -2270,7 +2377,7 @@ class GenerationEngine:
         # Build module index table (flat by domain for quick lookup)
         module_index_lines = [
             "| 模块 | 路径 | 运行时角色 | 域 | 核心职责 |",
-            "|------|------|-----------|-----|---------|"
+            "|------|------|-----------|-----|---------|",
         ]
         for m in sorted(modules, key=lambda x: (x.get("domain", "z"), x.get("name", ""))):
             name = m.get("name", "unknown")
@@ -2278,7 +2385,9 @@ class GenerationEngine:
             runtime_role = m.get("runtime_role", "unknown")
             domain = m.get("domain", "unknown")
             responsibility = m.get("responsibility", "N/A")[:60]
-            module_index_lines.append(f"| `{name}` | `{path}` | {runtime_role} | {domain} | {responsibility} |")
+            module_index_lines.append(
+                f"| `{name}` | `{path}` | {runtime_role} | {domain} | {responsibility} |"
+            )
         module_index_table = "\n".join(module_index_lines)
 
         # Build cross-domain dependencies
@@ -2298,7 +2407,9 @@ class GenerationEngine:
                         dep_key = (domain, dep_domain)
                         if dep_key not in seen_deps:
                             seen_deps.add(dep_key)
-                            cross_domain_deps.append(f"- **{domain}** → **{dep_domain}**: `{m.get('name')}` 依赖 `{dep}`")
+                            cross_domain_deps.append(
+                                f"- **{domain}** → **{dep_domain}**: `{m.get('name')}` 依赖 `{dep}`"
+                            )
 
         for m in modules:
             domain = m.get("domain", "unknown")
@@ -2312,9 +2423,13 @@ class GenerationEngine:
                         dep_key = (domain, dep_domain)
                         if dep_key not in seen_deps:
                             seen_deps.add(dep_key)
-                            cross_domain_deps.append(f"- **{domain}** ← **{dep_domain}**: `{m.get('name')}` 被 `{dep}` 依赖")
+                            cross_domain_deps.append(
+                                f"- **{domain}** ← **{dep_domain}**: `{m.get('name')}` 被 `{dep}` 依赖"
+                            )
 
-        cross_domain_dependencies = "\n".join(cross_domain_deps) if cross_domain_deps else "- 暂无跨域依赖关系"
+        cross_domain_dependencies = (
+            "\n".join(cross_domain_deps) if cross_domain_deps else "- 暂无跨域依赖关系"
+        )
 
         # =====================================================================
         # Aggregated API contracts generation (Phase 10 - Task 10.2)
@@ -2337,7 +2452,9 @@ class GenerationEngine:
         if key_entry_endpoints:
             key_api_parts = ["系统中的关键入口 API：\n"]
             for ep in key_entry_endpoints:
-                key_api_parts.append(f"- **{ep.method}** `{ep.path}` ({ep.module}.{ep.handler}) - {ep.entry_reason}")
+                key_api_parts.append(
+                    f"- **{ep.method}** `{ep.path}` ({ep.module}.{ep.handler}) - {ep.entry_reason}"
+                )
             key_entry_apis = "\n".join(key_api_parts)
         else:
             key_entry_apis = "- 暂无关键入口 API 定义"
@@ -2345,7 +2462,7 @@ class GenerationEngine:
         # Build endpoint index table (simplified for reference)
         endpoint_index_lines = [
             "| 方法 | 路径 | 模块 | 处理器 | 文档 |",
-            "|------|------|------|--------|------|"
+            "|------|------|------|--------|------|",
         ]
         for ep in sorted(endpoints, key=lambda x: (x.get("module", ""), x.get("path", ""))):
             method = ep.get("method", "GET")
@@ -2354,9 +2471,17 @@ class GenerationEngine:
             handler = ep.get("handler", "unknown")
             file_path = ep.get("file_path", "")
             # Find module doc path
-            doc_link = f"[模块文档](modules/{module_name}.md)" if module_name != "tests" else "[测试模块](modules/tests.md)"
-            endpoint_index_lines.append(f"| {method} | `{path}` | {module_name} | `{handler}` | {doc_link} |")
-        endpoint_index_table = "\n".join(endpoint_index_lines) if endpoint_index_lines else "| 无端点 | | | |"
+            doc_link = (
+                f"[模块文档](modules/{module_name}.md)"
+                if module_name != "tests"
+                else "[测试模块](modules/tests.md)"
+            )
+            endpoint_index_lines.append(
+                f"| {method} | `{path}` | {module_name} | `{handler}` | {doc_link} |"
+            )
+        endpoint_index_table = (
+            "\n".join(endpoint_index_lines) if endpoint_index_lines else "| 无端点 | | | |"
+        )
 
         # =====================================================================
         # Domain-aggregated data model generation (Phase 10 - Task 10.3)
@@ -2379,10 +2504,12 @@ class GenerationEngine:
         if core_models:
             core_models_table_lines = [
                 "| 模型名称 | 类型 | 模块 | 定义文件 |",
-                "|----------|------|------|----------|"
+                "|----------|------|------|----------|",
             ]
             for m in sorted(core_models, key=lambda x: x.name):
-                core_models_table_lines.append(f"| {m.name} | {m.type} | {m.module} | `{m.file_path}` |")
+                core_models_table_lines.append(
+                    f"| {m.name} | {m.type} | {m.module} | `{m.file_path}` |"
+                )
             core_models_table = "\n".join(core_models_table_lines)
         else:
             core_models_table = "| 无核心模型 | | | |"
@@ -2418,13 +2545,17 @@ class GenerationEngine:
         # Model index table
         model_index_lines = [
             "| 模型名称 | 类型 | 模块 | 定义文件 |",
-            "|----------|------|------|----------|"
+            "|----------|------|------|----------|",
         ]
         for m in sorted(data_model_aggregator.data_models, key=lambda x: (x.module, x.name)):
             # Determine if core
             is_core = "**[核心]**" if m.is_core_entity else ""
-            model_index_lines.append(f"| {m.name} {is_core} | {m.type} | {m.module} | `{m.file_path}` |")
-        model_index_table = "\n".join(model_index_lines) if model_index_lines else "| 无模型 | | | |"
+            model_index_lines.append(
+                f"| {m.name} {is_core} | {m.type} | {m.module} | `{m.file_path}` |"
+            )
+        model_index_table = (
+            "\n".join(model_index_lines) if model_index_lines else "| 无模型 | | | |"
+        )
 
         return {
             "repository_name": repo_name,
@@ -2436,7 +2567,7 @@ class GenerationEngine:
             "model_table": "\n".join(model_lines),
             "commands_table": "\n".join(command_lines),
             "module_count": str(len(modules)),
-            "endpoint_count":str(len(endpoints)),
+            "endpoint_count": str(len(endpoints)),
             "model_count": str(len(models)),
             "graph_summary": graph_summary,
             # New prose-first fields for 00-overview.md
@@ -2731,7 +2862,9 @@ class GenerationEngine:
     def _generate_module_docs(
         self, snapshot: dict[str, Any], impacted_modules: list[str] | None
     ) -> tuple[list[str], int, int]:
-        modules = sorted(snapshot["module_index"].get("modules", []), key=lambda x: str(x.get("name", "")))
+        modules = sorted(
+            snapshot["module_index"].get("modules", []), key=lambda x: str(x.get("name", ""))
+        )
         graph_modules = snapshot["graph"].get("modules", {}) or {}
         retrieval_modules = snapshot["retrieval"].get("modules", {}) or {}
         files: list[str] = []
@@ -2742,12 +2875,16 @@ class GenerationEngine:
             if impacted_modules is not None and name not in impacted_modules:
                 continue
 
-            retrieval_candidates = retrieval_modules.get(name, []) if isinstance(retrieval_modules, dict) else []
+            retrieval_candidates = (
+                retrieval_modules.get(name, []) if isinstance(retrieval_modules, dict) else []
+            )
             neighbors: list[str] = []
             if isinstance(graph_modules, dict):
                 node = graph_modules.get(name, {}) or {}
                 neighbors = (node.get("upstream", []) or []) + (node.get("downstream", []) or [])
-            context_strategy = self.context_builder.build_module_context(module, retrieval_candidates, neighbors)
+            context_strategy = self.context_builder.build_module_context(
+                module, retrieval_candidates, neighbors
+            )
 
             contract = module_document_contract(name)
             module_context = {
@@ -2755,15 +2892,29 @@ class GenerationEngine:
                 "module_path": module.get("path", ""),
                 "module_owner": module.get("owner", "unknown"),
                 "module_responsibility": module.get("responsibility", "unknown"),
-                "module_exports": "\n".join(f"- `{x}`" for x in (module.get("exports", []) or [])) or "- none",
-                "module_depends_on": "\n".join(f"- `{x}`" for x in (module.get("depends_on", []) or [])) or "- none",
-                "module_depended_by": "\n".join(f"- `{x}`" for x in (module.get("depended_by", []) or [])) or "- none",
-                "module_interfaces": "\n".join(f"- `{x}`" for x in (module.get("interfaces", []) or [])) or "- none",
-                "module_data_models": "\n".join(f"- `{x}`" for x in (module.get("data_models", []) or [])) or "- none",
+                "module_exports": "\n".join(f"- `{x}`" for x in (module.get("exports", []) or []))
+                or "- none",
+                "module_depends_on": "\n".join(
+                    f"- `{x}`" for x in (module.get("depends_on", []) or [])
+                )
+                or "- none",
+                "module_depended_by": "\n".join(
+                    f"- `{x}`" for x in (module.get("depended_by", []) or [])
+                )
+                or "- none",
+                "module_interfaces": "\n".join(
+                    f"- `{x}`" for x in (module.get("interfaces", []) or [])
+                )
+                or "- none",
+                "module_data_models": "\n".join(
+                    f"- `{x}`" for x in (module.get("data_models", []) or [])
+                )
+                or "- none",
                 "context_strategy": context_strategy.strategy,
                 "context_token_budget": str(context_strategy.token_budget),
                 "context_notes": context_strategy.notes,
-                "context_neighbors": "\n".join(f"- `{x}`" for x in context_strategy.neighbors) or "- none",
+                "context_neighbors": "\n".join(f"- `{x}`" for x in context_strategy.neighbors)
+                or "- none",
                 "context_chunks": "\n".join(
                     f"- `{chunk.get('symbol_name', 'chunk')}` `{chunk.get('file_path', '')}`"
                     for chunk in context_strategy.chunks
@@ -2771,7 +2922,9 @@ class GenerationEngine:
                 or "- none",
             }
 
-            content, cached = self._render_with_cache(contract.name, contract.template_path, module_context)
+            content, cached = self._render_with_cache(
+                contract.name, contract.template_path, module_context
+            )
             target = self.root / contract.output_path
             write_text(target, content)
             files.append(contract.output_path)
@@ -2779,12 +2932,16 @@ class GenerationEngine:
             misses += 0 if cached else 1
         return files, hits, misses
 
-    def _generate_prompt_fragments(self, core_context: dict[str, Any]) -> tuple[list[str], int, int]:
+    def _generate_prompt_fragments(
+        self, core_context: dict[str, Any]
+    ) -> tuple[list[str], int, int]:
         files: list[str] = []
         hits = 0
         misses = 0
         for contract in PROMPT_FRAGMENT_CONTRACTS:
-            content, cached = self._render_with_cache(contract.name, contract.template_path, core_context)
+            content, cached = self._render_with_cache(
+                contract.name, contract.template_path, core_context
+            )
             write_text(self.root / contract.output_path, content)
             files.append(contract.output_path)
             hits += 1 if cached else 0
@@ -2795,11 +2952,27 @@ class GenerationEngine:
         modules = [m.get("name", "unknown") for m in snapshot["module_index"].get("modules", [])]
         commands = snapshot["repo_map"].get("commands", {}) or {}
         tasks = [
-            {"name": "init", "description": "Full bootstrap workflow", "commands": ["repo-wiki init"]},
-            {"name": "update", "description": "Impacted module regeneration", "commands": ["repo-wiki update"]},
-            {"name": "verify", "description": "Governance checks", "commands": ["repo-wiki verify", "repo-wiki verify --ci"]},
+            {
+                "name": "init",
+                "description": "Full bootstrap workflow",
+                "commands": ["repo-wiki init"],
+            },
+            {
+                "name": "update",
+                "description": "Impacted module regeneration",
+                "commands": ["repo-wiki update"],
+            },
+            {
+                "name": "verify",
+                "description": "Governance checks",
+                "commands": ["repo-wiki verify", "repo-wiki verify --ci"],
+            },
         ]
-        payload = {"tasks": tasks, "module_references": sorted(str(x) for x in modules), "commands": commands}
+        payload = {
+            "tasks": tasks,
+            "module_references": sorted(str(x) for x in modules),
+            "commands": commands,
+        }
         context = {"task_catalog_json": self._json_text(payload)}
         content, cached = self._render_with_cache(
             TASK_CATALOG_CONTRACT.name, TASK_CATALOG_CONTRACT.template_path, context
@@ -2809,7 +2982,9 @@ class GenerationEngine:
         write_json(self.root / "ai" / "source-of-truth" / "task-catalog.generated.json", payload)
         return TASK_CATALOG_CONTRACT.output_path, cached
 
-    def _render_with_cache(self, cache_key_prefix: str, template_path: str, context: dict[str, Any]) -> tuple[str, bool]:
+    def _render_with_cache(
+        self, cache_key_prefix: str, template_path: str, context: dict[str, Any]
+    ) -> tuple[str, bool]:
         key = stable_hash({"k": cache_key_prefix, "tpl": template_path, "ctx": context})
         cached = self.cache.get(key)
         if cached is not None:
@@ -2827,7 +3002,10 @@ class GenerationEngine:
     def ensure_source_of_truth_scaffold(self) -> None:
         ensure_dir(self.source_root / "prompt-fragments")
         defaults = {
-            self.source_root / "repo-map.yaml": {"repository": {"name": self.root.name, "root_path": str(self.root)}, "commands": {}},
+            self.source_root / "repo-map.yaml": {
+                "repository": {"name": self.root.name, "root_path": str(self.root)},
+                "commands": {},
+            },
             self.source_root / "module-index.yaml": {"modules": []},
             self.source_root / "api-index.yaml": {"endpoints": []},
             self.source_root / "data-models.yaml": {"models": []},
@@ -2876,7 +3054,9 @@ class GenerationEngine:
 
         return errors
 
-    def validate_module_map_output(self, content: str, has_domain_metadata: bool = True) -> list[str]:
+    def validate_module_map_output(
+        self, content: str, has_domain_metadata: bool = True
+    ) -> list[str]:
         """Validate module map output meets domain-grouped organization requirements.
 
         Returns a list of validation errors, empty if valid.
@@ -2985,8 +3165,14 @@ class GenerationEngine:
         """
         results = {}
         required_sections = [
-            "project", "architecture", "services", "data-model",
-            "api", "operations", "development", "security"
+            "project",
+            "architecture",
+            "services",
+            "data-model",
+            "api",
+            "operations",
+            "development",
+            "security",
         ]
 
         for section_slug in required_sections:

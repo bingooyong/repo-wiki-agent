@@ -1,10 +1,8 @@
 """Tests for qoder-style navigation metadata adapter and import bridge."""
 
-import pytest
 
 from repo_wiki.adapter.qoder_adapter import (
     CANONICAL_SECTIONS,
-    QODER_TO_CANONICAL,
     VALIDATION_REASON_CODES,
     QoderImportBridge,
     QoderNavMetadata,
@@ -331,8 +329,18 @@ class TestSideBySideComparison:
         qoder_data = {
             "version": "1.0",
             "nodes": [
-                {"id": "q01-architecture", "label": "Architecture", "type": "section", "aliases": ["arch", "architecture"]},
-                {"id": "q02-services", "label": "Services", "type": "section", "aliases": ["arch"]},  # Duplicate alias
+                {
+                    "id": "q01-architecture",
+                    "label": "Architecture",
+                    "type": "section",
+                    "aliases": ["arch", "architecture"],
+                },
+                {
+                    "id": "q02-services",
+                    "label": "Services",
+                    "type": "section",
+                    "aliases": ["arch"],
+                },  # Duplicate alias
             ],
         }
         result = generate_side_by_side_comparison(qoder_data)

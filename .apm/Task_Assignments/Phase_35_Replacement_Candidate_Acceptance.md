@@ -27,13 +27,14 @@ Run the final full AI_API_Atlas Minimax pilot after strict, IA, evidence, and re
 - Generate under `/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/.repo-agent-eval/<run>` only.
 - Verify `.qoder/**` remains read-only and unmodified.
 - Produce strict report, qoder comparison report, and manual review checklist.
+- Verify the selected run is the latest READY run by manifest readiness, not only newest directory mtime.
 - Require fallback pages to be `<= 5%` before READY consideration.
 
 ## Expected Output
 - Deliverables: full isolated run, strict report, qoder comparison report, review checklist.
 - Compile command: `uv run repo-wiki --help`
 - Self-test command: `uv run pytest tests/test_qoder_like_verifier.py tests/test_qoder_comparator_paths.py`
-- Completion rule: do not mark complete unless the run is either READY with evidence or explicitly `NOT_READY`.
+- Completion rule: do not mark complete unless the run is either READY with evidence or explicitly `NOT_READY`, and dirty/no-readiness runs are not selected as READY.
 
 ## Memory Logging
 Upon completion, you **MUST** log work in: `.apm/Memory/Phase_35_Replacement_Candidate_Acceptance/Task_35_1_AI_API_Atlas_full_pilot_rerun.md`
@@ -64,12 +65,13 @@ Build a 30-page manual review pack comparing repo-agent output to Qoder pages.
 
 ## Detailed Instructions
 - Select 30 representative pages covering overview, architecture, core services, Python services, data models, API, operations, security, and troubleshooting.
-- Record the Qoder page, repo-agent page, gap summary, and acceptability for each pair.
+- Include Qoder `API参考/核心服务API/API台账服务API.md` and require the repo-agent counterpart to cite `inventory-service`.
+- Record the Qoder page, repo-agent page, gap summary, Mermaid/flow coverage, and acceptability for each pair.
 - Require at least 24 of 30 pages to be acceptable for replacement readiness.
 - Keep review artifacts inside the isolated evaluation output or operations evidence.
 
 ## Expected Output
-- Deliverables: 30-page manual review matrix, page-pair references, acceptance summary.
+- Deliverables: 30-page manual review matrix, API台账服务 comparison pair, Mermaid/flow coverage review, acceptance summary.
 - Compile command: `uv run repo-wiki --help`
 - Self-test command: `uv run pytest tests/test_qoder_parity_metrics.py tests/test_readiness_schema.py`
 - Completion rule: do not mark complete unless review count and acceptance threshold are explicit.
@@ -156,4 +158,3 @@ Issue the final replacement decision dossier.
 ## Memory Logging
 Upon completion, you **MUST** log work in: `.apm/Memory/Phase_35_Replacement_Candidate_Acceptance/Task_35_4_Go_no_go_dossier.md`
 ```
-

@@ -5,7 +5,6 @@ domain, and exposure pattern, and that entry-point selection uses principled
 scoring rather than just top-K retrieval.
 """
 
-import pytest
 from repo_wiki.generator.engine import APIAggregator, APIEndpoint
 
 
@@ -15,10 +14,21 @@ class TestAPIAggregatorInitialization:
     def test_aggregator_builds_endpoint_objects(self):
         """Test that aggregator converts raw endpoints to APIEndpoint objects."""
         endpoints = [
-            {"method": "GET", "path": "/health", "module": "api", "handler": "health", "file_path": "api/main.py"}
+            {
+                "method": "GET",
+                "path": "/health",
+                "module": "api",
+                "handler": "health",
+                "file_path": "api/main.py",
+            }
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -34,10 +44,21 @@ class TestAPIAggregatorInitialization:
     def test_aggregator_extracts_module_metadata(self):
         """Test that aggregator attaches module domain/service_family to endpoints."""
         endpoints = [
-            {"method": "POST", "path": "/users", "module": "users", "handler": "create_user", "file_path": "users/api.py"}
+            {
+                "method": "POST",
+                "path": "/users",
+                "module": "users",
+                "handler": "create_user",
+                "file_path": "users/api.py",
+            }
         ]
         modules = [
-            {"name": "users", "domain": "core-platform", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "users",
+                "domain": "core-platform",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -54,11 +75,28 @@ class TestExposurePatternClassification:
     def test_classifies_public_endpoints(self):
         """Test that health/status endpoints are classified as public."""
         endpoints = [
-            {"method": "GET", "path": "/health", "module": "api", "handler": "health", "file_path": "api/main.py"},
-            {"method": "GET", "path": "/ready", "module": "api", "handler": "ready", "file_path": "api/main.py"},
+            {
+                "method": "GET",
+                "path": "/health",
+                "module": "api",
+                "handler": "health",
+                "file_path": "api/main.py",
+            },
+            {
+                "method": "GET",
+                "path": "/ready",
+                "module": "api",
+                "handler": "ready",
+                "file_path": "api/main.py",
+            },
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -69,10 +107,21 @@ class TestExposurePatternClassification:
     def test_classifies_webhook_endpoints(self):
         """Test that webhook paths are classified correctly."""
         endpoints = [
-            {"method": "POST", "path": "/webhook/github", "module": "hooks", "handler": "handle", "file_path": "hooks/api.py"},
+            {
+                "method": "POST",
+                "path": "/webhook/github",
+                "module": "hooks",
+                "handler": "handle",
+                "file_path": "hooks/api.py",
+            },
         ]
         modules = [
-            {"name": "hooks", "domain": "operations", "service_family": "python-backend", "runtime_role": "worker"}
+            {
+                "name": "hooks",
+                "domain": "operations",
+                "service_family": "python-backend",
+                "runtime_role": "worker",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -82,10 +131,21 @@ class TestExposurePatternClassification:
     def test_classifies_admin_endpoints(self):
         """Test that admin paths are classified as admin."""
         endpoints = [
-            {"method": "POST", "path": "/admin/users", "module": "admin", "handler": "create_user", "file_path": "admin/api.py"},
+            {
+                "method": "POST",
+                "path": "/admin/users",
+                "module": "admin",
+                "handler": "create_user",
+                "file_path": "admin/api.py",
+            },
         ]
         modules = [
-            {"name": "admin", "domain": "operations", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "admin",
+                "domain": "operations",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -95,10 +155,21 @@ class TestExposurePatternClassification:
     def test_classifies_auth_endpoints_as_public(self):
         """Test that auth endpoints are classified as public."""
         endpoints = [
-            {"method": "POST", "path": "/auth/login", "module": "auth", "handler": "login", "file_path": "auth/api.py"},
+            {
+                "method": "POST",
+                "path": "/auth/login",
+                "module": "auth",
+                "handler": "login",
+                "file_path": "auth/api.py",
+            },
         ]
         modules = [
-            {"name": "auth", "domain": "core-platform", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "auth",
+                "domain": "core-platform",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -112,10 +183,21 @@ class TestAuthTypeDetection:
     def test_detects_bearer_auth_for_api_servers(self):
         """Test that API server endpoints require bearer auth."""
         endpoints = [
-            {"method": "GET", "path": "/api/users", "module": "api", "handler": "list_users", "file_path": "api/main.py"},
+            {
+                "method": "GET",
+                "path": "/api/users",
+                "module": "api",
+                "handler": "list_users",
+                "file_path": "api/main.py",
+            },
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -127,10 +209,21 @@ class TestAuthTypeDetection:
     def test_detects_no_auth_for_tests(self):
         """Test that test module endpoints don't require auth."""
         endpoints = [
-            {"method": "GET", "path": "/test/health", "module": "tests", "handler": "health", "file_path": "tests/api.py"},
+            {
+                "method": "GET",
+                "path": "/test/health",
+                "module": "tests",
+                "handler": "health",
+                "file_path": "tests/api.py",
+            },
         ]
         modules = [
-            {"name": "tests", "domain": "testing", "service_family": "python-backend", "runtime_role": "test-harness"}
+            {
+                "name": "tests",
+                "domain": "testing",
+                "service_family": "python-backend",
+                "runtime_role": "test-harness",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -141,10 +234,21 @@ class TestAuthTypeDetection:
     def test_detects_auth_endpoints(self):
         """Test that auth-related paths are detected."""
         endpoints = [
-            {"method": "POST", "path": "/login", "module": "auth", "handler": "login", "file_path": "auth/api.py"},
+            {
+                "method": "POST",
+                "path": "/login",
+                "module": "auth",
+                "handler": "login",
+                "file_path": "auth/api.py",
+            },
         ]
         modules = [
-            {"name": "auth", "domain": "core-platform", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "auth",
+                "domain": "core-platform",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -159,11 +263,28 @@ class TestEntryPointScoring:
     def test_scores_public_mutation_high(self):
         """Test that public mutation endpoints score higher than internal GET endpoints."""
         endpoints = [
-            {"method": "GET", "path": "/internal/stats", "module": "api", "handler": "stats", "file_path": "api/main.py"},  # Internal
-            {"method": "POST", "path": "/users", "module": "api", "handler": "create_user", "file_path": "api/main.py"},  # Public mutation
+            {
+                "method": "GET",
+                "path": "/internal/stats",
+                "module": "api",
+                "handler": "stats",
+                "file_path": "api/main.py",
+            },  # Internal
+            {
+                "method": "POST",
+                "path": "/users",
+                "module": "api",
+                "handler": "create_user",
+                "file_path": "api/main.py",
+            },  # Public mutation
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -176,29 +297,71 @@ class TestEntryPointScoring:
     def test_scores_root_level_paths_high(self):
         """Test that shorter paths (more root-level) score higher."""
         endpoints = [
-            {"method": "GET", "path": "/", "module": "api", "handler": "root", "file_path": "api/main.py"},
-            {"method": "GET", "path": "/api/v1/users/profile/settings", "module": "api", "handler": "deep", "file_path": "api/main.py"},
+            {
+                "method": "GET",
+                "path": "/",
+                "module": "api",
+                "handler": "root",
+                "file_path": "api/main.py",
+            },
+            {
+                "method": "GET",
+                "path": "/api/v1/users/profile/settings",
+                "module": "api",
+                "handler": "deep",
+                "file_path": "api/main.py",
+            },
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
 
         root_ep = next(ep for ep in aggregator.api_endpoints if ep.path == "/")
-        deep_ep = next(ep for ep in aggregator.api_endpoints if ep.path == "/api/v1/users/profile/settings")
+        deep_ep = next(
+            ep for ep in aggregator.api_endpoints if ep.path == "/api/v1/users/profile/settings"
+        )
 
         assert root_ep.entry_score > deep_ep.entry_score
 
     def test_selects_entry_points_above_threshold(self):
         """Test that only endpoints above score threshold are marked as entry points."""
         endpoints = [
-            {"method": "POST", "path": "/users", "module": "api", "handler": "create", "file_path": "api/main.py"},  # High score
-            {"method": "GET", "path": "/users", "module": "api", "handler": "list", "file_path": "api/main.py"},  # Medium score
-            {"method": "GET", "path": "/users/123/items", "module": "api", "handler": "get_items", "file_path": "api/main.py"},  # Lower score
+            {
+                "method": "POST",
+                "path": "/users",
+                "module": "api",
+                "handler": "create",
+                "file_path": "api/main.py",
+            },  # High score
+            {
+                "method": "GET",
+                "path": "/users",
+                "module": "api",
+                "handler": "list",
+                "file_path": "api/main.py",
+            },  # Medium score
+            {
+                "method": "GET",
+                "path": "/users/123/items",
+                "module": "api",
+                "handler": "get_items",
+                "file_path": "api/main.py",
+            },  # Lower score
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -212,13 +375,42 @@ class TestEntryPointScoring:
     def test_get_key_entry_apis_returns_top_scored(self):
         """Test that get_key_entry_apis returns top-scoring endpoints."""
         endpoints = [
-            {"method": "GET", "path": "/health", "module": "api", "handler": "health", "file_path": "api/main.py"},
-            {"method": "POST", "path": "/users", "module": "api", "handler": "create", "file_path": "api/main.py"},
-            {"method": "GET", "path": "/users", "module": "api", "handler": "list", "file_path": "api/main.py"},
-            {"method": "DELETE", "path": "/users/123", "module": "api", "handler": "delete", "file_path": "api/main.py"},
+            {
+                "method": "GET",
+                "path": "/health",
+                "module": "api",
+                "handler": "health",
+                "file_path": "api/main.py",
+            },
+            {
+                "method": "POST",
+                "path": "/users",
+                "module": "api",
+                "handler": "create",
+                "file_path": "api/main.py",
+            },
+            {
+                "method": "GET",
+                "path": "/users",
+                "module": "api",
+                "handler": "list",
+                "file_path": "api/main.py",
+            },
+            {
+                "method": "DELETE",
+                "path": "/users/123",
+                "module": "api",
+                "handler": "delete",
+                "file_path": "api/main.py",
+            },
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"}
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -237,12 +429,34 @@ class TestAPIGrouping:
     def test_group_by_service_family(self):
         """Test that endpoints are grouped by service family and domain."""
         endpoints = [
-            {"method": "GET", "path": "/api/users", "module": "api", "handler": "list", "file_path": "api/main.py"},
-            {"method": "GET", "path": "/data/reports", "module": "data", "handler": "list", "file_path": "data/main.py"},
+            {
+                "method": "GET",
+                "path": "/api/users",
+                "module": "api",
+                "handler": "list",
+                "file_path": "api/main.py",
+            },
+            {
+                "method": "GET",
+                "path": "/data/reports",
+                "module": "data",
+                "handler": "list",
+                "file_path": "data/main.py",
+            },
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"},
-            {"name": "data", "domain": "data-pipeline", "service_family": "python-backend", "runtime_role": "data-pipeline"},
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            },
+            {
+                "name": "data",
+                "domain": "data-pipeline",
+                "service_family": "python-backend",
+                "runtime_role": "data-pipeline",
+            },
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -255,11 +469,28 @@ class TestAPIGrouping:
     def test_group_by_exposure(self):
         """Test that endpoints are grouped by exposure pattern."""
         endpoints = [
-            {"method": "GET", "path": "/health", "module": "api", "handler": "health", "file_path": "api/main.py"},
-            {"method": "POST", "path": "/users", "module": "api", "handler": "create", "file_path": "api/main.py"},
+            {
+                "method": "GET",
+                "path": "/health",
+                "module": "api",
+                "handler": "health",
+                "file_path": "api/main.py",
+            },
+            {
+                "method": "POST",
+                "path": "/users",
+                "module": "api",
+                "handler": "create",
+                "file_path": "api/main.py",
+            },
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"},
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            },
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -275,12 +506,34 @@ class TestSummarizationMethods:
     def test_summarize_auth_conventions(self):
         """Test that auth conventions are summarized by module."""
         endpoints = [
-            {"method": "GET", "path": "/api/users", "module": "api", "handler": "list", "file_path": "api/main.py"},
-            {"method": "GET", "path": "/health", "module": "health", "handler": "check", "file_path": "health/main.py"},
+            {
+                "method": "GET",
+                "path": "/api/users",
+                "module": "api",
+                "handler": "list",
+                "file_path": "api/main.py",
+            },
+            {
+                "method": "GET",
+                "path": "/health",
+                "module": "health",
+                "handler": "check",
+                "file_path": "health/main.py",
+            },
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"},
-            {"name": "health", "domain": "operations", "service_family": "python-backend", "runtime_role": "tooling"},
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            },
+            {
+                "name": "health",
+                "domain": "operations",
+                "service_family": "python-backend",
+                "runtime_role": "tooling",
+            },
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -294,11 +547,28 @@ class TestSummarizationMethods:
     def test_summarize_calling_conventions(self):
         """Test that calling conventions are summarized for a group."""
         endpoints = [
-            {"method": "POST", "path": "/users", "module": "api", "handler": "create", "file_path": "api/main.py"},
-            {"method": "GET", "path": "/users", "module": "api", "handler": "list", "file_path": "api/main.py"},
+            {
+                "method": "POST",
+                "path": "/users",
+                "module": "api",
+                "handler": "create",
+                "file_path": "api/main.py",
+            },
+            {
+                "method": "GET",
+                "path": "/users",
+                "module": "api",
+                "handler": "list",
+                "file_path": "api/main.py",
+            },
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"},
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            },
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -311,10 +581,21 @@ class TestSummarizationMethods:
     def test_build_api_groups_table(self):
         """Test that API groups table is built correctly."""
         endpoints = [
-            {"method": "GET", "path": "/api/users", "module": "api", "handler": "list", "file_path": "api/main.py"},
+            {
+                "method": "GET",
+                "path": "/api/users",
+                "module": "api",
+                "handler": "list",
+                "file_path": "api/main.py",
+            },
         ]
         modules = [
-            {"name": "api", "domain": "api-gateway", "service_family": "python-backend", "runtime_role": "api-server"},
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            },
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)
@@ -327,10 +608,21 @@ class TestSummarizationMethods:
     def test_build_api_groups_detail(self):
         """Test that API groups detail contains calling convention summaries."""
         endpoints = [
-            {"method": "POST", "path": "/users", "module": "users", "handler": "create", "file_path": "users/api.py"},
+            {
+                "method": "POST",
+                "path": "/users",
+                "module": "users",
+                "handler": "create",
+                "file_path": "users/api.py",
+            },
         ]
         modules = [
-            {"name": "users", "domain": "core-platform", "service_family": "python-backend", "runtime_role": "api-server"},
+            {
+                "name": "users",
+                "domain": "core-platform",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            },
         ]
 
         aggregator = APIAggregator(endpoints=endpoints, modules=modules)

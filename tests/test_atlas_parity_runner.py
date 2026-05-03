@@ -1,17 +1,14 @@
 """Tests for AI_API_Atlas parity runner."""
 
-import json
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from repo_wiki.verifier.atlas_parity_runner import (
     AIAPIAtlasParityRunner,
+    GapItem,
     ParityComparisonResult,
     ParityMetric,
-    GapItem,
-    run_atlas_parity,
 )
 
 

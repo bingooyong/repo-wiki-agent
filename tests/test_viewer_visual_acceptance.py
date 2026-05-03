@@ -17,7 +17,6 @@ from repo_wiki.viewer.static_viewer import (
     build_viewer_html,
     extract_headings,
     get_label_from_path,
-    get_nav_type_from_path,
     inject_anchors,
     inject_mermaid_support,
     make_anchor,
@@ -65,19 +64,25 @@ class TestNavigationTreeRegression:
         ]
         for path, expected_label in test_cases:
             label = get_label_from_path(path)
-            assert label == expected_label, f"Label for {path}: got '{label}', expected '{expected_label}'"
+            assert (
+                label == expected_label
+            ), f"Label for {path}: got '{label}', expected '{expected_label}'"
 
     def test_nav_tree_html_structure(self):
         """Tree HTML should have correct structure for CSS styling."""
         nodes = [
             {"label": "Overview", "path": "docs/00-overview.md", "type": "overview"},
-            {"label": "Architecture", "path": "docs/sections/architecture/index.md", "type": "section"},
+            {
+                "label": "Architecture",
+                "path": "docs/sections/architecture/index.md",
+                "type": "section",
+            },
         ]
         html = build_tree_html(nodes)
 
         assert 'class="tree-nav"' in html, "Missing tree-nav class"
         assert 'class="tree-section"' in html, "Missing tree-section class"
-        assert 'tree-item' in html, "Missing tree-item class"
+        assert "tree-item" in html, "Missing tree-item class"
         assert "Overview" in html, "Missing Overview label"
         assert "Architecture" in html, "Missing Architecture label"
 
@@ -280,7 +285,11 @@ See [deployment guide](../ops/deploy.md).
         headings = extract_headings(content)
         nav_nodes = [
             {"label": "Overview", "path": "docs/00-overview.md", "type": "overview"},
-            {"label": "Architecture", "path": "docs/sections/architecture/index.md", "type": "section"},
+            {
+                "label": "Architecture",
+                "path": "docs/sections/architecture/index.md",
+                "type": "section",
+            },
             {"label": "Operations", "path": "docs/sections/operations/index.md", "type": "section"},
             {"label": "API", "path": "docs/sections/api/index.md", "type": "section"},
         ]

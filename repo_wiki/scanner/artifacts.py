@@ -184,32 +184,38 @@ def emit_classification_diagnostics(snapshot: RepositorySnapshot) -> dict[str, A
     for module in snapshot.modules:
         # Track low confidence modules
         if module.domain_confidence < _LOW_CONFIDENCE_THRESHOLD:
-            diagnostics["low_confidence_modules"].append({
-                "module": module.name,
-                "path": module.path,
-                "domain": module.domain,
-                "confidence": module.domain_confidence,
-                "reason": module.domain_classification_reason,
-            })
+            diagnostics["low_confidence_modules"].append(
+                {
+                    "module": module.name,
+                    "path": module.path,
+                    "domain": module.domain,
+                    "confidence": module.domain_confidence,
+                    "reason": module.domain_classification_reason,
+                }
+            )
             diagnostics["summary"]["low_confidence_count"] += 1
 
         # Track fallback classifications
         if module.domain in _FALLBACK_DIAGNOSTIC_TYPES and module.domain_confidence < 0.5:
-            diagnostics["fallback_classifications"].append({
-                "module": module.name,
-                "path": module.path,
-                "domain": module.domain,
-                "confidence": module.domain_confidence,
-                "reason": module.domain_classification_reason,
-                "suggestion": _get_fallback_suggestion(module),
-            })
+            diagnostics["fallback_classifications"].append(
+                {
+                    "module": module.name,
+                    "path": module.path,
+                    "domain": module.domain,
+                    "confidence": module.domain_confidence,
+                    "reason": module.domain_classification_reason,
+                    "suggestion": _get_fallback_suggestion(module),
+                }
+            )
             diagnostics["summary"]["fallback_count"] += 1
 
         # Track coverage
-        diagnostics["service_family_coverage"][module.service_family] = \
+        diagnostics["service_family_coverage"][module.service_family] = (
             diagnostics["service_family_coverage"].get(module.service_family, 0) + 1
-        diagnostics["runtime_role_coverage"][module.runtime_role] = \
+        )
+        diagnostics["runtime_role_coverage"][module.runtime_role] = (
             diagnostics["runtime_role_coverage"].get(module.runtime_role, 0) + 1
+        )
 
     # Count high confidence
     diagnostics["summary"]["high_confidence_count"] = (
@@ -258,6 +264,7 @@ def write_diagnostics_report(root: Path, snapshot: RepositorySnapshot) -> Path:
     ensure_dir(ai_dir)
 
     import json
+
     diagnostics_path = ai_dir / "classification-diagnostics.json"
     diagnostics_path.write_text(
         json.dumps(diagnostics, indent=2, ensure_ascii=False),

@@ -7,8 +7,6 @@ from repo_wiki.planner.schema import (
     WikiPagePlan,
     WikiPlanManifest,
     WikiTaxonomyCategory,
-    GenerationMode,
-    RepositoryIdentity,
 )
 
 
@@ -159,12 +157,14 @@ class TestNavTreeFromManifest:
         """Test navigation tree contains all taxonomy categories."""
         pages = []
         for cat in WikiTaxonomyCategory:
-            pages.append(WikiPagePlan(
-                page_id=f"index-{cat.value}",
-                title=cat.value,
-                category=cat,
-                output_path=f"docs/pages/{cat.value}/index.md",
-            ))
+            pages.append(
+                WikiPagePlan(
+                    page_id=f"index-{cat.value}",
+                    title=cat.value,
+                    category=cat,
+                    output_path=f"docs/pages/{cat.value}/index.md",
+                )
+            )
 
         manifest = WikiPlanManifest(version="1.0.0", pages=pages)
 
@@ -283,13 +283,18 @@ class TestManifestNavIntegration:
         ]
 
         import json
-        json_str = json.dumps(tree, default=lambda n: {
-            "node_id": n.node_id,
-            "label": n.label,
-            "node_type": n.node_type,
-            "path": n.path,
-            "children": n.children,
-        }, indent=2)
+
+        json_str = json.dumps(
+            tree,
+            default=lambda n: {
+                "node_id": n.node_id,
+                "label": n.label,
+                "node_type": n.node_type,
+                "path": n.path,
+                "children": n.children,
+            },
+            indent=2,
+        )
 
         assert "root" in json_str
         assert "child1" in json_str

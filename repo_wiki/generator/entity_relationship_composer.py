@@ -20,43 +20,39 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.core.contracts import DataModel as CoreDataModel, RepositorySnapshot
+from repo_wiki.core.contracts import RepositorySnapshot
 from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.generator.composer import (
     ComposerContext,
-    ComposerInput,
     ComposerOutput,
     build_composer_input,
     create_composer,
 )
 from repo_wiki.generator.engine import (
+    CanonicalModel,
+    CanonicalModelResolver,
     DataModel,
     DataModelAggregator,
-    CanonicalModelResolver,
-    CanonicalModel,
     ModelCategory,
 )
 from repo_wiki.generator.mermaid_planner import (
-    MermaidDiagramType,
-    DiagramNode,
-    DiagramEdge,
     DiagramPlan,
-    MermaidPlanner,
-    MermaidRenderer,
+    MermaidDiagramType,
     create_planner,
     create_renderer,
 )
-from repo_wiki.llm.providers import MockLLMProvider, create_mock_provider
-from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
-
+from repo_wiki.llm.providers import MockLLMProvider
+from repo_wiki.planner.schema import WikiPagePlan
 
 # =============================================================================
 # ENTITY RELATIONSHIP COMPOSER
 # =============================================================================
 
+
 @dataclass
 class EntityRelationshipInfo:
     """Information about entity relationships."""
+
     source_entity: str
     target_entity: str
     relationship_type: str  # "has_one", "has_many", "references", "belongs_to"
@@ -71,6 +67,7 @@ class EntityRelationshipInfo:
 @dataclass
 class EntityInfo:
     """Information about an entity for ER diagram."""
+
     name: str
     canonical_name: str
     category: str
@@ -135,8 +132,8 @@ class EntityRelationshipComposer:
         modules_dicts = [
             {
                 "name": m.name,
-                "domain": getattr(m, 'domain', None) or "unknown",
-                "service_family": getattr(m, 'service_family', None) or "unknown",
+                "domain": getattr(m, "domain", None) or "unknown",
+                "service_family": getattr(m, "service_family", None) or "unknown",
             }
             for m in self.snapshot.modules
         ]
@@ -227,7 +224,7 @@ class EntityRelationshipComposer:
 
             # Multiple projections of the same entity indicate close relationship
             for i, model in enumerate(canonical.models):
-                for other_model in canonical.models[i + 1:]:
+                for other_model in canonical.models[i + 1 :]:
                     # Determine relationship type based on modules
                     rel_type = self._determine_relationship_type(model, other_model)
 
@@ -362,13 +359,11 @@ class EntityRelationshipComposer:
         """Get entities relevant to a page."""
         if page_plan.source_requirements and page_plan.source_requirements.data_models:
             # Filter by source requirements
-            model_names = set(
-                name.lower() for name in page_plan.source_requirements.data_models
-            )
+            model_names = set(name.lower() for name in page_plan.source_requirements.data_models)
             return [
-                e for e in self._entities
-                if e.canonical_name.lower() in model_names
-                or e.name.lower() in model_names
+                e
+                for e in self._entities
+                if e.canonical_name.lower() in model_names or e.name.lower() in model_names
             ]
 
         # Return all entities (for overview page)
@@ -384,7 +379,8 @@ class EntityRelationshipComposer:
 
         # Filter relationships
         return [
-            r for r in self._relationships
+            r
+            for r in self._relationships
             if r.source_entity in entity_names or r.target_entity in entity_names
         ]
 
@@ -429,11 +425,13 @@ class EntityRelationshipComposer:
         # Build diagram plan
         er_entities = []
         for entity in entities:
-            er_entities.append({
-                "entity": entity.canonical_name,
-                "attributes": entity.attributes,
-                "primary_key": entity.primary_key,
-            })
+            er_entities.append(
+                {
+                    "entity": entity.canonical_name,
+                    "attributes": entity.attributes,
+                    "primary_key": entity.primary_key,
+                }
+            )
 
         plan = DiagramPlan(
             diagram_id="entity-relationship",
@@ -455,9 +453,12 @@ class EntityRelationshipComposer:
     ) -> ComposerOutput:
         """Compose ER article using LLM."""
         import asyncio
-        return asyncio.run(self._compose_er_article_async(
-            page_plan, evidence_binding, context, er_diagram, entities, relationships
-        ))
+
+        return asyncio.run(
+            self._compose_er_article_async(
+                page_plan, evidence_binding, context, er_diagram, entities, relationships
+            )
+        )
 
     async def _compose_er_article_async(
         self,
@@ -471,9 +472,9 @@ class EntityRelationshipComposer:
         """Async compose ER article."""
         # Build composer context
         composer_context = ComposerContext(
-            repository_name=getattr(self.snapshot.repository, 'name', 'unknown'),
-            primary_language=getattr(self.snapshot.repository, 'language', 'python'),
-            framework=getattr(self.snapshot.repository, 'framework', 'unknown'),
+            repository_name=getattr(self.snapshot.repository, "name", "unknown"),
+            primary_language=getattr(self.snapshot.repository, "language", "python"),
+            framework=getattr(self.snapshot.repository, "framework", "unknown"),
             repository_root=str(self.workspace_root) if self.workspace_root else ".",
             models=[
                 {
@@ -604,7 +605,7 @@ class EntityRelationshipComposer:
                     f"<cite>{entity.file_path}</cite>"
                 )
                 if entity.is_high_frequency:
-                    parts.append(f"  - High-frequency entity")
+                    parts.append("  - High-frequency entity")
 
         return "\n".join(parts)
 
@@ -648,10 +649,9 @@ class EntityRelationshipComposer:
                 for cat in set(e.category for e in self._entities)
             },
             "high_frequency_count": len([e for e in self._entities if e.is_high_frequency]),
-            "core_entity_count": len([
-                e for e in self._entities
-                if e.category == ModelCategory.CORE_ENTITY
-            ]),
+            "core_entity_count": len(
+                [e for e in self._entities if e.category == ModelCategory.CORE_ENTITY]
+            ),
             "total_relationships": len(self._relationships),
             "fk_relationships": len([r for r in self._relationships if r.is_foreign_key]),
         }
@@ -660,6 +660,7 @@ class EntityRelationshipComposer:
 # =============================================================================
 # COMPOSER FACTORY
 # =============================================================================
+
 
 def create_entity_relationship_composer(
     snapshot: RepositorySnapshot,
@@ -686,6 +687,7 @@ def create_entity_relationship_composer(
 # =============================================================================
 # STANDALONE COMPOSITION HELPERS
 # =============================================================================
+
 
 def compose_entity_relationship_article(
     page_plan: WikiPagePlan,
@@ -744,6 +746,7 @@ async def compose_entity_relationship_article_async(
 # =============================================================================
 # ENTITY RELATIONSHIP INFO EXTRACTION
 # =============================================================================
+
 
 def extract_entity_relationships(
     snapshot: RepositorySnapshot,

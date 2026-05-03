@@ -28,35 +28,35 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # =============================================================================
 # HEADING SECTION DEFINITIONS
 # =============================================================================
 # Standard section keys used in Qoder-style articles
 
 SECTION_KEYS = (
-    "目录",       # Table of Contents
-    "简介",       # Introduction
-    "项目结构",   # Project Structure
-    "核心组件",   # Core Components
-    "架构总览",   # Architecture Overview
-    "详细分析",   # Detailed Analysis
-    "依赖",       # Dependencies
-    "性能",       # Performance
-    "排障",       # Troubleshooting
-    "结论",       # Conclusion
-    "附录",       # Appendix
+    "目录",  # Table of Contents
+    "简介",  # Introduction
+    "项目结构",  # Project Structure
+    "核心组件",  # Core Components
+    "架构总览",  # Architecture Overview
+    "详细分析",  # Detailed Analysis
+    "依赖",  # Dependencies
+    "性能",  # Performance
+    "排障",  # Troubleshooting
+    "结论",  # Conclusion
+    "附录",  # Appendix
 )
 
 
 @dataclass(frozen=True)
 class HeadingSection:
     """A heading section in an article skeleton."""
-    key: str                    # Section key (e.g., "目录", "简介")
-    heading_text: str           # Full heading text (e.g., "## 目录")
-    level: int                  # Heading level (1-6)
-    required: bool = False       # Whether this section is required
-    min_prose_chars: int = 0    # Minimum prose characters
+
+    key: str  # Section key (e.g., "目录", "简介")
+    heading_text: str  # Full heading text (e.g., "## 目录")
+    level: int  # Heading level (1-6)
+    required: bool = False  # Whether this section is required
+    min_prose_chars: int = 0  # Minimum prose characters
 
 
 @dataclass
@@ -66,6 +66,7 @@ class HeadingContract:
     This defines which sections are required/optional and their ordering
     for a specific page type (e.g., overview, service, API, etc.).
     """
+
     page_type: str
     sections: tuple[HeadingSection, ...]
     toc_required: bool = True
@@ -236,8 +237,7 @@ def get_heading_contract(page_type: str) -> HeadingContract:
     """
     if page_type not in HEADING_CONTRACTS:
         raise ValueError(
-            f"Unknown page type: {page_type}. "
-            f"Available: {list(HEADING_CONTRACTS.keys())}"
+            f"Unknown page type: {page_type}. " f"Available: {list(HEADING_CONTRACTS.keys())}"
         )
     return HEADING_CONTRACTS[page_type]
 
@@ -246,6 +246,7 @@ def get_heading_contract(page_type: str) -> HeadingContract:
 # ARTICLE SKELETON
 # =============================================================================
 
+
 @dataclass
 class ArticleSkeleton:
     """A structured article skeleton with headings and TOC.
@@ -253,10 +254,11 @@ class ArticleSkeleton:
     This represents the skeletal structure of a Qoder-style article,
     including all headings, their levels, and an optional table of contents.
     """
+
     page_type: str
-    title: str                    # Article title (H1)
+    title: str  # Article title (H1)
     headings: tuple[HeadingSection, ...]  # All headings in order
-    toc_entries: tuple[str, ...]   # TOC entries (heading texts)
+    toc_entries: tuple[str, ...]  # TOC entries (heading texts)
     context: dict[str, Any] = field(default_factory=dict)  # Template context
 
     def render_toc(self) -> str:
@@ -296,6 +298,7 @@ class ArticleSkeleton:
 # =============================================================================
 # SKELETON BUILDER
 # =============================================================================
+
 
 class SkeletonBuilder:
     """Builder for ArticleSkeleton instances.
@@ -434,6 +437,7 @@ def build_skeleton(
 # TOC EXTRACTION AND VALIDATION
 # =============================================================================
 
+
 def extract_toc_from_markdown(content: str, max_depth: int = 2) -> list[tuple[int, str]]:
     """Extract table of contents from markdown content.
 
@@ -445,7 +449,7 @@ def extract_toc_from_markdown(content: str, max_depth: int = 2) -> list[tuple[in
         List of (level, heading_text) tuples
     """
     toc: list[tuple[int, str]] = []
-    pattern = re.compile(r'^(#{1,6})\s+(.+)$')
+    pattern = re.compile(r"^(#{1,6})\s+(.+)$")
     in_code_block = False
 
     for line in content.split("\n"):
@@ -511,7 +515,7 @@ def validate_heading_hierarchy(content: str) -> tuple[bool, str]:
     Returns:
         (is_valid, error_message) tuple
     """
-    pattern = re.compile(r'^(#{1,6})\s+(.+)$')
+    pattern = re.compile(r"^(#{1,6})\s+(.+)$")
     headings: list[int] = []
 
     for line in content.split("\n"):
@@ -536,6 +540,7 @@ def validate_heading_hierarchy(content: str) -> tuple[bool, str]:
 # SNAPSHOT TEST UTILITIES
 # =============================================================================
 
+
 def generate_heading_snapshot(content: str) -> str:
     """Generate a heading snapshot from markdown content.
 
@@ -549,7 +554,7 @@ def generate_heading_snapshot(content: str) -> str:
         Snapshot string showing heading structure
     """
     lines: list[str] = []
-    pattern = re.compile(r'^(#{1,6})\s+(.+)$')
+    pattern = re.compile(r"^(#{1,6})\s+(.+)$")
     in_code_block = False
 
     for line in content.split("\n"):
@@ -593,7 +598,7 @@ def headings_match_snapshot(
 
     diff_lines = ["Differences:"]
 
-    for i, (actual_line, expected_line) in enumerate(zip(actual_lines, expected_lines)):
+    for i, (actual_line, expected_line) in enumerate(zip(actual_lines, expected_lines, strict=False)):
         if actual_line != expected_line:
             diff_lines.append(f"Line {i}: got '{actual_line}', expected '{expected_line}'")
 

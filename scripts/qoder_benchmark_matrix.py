@@ -29,23 +29,23 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 
 class RepositorySize(Enum):
-    SMALL = "small"       # < 10 files
-    MEDIUM = "medium"     # 10-100 files
-    LARGE = "large"       # 100-1000 files
-    XLARGE = "xlarge"     # > 1000 files
+    SMALL = "small"  # < 10 files
+    MEDIUM = "medium"  # 10-100 files
+    LARGE = "large"  # 100-1000 files
+    XLARGE = "xlarge"  # > 1000 files
 
 
 class RepositoryComplexity(Enum):
-    LOW = "low"       # Simple structure
-    MEDIUM = "medium" # Moderate nesting
-    HIGH = "high"     # Deep nesting, multiple services
+    LOW = "low"  # Simple structure
+    MEDIUM = "medium"  # Moderate nesting
+    HIGH = "high"  # Deep nesting, multiple services
 
 
 class Language(Enum):
@@ -145,6 +145,7 @@ DEFAULT_THRESHOLDS = {
 @dataclass
 class RepositoryMetadata:
     """Metadata about a repository being benchmarked."""
+
     path: Path
     name: str
     language: Language
@@ -168,6 +169,7 @@ class RepositoryMetadata:
 @dataclass
 class BenchmarkResult:
     """Result of benchmarking a single repository."""
+
     repository: RepositoryMetadata
     overall_score: float
     structural_score: float
@@ -197,6 +199,7 @@ class BenchmarkResult:
 @dataclass
 class ThresholdProfile:
     """A threshold profile for a repository type."""
+
     language: str
     size: RepositorySize
     complexity: RepositoryComplexity
@@ -224,6 +227,7 @@ class ThresholdProfile:
 @dataclass
 class ScoreDriftAnalysis:
     """Analysis of score drift patterns."""
+
     pattern_type: str  # "improving", "declining", "stable", "volatile"
     drift_magnitude: float
     affected_dimensions: list[str]
@@ -323,7 +327,9 @@ class ThresholdProfileGenerator:
     """Generates and manages threshold profiles."""
 
     @staticmethod
-    def get_profile(language: Language, size: RepositorySize, complexity: RepositoryComplexity) -> ThresholdProfile:
+    def get_profile(
+        language: Language, size: RepositorySize, complexity: RepositoryComplexity
+    ) -> ThresholdProfile:
         """Get threshold profile for a repository type."""
         key = (language.value, size, complexity)
         thresholds = THRESHOLD_PROFILES.get(key, DEFAULT_THRESHOLDS)
@@ -346,7 +352,7 @@ class ThresholdProfileGenerator:
 
         scores = [r.overall_score for r in results]
         variance = sum((s - sum(scores) / len(scores)) ** 2 for s in scores) / len(scores)
-        std_dev = variance ** 0.5
+        std_dev = variance**0.5
 
         # If variance is high, suggest normalization
         if std_dev > 0.15:
@@ -378,8 +384,12 @@ class ScoreDriftDetector:
 
         # Calculate overall score trend
         overall_scores = [r.overall_score for r in results]
-        first_half_avg = sum(overall_scores[:len(overall_scores)//2]) / (len(overall_scores)//2)
-        second_half_avg = sum(overall_scores[len(overall_scores)//2:]) / (len(overall_scores) - len(overall_scores)//2)
+        first_half_avg = sum(overall_scores[: len(overall_scores) // 2]) / (
+            len(overall_scores) // 2
+        )
+        second_half_avg = sum(overall_scores[len(overall_scores) // 2 :]) / (
+            len(overall_scores) - len(overall_scores) // 2
+        )
 
         drift = second_half_avg - first_half_avg
 
@@ -387,8 +397,10 @@ class ScoreDriftDetector:
         affected = []
         for dim in ["structural_score", "quality_score"]:
             dim_values = [getattr(r, dim) for r in results]
-            dim_first = sum(dim_values[:len(dim_values)//2]) / (len(dim_values)//2)
-            dim_second = sum(dim_values[len(dim_values)//2:]) / (len(dim_values) - len(dim_values)//2)
+            dim_first = sum(dim_values[: len(dim_values) // 2]) / (len(dim_values) // 2)
+            dim_second = sum(dim_values[len(dim_values) // 2 :]) / (
+                len(dim_values) - len(dim_values) // 2
+            )
             if abs(dim_second - dim_first) > 0.1:
                 affected.append(dim)
 
@@ -403,15 +415,19 @@ class ScoreDriftDetector:
             pattern = "volatile"
 
         # Determine if normalization suggested
-        variance = sum((s - sum(overall_scores) / len(overall_scores)) ** 2 for s in overall_scores) / len(overall_scores)
-        normalization_suggested = variance ** 0.5 > 0.15
+        variance = sum(
+            (s - sum(overall_scores) / len(overall_scores)) ** 2 for s in overall_scores
+        ) / len(overall_scores)
+        normalization_suggested = variance**0.5 > 0.15
 
         return ScoreDriftAnalysis(
             pattern_type=pattern,
             drift_magnitude=drift,
             affected_dimensions=affected,
             normalization_suggested=normalization_suggested,
-            normalization_factor=ThresholdProfileGenerator.suggest_normalization(results) if normalization_suggested else 1.0,
+            normalization_factor=ThresholdProfileGenerator.suggest_normalization(results)
+            if normalization_suggested
+            else 1.0,
         )
 
 
@@ -421,7 +437,7 @@ class BenchmarkMatrix:
     def __init__(self, baseline_path: Path) -> None:
         self.baseline_path = baseline_path
         self.results: list[BenchmarkResult] = []
-        self.generated_at = datetime.now(timezone.utc).isoformat()
+        self.generated_at = datetime.now(UTC).isoformat()
 
     def add_repository(self, repo_path: Path, name: str = "") -> BenchmarkResult:
         """Benchmark a single repository and add to matrix."""
@@ -469,9 +485,9 @@ class BenchmarkMatrix:
                 "quality": profile.quality_threshold,
             },
             passed_thresholds=(
-                report.summary["overall_score"] >= profile.overall_threshold and
-                report.summary["structural_score"] >= profile.structural_threshold and
-                report.summary["quality_score"] >= profile.quality_threshold
+                report.summary["overall_score"] >= profile.overall_threshold
+                and report.summary["structural_score"] >= profile.structural_threshold
+                and report.summary["quality_score"] >= profile.quality_threshold
             ),
         )
 
@@ -551,15 +567,17 @@ class BenchmarkMatrix:
                 )
             lines.append("")
 
-        lines.extend([
-            "---",
-            "",
-            "## Score Drift Analysis",
-            "",
-            f"- **Pattern:** {drift_analysis.pattern_type}",
-            f"- **Drift Magnitude:** {drift_analysis.drift_magnitude:+.1%}",
-            f"- **Normalization Suggested:** {'Yes' if drift_analysis.normalization_suggested else 'No'}",
-        ])
+        lines.extend(
+            [
+                "---",
+                "",
+                "## Score Drift Analysis",
+                "",
+                f"- **Pattern:** {drift_analysis.pattern_type}",
+                f"- **Drift Magnitude:** {drift_analysis.drift_magnitude:+.1%}",
+                f"- **Normalization Suggested:** {'Yes' if drift_analysis.normalization_suggested else 'No'}",
+            ]
+        )
 
         if drift_analysis.normalization_suggested and drift_analysis.normalization_factor != 1.0:
             lines.append(f"- **Normalization Factor:** {drift_analysis.normalization_factor:.2f}")
@@ -573,8 +591,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Qoder benchmark matrix tool")
     parser.add_argument("--repos", nargs="+", type=Path, help="Paths to repository directories")
     parser.add_argument("--from-csv", type=Path, help="CSV file with repository paths")
-    parser.add_argument("--baseline", type=Path, required=True, help="Path to qoder baseline fixture")
-    parser.add_argument("--output", type=Path, required=True, help="Output path for benchmark matrix")
+    parser.add_argument(
+        "--baseline", type=Path, required=True, help="Path to qoder baseline fixture"
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="Output path for benchmark matrix"
+    )
 
     args = parser.parse_args()
 
@@ -588,7 +610,8 @@ def main() -> int:
         repo_paths = args.repos
     elif args.from_csv:
         import csv
-        with open(args.from_csv, "r", encoding="utf-8") as f:
+
+        with open(args.from_csv, encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 repo_paths.append(Path(row["path"]))
@@ -605,7 +628,9 @@ def main() -> int:
             continue
         print(f"Benchmarking: {repo_path}")
         result = matrix.add_repository(repo_path)
-        print(f"  Overall: {result.overall_score:.1%}, Structural: {result.structural_score:.1%}, Quality: {result.quality_score:.1%}")
+        print(
+            f"  Overall: {result.overall_score:.1%}, Structural: {result.structural_score:.1%}, Quality: {result.quality_score:.1%}"
+        )
 
     # Export
     with open(args.output, "w", encoding="utf-8") as f:

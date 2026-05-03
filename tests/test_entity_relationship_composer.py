@@ -22,16 +22,15 @@ from repo_wiki.core.contracts import (
     RepositoryStats,
 )
 from repo_wiki.generator.entity_relationship_composer import (
+    EntityInfo,
     EntityRelationshipComposer,
     EntityRelationshipInfo,
-    EntityInfo,
-    create_entity_relationship_composer,
     compose_entity_relationship_article,
     compose_entity_relationship_article_async,
+    create_entity_relationship_composer,
     extract_entity_relationships,
     get_entity_summary,
 )
-from repo_wiki.llm.providers import create_mock_provider
 from repo_wiki.planner.schema import (
     GenerationMode,
     SourceRequirement,
@@ -484,9 +483,7 @@ class TestFormatMethods:
         entities = composer._entities[:5]
         relationships = composer._relationships[:3]
 
-        narrative = composer.format_entity_relationship_narrative(
-            entities, relationships
-        )
+        narrative = composer.format_entity_relationship_narrative(entities, relationships)
 
         assert "实体关系" in narrative or "Entity" in narrative
         assert isinstance(narrative, str)

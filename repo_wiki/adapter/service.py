@@ -24,7 +24,9 @@ class AdapterService:
                 indent=2,
             )
             + "\n",
-            ".claude/skills/repo-wiki-navigation/SKILL.md": self._render_skill_md("Claude Code", refs),
+            ".claude/skills/repo-wiki-navigation/SKILL.md": self._render_skill_md(
+                "Claude Code", refs
+            ),
             "AGENTS.md": self._render_agents_md(refs),
             ".opencode/opencode.json": json.dumps(
                 {
@@ -65,7 +67,9 @@ class AdapterService:
         }
 
     def _collect_reference_paths(self) -> list[str]:
-        module_index = read_yamlish(self.root / "ai" / "source-of-truth" / "module-index.yaml", {"modules": []})
+        module_index = read_yamlish(
+            self.root / "ai" / "source-of-truth" / "module-index.yaml", {"modules": []}
+        )
         modules = module_index.get("modules", []) if isinstance(module_index, dict) else []
         module_docs = []
         for module in modules:

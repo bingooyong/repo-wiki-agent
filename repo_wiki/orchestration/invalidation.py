@@ -13,14 +13,14 @@ Key concepts:
 from __future__ import annotations
 
 import json
-import time
-import uuid
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from repo_wiki.generator.contracts import SECTION_DEFINITIONS, get_canonical_slug, is_known_section_slug
+from repo_wiki.generator.contracts import (
+    SECTION_DEFINITIONS,
+    get_canonical_slug,
+)
 from repo_wiki.indexer.state_store import SQLiteStateStore
 from repo_wiki.retrieval.service import IncrementalImpact, RetrievalService
 
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 @dataclass
 class InvalidationResult:
     """Result of a page invalidation operation."""
+
     invalidated_pages: list[str]
     skipped_pages: list[str]
     regeneration_plan: list[str]
@@ -43,6 +44,7 @@ class InvalidationResult:
 @dataclass
 class RegenerationTask:
     """A single regeneration task for a page."""
+
     doc_slug: str
     doc_type: str
     priority: int  # 1=high, 2=medium, 3=low
@@ -68,7 +70,7 @@ class PageInvalidationEngine:
         self,
         root: Path,
         state_store: SQLiteStateStore,
-        runtime_store: "SQLiteRuntimeStore",
+        runtime_store: SQLiteRuntimeStore,
         retrieval_service: RetrievalService | None = None,
     ) -> None:
         self.root = root
@@ -98,7 +100,9 @@ class PageInvalidationEngine:
             )
 
         # Map changed files to impacted modules
-        impacted_modules = self._map_files_to_modules(changed_files + deleted_files + list(renamed_files.keys()))
+        impacted_modules = self._map_files_to_modules(
+            changed_files + deleted_files + list(renamed_files.keys())
+        )
 
         # Check for global regeneration triggers
         is_full_rebuild = self._needs_full_rebuild(changed_files, deleted_files, renamed_files)
@@ -313,7 +317,7 @@ class PageInvalidationEngine:
                 doc_slug=doc_slug,
                 doc_type=doc_type,
                 reason=reason,
-                changed_files=[f"ai/source-of-truth/"],
+                changed_files=["ai/source-of-truth/"],
                 impacted_modules=[],
             )
 
@@ -338,13 +342,15 @@ class PageInvalidationEngine:
             priority = self._get_regeneration_priority(doc_type, doc_slug)
             dependencies = self._get_regeneration_dependencies(doc_slug)
 
-            tasks.append(RegenerationTask(
-                doc_slug=doc_slug,
-                doc_type=doc_type,
-                priority=priority,
-                reason=invalidation.reason,
-                dependencies=dependencies,
-            ))
+            tasks.append(
+                RegenerationTask(
+                    doc_slug=doc_slug,
+                    doc_type=doc_type,
+                    priority=priority,
+                    reason=invalidation.reason,
+                    dependencies=dependencies,
+                )
+            )
 
         # Sort by priority (dependencies first, then priority order)
         tasks.sort(key=lambda t: (len(t.dependencies), t.priority, t.doc_slug))
@@ -392,7 +398,9 @@ class PageInvalidationEngine:
     def _map_files_to_modules(self, files: list[str]) -> list[str]:
         """Map a list of files to module names."""
         if self.retrieval_service:
-            modules = self.retrieval_service._map_files_to_modules(files, self.retrieval_service._load_module_index())
+            modules = self.retrieval_service._map_files_to_modules(
+                files, self.retrieval_service._load_module_index()
+            )
             return modules
 
         # Fallback: simple module extraction from path
@@ -411,11 +419,21 @@ class PageInvalidationEngine:
     ) -> bool:
         """Check if changes require full rebuild."""
         global_triggers = {
-            "pyproject.toml", "package.json", "go.mod",
-            "Dockerfile", "Makefile", "repo-wiki.yaml", ".repo-wiki.yaml",
+            "pyproject.toml",
+            "package.json",
+            "go.mod",
+            "Dockerfile",
+            "Makefile",
+            "repo-wiki.yaml",
+            ".repo-wiki.yaml",
         }
 
-        candidates = set(changed_files) | set(deleted_files) | set(renamed_files.keys()) | set(renamed_files.values())
+        candidates = (
+            set(changed_files)
+            | set(deleted_files)
+            | set(renamed_files.keys())
+            | set(renamed_files.values())
+        )
         for path in candidates:
             if Path(path).name in global_triggers:
                 return True
@@ -535,7 +553,13 @@ class PageInvalidationEngine:
 
     def _get_doc_type(self, doc_slug: str) -> str:
         """Determine document type from slug."""
-        if doc_slug.startswith("00-") or doc_slug.startswith("01-") or doc_slug.startswith("03-") or doc_slug.startswith("04-") or doc_slug.startswith("05-"):
+        if (
+            doc_slug.startswith("00-")
+            or doc_slug.startswith("01-")
+            or doc_slug.startswith("03-")
+            or doc_slug.startswith("04-")
+            or doc_slug.startswith("05-")
+        ):
             return "overview"
         if doc_slug in [s.canonical_slug for s in SECTION_DEFINITIONS]:
             return "section"

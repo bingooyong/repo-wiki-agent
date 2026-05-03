@@ -5,8 +5,7 @@ using ownership cues, endpoint parameters, and cross-module references,
 and that migration strategy is properly detected.
 """
 
-import pytest
-from repo_wiki.generator.engine import DataModelAggregator, DataModel
+from repo_wiki.generator.engine import DataModelAggregator
 
 
 class TestCoreEntityIdentification:
@@ -17,7 +16,12 @@ class TestCoreEntityIdentification:
         models = [
             {"name": "User", "module": "auth", "type": "dataclass", "file_path": "auth/models.py"},
             {"name": "User", "module": "api", "type": "pydantic", "file_path": "api/schemas.py"},
-            {"name": "User", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
+            {
+                "name": "User",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "core-platform", "service_family": "python-backend"},
@@ -37,8 +41,18 @@ class TestCoreEntityIdentification:
     def test_identifies_domain_based_core_entities(self):
         """Test that entities in core domains (core-platform, persistence) are identified as core."""
         models = [
-            {"name": "RepositorySnapshot", "module": "core", "type": "dataclass", "file_path": "core/snapshot.py"},
-            {"name": "BaseModel", "module": "persistence", "type": "sqlalchemy", "file_path": "persistence/base.py"},
+            {
+                "name": "RepositorySnapshot",
+                "module": "core",
+                "type": "dataclass",
+                "file_path": "core/snapshot.py",
+            },
+            {
+                "name": "BaseModel",
+                "module": "persistence",
+                "type": "sqlalchemy",
+                "file_path": "persistence/base.py",
+            },
         ]
         modules = [
             {"name": "core", "domain": "core-platform", "service_family": "python-backend"},
@@ -54,8 +68,18 @@ class TestCoreEntityIdentification:
     def test_identifies_foundational_named_entities(self):
         """Test that entities with foundational names are identified as core."""
         models = [
-            {"name": "BaseEntity", "module": "core", "type": "dataclass", "file_path": "core/base.py"},
-            {"name": "CommonModel", "module": "shared", "type": "dataclass", "file_path": "shared/models.py"},
+            {
+                "name": "BaseEntity",
+                "module": "core",
+                "type": "dataclass",
+                "file_path": "core/base.py",
+            },
+            {
+                "name": "CommonModel",
+                "module": "shared",
+                "type": "dataclass",
+                "file_path": "shared/models.py",
+            },
         ]
         modules = [
             {"name": "core", "domain": "core-platform", "service_family": "python-backend"},
@@ -71,11 +95,26 @@ class TestCoreEntityIdentification:
     def test_service_models_not_marked_as_core(self):
         """Test that service-specific models have lower core scores than truly shared entities."""
         models = [
-            {"name": "Invoice", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
-            {"name": "LineItem", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
+            {
+                "name": "Invoice",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
+            {
+                "name": "LineItem",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
             {"name": "User", "module": "auth", "type": "dataclass", "file_path": "auth/models.py"},
             {"name": "User", "module": "api", "type": "pydantic", "file_path": "api/schemas.py"},
-            {"name": "User", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
+            {
+                "name": "User",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "billing", "domain": "persistence", "service_family": "python-backend"},
@@ -91,7 +130,9 @@ class TestCoreEntityIdentification:
 
         # Invoice is only in billing - should have lower core score than User
         invoice = next(m for m in aggregator.data_models if m.name == "Invoice")
-        user_core = next(m for m in aggregator.data_models if m.name == "User" and len(m.ownership_modules) > 1)
+        user_core = next(
+            m for m in aggregator.data_models if m.name == "User" and len(m.ownership_modules) > 1
+        )
 
         # User should have higher score because it's shared
         assert user_core.core_score >= invoice.core_score
@@ -103,7 +144,12 @@ class TestMigrationSignalAnalysis:
     def test_detects_alembic_migration(self):
         """Test that Alembic migration strategy is detected."""
         models = [
-            {"name": "User", "module": "auth", "type": "sqlalchemy", "file_path": "alembic/versions/user_model.py"},
+            {
+                "name": "User",
+                "module": "auth",
+                "type": "sqlalchemy",
+                "file_path": "alembic/versions/user_model.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "persistence", "service_family": "python-backend"},
@@ -116,8 +162,18 @@ class TestMigrationSignalAnalysis:
     def test_detects_schema_version_tracking(self):
         """Test that schema version tracking is detected."""
         models = [
-            {"name": "current_schema_version", "module": "core", "type": "integer", "file_path": "core/config.py"},
-            {"name": "SchemaVersion", "module": "core", "type": "dataclass", "file_path": "core/schema.py"},
+            {
+                "name": "current_schema_version",
+                "module": "core",
+                "type": "integer",
+                "file_path": "core/config.py",
+            },
+            {
+                "name": "SchemaVersion",
+                "module": "core",
+                "type": "dataclass",
+                "file_path": "core/schema.py",
+            },
         ]
         modules = [
             {"name": "core", "domain": "core-platform", "service_family": "python-backend"},
@@ -131,7 +187,12 @@ class TestMigrationSignalAnalysis:
         """Test that SQLAlchemy ORM migration strategy is detected."""
         models = [
             {"name": "User", "module": "auth", "type": "sqlalchemy", "file_path": "auth/models.py"},
-            {"name": "Base", "module": "shared", "type": "sqlalchemy", "file_path": "shared/base.py"},
+            {
+                "name": "Base",
+                "module": "shared",
+                "type": "sqlalchemy",
+                "file_path": "shared/base.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "persistence", "service_family": "python-backend"},
@@ -141,7 +202,10 @@ class TestMigrationSignalAnalysis:
         aggregator = DataModelAggregator(models=models, modules=modules)
 
         # Should detect ORM-based strategy (either SQLAlchemy or ORM model migration)
-        assert "ORM" in aggregator.migration_strategy or "sqlalchemy" in aggregator.migration_strategy.lower()
+        assert (
+            "ORM" in aggregator.migration_strategy
+            or "sqlalchemy" in aggregator.migration_strategy.lower()
+        )
 
 
 class TestModelDeduplication:
@@ -151,8 +215,18 @@ class TestModelDeduplication:
         """Test that model names are normalized for deduplication."""
         models = [
             {"name": "User", "module": "auth", "type": "sqlalchemy", "file_path": "auth/models.py"},
-            {"name": "User_dto", "module": "api", "type": "pydantic", "file_path": "api/schemas.py"},
-            {"name": "User_model", "module": "billing", "type": "dataclass", "file_path": "billing/models.py"},
+            {
+                "name": "User_dto",
+                "module": "api",
+                "type": "pydantic",
+                "file_path": "api/schemas.py",
+            },
+            {
+                "name": "User_model",
+                "module": "billing",
+                "type": "dataclass",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "persistence", "service_family": "python-backend"},
@@ -174,9 +248,19 @@ class TestGroupingMethods:
     def test_get_core_entities(self):
         """Test that get_core_entities returns only core entities."""
         models = [
-            {"name": "RepositorySnapshot", "module": "core", "type": "dataclass", "file_path": "core/snapshot.py"},
+            {
+                "name": "RepositorySnapshot",
+                "module": "core",
+                "type": "dataclass",
+                "file_path": "core/snapshot.py",
+            },
             {"name": "User", "module": "auth", "type": "dataclass", "file_path": "auth/models.py"},
-            {"name": "Invoice", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
+            {
+                "name": "Invoice",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "core", "domain": "core-platform", "service_family": "python-backend"},
@@ -196,7 +280,12 @@ class TestGroupingMethods:
         """Test that models are grouped by domain."""
         models = [
             {"name": "User", "module": "auth", "type": "dataclass", "file_path": "auth/models.py"},
-            {"name": "Invoice", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
+            {
+                "name": "Invoice",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "core-platform", "service_family": "python-backend"},
@@ -216,7 +305,12 @@ class TestGroupingMethods:
         """Test that models are grouped by module."""
         models = [
             {"name": "User", "module": "auth", "type": "dataclass", "file_path": "auth/models.py"},
-            {"name": "AuthToken", "module": "auth", "type": "dataclass", "file_path": "auth/models.py"},
+            {
+                "name": "AuthToken",
+                "module": "auth",
+                "type": "dataclass",
+                "file_path": "auth/models.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "core-platform", "service_family": "python-backend"},
@@ -237,7 +331,12 @@ class TestSummarizationMethods:
         """Test that database shape is properly summarized."""
         models = [
             {"name": "User", "module": "auth", "type": "sqlalchemy", "file_path": "auth/models.py"},
-            {"name": "Invoice", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
+            {
+                "name": "Invoice",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
             {"name": "Config", "module": "core", "type": "pydantic", "file_path": "core/config.py"},
         ]
         modules = [
@@ -271,7 +370,12 @@ class TestSummarizationMethods:
     def test_build_core_models_section(self):
         """Test that core models section contains proper narrative."""
         models = [
-            {"name": "RepositorySnapshot", "module": "core", "type": "dataclass", "file_path": "core/snapshot.py"},
+            {
+                "name": "RepositorySnapshot",
+                "module": "core",
+                "type": "dataclass",
+                "file_path": "core/snapshot.py",
+            },
         ]
         modules = [
             {"name": "core", "domain": "core-platform", "service_family": "python-backend"},
@@ -281,16 +385,25 @@ class TestSummarizationMethods:
         section = aggregator.build_core_models_section()
 
         assert "RepositorySnapshot" in section
-        assert ("核心" in section or "core" in section.lower())
+        assert "核心" in section or "core" in section.lower()
 
     def test_build_service_models_section(self):
         """Test that service models section is properly structured."""
         # Use a module that won't be classified as core domain
         models = [
-            {"name": "InvoiceItem", "module": "billing", "type": "dataclass", "file_path": "billing/models.py"},
+            {
+                "name": "InvoiceItem",
+                "module": "billing",
+                "type": "dataclass",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
-            {"name": "billing", "domain": "operations", "service_family": "python-backend"},  # Not a core domain
+            {
+                "name": "billing",
+                "domain": "operations",
+                "service_family": "python-backend",
+            },  # Not a core domain
         ]
 
         aggregator = DataModelAggregator(models=models, modules=modules)
@@ -315,7 +428,7 @@ class TestSummarizationMethods:
         boundaries = aggregator.build_cross_module_boundaries()
 
         assert "User" in boundaries
-        assert ("模块" in boundaries or "module" in boundaries.lower())
+        assert "模块" in boundaries or "module" in boundaries.lower()
 
 
 class TestNoModelDump:

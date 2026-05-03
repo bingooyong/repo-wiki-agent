@@ -7,11 +7,10 @@ This planner extends the RuleFirstPlanner to provide data-model-specific plannin
 with entity deduplication and ER relationship awareness, generating at least
 10 AI_API_Atlas data model planned pages.
 """
+
 from __future__ import annotations
 
-from typing import Any
-
-from repo_wiki.core.contracts import DataModel, Module, RepositorySnapshot
+from repo_wiki.core.contracts import DataModel, RepositorySnapshot
 from repo_wiki.planner.schema import (
     GenerationMode,
     NavNode,
@@ -44,12 +43,12 @@ class DataModelTopicCategory:
     ER_DIAGRAMS = "er-diagrams"
 
     # Additional data model topics (Task 32.3 additions)
-    ENTITY = "entity"                    # Entity drill-down
-    MIGRATION = "migration"              # Migration details
+    ENTITY = "entity"  # Entity drill-down
+    MIGRATION = "migration"  # Migration details
     TABLE_STRUCTURE = "table-structure"  # Table structure docs
     INDEX_PERFORMANCE = "index-performance"  # Index and performance
-    AUDIT = "audit"                      # Audit trails
-    SECURITY = "security"                # Security models
+    AUDIT = "audit"  # Audit trails
+    SECURITY = "security"  # Security models
 
 
 # Topic to page title mapping
@@ -76,6 +75,7 @@ _TOPIC_TITLES: dict[str, str] = {
 
 # Track seen page ID bases for duplicate detection
 _PAGE_ID_BASES: dict[str, int] = {}
+
 
 def _mark_page_id_base(base: str) -> str:
     """Mark a page ID base as used, return deduplicated base."""
@@ -179,8 +179,9 @@ class DataModelTopicPlanner:
                 return True
             # Match except for numeric suffix (-2, -3, etc)
             import re
-            pattern = r'-\d+$'
-            if re.sub(pattern, '', normalized) == re.sub(pattern, '', existing_norm):
+
+            pattern = r"-\d+$"
+            if re.sub(pattern, "", normalized) == re.sub(pattern, "", existing_norm):
                 return True
 
         return False
@@ -445,7 +446,9 @@ class DataModelTopicPlanner:
             category=WikiTaxonomyCategory.DATA_MODELS,
             parent="entity-relationships",
             source_requirements=SourceRequirement(
-                data_models=[dm.name for dm in self.snapshot.data_models if dm.type == "python_class"]
+                data_models=[
+                    dm.name for dm in self.snapshot.data_models if dm.type == "python_class"
+                ]
             ),
             sort_order=12,
             tags=["data-model", "entity", "drilldown"],
@@ -470,7 +473,9 @@ class DataModelTopicPlanner:
             category=WikiTaxonomyCategory.DATA_MODELS,
             parent="database-architecture",
             source_requirements=SourceRequirement(
-                data_models=[dm.name for dm in self.snapshot.data_models if dm.type == "migration_table"]
+                data_models=[
+                    dm.name for dm in self.snapshot.data_models if dm.type == "migration_table"
+                ]
             ),
             sort_order=22,
             tags=["data-model", "table", "structure"],

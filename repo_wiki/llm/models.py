@@ -82,7 +82,9 @@ class ChatResponse:
 
     content: str
     model: str
-    usage: dict[str, int] | None = None  # {"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}
+    usage: dict[str, int] | None = (
+        None  # {"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}
+    )
     finish_reason: str | None = None  # "stop", "length", "content_filter"
     raw_response: dict[str, Any] | None = None  # Provider-specific raw response
     error: LLMError | None = None  # Set if this is an error response

@@ -22,19 +22,18 @@ import hashlib
 import json
 import sqlite3
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
+from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.generator.composer import (
     ArticleSkeleton,
     ComposerContext,
     ComposerInput,
-    ComposerOutput,
 )
-from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
+from repo_wiki.planner.schema import WikiPagePlan
 
 
 def _now_iso() -> str:
@@ -53,6 +52,7 @@ def _now_epoch() -> float:
 @dataclass
 class ComposerCacheRecord:
     """A cache record for page composition."""
+
     page_id: str
     doc_type: str
     input_hash: str
@@ -67,6 +67,7 @@ class ComposerCacheRecord:
 @dataclass
 class ComposerCacheStats:
     """Statistics for composer cache."""
+
     total_entries: int
     cache_hits: int
     cache_misses: int
@@ -98,13 +99,15 @@ def compute_page_plan_hash(page: WikiPagePlan) -> str:
     # Source requirements
     sr = page.source_requirements
     if sr:
-        parts.extend([
-            ",".join(sorted(sr.modules)),
-            ",".join(sorted(sr.endpoints)),
-            ",".join(sorted(sr.data_models)),
-            ",".join(sorted(sr.commands)),
-            ",".join(sorted(sr.files)),
-        ])
+        parts.extend(
+            [
+                ",".join(sorted(sr.modules)),
+                ",".join(sorted(sr.endpoints)),
+                ",".join(sorted(sr.data_models)),
+                ",".join(sorted(sr.commands)),
+                ",".join(sorted(sr.files)),
+            ]
+        )
 
     # Tags
     parts.append(",".join(sorted(page.tags)))
@@ -119,16 +122,19 @@ def compute_evidence_hash(binding: PageEvidenceBinding | None) -> str:
     Includes: evidence candidate digests, citation order.
     """
     if binding is None:
-        return hashlib.sha256("no-evidence".encode()).hexdigest()[:24]
+        return hashlib.sha256(b"no-evidence").hexdigest()[:24]
 
     parts = [binding.page_id, binding.doc_type]
 
     for candidate in sorted(binding.candidates, key=lambda c: c.citation_order):
         span = candidate.span
         # Use digest as the primary identifier for deduplication
-        digest = getattr(span, 'digest', None) or hashlib.sha256(
-            f"{span.file_path}:{span.line_start}-{span.line_end}".encode()
-        ).hexdigest()[:24]
+        digest = (
+            getattr(span, "digest", None)
+            or hashlib.sha256(
+                f"{span.file_path}:{span.line_start}-{span.line_end}".encode()
+            ).hexdigest()[:24]
+        )
         parts.append(f"{digest}:{candidate.citation_order}")
 
     content = "|".join(parts)
@@ -147,11 +153,13 @@ def compute_skeleton_hash(skeleton: ArticleSkeleton) -> str:
     headings_data = []
     if skeleton.headings:
         for h in skeleton.headings:
-            headings_data.append({
-                "key": h.key,
-                "level": h.level,
-                "required": h.required,
-            })
+            headings_data.append(
+                {
+                    "key": h.key,
+                    "level": h.level,
+                    "required": h.required,
+                }
+            )
 
     data = {
         "page_type": skeleton.page_type,
@@ -220,15 +228,17 @@ def compute_composer_input_hash(
     context_hash = compute_context_hash(input_data.context)
 
     # Combine all hashes
-    combined = "|".join([
-        page_hash,
-        evidence_hash,
-        skeleton_hash,
-        context_hash,
-        model_name,
-        str(temperature),
-        str(max_tokens),
-    ])
+    combined = "|".join(
+        [
+            page_hash,
+            evidence_hash,
+            skeleton_hash,
+            context_hash,
+            model_name,
+            str(temperature),
+            str(max_tokens),
+        ]
+    )
 
     return hashlib.sha256(combined.encode()).hexdigest()[:32]
 

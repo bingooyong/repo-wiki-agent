@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from repo_wiki.generator.io import ensure_dir
 
@@ -75,15 +75,19 @@ class ChromaVectorStore:
             data.pop(cid, None)
         self._save_fallback(data)
 
-    def search(self, query_embedding: list[float], top_k: int = 20, module_name: str | None = None) -> list[dict]:
+    def search(
+        self, query_embedding: list[float], top_k: int = 20, module_name: str | None = None
+    ) -> list[dict]:
         if self._collection is not None:
             where = {"module_name": module_name} if module_name else None
-            result = self._collection.query(query_embeddings=[query_embedding], n_results=top_k, where=where)
+            result = self._collection.query(
+                query_embeddings=[query_embedding], n_results=top_k, where=where
+            )
             ids = (result.get("ids") or [[]])[0]
             distances = (result.get("distances") or [[]])[0]
             metadatas = (result.get("metadatas") or [[]])[0]
             out = []
-            for cid, dist, meta in zip(ids, distances, metadatas):
+            for cid, dist, meta in zip(ids, distances, metadatas, strict=False):
                 out.append({"chunk_id": cid, "score": 1.0 - float(dist), **(meta or {})})
             return out
 
@@ -107,4 +111,6 @@ class ChromaVectorStore:
             return {}
 
     def _save_fallback(self, data: dict) -> None:
-        self._fallback_path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        self._fallback_path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+        )

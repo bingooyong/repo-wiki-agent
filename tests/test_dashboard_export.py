@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import json
-import tempfile
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from scripts.qoder_governance_dashboard import (
-    GovernanceDB,
     GovernanceDashboard,
+    GovernanceDB,
     GovernanceMetric,
-    SQLITE_AVAILABLE,
 )
 
 
@@ -25,7 +22,7 @@ def dashboard_with_data(tmp_path):
     db.connect()
     db.init_schema()
 
-    base_date = datetime.now(timezone.utc)
+    base_date = datetime.now(UTC)
 
     # Add test repositories
     repos = [
@@ -268,7 +265,7 @@ class TestDashboardPersistence:
             total_gaps=2,
             critical_gaps=0,
             major_gaps=1,
-            benchmark_date=datetime.now(timezone.utc).isoformat(),
+            benchmark_date=datetime.now(UTC).isoformat(),
             fixture_hash="persist_hash",
         )
         db.insert_metric(metric)
@@ -290,7 +287,7 @@ class TestDashboardPersistence:
         db.connect()
         db.init_schema()
 
-        base_date = datetime.now(timezone.utc)
+        base_date = datetime.now(UTC)
 
         # Insert with different dates to simulate time progression
         dates = [
@@ -300,7 +297,7 @@ class TestDashboardPersistence:
         ]
         scores = [0.50, 0.55, 0.60]
 
-        for score, date in zip(scores, dates):
+        for score, date in zip(scores, dates, strict=False):
             metric = GovernanceMetric(
                 repository_name="multi-insert",
                 repository_path="/path/to/multi",

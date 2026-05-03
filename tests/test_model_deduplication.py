@@ -7,12 +7,10 @@ These tests validate that:
 4. High-frequency models are identified for fixture generation
 """
 
-import pytest
 from repo_wiki.generator.engine import (
+    CanonicalModelResolver,
     DataModel,
     DataModelAggregator,
-    CanonicalModelResolver,
-    CanonicalModel,
     ModelCategory,
 )
 
@@ -25,7 +23,9 @@ class TestCanonicalModelResolution:
         models = [
             DataModel(name="User", module="auth", type="sqlalchemy", file_path="auth/models.py"),
             DataModel(name="User_dto", module="api", type="pydantic", file_path="api/schemas.py"),
-            DataModel(name="UserEntity", module="billing", type="dataclass", file_path="billing/models.py"),
+            DataModel(
+                name="UserEntity", module="billing", type="dataclass", file_path="billing/models.py"
+            ),
         ]
         modules = [
             {"name": "auth", "domain": "core-platform", "service_family": "python-backend"},
@@ -47,7 +47,9 @@ class TestCanonicalModelResolution:
         """Test that _dto, _DTO suffixes are normalized for deduplication."""
         models = [
             DataModel(name="UserDTO", module="api", type="pydantic", file_path="api/schemas.py"),
-            DataModel(name="UserDto", module="service", type="pydantic", file_path="service/schemas.py"),
+            DataModel(
+                name="UserDto", module="service", type="pydantic", file_path="service/schemas.py"
+            ),
         ]
         modules = [
             {"name": "api", "domain": "api-gateway", "service_family": "python-backend"},
@@ -64,8 +66,12 @@ class TestCanonicalModelResolution:
     def test_normalizes_request_response_suffixes(self):
         """Test that request/response suffixes are normalized to base entity."""
         models = [
-            DataModel(name="CreateUserRequest", module="api", type="pydantic", file_path="api/schemas.py"),
-            DataModel(name="CreateUserResponse", module="api", type="pydantic", file_path="api/schemas.py"),
+            DataModel(
+                name="CreateUserRequest", module="api", type="pydantic", file_path="api/schemas.py"
+            ),
+            DataModel(
+                name="CreateUserResponse", module="api", type="pydantic", file_path="api/schemas.py"
+            ),
         ]
         modules = [
             {"name": "api", "domain": "api-gateway", "service_family": "python-backend"},
@@ -118,8 +124,12 @@ class TestCanonicalModelResolution:
     def test_classifies_request_response_types(self):
         """Test that request/response types are properly classified."""
         models = [
-            DataModel(name="LoginRequest", module="api", type="pydantic", file_path="api/schemas.py"),
-            DataModel(name="LoginResponse", module="api", type="pydantic", file_path="api/schemas.py"),
+            DataModel(
+                name="LoginRequest", module="api", type="pydantic", file_path="api/schemas.py"
+            ),
+            DataModel(
+                name="LoginResponse", module="api", type="pydantic", file_path="api/schemas.py"
+            ),
         ]
         modules = [
             {"name": "api", "domain": "api-gateway", "service_family": "python-backend"},
@@ -140,7 +150,9 @@ class TestHighFrequencyModelIdentification:
         models = [
             DataModel(name="User", module="auth", type="sqlalchemy", file_path="auth/models.py"),
             DataModel(name="User", module="api", type="pydantic", file_path="api/schemas.py"),
-            DataModel(name="User", module="billing", type="dataclass", file_path="billing/models.py"),
+            DataModel(
+                name="User", module="billing", type="dataclass", file_path="billing/models.py"
+            ),
         ]
         modules = [
             {"name": "auth", "domain": "core-platform", "service_family": "python-backend"},
@@ -174,10 +186,14 @@ class TestHighFrequencyModelIdentification:
     def test_high_frequency_models_sorted_first(self):
         """Test that high-frequency models appear first in canonical list."""
         models = [
-            DataModel(name="Invoice", module="billing", type="sqlalchemy", file_path="billing/models.py"),
+            DataModel(
+                name="Invoice", module="billing", type="sqlalchemy", file_path="billing/models.py"
+            ),
             DataModel(name="User", module="auth", type="sqlalchemy", file_path="auth/models.py"),
             DataModel(name="User", module="api", type="pydantic", file_path="api/schemas.py"),
-            DataModel(name="User", module="billing", type="dataclass", file_path="billing/models.py"),
+            DataModel(
+                name="User", module="billing", type="dataclass", file_path="billing/models.py"
+            ),
         ]
         modules = [
             {"name": "billing", "domain": "persistence", "service_family": "python-backend"},
@@ -216,7 +232,9 @@ class TestCategoryFiltering:
         """Test filtering for DTOs."""
         models = [
             DataModel(name="UserDTO", module="api", type="pydantic", file_path="api/schemas.py"),
-            DataModel(name="LoginRequest", module="api", type="pydantic", file_path="api/schemas.py"),
+            DataModel(
+                name="LoginRequest", module="api", type="pydantic", file_path="api/schemas.py"
+            ),
         ]
         modules = [
             {"name": "api", "domain": "api-gateway", "service_family": "python-backend"},
@@ -231,8 +249,12 @@ class TestCategoryFiltering:
     def test_get_request_response_types(self):
         """Test filtering for request/response types."""
         models = [
-            DataModel(name="LoginRequest", module="api", type="pydantic", file_path="api/schemas.py"),
-            DataModel(name="LoginResponse", module="api", type="pydantic", file_path="api/schemas.py"),
+            DataModel(
+                name="LoginRequest", module="api", type="pydantic", file_path="api/schemas.py"
+            ),
+            DataModel(
+                name="LoginResponse", module="api", type="pydantic", file_path="api/schemas.py"
+            ),
         ]
         modules = [
             {"name": "api", "domain": "api-gateway", "service_family": "python-backend"},
@@ -328,7 +350,9 @@ class TestSummarization:
         models = [
             DataModel(name="User", module="auth", type="sqlalchemy", file_path="auth/models.py"),
             DataModel(name="UserDTO", module="api", type="pydantic", file_path="api/schemas.py"),
-            DataModel(name="LoginRequest", module="api", type="pydantic", file_path="api/schemas.py"),
+            DataModel(
+                name="LoginRequest", module="api", type="pydantic", file_path="api/schemas.py"
+            ),
         ]
         modules = [
             {"name": "auth", "domain": "core-platform", "service_family": "python-backend"},

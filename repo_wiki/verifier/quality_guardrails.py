@@ -25,10 +25,10 @@ from typing import Any
 
 from repo_wiki.generator.io import read_text
 
-
 # =============================================================================
 # QUALITY GATE REASON CODES (6xxx)
 # =============================================================================
+
 
 class QualityReasonCode(Enum):
     """Reason codes for quality gate failures."""
@@ -63,17 +63,35 @@ class QualityReasonCode(Enum):
 # Filler words and phrases commonly found in generic AI-generated prose
 FILLER_PATTERNS: list[tuple[str, str]] = [
     # Weak qualifiers
-    (r'\b(v?:?ery|extremely|incredibly|highly|deeply|truly|really|quite|somewhat)\s+', "weak_qualifier"),
+    (
+        r"\b(v?:?ery|extremely|incredibly|highly|deeply|truly|really|quite|somewhat)\s+",
+        "weak_qualifier",
+    ),
     # Generic transitions
-    (r'\b(It is important to note that|It should be noted that|Note that|As previously mentioned|In summary|To summarize|In conclusion|Additionally|Furthermore|Moreover|Likewise|Similarly)\b', "generic_transition"),
+    (
+        r"\b(It is important to note that|It should be noted that|Note that|As previously mentioned|In summary|To summarize|In conclusion|Additionally|Furthermore|Moreover|Likewise|Similarly)\b",
+        "generic_transition",
+    ),
     # Vague references
-    (r'\b(this system|this application|this software|the system|the application|the software)\b', "vague_reference"),
+    (
+        r"\b(this system|this application|this software|the system|the application|the software)\b",
+        "vague_reference",
+    ),
     # Template phrases
-    (r'\b(is designed to|is built to|serves as a|acts as a|provides the ability to|enables the user to)\b', "template_phrase"),
+    (
+        r"\b(is designed to|is built to|serves as a|acts as a|provides the ability to|enables the user to)\b",
+        "template_phrase",
+    ),
     # Common filler
-    (r'\b(of course|obviously|clearly|certainly|undoubtedly|basically|essentially|fundamentally|literally|virtually)\b', "common_filler"),
+    (
+        r"\b(of course|obviously|clearly|certainly|undoubtedly|basically|essentially|fundamentally|literally|virtually)\b",
+        "common_filler",
+    ),
     # Nominalization patterns
-    (r'\b(utilization|implementation|utilization|optimization|maximization|minimization)\b', "nominalization"),
+    (
+        r"\b(utilization|implementation|utilization|optimization|maximization|minimization)\b",
+        "nominalization",
+    ),
 ]
 
 # Compiled filler regex for performance
@@ -84,11 +102,14 @@ COMPILED_FILLER_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # Hallucinated/invented technical terms patterns
 HALLUCINATION_PATTERNS: list[tuple[str, str]] = [
     # Common hallucinated patterns
-    (r'\b(XML-based|XML-driven|JSON-enabled|REST-ful|cloud-native|microservices-ready)\b', "buzzword_combo"),
+    (
+        r"\b(XML-based|XML-driven|JSON-enabled|REST-ful|cloud-native|microservices-ready)\b",
+        "buzzword_combo",
+    ),
     # Invented frameworks
-    (r'\b(Framework\s+X|Architecture\s+Y|Module\s+Z|System\s+ABC)\b', "placeholder_names"),
+    (r"\b(Framework\s+X|Architecture\s+Y|Module\s+Z|System\s+ABC)\b", "placeholder_names"),
     # Fake version numbers
-    (r'\bv\d+\.\d+\.\d+(?:\.\d+)?\b', "version_bloat"),
+    (r"\bv\d+\.\d+\.\d+(?:\.\d+)?\b", "version_bloat"),
 ]
 
 COMPILED_HALLUCINATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -100,9 +121,11 @@ COMPILED_HALLUCINATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # QODER PROFILE VERIFIER
 # =============================================================================
 
+
 @dataclass
 class QoderProfileMetrics:
     """Metrics from qoder-style profile verification."""
+
     profile_found: bool = False
     profile_complete: bool = False
     sections_documented: int = 0
@@ -120,10 +143,19 @@ class QoderProfileVerifier:
     """
 
     # Expected section coverage for a complete profile
-    EXPECTED_SECTIONS: frozenset[str] = frozenset([
-        "project", "architecture", "services", "data-model",
-        "api", "operations", "development", "security", "troubleshooting"
-    ])
+    EXPECTED_SECTIONS: frozenset[str] = frozenset(
+        [
+            "project",
+            "architecture",
+            "services",
+            "data-model",
+            "api",
+            "operations",
+            "development",
+            "security",
+            "troubleshooting",
+        ]
+    )
 
     # Minimum citation density: citations per 1000 prose chars
     MIN_CITATION_DENSITY = 0.5
@@ -168,9 +200,9 @@ class QoderProfileVerifier:
         # Check profile completeness
         metrics.profile_found = True
         metrics.profile_complete = (
-            metrics.sections_documented >= 3 and
-            metrics.estimated_prose_chars >= 200 and
-            metrics.citations_count >= 1
+            metrics.sections_documented >= 3
+            and metrics.estimated_prose_chars >= 200
+            and metrics.citations_count >= 1
         )
 
         # Report issues
@@ -187,12 +219,12 @@ class QoderProfileVerifier:
 
     def _extract_section_headers(self, content: str) -> list[str]:
         """Extract section headers from content."""
-        header_pattern = re.compile(r'^#{1,6}\s+(.+)$', re.MULTILINE)
+        header_pattern = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
         return [m.group(1).strip() for m in header_pattern.finditer(content)]
 
     def _count_citations(self, content: str) -> int:
         """Count citations in content."""
-        cite_pattern = re.compile(r'<cite>[^<]+</cite>')
+        cite_pattern = re.compile(r"<cite>[^<]+</cite>")
         return len(cite_pattern.findall(content))
 
     def _count_prose_chars(self, content: str) -> int:
@@ -200,7 +232,7 @@ class QoderProfileVerifier:
 
         Strips headers, list items, code blocks, and tables.
         """
-        lines = content.split('\n')
+        lines = content.split("\n")
         prose_lines = []
         in_code_block = False
 
@@ -208,31 +240,33 @@ class QoderProfileVerifier:
             stripped = line.strip()
             if not stripped:
                 continue
-            if stripped.startswith('```'):
+            if stripped.startswith("```"):
                 in_code_block = not in_code_block
                 continue
             if in_code_block:
                 continue
-            if stripped.startswith('#'):
+            if stripped.startswith("#"):
                 continue
-            if stripped.startswith('-') or stripped.startswith('*'):
+            if stripped.startswith("-") or stripped.startswith("*"):
                 continue
-            if stripped.startswith('|'):
+            if stripped.startswith("|"):
                 continue
-            if stripped.startswith('!'):
+            if stripped.startswith("!"):
                 continue
             prose_lines.append(stripped)
 
-        return len(' '.join(prose_lines))
+        return len(" ".join(prose_lines))
 
 
 # =============================================================================
 # QUALITY GUARDRAILS CHECKER
 # =============================================================================
 
+
 @dataclass
 class QualityIssue:
     """A single quality issue detected."""
+
     reason_code: QualityReasonCode
     message: str
     location: str = ""  # File or section where issue found
@@ -243,6 +277,7 @@ class QualityIssue:
 @dataclass
 class QualityGateResult:
     """Result of quality gate check on a document."""
+
     document_path: Path
     passed: bool
     issues: list[QualityIssue]
@@ -290,11 +325,11 @@ class QualityGuardrailsChecker:
     # Patterns for claim detection
     CLAIM_PATTERNS: list[re.Pattern[str]] = [
         # Absolute claims
-        re.compile(r'\b(always|never|must|will|shall|guarantee|ensure)\b', re.IGNORECASE),
+        re.compile(r"\b(always|never|must|will|shall|guarantee|ensure)\b", re.IGNORECASE),
         # Performance claims
-        re.compile(r'\b(faster|slower|better|worse|optimized|scalable)\b', re.IGNORECASE),
+        re.compile(r"\b(faster|slower|better|worse|optimized|scalable)\b", re.IGNORECASE),
         # Technical claims
-        re.compile(r'\b(uses?|implements?|provides?|supports?|enables?|allows?)\b', re.IGNORECASE),
+        re.compile(r"\b(uses?|implements?|provides?|supports?|enables?|allows?)\b", re.IGNORECASE),
     ]
 
     def __init__(self, workspace_root: Path | str | None = None) -> None:
@@ -317,11 +352,13 @@ class QualityGuardrailsChecker:
             return QualityGateResult(
                 document_path=doc_path,
                 passed=False,
-                issues=[QualityIssue(
-                    reason_code=QualityReasonCode.UNVERIFIABLE_STATEMENT,
-                    message=f"Document not found: {doc_path}",
-                    severity="ERROR",
-                )],
+                issues=[
+                    QualityIssue(
+                        reason_code=QualityReasonCode.UNVERIFIABLE_STATEMENT,
+                        message=f"Document not found: {doc_path}",
+                        severity="ERROR",
+                    )
+                ],
                 metrics={},
             )
 
@@ -368,7 +405,7 @@ class QualityGuardrailsChecker:
 
         # Find all claims
         claim_lines: list[tuple[int, str]] = []
-        for i, line in enumerate(content.split('\n'), 1):
+        for i, line in enumerate(content.split("\n"), 1):
             for pattern in self.CLAIM_PATTERNS:
                 if pattern.search(line):
                     claim_lines.append((i, line.strip()))
@@ -378,20 +415,22 @@ class QualityGuardrailsChecker:
             return issues
 
         # Count citations in content
-        cite_count = len(re.findall(r'<cite>[^<]+</cite>', content))
+        cite_count = len(re.findall(r"<cite>[^<]+</cite>", content))
 
         # If content has many claims but few citations, flag potential unsupported claims
         if len(claim_lines) > 3 and cite_count == 0:
-            issues.append(QualityIssue(
-                reason_code=QualityReasonCode.UNSUPPORTED_CLAIM,
-                message=f"Found {len(claim_lines)} claims but no citations - claims may be unsupported",
-                location=f"{doc_path.name}:1-{content.count(chr(10))}",
-                severity="WARNING",
-                details={
-                    "claim_count": len(claim_lines),
-                    "citation_count": cite_count,
-                },
-            ))
+            issues.append(
+                QualityIssue(
+                    reason_code=QualityReasonCode.UNSUPPORTED_CLAIM,
+                    message=f"Found {len(claim_lines)} claims but no citations - claims may be unsupported",
+                    location=f"{doc_path.name}:1-{content.count(chr(10))}",
+                    severity="WARNING",
+                    details={
+                        "claim_count": len(claim_lines),
+                        "citation_count": cite_count,
+                    },
+                )
+            )
 
         return issues
 
@@ -400,7 +439,7 @@ class QualityGuardrailsChecker:
         issues: list[QualityIssue] = []
 
         prose_chars = self._count_prose_chars(content)
-        cite_count = len(re.findall(r'<cite>[^<]+</cite>', content))
+        cite_count = len(re.findall(r"<cite>[^<]+</cite>", content))
 
         if prose_chars == 0:
             return issues
@@ -409,17 +448,19 @@ class QualityGuardrailsChecker:
         density = (cite_count / prose_chars) * 1000
 
         if density < self.MIN_CITATIONS_PER_1000_CHARS:
-            issues.append(QualityIssue(
-                reason_code=QualityReasonCode.LOW_CITATION_DENSITY,
-                message=f"Citation density too low: {density:.2f}/1000 chars (min: {self.MIN_CITATIONS_PER_1000_CHARS})",
-                location=doc_path.name,
-                severity="WARNING",
-                details={
-                    "citation_density": round(density, 3),
-                    "prose_chars": prose_chars,
-                    "citation_count": cite_count,
-                },
-            ))
+            issues.append(
+                QualityIssue(
+                    reason_code=QualityReasonCode.LOW_CITATION_DENSITY,
+                    message=f"Citation density too low: {density:.2f}/1000 chars (min: {self.MIN_CITATIONS_PER_1000_CHARS})",
+                    location=doc_path.name,
+                    severity="WARNING",
+                    details={
+                        "citation_density": round(density, 3),
+                        "prose_chars": prose_chars,
+                        "citation_count": cite_count,
+                    },
+                )
+            )
 
         return issues
 
@@ -441,29 +482,33 @@ class QualityGuardrailsChecker:
         # Check for repeated instances of same filler
         for filler_name, count in filler_counts.items():
             if count >= self.MAX_REPEATED_FILLER_INSTANCES:
-                issues.append(QualityIssue(
-                    reason_code=QualityReasonCode.REPEATED_FILLER,
-                    message=f"Repeated filler '{filler_name}' found {count} times",
-                    location=doc_path.name,
-                    severity="WARNING",
-                    details={"filler_type": filler_name, "count": count},
-                ))
+                issues.append(
+                    QualityIssue(
+                        reason_code=QualityReasonCode.REPEATED_FILLER,
+                        message=f"Repeated filler '{filler_name}' found {count} times",
+                        location=doc_path.name,
+                        severity="WARNING",
+                        details={"filler_type": filler_name, "count": count},
+                    )
+                )
 
         # Calculate total filler ratio
         total_filler = sum(filler_counts.values())
         filler_ratio = (total_filler / prose_chars) * 1000
 
         if filler_ratio > self.MAX_FILLER_WORDS_PER_1000_CHARS:
-            issues.append(QualityIssue(
-                reason_code=QualityReasonCode.GENERIC_PROSE,
-                message=f"Filler ratio too high: {filler_ratio:.1f}/1000 chars (max: {self.MAX_FILLER_WORDS_PER_1000_CHARS})",
-                location=doc_path.name,
-                severity="WARNING",
-                details={
-                    "filler_ratio": round(filler_ratio, 1),
-                    "total_filler": total_filler,
-                },
-            ))
+            issues.append(
+                QualityIssue(
+                    reason_code=QualityReasonCode.GENERIC_PROSE,
+                    message=f"Filler ratio too high: {filler_ratio:.1f}/1000 chars (max: {self.MAX_FILLER_WORDS_PER_1000_CHARS})",
+                    location=doc_path.name,
+                    severity="WARNING",
+                    details={
+                        "filler_ratio": round(filler_ratio, 1),
+                        "total_filler": total_filler,
+                    },
+                )
+            )
 
         return issues
 
@@ -471,7 +516,7 @@ class QualityGuardrailsChecker:
         """Check prose vs list/table ratio."""
         issues: list[QualityIssue] = []
 
-        lines = content.split('\n')
+        lines = content.split("\n")
         prose_lines: list[str] = []
         list_lines: list[str] = []
         table_lines: list[str] = []
@@ -481,20 +526,20 @@ class QualityGuardrailsChecker:
             stripped = line.strip()
             if not stripped:
                 continue
-            if stripped.startswith('```'):
+            if stripped.startswith("```"):
                 in_code_block = not in_code_block
                 continue
             if in_code_block:
                 continue
-            if stripped.startswith('#'):
+            if stripped.startswith("#"):
                 continue
-            if stripped.startswith('-') or stripped.startswith('*'):
+            if stripped.startswith("-") or stripped.startswith("*"):
                 list_lines.append(stripped)
                 continue
-            if stripped.startswith('|'):
+            if stripped.startswith("|"):
                 table_lines.append(stripped)
                 continue
-            if stripped.startswith('!'):
+            if stripped.startswith("!"):
                 continue
             prose_lines.append(stripped)
 
@@ -505,18 +550,20 @@ class QualityGuardrailsChecker:
         prose_ratio = len(prose_lines) / total_content_lines
 
         if prose_ratio < self.MIN_PROSE_RATIO:
-            issues.append(QualityIssue(
-                reason_code=QualityReasonCode.LOW_PROSE_RATIO,
-                message=f"Prose ratio too low: {prose_ratio*100:.0f}% (min: {self.MIN_PROSE_RATIO*100:.0f}%)",
-                location=doc_path.name,
-                severity="ERROR",
-                details={
-                    "prose_ratio": round(prose_ratio, 2),
-                    "prose_lines": len(prose_lines),
-                    "list_lines": len(list_lines),
-                    "table_lines": len(table_lines),
-                },
-            ))
+            issues.append(
+                QualityIssue(
+                    reason_code=QualityReasonCode.LOW_PROSE_RATIO,
+                    message=f"Prose ratio too low: {prose_ratio*100:.0f}% (min: {self.MIN_PROSE_RATIO*100:.0f}%)",
+                    location=doc_path.name,
+                    severity="ERROR",
+                    details={
+                        "prose_ratio": round(prose_ratio, 2),
+                        "prose_lines": len(prose_lines),
+                        "list_lines": len(list_lines),
+                        "table_lines": len(table_lines),
+                    },
+                )
+            )
 
         return issues
 
@@ -524,18 +571,18 @@ class QualityGuardrailsChecker:
         """Check for excessive list items without narrative."""
         issues: list[QualityIssue] = []
 
-        lines = content.split('\n')
+        lines = content.split("\n")
         consecutive_lists: list[int] = []  # Tracks line numbers with list items
         in_code_block = False
 
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if stripped.startswith('```'):
+            if stripped.startswith("```"):
                 in_code_block = not in_code_block
                 continue
             if in_code_block:
                 continue
-            if stripped.startswith('-') or stripped.startswith('*'):
+            if stripped.startswith("-") or stripped.startswith("*"):
                 consecutive_lists.append(i)
 
         # Check for list dumps (10+ consecutive list items)
@@ -544,20 +591,22 @@ class QualityGuardrailsChecker:
             max_run = 1
             current_run = 1
             for i in range(1, len(consecutive_lists)):
-                if consecutive_lists[i] - consecutive_lists[i-1] == 1:
+                if consecutive_lists[i] - consecutive_lists[i - 1] == 1:
                     current_run += 1
                     max_run = max(max_run, current_run)
                 else:
                     current_run = 1
 
             if max_run >= self.MAX_LIST_ITEMS_BEFORE_WARNING:
-                issues.append(QualityIssue(
-                    reason_code=QualityReasonCode.LIST_DUMP,
-                    message=f"List dump detected: {max_run} consecutive list items without narrative",
-                    location=doc_path.name,
-                    severity="ERROR",
-                    details={"consecutive_list_items": max_run},
-                ))
+                issues.append(
+                    QualityIssue(
+                        reason_code=QualityReasonCode.LIST_DUMP,
+                        message=f"List dump detected: {max_run} consecutive list items without narrative",
+                        location=doc_path.name,
+                        severity="ERROR",
+                        details={"consecutive_list_items": max_run},
+                    )
+                )
 
         return issues
 
@@ -574,19 +623,21 @@ class QualityGuardrailsChecker:
 
         for hallucination_type, count in hallucination_counts.items():
             if count >= 2:
-                issues.append(QualityIssue(
-                    reason_code=QualityReasonCode.HALLUCINATED_TERMINOLOGY,
-                    message=f"Possible hallucinated content: {hallucination_type} found {count} times",
-                    location=doc_path.name,
-                    severity="ERROR",
-                    details={"type": hallucination_type, "count": count},
-                ))
+                issues.append(
+                    QualityIssue(
+                        reason_code=QualityReasonCode.HALLUCINATED_TERMINOLOGY,
+                        message=f"Possible hallucinated content: {hallucination_type} found {count} times",
+                        location=doc_path.name,
+                        severity="ERROR",
+                        details={"type": hallucination_type, "count": count},
+                    )
+                )
 
         return issues
 
     def _count_prose_chars(self, content: str) -> int:
         """Count prose characters (excluding markdown syntax)."""
-        lines = content.split('\n')
+        lines = content.split("\n")
         prose_lines = []
         in_code_block = False
 
@@ -594,29 +645,35 @@ class QualityGuardrailsChecker:
             stripped = line.strip()
             if not stripped:
                 continue
-            if stripped.startswith('```'):
+            if stripped.startswith("```"):
                 in_code_block = not in_code_block
                 continue
             if in_code_block:
                 continue
-            if stripped.startswith('#'):
+            if stripped.startswith("#"):
                 continue
-            if stripped.startswith('-') or stripped.startswith('*'):
+            if stripped.startswith("-") or stripped.startswith("*"):
                 continue
-            if stripped.startswith('|'):
+            if stripped.startswith("|"):
                 continue
-            if stripped.startswith('!'):
+            if stripped.startswith("!"):
                 continue
             prose_lines.append(stripped)
 
-        return len(' '.join(prose_lines))
+        return len(" ".join(prose_lines))
 
     def _collect_metrics(self, content: str) -> dict[str, Any]:
         """Collect quality metrics for a document."""
         prose_chars = self._count_prose_chars(content)
-        cite_count = len(re.findall(r'<cite>[^<]+</cite>', content))
-        prose_lines = len([l for l in content.split('\n') if l.strip() and not l.strip().startswith(('#', '-', '*', '|', '!', '```'))])
-        list_items = len([l for l in content.split('\n') if l.strip().startswith(('-', '*'))])
+        cite_count = len(re.findall(r"<cite>[^<]+</cite>", content))
+        prose_lines = len(
+            [
+                l
+                for l in content.split("\n")
+                if l.strip() and not l.strip().startswith(("#", "-", "*", "|", "!", "```"))
+            ]
+        )
+        list_items = len([l for l in content.split("\n") if l.strip().startswith(("-", "*"))])
 
         filler_counts: dict[str, int] = {}
         for pattern, name in COMPILED_FILLER_PATTERNS:
@@ -635,6 +692,7 @@ class QualityGuardrailsChecker:
 # =============================================================================
 # FACTORY AND INTEGRATION HELPERS
 # =============================================================================
+
 
 def create_quality_checker(
     workspace_root: Path | str | None = None,

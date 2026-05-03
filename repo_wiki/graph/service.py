@@ -46,26 +46,32 @@ def build_graph_artifacts(root: Path, snapshot: RepositorySnapshot) -> dict:
             "models": nodes[name]["models"],
         }
 
-    edges = [
-        {"type": "DEPENDS_ON", "from": m.name, "to": dep}
-        for m in snapshot.modules
-        for dep in m.depends_on
-        if dep in by_name
-    ] + [
-        {"type": "EXPOSES", "from": m.name, "to": interface}
-        for m in snapshot.modules
-        for interface in m.interfaces
-    ] + [
-        {"type": "USES", "from": m.name, "to": model}
-        for m in snapshot.modules
-        for model in m.data_models
-    ] + [
-        {"type": "BELONGS_TO", "from": endpoint.path, "to": endpoint.module}
-        for endpoint in snapshot.endpoints
-    ] + [
-        {"type": "BELONGS_TO", "from": model.name, "to": model.module}
-        for model in snapshot.data_models
-    ]
+    edges = (
+        [
+            {"type": "DEPENDS_ON", "from": m.name, "to": dep}
+            for m in snapshot.modules
+            for dep in m.depends_on
+            if dep in by_name
+        ]
+        + [
+            {"type": "EXPOSES", "from": m.name, "to": interface}
+            for m in snapshot.modules
+            for interface in m.interfaces
+        ]
+        + [
+            {"type": "USES", "from": m.name, "to": model}
+            for m in snapshot.modules
+            for model in m.data_models
+        ]
+        + [
+            {"type": "BELONGS_TO", "from": endpoint.path, "to": endpoint.module}
+            for endpoint in snapshot.endpoints
+        ]
+        + [
+            {"type": "BELONGS_TO", "from": model.name, "to": model.module}
+            for model in snapshot.data_models
+        ]
+    )
 
     graph_payload = {
         "modules": nodes,
@@ -82,12 +88,7 @@ def build_graph_artifacts(root: Path, snapshot: RepositorySnapshot) -> dict:
                 [name for name, node in nodes.items() if name in set(node["upstream"])]
             ),
             "broken_dependencies": sorted(
-                [
-                    dep
-                    for node in nodes.values()
-                    for dep in node["upstream"]
-                    if dep not in nodes
-                ]
+                [dep for node in nodes.values() for dep in node["upstream"] if dep not in nodes]
             ),
         },
     }

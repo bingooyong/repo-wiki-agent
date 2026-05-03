@@ -7,15 +7,16 @@ Uses page topic, module, symbol, API, data model, and file proximity signals.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.planner.schema import WikiPagePlan, WikiPlanManifest, WikiTaxonomyCategory, SourceRequirement
-from repo_wiki.scanner.source_spans import SourceSpan, group_spans_by_file
-from repo_wiki.orchestration.runtime_store import SQLiteRuntimeStore, EvidenceSpanRecord
-
+from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord, SQLiteRuntimeStore
+from repo_wiki.planner.schema import (
+    WikiPagePlan,
+    WikiPlanManifest,
+    WikiTaxonomyCategory,
+)
 
 # Minimum candidate spans per page when evidence exists
 MIN_CANDIDATES_PER_PAGE = 5
@@ -32,6 +33,7 @@ WEIGHT_CATEGORY = 1.0
 @dataclass
 class EvidenceCandidate:
     """A ranked evidence candidate for a wiki page."""
+
     evidence_id: int
     span: EvidenceSpanRecord
     score: float
@@ -42,6 +44,7 @@ class EvidenceCandidate:
 @dataclass
 class PageEvidenceBinding:
     """Evidence binding for a wiki page with ranked candidates."""
+
     page_id: str
     doc_type: str
     candidates: list[EvidenceCandidate]
@@ -52,6 +55,7 @@ class PageEvidenceBinding:
 @dataclass
 class EvidenceRankingResult:
     """Result of evidence ranking for an entire page plan."""
+
     bindings: list[PageEvidenceBinding]
     insufficient_pages: list[str]
     total_spans_processed: int
@@ -266,7 +270,9 @@ def _score_by_category_relevance(page: WikiPagePlan, span: EvidenceSpanRecord) -
     return 0.0
 
 
-def score_evidence_for_page(page: WikiPagePlan, span: EvidenceSpanRecord) -> tuple[float, list[str]]:
+def score_evidence_for_page(
+    page: WikiPagePlan, span: EvidenceSpanRecord
+) -> tuple[float, list[str]]:
     """Calculate relevance score for an evidence span to a wiki page.
 
     Returns:
@@ -339,14 +345,16 @@ def rank_evidence_for_page(
 
     # Convert to EvidenceCandidate objects
     results: list[EvidenceCandidate] = []
-    for rank, (score, _, span, signals) in enumerate(candidates[:MIN_CANDIDATES_PER_PAGE * 2]):
-        results.append(EvidenceCandidate(
-            evidence_id=span.id if getattr(span, 'id', None) is not None else 0,
-            span=span,
-            score=score,
-            match_signals=signals,
-            citation_order=rank,
-        ))
+    for rank, (score, _, span, signals) in enumerate(candidates[: MIN_CANDIDATES_PER_PAGE * 2]):
+        results.append(
+            EvidenceCandidate(
+                evidence_id=span.id if getattr(span, "id", None) is not None else 0,
+                span=span,
+                score=score,
+                match_signals=signals,
+                citation_order=rank,
+            )
+        )
 
     return results[:MIN_CANDIDATES_PER_PAGE]
 
@@ -395,7 +403,8 @@ class EvidenceRanker:
                 page_id=page.page_id,
                 doc_type=doc_type,
                 candidates=candidates,
-                insufficient_evidence=len(candidates) < MIN_CANDIDATES_PER_PAGE and len(all_spans) > 0,
+                insufficient_evidence=len(candidates) < MIN_CANDIDATES_PER_PAGE
+                and len(all_spans) > 0,
                 bound_count=len(candidates),
             )
             bindings.append(binding)
@@ -460,21 +469,21 @@ class EvidenceRanker:
             if not page:
                 continue
 
-            binding = next(
-                (b for b in result.bindings if b.page_id == page_id),
-                None
-            )
+            binding = next((b for b in result.bindings if b.page_id == page_id), None)
             if not binding:
                 continue
 
-            insufficient.append({
-                "page_id": page_id,
-                "title": page.title,
-                "category": page.category.value,
-                "bound_count": binding.bound_count,
-                "required_minimum": MIN_CANDIDATES_PER_PAGE,
-                "source_requirements": page.source_requirements.model_dump()
-                    if page.source_requirements else {},
-            })
+            insufficient.append(
+                {
+                    "page_id": page_id,
+                    "title": page.title,
+                    "category": page.category.value,
+                    "bound_count": binding.bound_count,
+                    "required_minimum": MIN_CANDIDATES_PER_PAGE,
+                    "source_requirements": page.source_requirements.model_dump()
+                    if page.source_requirements
+                    else {},
+                }
+            )
 
         return insufficient

@@ -8,13 +8,13 @@ Preference order for name resolution:
 2. Git remote URL
 3. Directory name fallback
 """
+
 from __future__ import annotations
 
 import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
 
 from repo_wiki.planner.schema import RepositoryIdentity
 
@@ -189,7 +189,7 @@ def _human_readable_name(name: str) -> str:
 
     # Preserve uppercase acronyms (like AI, API, WIKI) by protecting them
     # First, replace spaces around them with a placeholder
-    protected = re.sub(r'\b([A-Z]{2,})\b', lambda m: m.group(1).replace(' ', '_'), result)
+    protected = re.sub(r"\b([A-Z]{2,})\b", lambda m: m.group(1).replace(" ", "_"), result)
 
     # Split and capitalize each word, preserving known acronyms
     def capitalize_word(word: str) -> str:

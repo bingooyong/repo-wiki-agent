@@ -250,7 +250,9 @@ class TestRuleFirstPlanner:
 
         # AI_API_Atlas should have substantial documentation
         # With 3 modules, 3 endpoints, 3 data models, should generate 80+ pages
-        assert manifest.page_count() >= 80, f"Expected at least 80 pages, got {manifest.page_count()}"
+        assert (
+            manifest.page_count() >= 80
+        ), f"Expected at least 80 pages, got {manifest.page_count()}"
 
 
 class TestPlanPagesFromSnapshot:

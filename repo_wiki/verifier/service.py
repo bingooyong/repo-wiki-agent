@@ -7,8 +7,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from repo_wiki.generator.contracts import (
+    SECTION_DEFINITIONS,
+)
 from repo_wiki.generator.io import list_repo_files, read_text, read_yamlish
-from repo_wiki.generator.contracts import SECTION_DEFINITIONS, get_canonical_slug, is_known_section_slug
 from repo_wiki.retrieval.service import RetrievalService
 
 
@@ -19,8 +21,9 @@ class GateType(Enum):
     fixed before acceptance. SOFT gate violations are quality issues that can
     be addressed later but indicate the output needs improvement.
     """
-    HARD = "HARD"   # Structural failures - must fix before acceptance
-    SOFT = "SOFT"   # Quality issues - should fix but not blocking
+
+    HARD = "HARD"  # Structural failures - must fix before acceptance
+    SOFT = "SOFT"  # Quality issues - should fix but not blocking
 
 
 class SeverityThreshold:
@@ -132,34 +135,40 @@ DEFAULT_THRESHOLDS = SeverityThreshold()
 # Reason codes for CI output - precise categorization of WARN/FAIL outcomes
 class ReasonCode:
     # Content quality codes (1xxx)
-    CONTENT_EMPTY = "CONTENT_EMPTY"            # 1001: Document is empty
-    CONTENT_LIST_ONLY = "CONTENT_LIST_ONLY"    # 1002: Document is primarily list/table, no prose
-    CONTENT_TOO_SHORT = "CONTENT_TOO_SHORT"    # 1003: Document below minimum prose length
+    CONTENT_EMPTY = "CONTENT_EMPTY"  # 1001: Document is empty
+    CONTENT_LIST_ONLY = "CONTENT_LIST_ONLY"  # 1002: Document is primarily list/table, no prose
+    CONTENT_TOO_SHORT = "CONTENT_TOO_SHORT"  # 1003: Document below minimum prose length
     CONTENT_MISSING_SECTIONS = "CONTENT_MISSING_SECTIONS"  # 1004: Missing required sections
 
     # Structure quality codes (2xxx)
-    STRUCT_MISSING_SECTIONS = "STRUCT_MISSING_SECTIONS"    # 2001: docs/sections/ missing required sections
-    STRUCT_SECTION_DIR_MISSING = "STRUCT_SECTION_DIR_MISSING"  # 2002: Section directory does not exist
+    STRUCT_MISSING_SECTIONS = (
+        "STRUCT_MISSING_SECTIONS"  # 2001: docs/sections/ missing required sections
+    )
+    STRUCT_SECTION_DIR_MISSING = (
+        "STRUCT_SECTION_DIR_MISSING"  # 2002: Section directory does not exist
+    )
     STRUCT_NAVIGATION_BROKEN = "STRUCT_NAVIGATION_BROKEN"  # 2003: Navigation links are broken
     STRUCT_NAV_BAD_DEPTH = "STRUCT_NAV_BAD_DEPTH"  # 2004: Incorrect relative path depth
     STRUCT_NAV_TARGET_MISSING = "STRUCT_NAV_TARGET_MISSING"  # 2005: Linked file does not exist
 
     # Aggregation quality codes (3xxx)
-    AGG_API_NOT_GROUPED = "AGG_API_NOT_GROUPED"            # 3001: API doc is raw endpoint dump
-    AGG_API_ENDPOINT_DUMP = "AGG_API_ENDPOINT_DUMP"       # 3002: Too many raw endpoints
-    AGG_DM_NOT_GROUPED = "AGG_DM_NOT_GROUPED"             # 3003: Data model is not aggregated
-    AGG_DM_MODEL_DUMP = "AGG_DM_MODEL_DUMP"               # 3004: Too many raw models
+    AGG_API_NOT_GROUPED = "AGG_API_NOT_GROUPED"  # 3001: API doc is raw endpoint dump
+    AGG_API_ENDPOINT_DUMP = "AGG_API_ENDPOINT_DUMP"  # 3002: Too many raw endpoints
+    AGG_DM_NOT_GROUPED = "AGG_DM_NOT_GROUPED"  # 3003: Data model is not aggregated
+    AGG_DM_MODEL_DUMP = "AGG_DM_MODEL_DUMP"  # 3004: Too many raw models
 
     # Architecture quality codes (4xxx)
-    ARCH_MERMAID_MISSING = "ARCH_MERMAID_MISSING"         # 4001: Architecture missing Mermaid diagrams
+    ARCH_MERMAID_MISSING = "ARCH_MERMAID_MISSING"  # 4001: Architecture missing Mermaid diagrams
     ARCH_MERMAID_INSUFFICIENT = "ARCH_MERMAID_INSUFFICIENT"  # 4002: Not enough Mermaid blocks
-    ARCH_LAYER_EXPLANATION_MISSING = "ARCH_LAYER_EXPLANATION_MISSING"  # 4003: Missing three-layer explanation
+    ARCH_LAYER_EXPLANATION_MISSING = (
+        "ARCH_LAYER_EXPLANATION_MISSING"  # 4003: Missing three-layer explanation
+    )
 
     # Citation quality codes (5xxx)
-    CITATION_MISSING = "CITATION_MISSING"                 # 5001: Page has no citations at all
-    CITATION_BROKEN_PATH = "CITATION_BROKEN_PATH"         # 5002: Citation file path does not exist
-    CITATION_BAD_LINES = "CITATION_BAD_LINES"             # 5003: Citation line range is invalid
-    CITATION_SOURCE_EMPTY = "CITATION_SOURCE_EMPTY"       # 5004: Source block is empty
+    CITATION_MISSING = "CITATION_MISSING"  # 5001: Page has no citations at all
+    CITATION_BROKEN_PATH = "CITATION_BROKEN_PATH"  # 5002: Citation file path does not exist
+    CITATION_BAD_LINES = "CITATION_BAD_LINES"  # 5003: Citation line range is invalid
+    CITATION_SOURCE_EMPTY = "CITATION_SOURCE_EMPTY"  # 5004: Source block is empty
 
 
 @dataclass
@@ -328,7 +337,9 @@ class VerifierService:
         )
 
     def _check_module_doc_coverage(self) -> CheckResult:
-        module_index = read_yamlish(self.root / "ai/source-of-truth/module-index.yaml", {"modules": []})
+        module_index = read_yamlish(
+            self.root / "ai/source-of-truth/module-index.yaml", {"modules": []}
+        )
         modules = module_index.get("modules", []) if isinstance(module_index, dict) else []
         missing_docs: list[str] = []
         for module in modules:
@@ -356,7 +367,9 @@ class VerifierService:
         )
 
     def _check_api_module_cross_refs(self) -> CheckResult:
-        module_index = read_yamlish(self.root / "ai/source-of-truth/module-index.yaml", {"modules": []})
+        module_index = read_yamlish(
+            self.root / "ai/source-of-truth/module-index.yaml", {"modules": []}
+        )
         api_index = read_yamlish(self.root / "ai/source-of-truth/api-index.yaml", {"endpoints": []})
         modules = {
             str(item.get("name", ""))
@@ -364,7 +377,7 @@ class VerifierService:
             if isinstance(item, dict)
         }
         dangling = []
-        for endpoint in (api_index.get("endpoints", []) if isinstance(api_index, dict) else []):
+        for endpoint in api_index.get("endpoints", []) if isinstance(api_index, dict) else []:
             if not isinstance(endpoint, dict):
                 continue
             module_name = str(endpoint.get("module", ""))
@@ -394,15 +407,19 @@ class VerifierService:
         )
 
     def _check_data_model_refs(self) -> CheckResult:
-        module_index = read_yamlish(self.root / "ai/source-of-truth/module-index.yaml", {"modules": []})
-        data_models = read_yamlish(self.root / "ai/source-of-truth/data-models.yaml", {"models": []})
+        module_index = read_yamlish(
+            self.root / "ai/source-of-truth/module-index.yaml", {"modules": []}
+        )
+        data_models = read_yamlish(
+            self.root / "ai/source-of-truth/data-models.yaml", {"models": []}
+        )
         modules = {
             str(item.get("name", ""))
             for item in (module_index.get("modules", []) if isinstance(module_index, dict) else [])
             if isinstance(item, dict)
         }
         dangling = []
-        for model in (data_models.get("models", []) if isinstance(data_models, dict) else []):
+        for model in data_models.get("models", []) if isinstance(data_models, dict) else []:
             if not isinstance(model, dict):
                 continue
             module_name = str(model.get("module", ""))
@@ -447,7 +464,11 @@ class VerifierService:
         latest_code_mtime = 0.0
         for path in list_repo_files(self.root):
             rel = path.relative_to(self.root).as_posix()
-            if rel.startswith("docs/") or rel.startswith("ai/source-of-truth/") or rel.startswith(".repo-wiki/"):
+            if (
+                rel.startswith("docs/")
+                or rel.startswith("ai/source-of-truth/")
+                or rel.startswith(".repo-wiki/")
+            ):
                 continue
             if path.suffix.lower() not in {".py", ".go", ".ts", ".tsx", ".js", ".jsx"}:
                 continue
@@ -610,7 +631,10 @@ class VerifierService:
                 name="overview-prose-quality",
                 status="FAIL",
                 message=f"Overview has only {len(prose_text)} chars of prose, need at least {self.OVERVIEW_MIN_PROSE_CHARS}",
-                details={"prose_chars": len(prose_text), "min_required": self.OVERVIEW_MIN_PROSE_CHARS},
+                details={
+                    "prose_chars": len(prose_text),
+                    "min_required": self.OVERVIEW_MIN_PROSE_CHARS,
+                },
                 reason_code=ReasonCode.CONTENT_TOO_SHORT,
                 gate_type=GateType.SOFT,  # Quality issue - soft gate
             )
@@ -622,7 +646,10 @@ class VerifierService:
                 name="overview-prose-quality",
                 status="FAIL",
                 message=f"Overview has only {section_count} sections, need at least {self.OVERVIEW_MIN_SECTIONS}",
-                details={"section_count": section_count, "min_required": self.OVERVIEW_MIN_SECTIONS},
+                details={
+                    "section_count": section_count,
+                    "min_required": self.OVERVIEW_MIN_SECTIONS,
+                },
                 reason_code=ReasonCode.CONTENT_MISSING_SECTIONS,
                 gate_type=GateType.SOFT,  # Quality issue - soft gate
             )
@@ -638,7 +665,10 @@ class VerifierService:
                     name="overview-prose-quality",
                     status="FAIL",
                     message=f"Overview is {list_ratio*100:.0f}% list/table content, must be less than 70%",
-                    details={"list_ratio": round(list_ratio, 2), "max_allowed": self.OVERVIEW_MAX_LIST_RATIO},
+                    details={
+                        "list_ratio": round(list_ratio, 2),
+                        "max_allowed": self.OVERVIEW_MAX_LIST_RATIO,
+                    },
                     reason_code=ReasonCode.CONTENT_LIST_ONLY,
                     gate_type=GateType.SOFT,  # Quality issue - soft gate
                 )
@@ -697,7 +727,10 @@ class VerifierService:
                 name="architecture-prose-quality",
                 status="FAIL",
                 message=f"Architecture has only {mermaid_blocks} Mermaid block(s), should have at least 2 for three-layer explanation",
-                details={"mermaid_blocks": mermaid_blocks, "min_required": self.ARCHITECTURE_MIN_MERMAID_BLOCKS},
+                details={
+                    "mermaid_blocks": mermaid_blocks,
+                    "min_required": self.ARCHITECTURE_MIN_MERMAID_BLOCKS,
+                },
                 reason_code=ReasonCode.ARCH_MERMAID_INSUFFICIENT,
                 gate_type=GateType.SOFT,  # Quality issue - soft gate
             )
@@ -734,8 +767,15 @@ class VerifierService:
         )
 
     REQUIRED_SECTIONS = [
-        "project", "architecture", "services", "data-model",
-        "api", "operations", "development", "security", "troubleshooting"
+        "project",
+        "architecture",
+        "services",
+        "data-model",
+        "api",
+        "operations",
+        "development",
+        "security",
+        "troubleshooting",
     ]
     LEGACY_SECTION_PATTERN = re.compile(r"^[qs]\d{2}[-_].+\.md$", re.IGNORECASE)
     LEGACY_SECTION_MIN_TOTAL = 8
@@ -745,8 +785,20 @@ class VerifierService:
     def _legacy_section_profile(self, sections_dir: Path) -> dict[str, Any]:
         """Inspect legacy Qxx/Sxx flat section files for compatibility mode."""
         flat_files = [p.name for p in sections_dir.glob("*.md") if p.is_file()]
-        q_files = sorted([name for name in flat_files if name.lower().startswith("q") and self.LEGACY_SECTION_PATTERN.match(name)])
-        s_files = sorted([name for name in flat_files if name.lower().startswith("s") and self.LEGACY_SECTION_PATTERN.match(name)])
+        q_files = sorted(
+            [
+                name
+                for name in flat_files
+                if name.lower().startswith("q") and self.LEGACY_SECTION_PATTERN.match(name)
+            ]
+        )
+        s_files = sorted(
+            [
+                name
+                for name in flat_files
+                if name.lower().startswith("s") and self.LEGACY_SECTION_PATTERN.match(name)
+            ]
+        )
         total = len(q_files) + len(s_files)
         qualified = (
             total >= self.LEGACY_SECTION_MIN_TOTAL
@@ -789,7 +841,11 @@ class VerifierService:
             )
 
         # Get canonical required slugs
-        canonical_required = [s.canonical_slug for s in SECTION_DEFINITIONS if s.canonical_slug in self.REQUIRED_SECTIONS]
+        canonical_required = [
+            s.canonical_slug
+            for s in SECTION_DEFINITIONS
+            if s.canonical_slug in self.REQUIRED_SECTIONS
+        ]
 
         missing_sections: list[str] = []
         found_sections = []
@@ -802,10 +858,14 @@ class VerifierService:
             if section_index.exists() or canonical_flat.exists():
                 found_sections.append(section_slug)
                 alias_resolutions[section_slug] = "canonical"
-                alias_details[section_slug] = f"Found at {section_slug}/index.md or {section_slug}.md"
+                alias_details[section_slug] = (
+                    f"Found at {section_slug}/index.md or {section_slug}.md"
+                )
             else:
                 # Check if alias exists instead
-                section_def = next((s for s in SECTION_DEFINITIONS if s.canonical_slug == section_slug), None)
+                section_def = next(
+                    (s for s in SECTION_DEFINITIONS if s.canonical_slug == section_slug), None
+                )
                 alias_found = False
                 if section_def and section_def.aliases:
                     for alias in section_def.aliases:
@@ -825,7 +885,9 @@ class VerifierService:
         # Collect legacy file mapping for diagnostics
         legacy_file_mapping: dict[str, str] = {}
         if missing_sections:
-            flat_files = [p.name for p in sections_dir.glob("*.md") if p.is_file() and not p.is_dir()]
+            flat_files = [
+                p.name for p in sections_dir.glob("*.md") if p.is_file() and not p.is_dir()
+            ]
             for f in flat_files:
                 if self.LEGACY_SECTION_PATTERN.match(f):
                     legacy_file_mapping[f] = "discovered"
@@ -934,8 +996,16 @@ class VerifierService:
         # Check raw endpoint count
         lines = [l.strip() for l in content.split("\n") if l.strip()]
         endpoint_patterns = [
-            "| GET |", "| POST |", "| PUT |", "| PATCH |", "| DELETE |",
-            "| *GET* |", "| *POST* |", "| *PUT* |", "| *PATCH* |", "| *DELETE* |",
+            "| GET |",
+            "| POST |",
+            "| PUT |",
+            "| PATCH |",
+            "| DELETE |",
+            "| *GET* |",
+            "| *POST* |",
+            "| *PUT* |",
+            "| *PATCH* |",
+            "| *DELETE* |",
         ]
         raw_endpoint_lines = sum(1 for line in lines if any(p in line for p in endpoint_patterns))
 
@@ -944,7 +1014,10 @@ class VerifierService:
                 name="api-aggregated",
                 status="FAIL",
                 message=f"API contracts has {raw_endpoint_lines} raw endpoints (>{self.API_MAX_RAW_ENDPOINTS}), should aggregate instead",
-                details={"raw_endpoints": raw_endpoint_lines, "max_allowed": self.API_MAX_RAW_ENDPOINTS},
+                details={
+                    "raw_endpoints": raw_endpoint_lines,
+                    "max_allowed": self.API_MAX_RAW_ENDPOINTS,
+                },
                 reason_code=ReasonCode.AGG_API_ENDPOINT_DUMP,
                 gate_type=GateType.SOFT,  # Quality issue - soft gate
             )
@@ -1023,7 +1096,9 @@ class VerifierService:
 
         # Check raw model count
         lines = [l.strip() for l in content.split("\n") if l.strip()]
-        raw_model_lines = sum(1 for line in lines if line.startswith("| ") and "model" in line.lower())
+        raw_model_lines = sum(
+            1 for line in lines if line.startswith("| ") and "model" in line.lower()
+        )
 
         if raw_model_lines > self.DM_MAX_RAW_MODELS:
             return CheckResult(
@@ -1064,11 +1139,13 @@ class VerifierService:
 
                 content = read_text(section_index)
                 if not content:
-                    broken_links.append({
-                        "file": f"{section_slug}/index.md",
-                        "reason": "empty content",
-                        "code": ReasonCode.CONTENT_EMPTY,
-                    })
+                    broken_links.append(
+                        {
+                            "file": f"{section_slug}/index.md",
+                            "reason": "empty content",
+                            "code": ReasonCode.CONTENT_EMPTY,
+                        }
+                    )
                     continue
 
                 # Extract and validate markdown links
@@ -1108,18 +1185,18 @@ class VerifierService:
         issues: list[dict[str, str]] = []
 
         # Pattern to match markdown links: [text](path)
-        link_pattern = re.compile(r'\[([^\]]+)\]\(([^)]+)\)')
+        link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
         for match in link_pattern.finditer(content):
             link_text = match.group(1)
             link_target = match.group(2)
 
             # Skip external links and anchors
-            if link_target.startswith(('http://', 'https://', 'mailto:', '#')):
+            if link_target.startswith(("http://", "https://", "mailto:", "#")):
                 continue
 
             # Skip code block or other special links
-            if link_target.startswith(('!', '{', '%')):
+            if link_target.startswith(("!", "{", "%")):
                 continue
 
             # Resolve the relative path
@@ -1132,24 +1209,28 @@ class VerifierService:
 
                 # Check if the target exists
                 if not target_path.exists():
-                    issues.append({
-                        "file": str(doc_path.relative_to(self.root)),
-                        "link": link_target,
-                        "resolved": str(target_path),
-                        "reason": "linked file does not exist",
-                        "code": ReasonCode.STRUCT_NAV_TARGET_MISSING,
-                    })
+                    issues.append(
+                        {
+                            "file": str(doc_path.relative_to(self.root)),
+                            "link": link_target,
+                            "resolved": str(target_path),
+                            "reason": "linked file does not exist",
+                            "code": ReasonCode.STRUCT_NAV_TARGET_MISSING,
+                        }
+                    )
                 else:
                     # Link is valid - could track for later
                     pass
 
             except (ValueError, OSError) as e:
-                issues.append({
-                    "file": str(doc_path.relative_to(self.root)),
-                    "link": link_target,
-                    "reason": f"path resolution error: {e}",
-                    "code": ReasonCode.STRUCT_NAV_BAD_DEPTH,
-                })
+                issues.append(
+                    {
+                        "file": str(doc_path.relative_to(self.root)),
+                        "link": link_target,
+                        "reason": f"path resolution error: {e}",
+                        "code": ReasonCode.STRUCT_NAV_BAD_DEPTH,
+                    }
+                )
 
         return issues
 
@@ -1162,7 +1243,7 @@ class VerifierService:
     # Optional label after: <cite>path/to/file:line (symbol) label</cite>
     # Supports negative line numbers for invalid citations
     CITE_BLOCK_PATTERN = re.compile(
-        r'<cite>\s*([^<>:]+):(-?\d+)(?:-(-?\d+))?\s*(?:\([^)]+\))?\s*(?:[^<]*)?</cite>'
+        r"<cite>\s*([^<>:]+):(-?\d+)(?:-(-?\d+))?\s*(?:\([^)]+\))?\s*(?:[^<]*)?</cite>"
     )
 
     # Pages that are checked for citation coverage
@@ -1267,10 +1348,11 @@ class VerifierService:
         if all_broken:
             # Determine the appropriate reason code based on the actual errors
             has_bad_lines = any(
-                issue.get("code") == ReasonCode.CITATION_BAD_LINES
-                for issue in all_broken
+                issue.get("code") == ReasonCode.CITATION_BAD_LINES for issue in all_broken
             )
-            reason_code = ReasonCode.CITATION_BAD_LINES if has_bad_lines else ReasonCode.CITATION_BROKEN_PATH
+            reason_code = (
+                ReasonCode.CITATION_BAD_LINES if has_bad_lines else ReasonCode.CITATION_BROKEN_PATH
+            )
 
             return CheckResult(
                 name="citation-validity",
@@ -1297,7 +1379,9 @@ class VerifierService:
         issues: list[dict[str, Any]] = []
 
         # Find all <cite> blocks (supports negative line numbers)
-        cite_pattern = re.compile(r'<cite>\s*([^<>:]+):(-?\d+)(?:-(-?\d+))?\s*(?:\([^)]+\))?\s*(?:[^<]*)?</cite>')
+        cite_pattern = re.compile(
+            r"<cite>\s*([^<>:]+):(-?\d+)(?:-(-?\d+))?\s*(?:\([^)]+\))?\s*(?:[^<]*)?</cite>"
+        )
 
         for match in cite_pattern.finditer(content):
             file_path = match.group(1)
@@ -1306,72 +1390,84 @@ class VerifierService:
             line_end = int(line_end_str) if line_end_str else line_start
 
             # Resolve relative to workspace root
-            full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
+            full_path = (
+                self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
+            )
 
             # Check for obviously invalid line numbers first (negative lines)
             # This doesn't require file existence check
             if line_start < 1:
-                issues.append({
-                    "file": str(doc_path.relative_to(self.root)),
-                    "citation": match.group(0),
-                    "path": file_path,
-                    "line_start": line_start,
-                    "reason": f"line start must be >= 1, got {line_start}",
-                    "code": ReasonCode.CITATION_BAD_LINES,
-                })
+                issues.append(
+                    {
+                        "file": str(doc_path.relative_to(self.root)),
+                        "citation": match.group(0),
+                        "path": file_path,
+                        "line_start": line_start,
+                        "reason": f"line start must be >= 1, got {line_start}",
+                        "code": ReasonCode.CITATION_BAD_LINES,
+                    }
+                )
                 continue
 
             # Check for reversed range (also obviously invalid)
             if line_end < line_start:
-                issues.append({
-                    "file": str(doc_path.relative_to(self.root)),
-                    "citation": match.group(0),
-                    "path": file_path,
-                    "line_start": line_start,
-                    "line_end": line_end,
-                    "reason": f"line end ({line_end}) must be >= line start ({line_start})",
-                    "code": ReasonCode.CITATION_BAD_LINES,
-                })
-                continue
-
-            # Now check if file exists
-            if not full_path.exists():
-                issues.append({
-                    "file": str(doc_path.relative_to(self.root)),
-                    "citation": match.group(0),
-                    "path": file_path,
-                    "reason": "file does not exist",
-                    "code": ReasonCode.CITATION_BROKEN_PATH,
-                })
-                continue
-
-            # Check line range validity against actual file
-            try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    line_count = sum(1 for _ in f)
-
-                # Check if line exceeds file
-                if line_end > line_count:
-                    issues.append({
+                issues.append(
+                    {
                         "file": str(doc_path.relative_to(self.root)),
                         "citation": match.group(0),
                         "path": file_path,
                         "line_start": line_start,
                         "line_end": line_end,
-                        "file_lines": line_count,
-                        "reason": f"line end ({line_end}) exceeds file length ({line_count})",
+                        "reason": f"line end ({line_end}) must be >= line start ({line_start})",
                         "code": ReasonCode.CITATION_BAD_LINES,
-                    })
+                    }
+                )
+                continue
+
+            # Now check if file exists
+            if not full_path.exists():
+                issues.append(
+                    {
+                        "file": str(doc_path.relative_to(self.root)),
+                        "citation": match.group(0),
+                        "path": file_path,
+                        "reason": "file does not exist",
+                        "code": ReasonCode.CITATION_BROKEN_PATH,
+                    }
+                )
+                continue
+
+            # Check line range validity against actual file
+            try:
+                with open(full_path, encoding="utf-8") as f:
+                    line_count = sum(1 for _ in f)
+
+                # Check if line exceeds file
+                if line_end > line_count:
+                    issues.append(
+                        {
+                            "file": str(doc_path.relative_to(self.root)),
+                            "citation": match.group(0),
+                            "path": file_path,
+                            "line_start": line_start,
+                            "line_end": line_end,
+                            "file_lines": line_count,
+                            "reason": f"line end ({line_end}) exceeds file length ({line_count})",
+                            "code": ReasonCode.CITATION_BAD_LINES,
+                        }
+                    )
                     continue
 
             except (ValueError, OSError) as e:
-                issues.append({
-                    "file": str(doc_path.relative_to(self.root)),
-                    "citation": match.group(0),
-                    "path": file_path,
-                    "reason": f"error reading file: {e}",
-                    "code": ReasonCode.CITATION_BROKEN_PATH,
-                })
+                issues.append(
+                    {
+                        "file": str(doc_path.relative_to(self.root)),
+                        "citation": match.group(0),
+                        "path": file_path,
+                        "reason": f"error reading file: {e}",
+                        "code": ReasonCode.CITATION_BROKEN_PATH,
+                    }
+                )
 
         return issues
 
@@ -1411,7 +1507,9 @@ class VerifierService:
             gate_type=GateType.HARD,
         )
 
-    def _validate_source_blocks_in_content(self, doc_path: Path, content: str) -> list[dict[str, Any]]:
+    def _validate_source_blocks_in_content(
+        self, doc_path: Path, content: str
+    ) -> list[dict[str, Any]]:
         """Validate that !!! cite blocks are not empty.
 
         Returns list of issues found. Empty list means all blocks are valid.
@@ -1421,8 +1519,7 @@ class VerifierService:
         # Pattern for !!! cite "section_id" blocks
         # These blocks should have at least one <cite> inside
         cite_block_pattern = re.compile(
-            r'!!! cite\s+"([^"]+)"\s*\n((?:[ \t]+[^\n]*\n)*)',
-            re.MULTILINE
+            r'!!! cite\s+"([^"]+)"\s*\n((?:[ \t]+[^\n]*\n)*)', re.MULTILINE
         )
 
         for match in cite_block_pattern.finditer(content):
@@ -1433,11 +1530,13 @@ class VerifierService:
             has_citations = bool(self.CITE_BLOCK_PATTERN.search(block_content))
 
             if not has_citations:
-                issues.append({
-                    "file": str(doc_path.relative_to(self.root)),
-                    "section_id": section_id,
-                    "reason": "source block has no citations",
-                    "code": ReasonCode.CITATION_SOURCE_EMPTY,
-                })
+                issues.append(
+                    {
+                        "file": str(doc_path.relative_to(self.root)),
+                        "section_id": section_id,
+                        "reason": "source block has no citations",
+                        "code": ReasonCode.CITATION_SOURCE_EMPTY,
+                    }
+                )
 
         return issues

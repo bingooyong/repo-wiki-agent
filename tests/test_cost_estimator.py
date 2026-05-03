@@ -1,19 +1,16 @@
 """Tests for LLM cost estimator and budget gate."""
 
-import tempfile
-from pathlib import Path
 
-import pytest
 
 from repo_wiki.orchestration.cost_estimator import (
     BudgetExceeded,
-    BudgetGateDecision,
     BudgetGate,
+    BudgetGateDecision,
     GenerationCostEstimator,
-    PagePlanCostInput,
     PageCostEstimate,
-    create_cost_estimator,
+    PagePlanCostInput,
     create_budget_gate,
+    create_cost_estimator,
     get_pricing,
 )
 from repo_wiki.orchestration.generation_state import GenerationStateMachine, RunState
@@ -180,8 +177,12 @@ class TestGenerationCostEstimator:
         """Run estimate can be derived from page plan + prompt overhead."""
         estimator = GenerationCostEstimator(tmp_path / "test.db", default_budget_usd=1.0)
         pages = [
-            PagePlanCostInput(page_id="p1", estimated_prompt_tokens=1000, estimated_completion_tokens=300),
-            PagePlanCostInput(page_id="p2", estimated_prompt_tokens=2000, estimated_completion_tokens=0),
+            PagePlanCostInput(
+                page_id="p1", estimated_prompt_tokens=1000, estimated_completion_tokens=300
+            ),
+            PagePlanCostInput(
+                page_id="p2", estimated_prompt_tokens=2000, estimated_completion_tokens=0
+            ),
         ]
         estimate = estimator.estimate_run_cost_from_plan(
             run_id="gen-plan",
@@ -312,7 +313,9 @@ class TestBudgetGate:
         estimator = GenerationCostEstimator(tmp_path / "test.db", default_budget_usd=0.001)
         gate = BudgetGate(estimator, default_budget_usd=0.001, allow_override=True)
         pages = [
-            PagePlanCostInput(page_id="p1", estimated_prompt_tokens=1_000_000, estimated_completion_tokens=500_000),
+            PagePlanCostInput(
+                page_id="p1", estimated_prompt_tokens=1_000_000, estimated_completion_tokens=500_000
+            ),
         ]
 
         decision = gate.check_run_budget_from_plan(
@@ -331,7 +334,9 @@ class TestBudgetGate:
         estimator = GenerationCostEstimator(tmp_path / "test.db", default_budget_usd=0.001)
         gate = BudgetGate(estimator, default_budget_usd=0.001, allow_override=True)
         pages = [
-            PagePlanCostInput(page_id="p1", estimated_prompt_tokens=1_000_000, estimated_completion_tokens=500_000),
+            PagePlanCostInput(
+                page_id="p1", estimated_prompt_tokens=1_000_000, estimated_completion_tokens=500_000
+            ),
         ]
 
         decision = gate.check_run_budget_from_plan(
@@ -352,7 +357,9 @@ class TestBudgetGate:
         estimator = GenerationCostEstimator(tmp_path / "test.db", default_budget_usd=0.001)
         gate = BudgetGate(estimator, default_budget_usd=0.001, allow_override=False)
         pages = [
-            PagePlanCostInput(page_id="p1", estimated_prompt_tokens=1_000_000, estimated_completion_tokens=500_000),
+            PagePlanCostInput(
+                page_id="p1", estimated_prompt_tokens=1_000_000, estimated_completion_tokens=500_000
+            ),
         ]
 
         decision = gate.enforce_run_budget_with_state(

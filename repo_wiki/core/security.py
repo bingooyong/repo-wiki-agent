@@ -26,9 +26,7 @@ _SENSITIVE_PATTERNS: dict[str, re.Pattern[str]] = {
         r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"
     ),
     "connection_string": re.compile(r"\b(?:postgres|mysql|mongodb|redis)://[^\s\"']+"),
-    "prod_domain_hint": re.compile(
-        r"(?i)\b(?:prod|production)\.[a-z0-9.-]+\.[a-z]{2,}\b"
-    ),
+    "prod_domain_hint": re.compile(r"(?i)\b(?:prod|production)\.[a-z0-9.-]+\.[a-z]{2,}\b"),
     "ipv4": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
 }
 
@@ -91,7 +89,11 @@ def sanitize_text(text: str, path: str | None = None) -> tuple[str, list[Securit
     for code, pattern in _SENSITIVE_PATTERNS.items():
         if pattern.search(sanitized):
             sanitized = pattern.sub("[REDACTED]", sanitized)
-            warnings.append(SecurityWarning(code=code, message=f"Sensitive content redacted ({code})", path=path))
+            warnings.append(
+                SecurityWarning(
+                    code=code, message=f"Sensitive content redacted ({code})", path=path
+                )
+            )
     return sanitized, warnings
 
 

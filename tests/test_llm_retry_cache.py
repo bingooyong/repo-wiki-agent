@@ -2,31 +2,24 @@
 
 from __future__ import annotations
 
-import asyncio
-import time
-
 import pytest
 
 from repo_wiki.llm import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
-    LLMProviderConfig,
-    MockLLMProvider,
     RetryConfig,
-    RetryResult,
     create_mock_provider,
-    is_retryable_error,
     get_retry_info,
+    is_retryable_error,
 )
 from repo_wiki.llm.cache import (
     CacheConfig,
-    CacheEntry,
     LLMCache,
     create_cache,
 )
-from repo_wiki.llm.retry import with_retry, chat_with_retry
-from repo_wiki.llm.models import RetryableError, NonRetryableError, ErrorCode
+from repo_wiki.llm.models import ErrorCode, NonRetryableError, RetryableError
+from repo_wiki.llm.retry import chat_with_retry
 
 
 class TestRetryConfig:

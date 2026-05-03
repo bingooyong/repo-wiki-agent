@@ -1,3 +1,4 @@
+LICENSE
 README.md
 pyproject.toml
 repo_wiki/__init__.py
@@ -21,7 +22,9 @@ repo_wiki/core/runtime.py
 repo_wiki/core/security.py
 repo_wiki/evidence/__init__.py
 repo_wiki/evidence/citation_renderer.py
+repo_wiki/evidence/page_evidence_scorer.py
 repo_wiki/evidence/ranking.py
+repo_wiki/evidence/service_ownership.py
 repo_wiki/generator/api_flow_diagram.py
 repo_wiki/generator/auth_error_convention_generator.py
 repo_wiki/generator/cache.py
@@ -54,6 +57,7 @@ repo_wiki/llm/diagnostics.py
 repo_wiki/llm/minimax.py
 repo_wiki/llm/models.py
 repo_wiki/llm/providers.py
+repo_wiki/llm/qoder_like_provider.py
 repo_wiki/llm/retry.py
 repo_wiki/orchestration/__init__.py
 repo_wiki/orchestration/content_layout_writer.py
@@ -77,6 +81,7 @@ repo_wiki/planner/llm_planner.py
 repo_wiki/planner/persistence.py
 repo_wiki/planner/rule_first.py
 repo_wiki/planner/schema.py
+repo_wiki/planner/service_subtopic_planner.py
 repo_wiki/prompts/__init__.py
 repo_wiki/prompts/contracts.py
 repo_wiki/prompts/fragments.py
@@ -111,6 +116,7 @@ tests/test_benchmark_matrix.py
 tests/test_citation_renderer.py
 tests/test_citation_verifier.py
 tests/test_cli_config_doctor.py
+tests/test_cli_packaging_smoke.py
 tests/test_cli_update.py
 tests/test_content_layout_writer.py
 tests/test_cost_estimator.py
@@ -146,6 +152,7 @@ tests/test_mermaid_planner.py
 tests/test_model_deduplication.py
 tests/test_narrative_builder.py
 tests/test_page_composer_cache.py
+tests/test_page_evidence_scorer.py
 tests/test_page_invalidation.py
 tests/test_page_prompts.py
 tests/test_partial_generation_evidence.py
@@ -154,7 +161,10 @@ tests/test_planner_persistence.py
 tests/test_qoder_adapter.py
 tests/test_qoder_comparator_paths.py
 tests/test_qoder_compare_cli.py
+tests/test_qoder_like_page_floor.py
+tests/test_qoder_like_planner.py
 tests/test_qoder_like_profile.py
+tests/test_qoder_like_provider.py
 tests/test_qoder_like_update.py
 tests/test_qoder_like_verifier.py
 tests/test_qoder_parity_metrics.py
@@ -172,6 +182,8 @@ tests/test_section_narrative_builder.py
 tests/test_security.py
 tests/test_service_data_model_composer.py
 tests/test_service_family_api_composer.py
+tests/test_service_ownership.py
+tests/test_service_subtopic_planner.py
 tests/test_source_spans.py
 tests/test_trend_persistence.py
 tests/test_verifier.py

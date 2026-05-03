@@ -52,6 +52,16 @@
 - `Phase_33_Evidence_Ranking_and_Hallucination_Control.md`
 - `Phase_34_LLM_Composer_Quality_Loop.md`
 - `Phase_35_Replacement_Candidate_Acceptance.md`
+- `Phase_36_Eval_Run_Selection_and_Qoder_Baseline_Canonicalization.md`
+- `Phase_37_Inventory_Service_API_Coverage_and_Ownership_Repair.md`
+- `Phase_38_Mermaid_Backed_API_Article_Quality_Uplift.md`
+- `Phase_39_Qoder_Comparison_and_Manual_Review_Hardening.md`
+- `Phase_40_Final_Replacement_Readiness_Rerun_and_Dossier.md`
+- `Phase_41_Qoder_compatible_Release_Interface_and_Meta_Contract.md`
+- `Phase_42_Source_and_Documentation_Discovery_Compiler.md`
+- `Phase_43_Knowledge_model_driven_IA_and_Page_Contract_Factory.md`
+- `Phase_44_Evidence_backed_Composition_and_Diagram_Generation.md`
+- `Phase_45_Product_Release_QA_and_Multi_repository_Acceptance.md`
 
 ## Reader-Facing 阶段文档
 
@@ -87,6 +97,16 @@
 - `docs/phases/Phase_33_Evidence_Ranking_and_Hallucination_Control.md`
 - `docs/phases/Phase_34_LLM_Composer_Quality_Loop.md`
 - `docs/phases/Phase_35_Replacement_Candidate_Acceptance.md`
+- `docs/phases/Phase_36_Eval_Run_Selection_and_Qoder_Baseline_Canonicalization.md`
+- `docs/phases/Phase_37_Inventory_Service_API_Coverage_and_Ownership_Repair.md`
+- `docs/phases/Phase_38_Mermaid_Backed_API_Article_Quality_Uplift.md`
+- `docs/phases/Phase_39_Qoder_Comparison_and_Manual_Review_Hardening.md`
+- `docs/phases/Phase_40_Final_Replacement_Readiness_Rerun_and_Dossier.md`
+- `docs/phases/Phase_41_Qoder_compatible_Release_Interface_and_Meta_Contract.md`
+- `docs/phases/Phase_42_Source_and_Documentation_Discovery_Compiler.md`
+- `docs/phases/Phase_43_Knowledge_model_driven_IA_and_Page_Contract_Factory.md`
+- `docs/phases/Phase_44_Evidence_backed_Composition_and_Diagram_Generation.md`
+- `docs/phases/Phase_45_Product_Release_QA_and_Multi_repository_Acceptance.md`
 
 ## Memory 结构
 
@@ -96,4 +116,4 @@
 - `.apm/Memory/Phase_XX_<slug>/Task_Y_Z_<slug>.md`
 
 所有 Phase 的 task log 文件都已预创建为空文件，便于 Manager 直接引用。
-Phase 06-35 追加后，Manager 需要继续保持 `.apm/Implementation_Plan.md`、`.apm/Task_Assignments/`、`.apm/Memory/` 的编号与目录一致性，并明确区分“已执行但未退出的历史阶段”“纠偏基线阶段”“替代发布阶段”“证据修复/RC 阶段”“Qoder-like Repo Wiki replacement track”和“Qoder replacement quality closure track”。
+Phase 06-45 追加后，Manager 需要继续保持 `.apm/Implementation_Plan.md`、`.apm/Task_Assignments/`、`.apm/Memory/` 的编号与目录一致性，并明确区分“已执行但未退出的历史阶段”“纠偏基线阶段”“替代发布阶段”“证据修复/RC 阶段”“Qoder-like Repo Wiki replacement track”“Qoder replacement quality closure track”“post-acceptance correction track”和“source/docs intelligence productization track”。

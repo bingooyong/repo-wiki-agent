@@ -26,7 +26,9 @@ def run_command(cmd: list[str], cwd: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run repo-wiki pilot acceptance scenarios.")
     parser.add_argument("--target", default=".", help="Target repository root to scan.")
-    parser.add_argument("--out", default=".repo-wiki/pilot", help="Output directory for pilot evidence.")
+    parser.add_argument(
+        "--out", default=".repo-wiki/pilot", help="Output directory for pilot evidence."
+    )
     args = parser.parse_args()
 
     workspace = Path(__file__).resolve().parents[1]
@@ -39,18 +41,19 @@ def main() -> None:
         config_path = Path(fp.name)
         fp.write(
             "project:\n"
-            f"  root: \"{target.as_posix()}\"\n"
+            f'  root: "{target.as_posix()}"\n'
             "output:\n"
-            "  docs_dir: \"docs/\"\n"
-            "  ai_dir: \"ai/source-of-truth/\"\n"
-            "  index_dir: \".repo-wiki/\"\n"
-            "  claude_dir: \".claude/\"\n"
+            '  docs_dir: "docs/"\n'
+            '  ai_dir: "ai/source-of-truth/"\n'
+            '  index_dir: ".repo-wiki/"\n'
+            '  claude_dir: ".claude/"\n'
         )
 
     base = [sys.executable, "-m", "repo_wiki.main"]
     scenarios = {
         "init": base + ["init", "--config", str(config_path)],
-        "search": base + ["search", "module architecture", "--top-k", "3", "--config", str(config_path)],
+        "search": base
+        + ["search", "module architecture", "--top-k", "3", "--config", str(config_path)],
         "graph": base + ["graph", "root", "--config", str(config_path)],
         "update": base + ["update", "--config", str(config_path)],
         "verify": base + ["verify", "--ci", "--config", str(config_path)],
@@ -60,7 +63,9 @@ def main() -> None:
     for name, cmd in scenarios.items():
         result = run_command(cmd, cwd=workspace)
         scenario_results[name] = result
-        (logs_dir / f"{name}.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        (logs_dir / f"{name}.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     metrics = {
         "module_identification_accuracy": None,
@@ -87,8 +92,15 @@ def main() -> None:
         "pass": all(value["returncode"] == 0 for value in scenario_results.values()),
     }
     acceptance_path = out_dir / "acceptance-report.json"
-    acceptance_path.write_text(json.dumps(acceptance, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"acceptance_report": str(acceptance_path), "metrics": str(metrics_path)}, ensure_ascii=False))
+    acceptance_path.write_text(
+        json.dumps(acceptance, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(
+        json.dumps(
+            {"acceptance_report": str(acceptance_path), "metrics": str(metrics_path)},
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":

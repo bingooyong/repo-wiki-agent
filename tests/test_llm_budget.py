@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
-
 from repo_wiki.llm import (
     ChatMessage,
     ChatRequest,
     TokenBudget,
-    estimate_request_tokens,
-    estimate_prompt_tokens,
-    estimate_text_tokens,
     check_token_budget,
+    estimate_prompt_tokens,
+    estimate_request_tokens,
+    estimate_text_tokens,
     format_budget_report,
 )
 

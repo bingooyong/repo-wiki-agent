@@ -16,9 +16,13 @@ from pathlib import Path
 
 import pytest
 
+from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
+from repo_wiki.generator.composer import (
+    ComposerContext,
+    ComposerInput,
+)
 from repo_wiki.generator.composer_cache import (
     ComposerCache,
-    ComposerCacheRecord,
     ComposerCacheStats,
     compute_composer_input_hash,
     compute_context_hash,
@@ -31,11 +35,6 @@ from repo_wiki.generator.composer_cache import (
     estimate_tokens_from_markdown,
     format_cache_stats,
 )
-from repo_wiki.generator.composer import (
-    ComposerContext,
-    ComposerInput,
-)
-from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.planner.schema import (
     GenerationMode,
@@ -43,8 +42,8 @@ from repo_wiki.planner.schema import (
     WikiPagePlan,
     WikiTaxonomyCategory,
 )
-from repo_wiki.prompts.contracts import PagePromptContract, PagePromptType
-from repo_wiki.prompts.skeleton import ArticleSkeleton, HeadingSection, build_skeleton
+from repo_wiki.prompts.contracts import PagePromptType
+from repo_wiki.prompts.skeleton import ArticleSkeleton, build_skeleton
 
 
 class TestComputePagePlanHash:

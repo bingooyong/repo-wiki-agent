@@ -32,10 +32,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import typing
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-import typing
 from typing import Any
 
 
@@ -45,15 +45,16 @@ class DeltaType(Enum):
     STRUCTURAL deltas are hard failures that block acceptance.
     QUALITY deltas are soft failures that indicate needed improvement.
     """
+
     STRUCTURAL = "STRUCTURAL"  # Hard failures - must fix
-    QUALITY = "QUALITY"         # Soft failures - should fix
+    QUALITY = "QUALITY"  # Soft failures - should fix
 
 
 class GapSeverity(Enum):
     CRITICAL = "CRITICAL"  # Missing core structure (always blocks)
-    MAJOR = "MAJOR"       # Missing important content
-    MINOR = "MINOR"       # Quality improvements needed
-    INFO = "INFO"         # Informational only
+    MAJOR = "MAJOR"  # Missing important content
+    MINOR = "MINOR"  # Quality improvements needed
+    INFO = "INFO"  # Informational only
 
 
 class ScoreBand(Enum):
@@ -65,10 +66,11 @@ class ScoreBand(Enum):
     - ACCEPTABLE (50-69%): Meets minimum, needs improvement
     - POOR (<50%): Significant gaps, requires major work
     """
-    EXCELLENT = "EXCELLENT"   # 90-100%: Exceeds baseline
-    GOOD = "GOOD"             # 70-89%: Meets baseline with minor gaps
-    ACCEPTABLE = "ACCEPTABLE" # 50-69%: Meets minimum
-    POOR = "POOR"             # <50%: Significant gaps
+
+    EXCELLENT = "EXCELLENT"  # 90-100%: Exceeds baseline
+    GOOD = "GOOD"  # 70-89%: Meets baseline with minor gaps
+    ACCEPTABLE = "ACCEPTABLE"  # 50-69%: Meets minimum
+    POOR = "POOR"  # <50%: Significant gaps
 
 
 class ComparisonDimension(Enum):
@@ -91,13 +93,27 @@ class ComparisonDimension(Enum):
 
 # Qoder baseline expected structure
 QODER_REQUIRED_SECTIONS = [
-    "project", "architecture", "services", "data-model",
-    "api", "operations", "development", "security", "troubleshooting"
+    "project",
+    "architecture",
+    "services",
+    "data-model",
+    "api",
+    "operations",
+    "development",
+    "security",
+    "troubleshooting",
 ]
 
 QODER_REQUIRED_OVERVIEW_HEADINGS = [
-    "项目定位", "核心问题", "核心能力", "快速开始", "阅读导航",
-    "系统分层", "服务协作", "核心链路", "存储与索引设计"
+    "项目定位",
+    "核心问题",
+    "核心能力",
+    "快速开始",
+    "阅读导航",
+    "系统分层",
+    "服务协作",
+    "核心链路",
+    "存储与索引设计",
 ]
 
 QODER_MIN_PROSE_CHARS = 500
@@ -133,11 +149,11 @@ DIMENSION_WEIGHTS = {
 
 # Rubric documentation: How scores translate to gap counts
 RUBRIC_SCORE_TO_GAPS = {
-    1.0: 0,      # Perfect: no gaps
-    0.9: 1,      # Excellent: 1 minor gap
-    0.7: 3,      # Good: up to 3 minor gaps or 1 major
-    0.5: 5,      # Acceptable: up to 5 gaps of any type
-    0.0: 999,    # Poor: critical gaps
+    1.0: 0,  # Perfect: no gaps
+    0.9: 1,  # Excellent: 1 minor gap
+    0.7: 3,  # Good: up to 3 minor gaps or 1 major
+    0.5: 5,  # Acceptable: up to 5 gaps of any type
+    0.0: 999,  # Poor: critical gaps
 }
 
 
@@ -161,10 +177,14 @@ class BaselineComparatorConfig:
 
     # Default dimension lists (as class variables to avoid dataclass issues)
     _DEFAULT_STRUCTURAL: typing.ClassVar[list[str]] = [
-        "directory_hierarchy", "section_coverage", "navigation_completeness"
+        "directory_hierarchy",
+        "section_coverage",
+        "navigation_completeness",
     ]
     _DEFAULT_QUALITY: typing.ClassVar[list[str]] = [
-        "heading_coverage", "prose_density", "aggregation_quality"
+        "heading_coverage",
+        "prose_density",
+        "aggregation_quality",
     ]
 
     @classmethod
@@ -226,6 +246,7 @@ def get_default_dimension_weights() -> dict[ComparisonDimension, float]:
 @dataclass
 class WeightedScore:
     """A weighted score with breakdown for transparency."""
+
     raw_score: float
     weighted_score: float
     weight: float
@@ -328,18 +349,28 @@ class GapReport:
         ]
 
         total_gaps = sum(len(d.gaps) for d in self.dimensions)
-        critical = sum(1 for d in self.dimensions for g in d.gaps if g.severity == GapSeverity.CRITICAL.value)
-        major = sum(1 for d in self.dimensions for g in d.gaps if g.severity == GapSeverity.MAJOR.value)
+        critical = sum(
+            1 for d in self.dimensions for g in d.gaps if g.severity == GapSeverity.CRITICAL.value
+        )
+        major = sum(
+            1 for d in self.dimensions for g in d.gaps if g.severity == GapSeverity.MAJOR.value
+        )
 
-        overall_score = sum(d.score for d in self.dimensions) / len(self.dimensions) if self.dimensions else 0
+        overall_score = (
+            sum(d.score for d in self.dimensions) / len(self.dimensions) if self.dimensions else 0
+        )
 
-        lines.append(f"- **Overall Score:** {overall_score:.1%} ({self.summary.get('overall_band', 'N/A')})")
+        lines.append(
+            f"- **Overall Score:** {overall_score:.1%} ({self.summary.get('overall_band', 'N/A')})"
+        )
         lines.append(f"- **Structural Score:** {self.summary.get('structural_score', 0):.1%}")
         lines.append(f"- **Quality Score:** {self.summary.get('quality_score', 0):.1%}")
         lines.append(f"- **Total Gaps:** {total_gaps}")
         lines.append(f"- **Critical Issues:** {critical}")
         lines.append(f"- **Major Issues:** {major}")
-        lines.append(f"- **Acceptance:** {'BLOCKED' if self.summary.get('acceptance_blocked') else 'READY'}")
+        lines.append(
+            f"- **Acceptance:** {'BLOCKED' if self.summary.get('acceptance_blocked') else 'READY'}"
+        )
         lines.append("")
 
         lines.append("### Score Band Guide")
@@ -352,7 +383,9 @@ class GapReport:
         # Phase 14: Add weighting scheme information
         if "weighting_scheme" in self.summary:
             lines.append("### Scoring Rubric (Phase 14)")
-            lines.append(f"- **Weighting Scheme:** {self.summary.get('weighting_scheme', 'uniform')}")
+            lines.append(
+                f"- **Weighting Scheme:** {self.summary.get('weighting_scheme', 'uniform')}"
+            )
             lines.append("")
             lines.append("**Dimension Weights:**")
             for dim, weight in sorted(self.summary.get("dimension_weights", {}).items()):
@@ -365,7 +398,9 @@ class GapReport:
         for dim in self.dimensions:
             status_icon = {"PASS": "✓", "FAIL": "✗", "PARTIAL": "◐"}.get(dim.status, "?")
             delta_icon = {"STRUCTURAL": "🔴", "QUALITY": "🟡"}.get(dim.delta_type.value, "?")
-            lines.append(f"### {status_icon} {delta_icon} {dim.dimension.replace('_', ' ').title()}")
+            lines.append(
+                f"### {status_icon} {delta_icon} {dim.dimension.replace('_', ' ').title()}"
+            )
             lines.append(f"- Status: **{dim.status}**")
             lines.append(f"- Score: {dim.score:.1%} ({dim.score_band.value})")
             lines.append(f"- Delta Type: **{dim.delta_type.value}**")
@@ -400,7 +435,9 @@ class GapReport:
                     if gap.recommendation:
                         lines.append(f"- **Recommendation:** {gap.recommendation}")
                     if gap.details:
-                        lines.append(f"- **Details:** `{json.dumps(gap.details, ensure_ascii=False)}`")
+                        lines.append(
+                            f"- **Details:** `{json.dumps(gap.details, ensure_ascii=False)}`"
+                        )
                     lines.append("")
 
         return "\n".join(lines)
@@ -476,8 +513,12 @@ class QoderBaselineComparator:
 
         # Calculate summary with structural vs quality separation
         total_gaps = sum(len(d.gaps) for d in report.dimensions)
-        critical = sum(1 for d in report.dimensions for g in d.gaps if g.severity == GapSeverity.CRITICAL.value)
-        major = sum(1 for d in report.dimensions for g in d.gaps if g.severity == GapSeverity.MAJOR.value)
+        critical = sum(
+            1 for d in report.dimensions for g in d.gaps if g.severity == GapSeverity.CRITICAL.value
+        )
+        major = sum(
+            1 for d in report.dimensions for g in d.gaps if g.severity == GapSeverity.MAJOR.value
+        )
 
         # Phase 14: Use explicit weights for deterministic scoring
         # Prevent alias/overlay inflation by capping individual dimension influence
@@ -489,7 +530,9 @@ class QoderBaselineComparator:
         quality_dims = [d for d in report.dimensions if d.delta_type == DeltaType.QUALITY]
 
         # Weighted structural score
-        structural_weighted = [ws for ws in weighted_scores if ws.delta_type == DeltaType.STRUCTURAL]
+        structural_weighted = [
+            ws for ws in weighted_scores if ws.delta_type == DeltaType.STRUCTURAL
+        ]
         structural_score = sum(ws.weighted_score for ws in structural_weighted)
 
         # Weighted quality score
@@ -502,10 +545,7 @@ class QoderBaselineComparator:
         # Acceptance is blocked if:
         # 1. Any CRITICAL gaps exist, OR
         # 2. Structural score is below ACCEPTABLE threshold
-        acceptance_blocked = (
-            critical > 0 or
-            any(d.status == "FAIL" for d in structural_dims)
-        )
+        acceptance_blocked = critical > 0 or any(d.status == "FAIL" for d in structural_dims)
 
         report.summary = {
             "generated_at": "2026-04-18",
@@ -552,13 +592,15 @@ class QoderBaselineComparator:
             capped_raw = min(dim.score, 1.0)
             weighted_score = capped_raw * weight
 
-            weighted_scores.append(WeightedScore(
-                raw_score=dim.score,
-                weighted_score=weighted_score,
-                weight=weight,
-                dimension=dim.dimension,
-                delta_type=dim.delta_type,
-            ))
+            weighted_scores.append(
+                WeightedScore(
+                    raw_score=dim.score,
+                    weighted_score=weighted_score,
+                    weight=weight,
+                    dimension=dim.dimension,
+                    delta_type=dim.delta_type,
+                )
+            )
 
         return weighted_scores
 
@@ -575,13 +617,15 @@ class QoderBaselineComparator:
         baseline_docs = self.baseline_root / "docs"
 
         if not target_docs.exists():
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.CRITICAL.value,
-                description="docs/ directory does not exist",
-                target_path=str(target_docs),
-                recommendation="Generate docs/ directory with overview and section pages",
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.CRITICAL.value,
+                    description="docs/ directory does not exist",
+                    target_path=str(target_docs),
+                    recommendation="Generate docs/ directory with overview and section pages",
+                )
+            )
             result.score_band = get_score_band(result.score)
             return result
 
@@ -594,14 +638,16 @@ class QoderBaselineComparator:
 
         # Check for sections directory
         if not (target_docs / "sections").exists():
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.CRITICAL.value,
-                description="docs/sections/ directory missing",
-                target_path=str(target_docs / "sections"),
-                baseline_path=str(baseline_docs / "sections"),
-                recommendation="Create docs/sections/ with topic-based section pages",
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.CRITICAL.value,
+                    description="docs/sections/ directory missing",
+                    target_path=str(target_docs / "sections"),
+                    baseline_path=str(baseline_docs / "sections"),
+                    recommendation="Create docs/sections/ with topic-based section pages",
+                )
+            )
 
         # Calculate score based on structure match
         target_keys = set(target_structure.keys())
@@ -658,14 +704,16 @@ class QoderBaselineComparator:
         baseline_sections = self.baseline_root / "docs/sections"
 
         if not target_sections.exists():
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.CRITICAL.value,
-                description="docs/sections/ directory missing",
-                target_path=str(target_sections),
-                baseline_path=str(baseline_sections),
-                recommendation="Create docs/sections/ with required section pages",
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.CRITICAL.value,
+                    description="docs/sections/ directory missing",
+                    target_path=str(target_sections),
+                    baseline_path=str(baseline_sections),
+                    recommendation="Create docs/sections/ with required section pages",
+                )
+            )
             result.score_band = get_score_band(result.score)
             return result
 
@@ -697,14 +745,16 @@ class QoderBaselineComparator:
                 missing_sections.append(required)
 
         if missing_sections:
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.MAJOR.value,
-                description=f"Missing required sections: {', '.join(missing_sections)}",
-                target_path=str(target_sections),
-                recommendation=f"Create section pages for: {', '.join(missing_sections)}",
-                details={"missing_sections": missing_sections},
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.MAJOR.value,
+                    description=f"Missing required sections: {', '.join(missing_sections)}",
+                    target_path=str(target_sections),
+                    recommendation=f"Create section pages for: {', '.join(missing_sections)}",
+                    details={"missing_sections": missing_sections},
+                )
+            )
 
         # Calculate score
         if not baseline_section_files:
@@ -719,7 +769,9 @@ class QoderBaselineComparator:
         else:
             result.score = 0.0
 
-        result.status = "PASS" if result.score >= 1.0 else ("PARTIAL" if result.score >= 0.5 else "FAIL")
+        result.status = (
+            "PASS" if result.score >= 1.0 else ("PARTIAL" if result.score >= 0.5 else "FAIL")
+        )
         result.score_band = get_score_band(result.score)
         return result
 
@@ -752,25 +804,34 @@ class QoderBaselineComparator:
                     missing_headings.append(required)
 
             if missing_headings:
-                result.gaps.append(GapItem(
-                    dimension=result.dimension,
-                    severity=GapSeverity.MAJOR.value,
-                    description=f"{filename} missing required headings",
-                    target_path=str(target_path),
-                    recommendation=f"Add headings: {', '.join(missing_headings[:3])}",
-                    details={"missing_headings": missing_headings},
-                ))
+                result.gaps.append(
+                    GapItem(
+                        dimension=result.dimension,
+                        severity=GapSeverity.MAJOR.value,
+                        description=f"{filename} missing required headings",
+                        target_path=str(target_path),
+                        recommendation=f"Add headings: {', '.join(missing_headings[:3])}",
+                        details={"missing_headings": missing_headings},
+                    )
+                )
 
         result.metrics["extracted_headings"] = {k: list(v) for k, v in all_headings.items()}
 
         # Calculate score based on heading match
         if all_required:
-            found = sum(1 for h in all_headings.values() for _ in h if any(r in str(_) for r in all_required))
+            found = sum(
+                1
+                for h in all_headings.values()
+                for _ in h
+                if any(r in str(_) for r in all_required)
+            )
             result.score = min(found / len(all_required), 1.0)
         else:
             result.score = 0.5
 
-        result.status = "PASS" if result.score >= 0.8 else ("PARTIAL" if result.score >= 0.4 else "FAIL")
+        result.status = (
+            "PASS" if result.score >= 0.8 else ("PARTIAL" if result.score >= 0.4 else "FAIL")
+        )
         result.score_band = get_score_band(result.score)
         return result
 
@@ -788,8 +849,18 @@ class QoderBaselineComparator:
                     heading_text = stripped[3:].strip()
                     headings.add(heading_text)
                     # Also add Chinese keywords
-                    for keyword in ["项目定位", "核心问题", "核心能力", "快速开始", "阅读导航",
-                                   "系统分层", "服务协作", "核心链路", "存储", "索引"]:
+                    for keyword in [
+                        "项目定位",
+                        "核心问题",
+                        "核心能力",
+                        "快速开始",
+                        "阅读导航",
+                        "系统分层",
+                        "服务协作",
+                        "核心链路",
+                        "存储",
+                        "索引",
+                    ]:
                         if keyword in heading_text:
                             headings.add(keyword)
         except (PermissionError, UnicodeDecodeError):
@@ -825,14 +896,19 @@ class QoderBaselineComparator:
 
         # Check minimum prose
         if total_prose_chars < QODER_MIN_PROSE_CHARS:
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.MAJOR.value,
-                description=f"Overview docs have insufficient prose ({total_prose_chars} < {QODER_MIN_PROSE_CHARS} chars)",
-                target_path=str(self.target_root / "docs"),
-                recommendation="Add more narrative content explaining the project",
-                details={"prose_chars": total_prose_chars, "min_required": QODER_MIN_PROSE_CHARS},
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.MAJOR.value,
+                    description=f"Overview docs have insufficient prose ({total_prose_chars} < {QODER_MIN_PROSE_CHARS} chars)",
+                    target_path=str(self.target_root / "docs"),
+                    recommendation="Add more narrative content explaining the project",
+                    details={
+                        "prose_chars": total_prose_chars,
+                        "min_required": QODER_MIN_PROSE_CHARS,
+                    },
+                )
+            )
 
         # Check list ratio
         list_ratio = 0.0
@@ -842,20 +918,29 @@ class QoderBaselineComparator:
             result.metrics["list_ratio"] = round(list_ratio, 3)
 
             if list_ratio > QODER_MAX_LIST_RATIO:
-                result.gaps.append(GapItem(
-                    dimension=result.dimension,
-                    severity=GapSeverity.MAJOR.value,
-                    description=f"Overview docs have too many lists/tables ({list_ratio:.1%} > {QODER_MAX_LIST_RATIO:.1%})",
-                    target_path=str(self.target_root / "docs"),
-                    recommendation="Replace some lists with prose explanations",
-                    details={"list_ratio": round(list_ratio, 3), "max_allowed": QODER_MAX_LIST_RATIO},
-                ))
+                result.gaps.append(
+                    GapItem(
+                        dimension=result.dimension,
+                        severity=GapSeverity.MAJOR.value,
+                        description=f"Overview docs have too many lists/tables ({list_ratio:.1%} > {QODER_MAX_LIST_RATIO:.1%})",
+                        target_path=str(self.target_root / "docs"),
+                        recommendation="Replace some lists with prose explanations",
+                        details={
+                            "list_ratio": round(list_ratio, 3),
+                            "max_allowed": QODER_MAX_LIST_RATIO,
+                        },
+                    )
+                )
 
         # Calculate score
         prose_score = min(total_prose_chars / QODER_MIN_PROSE_CHARS, 1.0)
-        ratio_score = 1.0 if list_ratio <= QODER_MAX_LIST_RATIO else QODER_MAX_LIST_RATIO / list_ratio
+        ratio_score = (
+            1.0 if list_ratio <= QODER_MAX_LIST_RATIO else QODER_MAX_LIST_RATIO / list_ratio
+        )
         result.score = (prose_score + ratio_score) / 2
-        result.status = "PASS" if result.score >= 0.8 else ("PARTIAL" if result.score >= 0.4 else "FAIL")
+        result.status = (
+            "PASS" if result.score >= 0.8 else ("PARTIAL" if result.score >= 0.4 else "FAIL")
+        )
         result.score_band = get_score_band(result.score)
         return result
 
@@ -912,13 +997,15 @@ class QoderBaselineComparator:
 
         sections_dir = self.target_root / "docs/sections"
         if not sections_dir.exists():
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.CRITICAL.value,
-                description="Cannot check navigation - docs/sections/ missing",
-                target_path=str(sections_dir),
-                recommendation="Create section pages with navigation links",
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.CRITICAL.value,
+                    description="Cannot check navigation - docs/sections/ missing",
+                    target_path=str(sections_dir),
+                    recommendation="Create section pages with navigation links",
+                )
+            )
             result.score_band = get_score_band(result.score)
             return result
 
@@ -952,27 +1039,33 @@ class QoderBaselineComparator:
         except PermissionError:
             pass
 
-        result.metrics["sections_checked"] = len(sections_without_overview_link) + len(low_nav_sections)
+        result.metrics["sections_checked"] = len(sections_without_overview_link) + len(
+            low_nav_sections
+        )
 
         if sections_without_overview_link:
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.MAJOR.value,
-                description=f"{len(sections_without_overview_link)} sections missing overview link",
-                target_path=str(sections_dir),
-                recommendation="Add link to ../../00-overview.md in all section pages",
-                details={"sections": sections_without_overview_link},
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.MAJOR.value,
+                    description=f"{len(sections_without_overview_link)} sections missing overview link",
+                    target_path=str(sections_dir),
+                    recommendation="Add link to ../../00-overview.md in all section pages",
+                    details={"sections": sections_without_overview_link},
+                )
+            )
 
         if low_nav_sections:
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.MINOR.value,
-                description=f"{len(low_nav_sections)} sections have insufficient nav links",
-                target_path=str(sections_dir),
-                recommendation=f"Add more cross-links (minimum {QODER_MIN_SECTION_NAV_LINKS} per section)",
-                details={"low_nav_sections": low_nav_sections},
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.MINOR.value,
+                    description=f"{len(low_nav_sections)} sections have insufficient nav links",
+                    target_path=str(sections_dir),
+                    recommendation=f"Add more cross-links (minimum {QODER_MIN_SECTION_NAV_LINKS} per section)",
+                    details={"low_nav_sections": low_nav_sections},
+                )
+            )
 
         # Calculate score
         total_sections = len(sections_without_overview_link) + len(low_nav_sections)
@@ -1004,30 +1097,36 @@ class QoderBaselineComparator:
         result.metrics["api_aggregation"] = api_metrics
 
         if not api_path.exists():
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.CRITICAL.value,
-                description="04-api-contracts.md missing",
-                target_path=str(api_path),
-                recommendation="Generate API contracts document with proper grouping",
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.CRITICAL.value,
+                    description="04-api-contracts.md missing",
+                    target_path=str(api_path),
+                    recommendation="Generate API contracts document with proper grouping",
+                )
+            )
         elif api_metrics["raw_endpoint_count"] > 50:
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.MAJOR.value,
-                description=f"API contracts has {api_metrics['raw_endpoint_count']} raw endpoints (should be aggregated)",
-                target_path=str(api_path),
-                recommendation="Group endpoints by service/auth and provide summary instead of full list",
-                details={"raw_endpoints": api_metrics["raw_endpoint_count"]},
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.MAJOR.value,
+                    description=f"API contracts has {api_metrics['raw_endpoint_count']} raw endpoints (should be aggregated)",
+                    target_path=str(api_path),
+                    recommendation="Group endpoints by service/auth and provide summary instead of full list",
+                    details={"raw_endpoints": api_metrics["raw_endpoint_count"]},
+                )
+            )
         elif not api_metrics["has_grouping"]:
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.MAJOR.value,
-                description="API contracts missing service/API grouping section",
-                target_path=str(api_path),
-                recommendation="Add grouping section that organizes APIs by service family or auth pattern",
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.MAJOR.value,
+                    description="API contracts missing service/API grouping section",
+                    target_path=str(api_path),
+                    recommendation="Add grouping section that organizes APIs by service family or auth pattern",
+                )
+            )
 
         # Check data model aggregation
         dm_path = self.target_root / "docs/05-data-model.md"
@@ -1035,36 +1134,52 @@ class QoderBaselineComparator:
         result.metrics["data_model_aggregation"] = dm_metrics
 
         if not dm_path.exists():
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.CRITICAL.value,
-                description="05-data-model.md missing",
-                target_path=str(dm_path),
-                recommendation="Generate data model document with proper categorization",
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.CRITICAL.value,
+                    description="05-data-model.md missing",
+                    target_path=str(dm_path),
+                    recommendation="Generate data model document with proper categorization",
+                )
+            )
         elif dm_metrics["raw_model_count"] > 30:
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.MAJOR.value,
-                description=f"Data model has {dm_metrics['raw_model_count']} raw models (should be aggregated)",
-                target_path=str(dm_path),
-                recommendation="Separate into core models, service models, and database/migration sections",
-                details={"raw_models": dm_metrics["raw_model_count"]},
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.MAJOR.value,
+                    description=f"Data model has {dm_metrics['raw_model_count']} raw models (should be aggregated)",
+                    target_path=str(dm_path),
+                    recommendation="Separate into core models, service models, and database/migration sections",
+                    details={"raw_models": dm_metrics["raw_model_count"]},
+                )
+            )
         elif not dm_metrics["has_three_sections"]:
-            result.gaps.append(GapItem(
-                dimension=result.dimension,
-                severity=GapSeverity.MAJOR.value,
-                description="Data model missing three-section structure",
-                target_path=str(dm_path),
-                recommendation="Organize into: Core Data Models, Service Data Models, Database & Migration",
-            ))
+            result.gaps.append(
+                GapItem(
+                    dimension=result.dimension,
+                    severity=GapSeverity.MAJOR.value,
+                    description="Data model missing three-section structure",
+                    target_path=str(dm_path),
+                    recommendation="Organize into: Core Data Models, Service Data Models, Database & Migration",
+                )
+            )
 
         # Calculate score
-        api_score = 1.0 if (api_metrics["has_grouping"] and api_metrics["raw_endpoint_count"] <= 50) else 0.5
-        dm_score = 1.0 if (dm_metrics["has_three_sections"] and dm_metrics["raw_model_count"] <= 30) else 0.5
+        api_score = (
+            1.0
+            if (api_metrics["has_grouping"] and api_metrics["raw_endpoint_count"] <= 50)
+            else 0.5
+        )
+        dm_score = (
+            1.0
+            if (dm_metrics["has_three_sections"] and dm_metrics["raw_model_count"] <= 30)
+            else 0.5
+        )
         result.score = (api_score + dm_score) / 2
-        result.status = "PASS" if result.score >= 0.8 else ("PARTIAL" if result.score >= 0.4 else "FAIL")
+        result.status = (
+            "PASS" if result.score >= 0.8 else ("PARTIAL" if result.score >= 0.4 else "FAIL")
+        )
         result.score_band = get_score_band(result.score)
         return result
 
@@ -1084,7 +1199,11 @@ class QoderBaselineComparator:
         # Count raw endpoints
         lines = content.split("\n")
         endpoint_patterns = [
-            "| GET |", "| POST |", "| PUT |", "| PATCH |", "| DELETE |",
+            "| GET |",
+            "| POST |",
+            "| PUT |",
+            "| PATCH |",
+            "| DELETE |",
         ]
         raw_count = sum(1 for line in lines if any(p in line for p in endpoint_patterns))
 
@@ -1115,7 +1234,9 @@ class QoderBaselineComparator:
 
         # Count raw models
         lines = content.split("\n")
-        raw_count = sum(1 for line in lines if line.strip().startswith("| ") and "model" in line.lower())
+        raw_count = sum(
+            1 for line in lines if line.strip().startswith("| ") and "model" in line.lower()
+        )
 
         return {
             "has_three_sections": has_three_sections,
@@ -1128,8 +1249,12 @@ def main() -> int:
     parser.add_argument("--target", type=Path, required=True, help="Path to generated output")
     parser.add_argument("--baseline", type=Path, required=True, help="Path to qoder baseline")
     parser.add_argument("--output", type=Path, help="Output path for JSON report")
-    parser.add_argument("--format", choices=["json", "markdown", "both"], default="both", help="Output format")
-    parser.add_argument("--config", type=Path, help="Path to YAML config file for comparator settings")
+    parser.add_argument(
+        "--format", choices=["json", "markdown", "both"], default="both", help="Output format"
+    )
+    parser.add_argument(
+        "--config", type=Path, help="Path to YAML config file for comparator settings"
+    )
 
     args = parser.parse_args()
 
@@ -1145,6 +1270,7 @@ def main() -> int:
     config_dict = None
     if args.config and args.config.exists():
         import yaml
+
         config_dict = yaml.safe_load(args.config.read_text(encoding="utf-8"))
 
     # Run comparison with optional config

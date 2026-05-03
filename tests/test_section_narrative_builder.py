@@ -5,8 +5,7 @@ of template-based aggregation, and that reading paths explain WHY documents
 are recommended in sequence.
 """
 
-import pytest
-from repo_wiki.generator.engine import SectionNarrativeBuilder, ReadingPathGenerator, ReadingPath
+from repo_wiki.generator.engine import ReadingPathGenerator, SectionNarrativeBuilder
 
 
 class TestSectionNarrativeBuilder:
@@ -35,9 +34,7 @@ class TestSectionNarrativeBuilder:
 
     def test_build_section_description_returns_string(self):
         """Test that section description is generated."""
-        modules = [
-            {"name": "auth", "domain": "core-platform", "responsibility": "Authentication"}
-        ]
+        modules = [{"name": "auth", "domain": "core-platform", "responsibility": "Authentication"}]
         endpoints = []
         commands = {}
         core_context = {}
@@ -57,9 +54,7 @@ class TestSectionNarrativeBuilder:
 
     def test_build_section_description_uses_domain_content(self):
         """Test that description reflects actual module domains."""
-        modules = [
-            {"name": "api", "domain": "api-gateway", "responsibility": "API Gateway"}
-        ]
+        modules = [{"name": "api", "domain": "api-gateway", "responsibility": "API Gateway"}]
         endpoints = []
         commands = {}
         core_context = {}
@@ -79,7 +74,12 @@ class TestSectionNarrativeBuilder:
     def test_build_section_content_returns_string(self):
         """Test that section content is generated."""
         modules = [
-            {"name": "auth", "domain": "core-platform", "responsibility": "Auth module", "runtime_role": "api-server"}
+            {
+                "name": "auth",
+                "domain": "core-platform",
+                "responsibility": "Auth module",
+                "runtime_role": "api-server",
+            }
         ]
         endpoints = []
         commands = {}
@@ -101,8 +101,18 @@ class TestSectionNarrativeBuilder:
     def test_build_section_modules_returns_markdown_list(self):
         """Test that section modules are formatted as markdown list."""
         modules = [
-            {"name": "auth", "domain": "core-platform", "path": "auth/", "responsibility": "Auth module"},
-            {"name": "users", "domain": "core-platform", "path": "users/", "responsibility": "User module"},
+            {
+                "name": "auth",
+                "domain": "core-platform",
+                "path": "auth/",
+                "responsibility": "Auth module",
+            },
+            {
+                "name": "users",
+                "domain": "core-platform",
+                "path": "users/",
+                "responsibility": "User module",
+            },
         ]
         endpoints = []
         commands = {}
@@ -171,7 +181,12 @@ class TestSectionNarrativeBuilder:
     def test_section_slug_affects_content_generation(self):
         """Test that different section slugs produce different content."""
         modules = [
-            {"name": "auth", "domain": "core-platform", "responsibility": "Auth", "runtime_role": "api-server"}
+            {
+                "name": "auth",
+                "domain": "core-platform",
+                "responsibility": "Auth",
+                "runtime_role": "api-server",
+            }
         ]
         endpoints = []
         commands = {}
@@ -408,9 +423,10 @@ class TestIntegrationWithBuildSectionContext:
 
     def test_section_context_uses_narrative_builder(self):
         """Test that _build_section_context produces narrative-based content."""
-        from repo_wiki.generator.engine import GenerationEngine
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+
+        from repo_wiki.generator.engine import GenerationEngine
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -424,7 +440,12 @@ class TestIntegrationWithBuildSectionContext:
             engine = GenerationEngine(root=root)
 
             modules = [
-                {"name": "auth", "domain": "core-platform", "path": "auth/", "responsibility": "Authentication"}
+                {
+                    "name": "auth",
+                    "domain": "core-platform",
+                    "path": "auth/",
+                    "responsibility": "Authentication",
+                }
             ]
             endpoints = [
                 {"method": "GET", "path": "/users", "module": "api", "handler": "list_users"}
@@ -453,9 +474,10 @@ class TestIntegrationWithBuildSectionContext:
 
     def test_section_context_reading_paths_explain_sequence(self):
         """Test that reading paths in context explain WHY sequence is recommended."""
-        from repo_wiki.generator.engine import GenerationEngine
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+
+        from repo_wiki.generator.engine import GenerationEngine
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -477,7 +499,9 @@ class TestIntegrationWithBuildSectionContext:
             )
 
             # Reading paths should contain explanations
-            assert "推荐阅读路径" in ctx["reading_paths"] or "reading" in ctx["reading_paths"].lower()
+            assert (
+                "推荐阅读路径" in ctx["reading_paths"] or "reading" in ctx["reading_paths"].lower()
+            )
             # Should have markdown links
             assert "[项目概览]" in ctx["reading_paths"] or "[Overview]" in ctx["reading_paths"]
 
@@ -488,8 +512,18 @@ class TestNoTemplateDump:
     def test_content_not_just_listing_modules(self):
         """Test that section content is not just a module listing."""
         modules = [
-            {"name": "auth", "domain": "core-platform", "responsibility": "Auth", "runtime_role": "api-server"},
-            {"name": "billing", "domain": "persistence", "responsibility": "Billing", "runtime_role": "worker"},
+            {
+                "name": "auth",
+                "domain": "core-platform",
+                "responsibility": "Auth",
+                "runtime_role": "api-server",
+            },
+            {
+                "name": "billing",
+                "domain": "persistence",
+                "responsibility": "Billing",
+                "runtime_role": "worker",
+            },
         ]
         endpoints = []
         commands = {}
@@ -509,7 +543,12 @@ class TestNoTemplateDump:
         # Should have narrative structure, not just bullet points
         assert "## " in content  # Has section headers (narrative structure)
         # Content should reference domain/runtimes, not just names
-        assert "core-platform" in content or "persistence" in content or "api-server" in content or "runtime" in content.lower()
+        assert (
+            "core-platform" in content
+            or "persistence" in content
+            or "api-server" in content
+            or "runtime" in content.lower()
+        )
 
     def test_reading_paths_not_just_links(self):
         """Test that reading paths have explanatory reasons, not just links."""

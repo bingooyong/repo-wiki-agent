@@ -23,22 +23,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.core.config import RepoWikiConfig
+from repo_wiki.orchestration.content_layout_writer import ContentLayoutWriter
 from repo_wiki.orchestration.cost_estimator import (
     BudgetGate,
     GenerationCostEstimator,
-    create_budget_gate,
 )
-from repo_wiki.orchestration.content_layout_writer import ContentLayoutWriter
 from repo_wiki.orchestration.eval_layout import EvalOutputProfile, get_eval_profile
 from repo_wiki.orchestration.generation_invalidation import (
-    GenerationAwareInvalidator,
     create_generation_invalidator,
 )
 from repo_wiki.orchestration.generation_scheduler import (
     GenerationScheduler,
     SchedulerConfig,
-    create_scheduler,
 )
 from repo_wiki.orchestration.generation_state import GenerationStateMachine
 from repo_wiki.orchestration.partial_evidence import (
@@ -47,14 +43,15 @@ from repo_wiki.orchestration.partial_evidence import (
     PartialManifestBuilder,
 )
 
-
 # =============================================================================
 # INTEGRATION CONFIG
 # =============================================================================
 
+
 @dataclass
 class QoderUpdateConfig:
     """Configuration for qoder-like update integration."""
+
     profile: EvalOutputProfile
     max_concurrency: int = 4
     default_budget_usd: float = 10.0
@@ -67,6 +64,7 @@ class QoderUpdateConfig:
 # =============================================================================
 # QODER UPDATE INTEGRATOR
 # =============================================================================
+
 
 class QoderUpdateIntegrator:
     """Integrates all Phase 28 components for qoder-like profile updates."""
@@ -258,6 +256,7 @@ class QoderUpdateIntegrator:
 # =============================================================================
 # UPDATE INTEGRATION HELPERS
 # =============================================================================
+
 
 def create_qoder_integrator(
     root: Path,

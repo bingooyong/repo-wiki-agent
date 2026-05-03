@@ -12,9 +12,10 @@ Schema definition:
 - source_requirements: what data is needed to generate
 - generation_mode: 'rule-first' | 'llm-assisted'
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Literal
 
@@ -28,6 +29,7 @@ class GenerationMode(str, Enum):
 
 class WikiTaxonomyCategory(str, Enum):
     """Chinese taxonomy baseline for Qoder-like output."""
+
     PROJECT_OVERVIEW = "项目概述"
     ARCHITECTURE_DESIGN = "架构设计"
     CORE_SERVICES = "核心服务"
@@ -59,6 +61,7 @@ DEFAULT_CHINESE_TAXONOMY = [
 
 class SourceRequirement(BaseModel):
     """Source requirements for a wiki page."""
+
     modules: list[str] = Field(default_factory=list)
     endpoints: list[str] = Field(default_factory=list)
     data_models: list[str] = Field(default_factory=list)
@@ -79,18 +82,17 @@ class WikiPagePlan(BaseModel):
         generation_mode: How this page should be generated
         sort_order: Ordering within siblings (lower = earlier)
     """
+
     page_id: str = Field(..., description="Unique identifier in kebab-case slug format")
     title: str = Field(..., description="Human-readable page title")
     category: WikiTaxonomyCategory = Field(..., description="Taxonomy category")
     parent: str | None = Field(None, description="Parent page ID for hierarchy")
     output_path: str = Field(..., description="Relative output path for wiki page")
     source_requirements: SourceRequirement = Field(
-        default_factory=SourceRequirement,
-        description="What data is needed to generate this page"
+        default_factory=SourceRequirement, description="What data is needed to generate this page"
     )
     generation_mode: GenerationMode = Field(
-        default=GenerationMode.RULE_FIRST,
-        description="How this page should be generated"
+        default=GenerationMode.RULE_FIRST, description="How this page should be generated"
     )
     sort_order: int = Field(default=0, description="Ordering within siblings")
     estimated_tokens: int = Field(default=0, description="Estimated token cost for generation")
@@ -102,10 +104,11 @@ class WikiPlanManifest(BaseModel):
 
     This is the top-level schema for wiki-plan.json files.
     """
+
     version: str = Field(default="1.0.0", description="Schema version")
     generated_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
-        description="ISO timestamp of generation"
+        default_factory=lambda: datetime.now(UTC).isoformat(),
+        description="ISO timestamp of generation",
     )
     profile: str = Field(default="qoder-chinese", description="Taxonomy profile used")
     repository_identity: RepositoryIdentity | None = None
@@ -138,11 +141,11 @@ class NavNode(BaseModel):
     This represents a node in the navigation hierarchy that can be
     rendered by documentation viewers or IDE plugins.
     """
+
     node_id: str = Field(..., description="Unique node identifier")
     label: str = Field(..., description="Display label")
     node_type: Literal["category", "page", "separator"] = Field(
-        default="page",
-        description="Type of node"
+        default="page", description="Type of node"
     )
     path: str | None = Field(None, description="Path to the page (for page nodes)")
     icon: str | None = Field(None, description="Icon identifier for UI")
@@ -156,6 +159,7 @@ class RepositoryIdentity(BaseModel):
 
     Resolved from: git root, README, pom.xml, package.json, pyproject.toml
     """
+
     name: str = Field(..., description="Repository name")
     display_name: str = Field(..., description="Human-readable display name")
     root_path: str = Field(..., description="Absolute root path")

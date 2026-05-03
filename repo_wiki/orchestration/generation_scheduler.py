@@ -19,12 +19,13 @@ Key features:
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Coroutine
-import logging
+from typing import Any
 
 from repo_wiki.orchestration.cost_estimator import (
     BudgetGate,
@@ -34,10 +35,7 @@ from repo_wiki.orchestration.cost_estimator import (
 from repo_wiki.orchestration.generation_state import (
     GenerationStateMachine,
     PageGenerationState,
-    PageState,
-    RunState,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +45,8 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 DEFAULT_RATE_LIMITS: dict[str, int] = {
-    "openai": 500,      # GPT-4o: 500 RPM
-    "anthropic": 400,    # Claude: 400 RPM
+    "openai": 500,  # GPT-4o: 500 RPM
+    "anthropic": 400,  # Claude: 400 RPM
     "generic": 100,
 }
 
@@ -57,9 +55,11 @@ DEFAULT_RATE_LIMITS: dict[str, int] = {
 # SCHEDULER CONFIG
 # =============================================================================
 
+
 @dataclass
 class SchedulerConfig:
     """Configuration for the generation scheduler."""
+
     max_concurrency: int = 4
     rate_limit_rpm: int = 100  # Default for unknown providers
     max_retries: int = 3
@@ -70,8 +70,7 @@ class SchedulerConfig:
     def get_rate_limit(self, provider: str) -> int:
         """Get rate limit for a provider."""
         return self.provider_rate_limits.get(
-            provider.lower(),
-            DEFAULT_RATE_LIMITS.get(provider.lower(), self.rate_limit_rpm)
+            provider.lower(), DEFAULT_RATE_LIMITS.get(provider.lower(), self.rate_limit_rpm)
         )
 
 
@@ -79,9 +78,11 @@ class SchedulerConfig:
 # PAGE JOB
 # =============================================================================
 
+
 @dataclass
 class PageJob:
     """A page generation job."""
+
     run_id: str
     doc_slug: str
     doc_type: str
@@ -98,6 +99,7 @@ class PageJob:
 # =============================================================================
 # RATE LIMITER
 # =============================================================================
+
 
 class TokenBucketRateLimiter:
     """Token bucket rate limiter for provider API calls."""
@@ -159,6 +161,7 @@ class TokenBucketRateLimiter:
 # =============================================================================
 # CONCURRENT GENERATION SCHEDULER
 # =============================================================================
+
 
 class GenerationScheduler:
     """Schedules and executes page generation with concurrency control."""
@@ -260,7 +263,7 @@ class GenerationScheduler:
                 if attempt < self.config.max_retries - 1:
                     # Exponential backoff
                     delay = min(
-                        self.config.retry_base_delay * (2 ** attempt),
+                        self.config.retry_base_delay * (2**attempt),
                         self.config.retry_max_delay,
                     )
                     await asyncio.sleep(delay)
@@ -356,7 +359,7 @@ class GenerationScheduler:
                 if success:
                     self.state_machine.complete_page(run_id, page.doc_slug)
                     # Record tokens if result contains token info
-                    if hasattr(result, 'prompt_tokens') and hasattr(result, 'completion_tokens'):
+                    if hasattr(result, "prompt_tokens") and hasattr(result, "completion_tokens"):
                         self.cost_estimator.record_page_tokens(
                             run_id=run_id,
                             doc_slug=page.doc_slug,
@@ -439,7 +442,9 @@ class GenerationScheduler:
         return [
             PagePlanCostInput(
                 page_id=page.doc_slug,
-                estimated_prompt_tokens=prompt_lookup.get(page.doc_slug, default_prompt_tokens_per_page),
+                estimated_prompt_tokens=prompt_lookup.get(
+                    page.doc_slug, default_prompt_tokens_per_page
+                ),
                 estimated_completion_tokens=completion_tokens_per_page,
             )
             for page in pending_pages
@@ -448,6 +453,7 @@ class GenerationScheduler:
 
 class SchedulerError(Exception):
     """Raised when scheduler encounters an error."""
+
     pass
 
 
@@ -464,7 +470,6 @@ def create_scheduler(
     Returns:
         GenerationScheduler instance
     """
-    from repo_wiki.orchestration.cost_estimator import create_budget_gate
 
     db_path = root / ".repo-wiki" / "index" / "generation_state.sqlite3"
     cost_db_path = root / ".repo-wiki" / "index" / "generation_costs.sqlite3"

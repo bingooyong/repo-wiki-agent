@@ -1,27 +1,23 @@
 """Tests for qoder fixture ingestion and validation."""
+
 from __future__ import annotations
 
 import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from repo_wiki.generator.io import write_text
 from scripts.qoder_fixture_ingestion import (
+    CURRENT_SCHEMA_VERSION,
+    REQUIRED_METADATA_FIELDS,
+    REQUIRED_SECTIONS,
     FixtureIngestion,
-    FixtureManifest,
+    FixtureIntegrityChecker,
+    FixtureSchemaValidator,
     FixtureStatus,
     IngestionError,
-    DiagnosticMessage,
-    FixtureSchemaValidator,
-    FixtureIntegrityChecker,
     PathNormalizer,
     create_fixture_metadata,
-    REQUIRED_SECTIONS,
-    REQUIRED_FILES,
-    REQUIRED_METADATA_FIELDS,
-    CURRENT_SCHEMA_VERSION,
 )
 
 
@@ -37,15 +33,16 @@ def _create_valid_fixture(root: Path) -> None:
         size_category="medium",
     )
     (root / "fixture_metadata.json").write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2),
-        encoding="utf-8"
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     # Create docs structure
     (root / "docs").mkdir(parents=True, exist_ok=True)
 
     # Create overview files
-    write_text(root / "docs/00-overview.md", """# Overview
+    write_text(
+        root / "docs/00-overview.md",
+        """# Overview
 
 ## 项目定位
 
@@ -66,9 +63,12 @@ Run poetry install.
 ## 阅读导航
 
 See architecture.
-""")
+""",
+    )
 
-    write_text(root / "docs/01-architecture.md", """# Architecture
+    write_text(
+        root / "docs/01-architecture.md",
+        """# Architecture
 
 ## 系统分层
 
@@ -77,7 +77,8 @@ Three layers.
 ## 服务协作
 
 Services work together.
-""")
+""",
+    )
 
     # Create sections
     (root / "docs/sections").mkdir(parents=True, exist_ok=True)
@@ -108,22 +109,27 @@ def _create_partial_fixture(root: Path) -> None:
         "generator_version": "1.0.0",
     }
     (root / "fixture_metadata.json").write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2),
-        encoding="utf-8"
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     # Create docs structure (missing some sections)
     (root / "docs").mkdir(parents=True, exist_ok=True)
 
-    write_text(root / "docs/00-overview.md", """# Overview
+    write_text(
+        root / "docs/00-overview.md",
+        """# Overview
 
 Some content.
-""")
+""",
+    )
 
-    write_text(root / "docs/01-architecture.md", """# Architecture
+    write_text(
+        root / "docs/01-architecture.md",
+        """# Architecture
 
 Some architecture content.
-""")
+""",
+    )
 
     # Only create a few sections
     (root / "docs/sections").mkdir(parents=True, exist_ok=True)
@@ -136,10 +142,7 @@ Some architecture content.
 def _create_malformed_fixture(root: Path) -> None:
     """Create a malformed fixture with invalid structure."""
     # Create invalid JSON metadata
-    (root / "fixture_metadata.json").write_text(
-        "{ invalid json }",
-        encoding="utf-8"
-    )
+    (root / "fixture_metadata.json").write_text("{ invalid json }", encoding="utf-8")
 
     # Create minimal docs
     (root / "docs").mkdir(parents=True, exist_ok=True)
@@ -199,8 +202,7 @@ class TestFixtureSchemaValidation:
                 generator_version="1.0.0",
             )
             (root / "fixture_metadata.json").write_text(
-                json.dumps(metadata, ensure_ascii=False, indent=2),
-                encoding="utf-8"
+                json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             (root / "docs").mkdir(parents=True, exist_ok=True)
 
@@ -209,7 +211,8 @@ class TestFixtureSchemaValidation:
 
             assert is_valid is False
             missing_file_diags = [
-                d for d in diagnostics
+                d
+                for d in diagnostics
                 if d.error == IngestionError.MISSING_REQUIRED_FILE and d.severity == "ERROR"
             ]
             assert len(missing_file_diags) > 0
@@ -227,8 +230,7 @@ class TestFixtureSchemaValidation:
                 "generator_version": "1.0.0",
             }
             (root / "fixture_metadata.json").write_text(
-                json.dumps(metadata, ensure_ascii=False, indent=2),
-                encoding="utf-8"
+                json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             (root / "docs").mkdir(parents=True, exist_ok=True)
             (root / "docs/00-overview.md").write_text("# Overview", encoding="utf-8")
@@ -239,8 +241,10 @@ class TestFixtureSchemaValidation:
 
             assert is_valid is False
             missing_field_diags = [
-                d for d in diagnostics
-                if d.error == IngestionError.MISSING_REQUIRED_FIELD and "schema_version" in d.field_path
+                d
+                for d in diagnostics
+                if d.error == IngestionError.MISSING_REQUIRED_FIELD
+                and "schema_version" in d.field_path
             ]
             assert len(missing_field_diags) > 0
 

@@ -23,12 +23,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from repo_wiki.generator.io import write_json, write_text
-from repo_wiki.verifier.service import VerifierService, SeverityThreshold
-
+from repo_wiki.verifier.service import SeverityThreshold, VerifierService
 
 # =============================================================================
 # FIXTURES
 # =============================================================================
+
 
 def _write_minimum_artifacts(root: Path) -> None:
     """Write minimum artifacts for API quality tests."""
@@ -59,17 +59,56 @@ def _write_minimum_artifacts(root: Path) -> None:
         root / "ai/source-of-truth/api-index.yaml",
         {
             "endpoints": [
-                {"method": "GET", "path": "/health", "module": "billing", "handler": "h", "file_path": "src/billing/api.py"},
-                {"method": "POST", "path": "/billing", "module": "billing", "handler": "create_billing", "file_path": "src/billing/api.py"},
-                {"method": "GET", "path": "/billing", "module": "billing", "handler": "list_billing", "file_path": "src/billing/api.py"},
-                {"method": "GET", "path": "/billing/{id}", "module": "billing", "handler": "get_billing", "file_path": "src/billing/api.py"},
-                {"method": "DELETE", "path": "/billing/{id}", "module": "billing", "handler": "delete_billing", "file_path": "src/billing/api.py"},
+                {
+                    "method": "GET",
+                    "path": "/health",
+                    "module": "billing",
+                    "handler": "h",
+                    "file_path": "src/billing/api.py",
+                },
+                {
+                    "method": "POST",
+                    "path": "/billing",
+                    "module": "billing",
+                    "handler": "create_billing",
+                    "file_path": "src/billing/api.py",
+                },
+                {
+                    "method": "GET",
+                    "path": "/billing",
+                    "module": "billing",
+                    "handler": "list_billing",
+                    "file_path": "src/billing/api.py",
+                },
+                {
+                    "method": "GET",
+                    "path": "/billing/{id}",
+                    "module": "billing",
+                    "handler": "get_billing",
+                    "file_path": "src/billing/api.py",
+                },
+                {
+                    "method": "DELETE",
+                    "path": "/billing/{id}",
+                    "module": "billing",
+                    "handler": "delete_billing",
+                    "file_path": "src/billing/api.py",
+                },
             ]
         },
     )
     write_json(
         root / "ai/source-of-truth/data-models.yaml",
-        {"models": [{"name": "Invoice", "type": "python_class", "module": "billing", "file_path": "src/billing/model.py"}]},
+        {
+            "models": [
+                {
+                    "name": "Invoice",
+                    "type": "python_class",
+                    "module": "billing",
+                    "file_path": "src/billing/model.py",
+                }
+            ]
+        },
     )
     write_json(root / "ai/source-of-truth/task-catalog.yaml", {"tasks": []})
     write_text(root / "ai/source-of-truth/prompt-fragments/overview.txt", "overview")
@@ -89,7 +128,10 @@ def _write_minimum_artifacts(root: Path) -> None:
     write_text(root / ".claude/CLAUDE.md", "`docs/00-overview.md`")
     write_text(root / "AGENTS.md", "`docs/01-architecture.md`\n`http://localhost:8007`")
     write_json(root / ".opencode/opencode.json", {"knowledge_paths": ["docs/00-overview.md"]})
-    write_text(root / ".codex/config.toml", 'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n')
+    write_text(
+        root / ".codex/config.toml",
+        'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n',
+    )
     write_json(root / ".codex/hooks.json", {"post_commands": []})
 
 
@@ -143,25 +185,70 @@ def _write_quality_artifacts(root: Path) -> None:
         root / "ai/source-of-truth/api-index.yaml",
         {
             "endpoints": [
-                {"method": "GET", "path": "/health", "module": "billing", "handler": "h", "file_path": "src/billing/api.py"},
-                {"method": "POST", "path": "/billing", "module": "billing", "handler": "create_billing", "file_path": "src/billing/api.py"},
-                {"method": "GET", "path": "/billing", "module": "billing", "handler": "list_billing", "file_path": "src/billing/api.py"},
-                {"method": "GET", "path": "/billing/{id}", "module": "billing", "handler": "get_billing", "file_path": "src/billing/api.py"},
-                {"method": "DELETE", "path": "/billing/{id}", "module": "billing", "handler": "delete_billing", "file_path": "src/billing/api.py"},
+                {
+                    "method": "GET",
+                    "path": "/health",
+                    "module": "billing",
+                    "handler": "h",
+                    "file_path": "src/billing/api.py",
+                },
+                {
+                    "method": "POST",
+                    "path": "/billing",
+                    "module": "billing",
+                    "handler": "create_billing",
+                    "file_path": "src/billing/api.py",
+                },
+                {
+                    "method": "GET",
+                    "path": "/billing",
+                    "module": "billing",
+                    "handler": "list_billing",
+                    "file_path": "src/billing/api.py",
+                },
+                {
+                    "method": "GET",
+                    "path": "/billing/{id}",
+                    "module": "billing",
+                    "handler": "get_billing",
+                    "file_path": "src/billing/api.py",
+                },
+                {
+                    "method": "DELETE",
+                    "path": "/billing/{id}",
+                    "module": "billing",
+                    "handler": "delete_billing",
+                    "file_path": "src/billing/api.py",
+                },
             ]
         },
     )
     write_json(
         root / "ai/source-of-truth/data-models.yaml",
-        {"models": [{"name": "Invoice", "type": "python_class", "module": "billing", "file_path": "src/billing/model.py"}]},
+        {
+            "models": [
+                {
+                    "name": "Invoice",
+                    "type": "python_class",
+                    "module": "billing",
+                    "file_path": "src/billing/model.py",
+                }
+            ]
+        },
     )
     write_json(root / "ai/source-of-truth/task-catalog.yaml", {"tasks": []})
     write_text(root / "ai/source-of-truth/prompt-fragments/overview.txt", "overview")
     write_text(root / "ai/source-of-truth/prompt-fragments/architecture.txt", "arch")
 
     # Create source files for citations
-    write_text(root / "src/billing/api.py", "def health():\n    return 'ok'\n\ndef create_billing():\n    pass\n\ndef list_billing():\n    pass\n\ndef get_billing(id):\n    pass\n\ndef delete_billing(id):\n    pass\n")
-    write_text(root / "src/billing/model.py", "class Invoice:\n    def __init__(self):\n        self.amount = 0\n")
+    write_text(
+        root / "src/billing/api.py",
+        "def health():\n    return 'ok'\n\ndef create_billing():\n    pass\n\ndef list_billing():\n    pass\n\ndef get_billing(id):\n    pass\n\ndef delete_billing(id):\n    pass\n",
+    )
+    write_text(
+        root / "src/billing/model.py",
+        "class Invoice:\n    def __init__(self):\n        self.amount = 0\n",
+    )
 
     # Write quality overview (200+ prose chars, 5+ sections, proper citations)
     write_text(
@@ -342,7 +429,17 @@ Invoices reference line items across services.
     )
 
     # Create section pages
-    sections = ["project", "architecture", "services", "data-model", "api", "operations", "development", "security", "troubleshooting"]
+    sections = [
+        "project",
+        "architecture",
+        "services",
+        "data-model",
+        "api",
+        "operations",
+        "development",
+        "security",
+        "troubleshooting",
+    ]
     for section in sections:
         write_text(
             root / f"docs/sections/{section}/index.md",
@@ -361,13 +458,17 @@ Describing the {section} section in detail with prose.
     write_text(root / ".claude/CLAUDE.md", "`docs/00-overview.md`")
     write_text(root / "AGENTS.md", "`docs/01-architecture.md`\n`http://localhost:8007`")
     write_json(root / ".opencode/opencode.json", {"knowledge_paths": ["docs/00-overview.md"]})
-    write_text(root / ".codex/config.toml", 'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n')
+    write_text(
+        root / ".codex/config.toml",
+        'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n',
+    )
     write_json(root / ".codex/hooks.json", {"post_commands": []})
 
 
 # =============================================================================
 # ENDPOINT DUMP DETECTION TESTS
 # =============================================================================
+
 
 def test_endpoint_dump_detection_raw_endpoints_only(tmp_path: Path) -> None:
     """Test that API doc with only raw endpoints (no grouping) is flagged as endpoint dump."""
@@ -511,6 +612,7 @@ Bearer token authentication.
 # SERVICE-FAMILY GROUPING TESTS
 # =============================================================================
 
+
 def test_service_family_grouping_detected(tmp_path: Path) -> None:
     """Test that service-family grouping is properly detected in API docs."""
     _write_quality_artifacts(root=tmp_path)
@@ -535,6 +637,7 @@ def test_service_family_grouping_with_bearer_auth(tmp_path: Path) -> None:
 # =============================================================================
 # AUTH/ERROR COVERAGE TESTS
 # =============================================================================
+
 
 def test_auth_coverage_missing_auth_section(tmp_path: Path) -> None:
     """Test that missing authentication section is flagged."""
@@ -623,6 +726,7 @@ def test_error_coverage_proper_status_codes(tmp_path: Path) -> None:
 # CITATION VALIDATION TESTS
 # =============================================================================
 
+
 def test_citation_missing_in_api_doc(tmp_path: Path) -> None:
     """Test that API doc without citations fails citation coverage check."""
     _write_minimum_artifacts(root=tmp_path)
@@ -674,6 +778,7 @@ def test_citation_present_in_api_doc(tmp_path: Path) -> None:
 # STRICT PROFILE TESTS
 # =============================================================================
 
+
 def test_strict_profile_endpoint_dump_fails(tmp_path: Path) -> None:
     """Test that endpoint dump fails in strict profile (soft gates become blocking).
 
@@ -701,9 +806,43 @@ def test_strict_profile_endpoint_dump_fails(tmp_path: Path) -> None:
     ]:
         d.mkdir(parents=True, exist_ok=True)
 
-    write_json(tmp_path / "ai/source-of-truth/repo-map.yaml", {"repository": {"name": "demo", "root_path": str(tmp_path)}, "commands": {}})
-    write_json(tmp_path / "ai/source-of-truth/module-index.yaml", {"modules": [{"name": "billing", "path": "src/billing", "responsibility": "billing", "exports": [], "depends_on": [], "depended_by": [], "interfaces": [], "data_models": [], "owner": "unknown", "doc_path": "docs/modules/billing.md"}]})
-    write_json(tmp_path / "ai/source-of-truth/api-index.yaml", {"endpoints": [{"method": "GET", "path": "/health", "module": "billing", "handler": "h", "file_path": "src/billing/api.py"}]})
+    write_json(
+        tmp_path / "ai/source-of-truth/repo-map.yaml",
+        {"repository": {"name": "demo", "root_path": str(tmp_path)}, "commands": {}},
+    )
+    write_json(
+        tmp_path / "ai/source-of-truth/module-index.yaml",
+        {
+            "modules": [
+                {
+                    "name": "billing",
+                    "path": "src/billing",
+                    "responsibility": "billing",
+                    "exports": [],
+                    "depends_on": [],
+                    "depended_by": [],
+                    "interfaces": [],
+                    "data_models": [],
+                    "owner": "unknown",
+                    "doc_path": "docs/modules/billing.md",
+                }
+            ]
+        },
+    )
+    write_json(
+        tmp_path / "ai/source-of-truth/api-index.yaml",
+        {
+            "endpoints": [
+                {
+                    "method": "GET",
+                    "path": "/health",
+                    "module": "billing",
+                    "handler": "h",
+                    "file_path": "src/billing/api.py",
+                }
+            ]
+        },
+    )
     write_json(tmp_path / "ai/source-of-truth/data-models.yaml", {"models": []})
     write_json(tmp_path / "ai/source-of-truth/task-catalog.yaml", {"tasks": []})
     write_text(tmp_path / "ai/source-of-truth/prompt-fragments/overview.txt", "overview")
@@ -769,7 +908,17 @@ graph LR
         write_text(tmp_path / path, "ok")
 
     # Create section pages
-    sections = ["project", "architecture", "services", "data-model", "api", "operations", "development", "security", "troubleshooting"]
+    sections = [
+        "project",
+        "architecture",
+        "services",
+        "data-model",
+        "api",
+        "operations",
+        "development",
+        "security",
+        "troubleshooting",
+    ]
     for section in sections:
         write_text(tmp_path / f"docs/sections/{section}/index.md", f"# {section}\n")
 
@@ -778,7 +927,10 @@ graph LR
     write_text(tmp_path / ".claude/CLAUDE.md", "`docs/00-overview.md`")
     write_text(tmp_path / "AGENTS.md", "`docs/01-architecture.md`")
     write_json(tmp_path / ".opencode/opencode.json", {"knowledge_paths": ["docs/00-overview.md"]})
-    write_text(tmp_path / ".codex/config.toml", 'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n')
+    write_text(
+        tmp_path / ".codex/config.toml",
+        'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n',
+    )
     write_json(tmp_path / ".codex/hooks.json", {"post_commands": []})
 
     # Create endpoint dump content with all sections but too many raw endpoints
@@ -828,8 +980,9 @@ Bearer token.
     hard_failures = result["summary"]["hard_gate_failures"]
 
     # The key assertion: AGG_API_ENDPOINT_DUMP should be in soft_gate_failures
-    assert "AGG_API_ENDPOINT_DUMP" in result.get("soft_gate_codes", []) or \
-           any("AGG_API_ENDPOINT_DUMP" in code for code in result.get("reason_codes", []))
+    assert "AGG_API_ENDPOINT_DUMP" in result.get("soft_gate_codes", []) or any(
+        "AGG_API_ENDPOINT_DUMP" in code for code in result.get("reason_codes", [])
+    )
 
 
 def test_strict_profile_missing_auth_fails(tmp_path: Path) -> None:
@@ -888,6 +1041,7 @@ def test_strict_profile_quality_artifacts_pass(tmp_path: Path) -> None:
 # REASON CODES TESTS
 # =============================================================================
 
+
 def test_reason_code_endpoint_dump(tmp_path: Path) -> None:
     """Test that AGG_API_ENDPOINT_DUMP reason code is returned for endpoint dumps."""
     _write_minimum_artifacts(root=tmp_path)
@@ -937,6 +1091,7 @@ This is an API document without proper grouping.
 # =============================================================================
 # API QUALITY GATE INTEGRATION TESTS
 # =============================================================================
+
 
 def test_api_quality_gates_all_pass_with_quality_content(tmp_path: Path) -> None:
     """Test that all API quality gates pass when content meets quality standards."""
@@ -1009,7 +1164,13 @@ def test_gate_summary_shows_blocking_on_endpoint_dump(tmp_path: Path) -> None:
 
     # Treat endpoint dump as hard gate
     hard_thresholds = SeverityThreshold(
-        hard_gate_codes={"AGG_API_ENDPOINT_DUMP", "STRUCT_NAV_TARGET_MISSING", "STRUCT_SECTION_DIR_MISSING", "STRUCT_MISSING_SECTIONS", "CONTENT_EMPTY"},
+        hard_gate_codes={
+            "AGG_API_ENDPOINT_DUMP",
+            "STRUCT_NAV_TARGET_MISSING",
+            "STRUCT_SECTION_DIR_MISSING",
+            "STRUCT_MISSING_SECTIONS",
+            "CONTENT_EMPTY",
+        },
         warn_on_soft=True,
     )
 

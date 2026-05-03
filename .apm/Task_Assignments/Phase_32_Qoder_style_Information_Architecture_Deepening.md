@@ -57,7 +57,7 @@ ad_hoc_delegation: false
 Implementation Plan: **Task 32.2 - Service subtopic planner** assigned to **Agent_DocGen**
 
 ## Context from Dependencies
-Depends on Task 32.1 and Task 22.6. Use the mined taxonomy and existing page-plan persistence contract.
+Depends on Task 32.1 and Task 22.6. Use the mined taxonomy and existing page-plan persistence contract. Preserve Qoder's dedicated API台账服务 API topic as a required comparison target.
 
 ## Objective
 Generate service subtopic plans instead of one page per service.
@@ -65,14 +65,15 @@ Generate service subtopic plans instead of one page per service.
 ## Detailed Instructions
 - Plan `服务概述`, `架构设计`, `API接口文档`, `部署配置`, and `核心组件` pages for Python services.
 - Generate business subdomain pages for core services when evidence supports them.
+- Generate a dedicated `API参考/核心服务API/API台账服务/API台账服务API.md` or equivalent stable page for `inventory-service`.
 - Preserve stable slugs and manifest navigation ordering.
-- Add planner tests for service subtopic expansion.
+- Add planner tests for service subtopic expansion and API台账服务 API page coverage.
 
 ## Expected Output
-- Deliverables: service subtopic planner, navigation updates, planner tests.
+- Deliverables: service subtopic planner, inventory-service API page plan, navigation updates, planner tests.
 - Compile command: `uv run repo-wiki --help`
 - Self-test command: `uv run pytest tests/test_qoder_like_planner.py tests/test_manifest_navigation.py`
-- Completion rule: do not mark complete unless service plans expand into meaningful subtopics.
+- Completion rule: do not mark complete unless service plans expand into meaningful subtopics and API台账服务 has a dedicated API page.
 
 ## Memory Logging
 Upon completion, you **MUST** log work in: `.apm/Memory/Phase_32_Qoder_style_Information_Architecture_Deepening/Task_32_2_Service_subtopic_planner.md`
@@ -144,6 +145,7 @@ Generate a Qoder-depth project overview and module organization hierarchy.
 - Target directory depth of `4` with non-empty topic pages.
 - Increase Qoder path common count from the current baseline toward at least `80`.
 - Keep repo-agent page count within `90%-120%` of Qoder page count.
+- Treat missing Qoder baseline counterparts such as `API参考/核心服务API/API台账服务API.md` as explicit comparison gaps.
 - Add hierarchy fixture tests and AI_API_Atlas path comparison evidence.
 
 ## Expected Output
@@ -155,4 +157,3 @@ Generate a Qoder-depth project overview and module organization hierarchy.
 ## Memory Logging
 Upon completion, you **MUST** log work in: `.apm/Memory/Phase_32_Qoder_style_Information_Architecture_Deepening/Task_32_4_Project_overview_module_hierarchy.md`
 ```
-

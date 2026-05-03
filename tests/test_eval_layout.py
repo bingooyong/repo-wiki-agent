@@ -1,15 +1,12 @@
 """Tests for eval layout policy, manifest schema, and path safety."""
 
 import json
-import tempfile
 import time
 from pathlib import Path
 
 import pytest
 
 from repo_wiki.orchestration.eval_layout import (
-    EVAL_PROFILES,
-    PROTECTED_DIRS,
     EvalManifest,
     EvalManifestEvidence,
     EvalManifestFile,
@@ -17,8 +14,8 @@ from repo_wiki.orchestration.eval_layout import (
     generate_manifest,
     get_eval_output_layout_contract,
     get_eval_profile,
-    resolve_revision_with_fallback,
     reject_unsafe_output_root,
+    resolve_revision_with_fallback,
     validate_eval_root_safety,
     write_manifest,
 )
@@ -324,6 +321,7 @@ class TestRejectUnsafeOutputRoot:
 
     def test_unsafe_root_raises(self):
         from repo_wiki.core.errors import RepoWikiError
+
         with pytest.raises(RepoWikiError, match="Unsafe eval output root"):
             reject_unsafe_output_root("docs/")
 

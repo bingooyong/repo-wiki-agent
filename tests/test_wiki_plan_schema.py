@@ -1,8 +1,8 @@
 """Tests for wiki plan schema and navigation tree contracts."""
 
-import pytest
 
 from repo_wiki.planner.schema import (
+    DEFAULT_CHINESE_TAXONOMY,
     GenerationMode,
     NavNode,
     RepositoryIdentity,
@@ -10,7 +10,6 @@ from repo_wiki.planner.schema import (
     WikiPagePlan,
     WikiPlanManifest,
     WikiTaxonomyCategory,
-    DEFAULT_CHINESE_TAXONOMY,
     current_schema_version,
 )
 

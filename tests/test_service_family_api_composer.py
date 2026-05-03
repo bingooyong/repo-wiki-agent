@@ -20,7 +20,6 @@ Test coverage:
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -33,14 +32,12 @@ from repo_wiki.core.contracts import (
     RepositoryStats,
 )
 from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
-from repo_wiki.generator.composer import ComposerContext
 from repo_wiki.generator.service_family_api_composer import (
     ServiceFamilyAPIComposer,
-    compose_service_family_article,
     compose_service_family_article_async,
     create_service_family_composer,
 )
-from repo_wiki.llm.providers import create_mock_provider, MockLLMProvider
+from repo_wiki.llm.providers import create_mock_provider
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.planner.schema import (
     GenerationMode,
@@ -49,10 +46,10 @@ from repo_wiki.planner.schema import (
     WikiTaxonomyCategory,
 )
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
+
 
 @pytest.fixture
 def sample_snapshot() -> RepositorySnapshot:
@@ -207,6 +204,7 @@ def python_backend_page_plan() -> WikiPagePlan:
 # TESTS FOR SERVICE FAMILY EXTRACTION
 # =============================================================================
 
+
 class TestServiceFamilyExtraction:
     """Tests for service family extraction from page IDs."""
 
@@ -250,6 +248,7 @@ class TestServiceFamilyExtraction:
 # =============================================================================
 # TESTS FOR ENDPOINT FILTERING
 # =============================================================================
+
 
 class TestEndpointFiltering:
     """Tests for endpoint filtering by service family and page requirements."""
@@ -297,7 +296,9 @@ class TestEndpointFiltering:
             service_family=None,
             page_plan=page_plan,
         )
-        assert all(ep.auth_required or ep.auth_type in ("bearer", "oauth", "api-key") for ep in endpoints)
+        assert all(
+            ep.auth_required or ep.auth_type in ("bearer", "oauth", "api-key") for ep in endpoints
+        )
 
     def test_filter_health_endpoints(self, sample_snapshot):
         """Test filtering health check endpoints."""
@@ -321,6 +322,7 @@ class TestEndpointFiltering:
 # =============================================================================
 # TESTS FOR CONTEXT BUILDING
 # =============================================================================
+
 
 class TestContextBuilding:
     """Tests for service context building."""
@@ -392,6 +394,7 @@ class TestContextBuilding:
 # TESTS FOR ENDPOINT TABLE FORMATTING
 # =============================================================================
 
+
 class TestEndpointTableFormatting:
     """Tests for endpoint table formatting."""
 
@@ -459,13 +462,16 @@ class TestEndpointTableFormatting:
 # TESTS FOR SERVICE PURPOSE FORMATTING
 # =============================================================================
 
+
 class TestServicePurposeFormatting:
     """Tests for service purpose formatting."""
 
     def test_format_with_service_family(self, sample_snapshot):
         """Test formatting purpose with service family name."""
         composer = ServiceFamilyAPIComposer(sample_snapshot)
-        endpoints = [ep for ep in sample_snapshot.endpoints if ep.service_family == "python-backend"]
+        endpoints = [
+            ep for ep in sample_snapshot.endpoints if ep.service_family == "python-backend"
+        ]
         result = composer.format_service_purpose("python-backend", endpoints)
 
         assert "python-backend" in result
@@ -506,6 +512,7 @@ class TestServicePurposeFormatting:
 # =============================================================================
 # TESTS FOR LLM COMPOSITION
 # =============================================================================
+
 
 class TestLLMComposition:
     """Tests for LLM composition integration."""
@@ -579,6 +586,7 @@ class TestLLMComposition:
 # TESTS FOR ASYNC COMPOSITION
 # =============================================================================
 
+
 class TestAsyncComposition:
     """Tests for async composition support."""
 
@@ -593,7 +601,9 @@ class TestAsyncComposition:
         assert len(output.markdown) > 0
 
     @pytest.mark.asyncio
-    async def test_compose_service_family_article_async(self, sample_snapshot, python_backend_page_plan):
+    async def test_compose_service_family_article_async(
+        self, sample_snapshot, python_backend_page_plan
+    ):
         """Test async convenience function."""
         output = await compose_service_family_article_async(
             page_plan=python_backend_page_plan,
@@ -620,6 +630,7 @@ class TestAsyncComposition:
 # =============================================================================
 # TESTS FOR COMPOSER CONTEXT CREATION
 # =============================================================================
+
 
 class TestComposerContextCreation:
     """Tests for ComposerContext creation."""
@@ -677,6 +688,7 @@ class TestComposerContextCreation:
 # TESTS FOR FACTORY FUNCTION
 # =============================================================================
 
+
 class TestFactoryFunction:
     """Tests for create_service_family_composer factory."""
 
@@ -709,6 +721,7 @@ class TestFactoryFunction:
 # =============================================================================
 # TESTS FOR EDGE CASES
 # =============================================================================
+
 
 class TestEdgeCases:
     """Tests for edge cases and error handling."""

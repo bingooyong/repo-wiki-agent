@@ -6,19 +6,19 @@ from pathlib import Path
 import pytest
 
 from repo_wiki.evidence.citation_renderer import (
+    BadLineError,
+    BrokenPathError,
     CitationRenderer,
     CiteBlock,
-    SectionSource,
     DiagramSource,
     FileLineLink,
-    BrokenPathError,
-    BadLineError,
+    SectionSource,
+    validate_citation,
     validate_citation_path,
     validate_line_range,
-    validate_citation,
 )
-from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
+from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 
 
 class TestCiteBlock:

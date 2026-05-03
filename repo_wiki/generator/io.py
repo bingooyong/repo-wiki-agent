@@ -35,7 +35,9 @@ def read_json(path: Path, default: Any) -> Any:
 
 def write_json(path: Path, payload: Any) -> None:
     ensure_dir(path.parent)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
 
 def read_yamlish(path: Path, default: Any) -> Any:
@@ -78,7 +80,9 @@ def stable_hash(payload: Any) -> str:
 def list_repo_files(root: Path) -> list[Path]:
     out: list[Path] = []
     for base, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in {".git", ".repo-wiki", ".pytest_cache", "__pycache__"}]
+        dirs[:] = [
+            d for d in dirs if d not in {".git", ".repo-wiki", ".pytest_cache", "__pycache__"}
+        ]
         for name in files:
             path = Path(base) / name
             if path.suffix in {".pyc"}:

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass, field
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Literal
 
 # Supported languages and their file extensions
 LANGUAGE_EXTENSIONS: dict[str, tuple[str, ...]] = {
@@ -71,9 +71,7 @@ class SourceSpanExtractor:
 
         return extractor(file_path, content)
 
-    def extract_from_files(
-        self, files: list[tuple[Path, str]]
-    ) -> list[SourceSpan]:
+    def extract_from_files(self, files: list[tuple[Path, str]]) -> list[SourceSpan]:
         """Extract spans from multiple files.
 
         Args:
@@ -196,7 +194,9 @@ def _extract_typescript(file_path: Path, content: str) -> list[SourceSpan]:
     lines = content.splitlines()
 
     # Match class definitions (including export)
-    for match in _regex_finditer(r"^(?:export\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)", content, re.MULTILINE):
+    for match in _regex_finditer(
+        r"^(?:export\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)", content, re.MULTILINE
+    ):
         name = match.group(1)
         start_line = content[: match.start()].count("\n") + 1
         end_line = _find_block_end(lines, start_line - 1, "{", None)
@@ -475,9 +475,7 @@ def _regex_finditer(pattern: str, text: str, flags: re.RegexFlag = 0) -> Iterato
         return iter([])
 
 
-def _find_block_end(
-    lines: list[str], start_idx: int, start_char: str, end_word: str | None
-) -> int:
+def _find_block_end(lines: list[str], start_idx: int, start_char: str, end_word: str | None) -> int:
     """Find the line index where a code block ends.
 
     Args:
@@ -613,9 +611,7 @@ def group_spans_by_file(spans: list[SourceSpan]) -> dict[str, list[SourceSpan]]:
     return result
 
 
-def filter_spans_by_language(
-    spans: list[SourceSpan], languages: list[str]
-) -> list[SourceSpan]:
+def filter_spans_by_language(spans: list[SourceSpan], languages: list[str]) -> list[SourceSpan]:
     """Filter spans to only include specified languages."""
     return [s for s in spans if s.language in languages]
 

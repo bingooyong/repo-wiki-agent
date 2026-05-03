@@ -19,16 +19,16 @@ Output Schema:
     - acceptance_criteria: Required evidence fields and validation status
     - human_readable_summary: Executive summary for stakeholders
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
 
 # Schema version for future compatibility
 SCHEMA_VERSION = "1.0.0"
@@ -37,6 +37,7 @@ SCHEMA_VERSION = "1.0.0"
 @dataclass
 class AcceptanceEvidence:
     """Bundled evidence from verify and baseline comparison."""
+
     verify_result: dict[str, Any]
     baseline_result: dict[str, Any]
 
@@ -44,6 +45,7 @@ class AcceptanceEvidence:
 @dataclass
 class EvidenceField:
     """A required evidence field with validation status."""
+
     name: str
     description: str
     present: bool
@@ -54,6 +56,7 @@ class EvidenceField:
 @dataclass
 class ReadinessCriteria:
     """Acceptance criteria with validation status."""
+
     field_name: str
     description: str
     met: bool
@@ -63,6 +66,7 @@ class ReadinessCriteria:
 @dataclass
 class ReadinessReport:
     """Unified readiness report schema."""
+
     schema_version: str
     generated_at: str
     target_path: str
@@ -121,8 +125,12 @@ class ReadinessReport:
         if "gate_summary" in summary:
             gate = summary["gate_summary"]
             lines.append("### Gate Status")
-            lines.append(f"- Hard Gate Blocking: {'YES' if gate.get('hard_gate_blocking') else 'NO'}")
-            lines.append(f"- Soft Gate Warnings: {'YES' if gate.get('soft_gate_warnings') else 'NO'}")
+            lines.append(
+                f"- Hard Gate Blocking: {'YES' if gate.get('hard_gate_blocking') else 'NO'}"
+            )
+            lines.append(
+                f"- Soft Gate Warnings: {'YES' if gate.get('soft_gate_warnings') else 'NO'}"
+            )
             lines.append("")
 
         # Criteria status
@@ -142,7 +150,9 @@ class ReadinessReport:
         lines.append(f"- Grade: **{verify.get('grade', 'N/A')}**")
         if "summary" in verify:
             s = verify["summary"]
-            lines.append(f"- Checks: {s.get('pass', 0)} passed, {s.get('fail', 0)} failed, {s.get('warn', 0)} warnings")
+            lines.append(
+                f"- Checks: {s.get('pass', 0)} passed, {s.get('fail', 0)} failed, {s.get('warn', 0)} warnings"
+            )
         lines.append("")
 
         lines.append("### Baseline Comparison")
@@ -159,8 +169,12 @@ class ReadinessReport:
         if "dimensions" in baseline:
             lines.append("### Dimension Details")
             for dim in baseline["dimensions"]:
-                status_icon = {"PASS": "✓", "FAIL": "✗", "PARTIAL": "◐"}.get(dim.get("status", ""), "?")
-                lines.append(f"- {status_icon} {dim.get('dimension')}: {dim.get('score', 0):.1%} ({dim.get('score_band', 'N/A')}) [{dim.get('delta_type', 'N/A')}]")
+                status_icon = {"PASS": "✓", "FAIL": "✗", "PARTIAL": "◐"}.get(
+                    dim.get("status", ""), "?"
+                )
+                lines.append(
+                    f"- {status_icon} {dim.get('dimension')}: {dim.get('score', 0):.1%} ({dim.get('score_band', 'N/A')}) [{dim.get('delta_type', 'N/A')}]"
+                )
             lines.append("")
 
         # Required evidence fields
@@ -198,39 +212,47 @@ def generate_readiness_report(
 
     # Verify grade criterion
     verify_grade = verify_result.get("grade", "FAIL")
-    criteria.append(ReadinessCriteria(
-        field_name="verify-grade",
-        description=f"Verify grade is PASS (got: {verify_grade})",
-        met=verify_grade == "PASS",
-        evidence_ref="acceptance_evidence.verify_result.grade",
-    ))
+    criteria.append(
+        ReadinessCriteria(
+            field_name="verify-grade",
+            description=f"Verify grade is PASS (got: {verify_grade})",
+            met=verify_grade == "PASS",
+            evidence_ref="acceptance_evidence.verify_result.grade",
+        )
+    )
 
     # No hard gate failures
     hard_failures = verify_result.get("summary", {}).get("hard_gate_failures", 0)
-    criteria.append(ReadinessCriteria(
-        field_name="no-hard-gate-failures",
-        description=f"No hard gate failures (got: {hard_failures})",
-        met=hard_failures == 0,
-        evidence_ref="acceptance_evidence.verify_result.summary.hard_gate_failures",
-    ))
+    criteria.append(
+        ReadinessCriteria(
+            field_name="no-hard-gate-failures",
+            description=f"No hard gate failures (got: {hard_failures})",
+            met=hard_failures == 0,
+            evidence_ref="acceptance_evidence.verify_result.summary.hard_gate_failures",
+        )
+    )
 
     # Acceptance not blocked
     acceptance_blocked = baseline_result.get("summary", {}).get("acceptance_blocked", True)
-    criteria.append(ReadinessCriteria(
-        field_name="baseline-acceptance",
-        description=f"Baseline acceptance not blocked (blocked: {acceptance_blocked})",
-        met=not acceptance_blocked,
-        evidence_ref="acceptance_evidence.baseline_result.summary.acceptance_blocked",
-    ))
+    criteria.append(
+        ReadinessCriteria(
+            field_name="baseline-acceptance",
+            description=f"Baseline acceptance not blocked (blocked: {acceptance_blocked})",
+            met=not acceptance_blocked,
+            evidence_ref="acceptance_evidence.baseline_result.summary.acceptance_blocked",
+        )
+    )
 
     # Overall score above threshold
     overall_score = baseline_result.get("summary", {}).get("overall_score", 0)
-    criteria.append(ReadinessCriteria(
-        field_name="baseline-score",
-        description=f"Overall baseline score >= 0.5 (got: {overall_score:.2f})",
-        met=overall_score >= 0.5,
-        evidence_ref="acceptance_evidence.baseline_result.summary.overall_score",
-    ))
+    criteria.append(
+        ReadinessCriteria(
+            field_name="baseline-score",
+            description=f"Overall baseline score >= 0.5 (got: {overall_score:.2f})",
+            met=overall_score >= 0.5,
+            evidence_ref="acceptance_evidence.baseline_result.summary.overall_score",
+        )
+    )
 
     # Generate human-readable summary
     summary = {
@@ -266,12 +288,20 @@ def generate_readiness_report(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Unified readiness report generator")
     parser.add_argument("--target", type=Path, required=True, help="Path to target repository")
-    parser.add_argument("--verify", type=Path, help="Path to verify JSON output (if not using default)")
+    parser.add_argument(
+        "--verify", type=Path, help="Path to verify JSON output (if not using default)"
+    )
     parser.add_argument("--baseline", type=Path, help="Path to baseline comparison JSON output")
-    parser.add_argument("--baseline-target", type=Path, help="Baseline comparison target (default: same as --target)")
+    parser.add_argument(
+        "--baseline-target",
+        type=Path,
+        help="Baseline comparison target (default: same as --target)",
+    )
     parser.add_argument("--baseline-baseline", type=Path, help="Baseline comparison baseline")
     parser.add_argument("--output", type=Path, required=True, help="Output path for report")
-    parser.add_argument("--format", choices=["json", "markdown", "both"], default="both", help="Output format")
+    parser.add_argument(
+        "--format", choices=["json", "markdown", "both"], default="both", help="Output format"
+    )
 
     args = parser.parse_args()
 
@@ -285,6 +315,7 @@ def main() -> int:
     else:
         # Run verify inline
         from repo_wiki.verifier.service import VerifierService
+
         verifier = VerifierService(args.target)
         verify_result = verifier.verify(ci=True)
 
@@ -294,11 +325,13 @@ def main() -> int:
     elif args.baseline_target and args.baseline_baseline:
         # Run baseline comparison
         from scripts.qoder_baseline_comparison import QoderBaselineComparator
+
         comparator = QoderBaselineComparator(args.baseline_target, args.baseline_baseline)
         baseline_result = comparator.compare_all().to_dict()
     else:
         # Use target as baseline (self-comparison for minimal report)
         from scripts.qoder_baseline_comparison import QoderBaselineComparator
+
         comparator = QoderBaselineComparator(args.target, args.target)
         baseline_result = comparator.compare_all().to_dict()
 

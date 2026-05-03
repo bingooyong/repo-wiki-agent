@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -28,9 +28,15 @@ class Module(BaseModel):
     owner: str = "unknown"
     doc_path: str
     # Business domain classification (added in Phase 06)
-    domain: str = "unknown"  # High-level business domain (e.g., 'core-platform', 'ai-services', 'frontend')
-    service_family: str = "unknown"  # Service family within domain (e.g., 'python-backend', 'javascript-frontend')
-    runtime_role: str = "unknown"  # Runtime role (e.g., 'api-server', 'worker', 'data-pipeline', 'tooling')
+    domain: str = (
+        "unknown"  # High-level business domain (e.g., 'core-platform', 'ai-services', 'frontend')
+    )
+    service_family: str = (
+        "unknown"  # Service family within domain (e.g., 'python-backend', 'javascript-frontend')
+    )
+    runtime_role: str = (
+        "unknown"  # Runtime role (e.g., 'api-server', 'worker', 'data-pipeline', 'tooling')
+    )
     domain_confidence: float = 0.0  # Classification confidence 0.0-1.0
     domain_classification_reason: str = ""  # Human-readable reason for classification
 
@@ -42,7 +48,9 @@ class Endpoint(BaseModel):
     handler: str
     file_path: str
     # Enriched metadata (Phase 25)
-    service_family: str = "unknown"  # Service family (e.g., 'python-backend', 'typescript-frontend')
+    service_family: str = (
+        "unknown"  # Service family (e.g., 'python-backend', 'typescript-frontend')
+    )
     domain: str = "unknown"  # Business domain (e.g., 'core-platform', 'ai-services')
     runtime_role: str = "unknown"  # Runtime role (e.g., 'api-server', 'worker')
     auth_type: str = "unknown"  # Authentication type: 'bearer', 'none', 'api-key', 'oauth'
@@ -74,7 +82,7 @@ class VerifyResult(BaseModel):
     status: Literal["ok", "warning", "error"]
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    checked_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    checked_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class ImpactSet(BaseModel):
@@ -99,9 +107,19 @@ class RepositorySnapshot(BaseModel):
 
 
 # Common API page prefixes that are not service families
-_API_COMMON_PREFIXES: frozenset[str] = frozenset({
-    "auth", "authentication", "error", "health", "core", "data", "admin", "status", "convention",
-})
+_API_COMMON_PREFIXES: frozenset[str] = frozenset(
+    {
+        "auth",
+        "authentication",
+        "error",
+        "health",
+        "core",
+        "data",
+        "admin",
+        "status",
+        "convention",
+    }
+)
 
 
 def extract_service_family_from_page_id(page_id: str) -> str | None:

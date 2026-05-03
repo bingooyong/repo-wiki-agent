@@ -30,7 +30,7 @@ import hashlib
 import json
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -71,8 +71,15 @@ REQUIRED_FILES = [
 
 # Required sections (at least these must be present)
 REQUIRED_SECTIONS = [
-    "project", "architecture", "services", "data-model",
-    "api", "operations", "development", "security", "troubleshooting"
+    "project",
+    "architecture",
+    "services",
+    "data-model",
+    "api",
+    "operations",
+    "development",
+    "security",
+    "troubleshooting",
 ]
 
 # Supported schema versions
@@ -83,17 +90,17 @@ CURRENT_SCHEMA_VERSION = "1.0"
 
 # Freshness thresholds (in days)
 FRESSHNESS_THRESHOLDS = {
-    "strict": 7,        # 7 days for strict profile
-    "transitional": 30, # 30 days for transitional profile
-    "pilot": 90,        # 90 days for pilot profile
+    "strict": 7,  # 7 days for strict profile
+    "transitional": 30,  # 30 days for transitional profile
+    "pilot": 90,  # 90 days for pilot profile
 }
 
 # Confidence score thresholds (0.0 - 1.0)
 CONFIDENCE_THRESHOLDS = {
-    "high": 0.90,       # >= 90% confidence
-    "medium": 0.70,     # >= 70% confidence
-    "low": 0.50,        # >= 50% confidence
-    "unacceptable": 0.0 # below 50%
+    "high": 0.90,  # >= 90% confidence
+    "medium": 0.70,  # >= 70% confidence
+    "low": 0.50,  # >= 50% confidence
+    "unacceptable": 0.0,  # below 50%
 }
 
 # Maximum acceptable age for fixtures by profile (days)
@@ -107,6 +114,7 @@ MAX_FIXTURE_AGE = {
 @dataclass
 class DiagnosticMessage:
     """Represents a diagnostic message for fixture validation."""
+
     error: IngestionError
     field_path: str
     message: str
@@ -126,6 +134,7 @@ class DiagnosticMessage:
 @dataclass
 class FixtureIntegrity:
     """Integrity information for a fixture."""
+
     content_hash: str
     structure_hash: str
     file_count: int
@@ -143,6 +152,7 @@ class FixtureIntegrity:
 @dataclass
 class FixtureMetadata:
     """Metadata for a qoder fixture snapshot."""
+
     schema_version: str
     repository_name: str
     repository_type: str
@@ -170,6 +180,7 @@ class FixtureMetadata:
 @dataclass
 class FixtureManifest:
     """Complete fixture manifest with metadata and integrity."""
+
     metadata: FixtureMetadata
     integrity: FixtureIntegrity
     status: FixtureStatus
@@ -218,47 +229,55 @@ class FixtureSchemaValidator:
         metadata_path = self.fixture_root / "fixture_metadata.json"
 
         if not metadata_path.exists():
-            self.diagnostics.append(DiagnosticMessage(
-                error=IngestionError.MISSING_REQUIRED_FILE,
-                field_path="fixture_metadata.json",
-                message="fixture_metadata.json not found in fixture root",
-                severity="ERROR",
-            ))
+            self.diagnostics.append(
+                DiagnosticMessage(
+                    error=IngestionError.MISSING_REQUIRED_FILE,
+                    field_path="fixture_metadata.json",
+                    message="fixture_metadata.json not found in fixture root",
+                    severity="ERROR",
+                )
+            )
             return False
 
         try:
-            with open(metadata_path, "r", encoding="utf-8") as f:
+            with open(metadata_path, encoding="utf-8") as f:
                 metadata = json.load(f)
         except json.JSONDecodeError as e:
-            self.diagnostics.append(DiagnosticMessage(
-                error=IngestionError.MALFORMED,
-                field_path="fixture_metadata.json",
-                message=f"Invalid JSON in fixture_metadata.json: {e}",
-                severity="ERROR",
-            ))
+            self.diagnostics.append(
+                DiagnosticMessage(
+                    error=IngestionError.MALFORMED,
+                    field_path="fixture_metadata.json",
+                    message=f"Invalid JSON in fixture_metadata.json: {e}",
+                    severity="ERROR",
+                )
+            )
             return False
 
         # Check required fields
         for field_name in REQUIRED_METADATA_FIELDS:
             if field_name not in metadata:
-                self.diagnostics.append(DiagnosticMessage(
-                    error=IngestionError.MISSING_REQUIRED_FIELD,
-                    field_path=f"metadata.{field_name}",
-                    message=f"Required field '{field_name}' is missing from metadata",
-                    severity="ERROR",
-                ))
+                self.diagnostics.append(
+                    DiagnosticMessage(
+                        error=IngestionError.MISSING_REQUIRED_FIELD,
+                        field_path=f"metadata.{field_name}",
+                        message=f"Required field '{field_name}' is missing from metadata",
+                        severity="ERROR",
+                    )
+                )
 
         # Check schema version
         if "schema_version" in metadata:
             schema_version = metadata["schema_version"]
             if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-                self.diagnostics.append(DiagnosticMessage(
-                    error=IngestionError.UNSUPPORTED_SCHEMA_VERSION,
-                    field_path="metadata.schema_version",
-                    message=f"Schema version '{schema_version}' is not supported. Supported: {SUPPORTED_SCHEMA_VERSIONS}",
-                    severity="ERROR",
-                    context={"supported_versions": SUPPORTED_SCHEMA_VERSIONS},
-                ))
+                self.diagnostics.append(
+                    DiagnosticMessage(
+                        error=IngestionError.UNSUPPORTED_SCHEMA_VERSION,
+                        field_path="metadata.schema_version",
+                        message=f"Schema version '{schema_version}' is not supported. Supported: {SUPPORTED_SCHEMA_VERSIONS}",
+                        severity="ERROR",
+                        context={"supported_versions": SUPPORTED_SCHEMA_VERSIONS},
+                    )
+                )
                 return False
 
         return len([d for d in self.diagnostics if d.severity == "ERROR"]) == 0
@@ -269,12 +288,14 @@ class FixtureSchemaValidator:
         for required_file in REQUIRED_FILES:
             file_path = self.fixture_root / required_file
             if not file_path.exists():
-                self.diagnostics.append(DiagnosticMessage(
-                    error=IngestionError.MISSING_REQUIRED_FILE,
-                    field_path=required_file,
-                    message=f"Required file '{required_file}' is missing",
-                    severity="ERROR",
-                ))
+                self.diagnostics.append(
+                    DiagnosticMessage(
+                        error=IngestionError.MISSING_REQUIRED_FILE,
+                        field_path=required_file,
+                        message=f"Required file '{required_file}' is missing",
+                        severity="ERROR",
+                    )
+                )
                 all_present = False
 
         return all_present
@@ -284,12 +305,14 @@ class FixtureSchemaValidator:
         sections_dir = self.fixture_root / "docs/sections"
 
         if not sections_dir.exists():
-            self.diagnostics.append(DiagnosticMessage(
-                error=IngestionError.MISSING_REQUIRED_FILE,
-                field_path="docs/sections",
-                message="docs/sections directory is missing",
-                severity="ERROR",
-            ))
+            self.diagnostics.append(
+                DiagnosticMessage(
+                    error=IngestionError.MISSING_REQUIRED_FILE,
+                    field_path="docs/sections",
+                    message="docs/sections directory is missing",
+                    severity="ERROR",
+                )
+            )
             return False
 
         # Check for required sections
@@ -303,13 +326,15 @@ class FixtureSchemaValidator:
 
         missing_sections = [s for s in REQUIRED_SECTIONS if s not in present_sections]
         if missing_sections:
-            self.diagnostics.append(DiagnosticMessage(
-                error=IngestionError.MISSING_REQUIRED_FILE,
-                field_path="docs/sections/*",
-                message=f"Missing required sections: {', '.join(missing_sections)}",
-                severity="WARNING",
-                context={"missing": missing_sections, "present": sorted(present_sections)},
-            ))
+            self.diagnostics.append(
+                DiagnosticMessage(
+                    error=IngestionError.MISSING_REQUIRED_FILE,
+                    field_path="docs/sections/*",
+                    message=f"Missing required sections: {', '.join(missing_sections)}",
+                    severity="WARNING",
+                    context={"missing": missing_sections, "present": sorted(present_sections)},
+                )
+            )
 
         return True
 
@@ -392,8 +417,13 @@ class PathNormalizer:
         }
 
         # Normalize overview files
-        for filename in ["00-overview.md", "01-architecture.md", "03-module-map.md",
-                         "04-api-contracts.md", "05-data-model.md"]:
+        for filename in [
+            "00-overview.md",
+            "01-architecture.md",
+            "03-module-map.md",
+            "04-api-contracts.md",
+            "05-data-model.md",
+        ]:
             file_path = docs_dir / filename
             if file_path.exists():
                 normalized["overview_files"].append(filename)
@@ -427,14 +457,16 @@ class FreshnessValidator:
                 generated_dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
             else:
                 generated_dt = datetime.fromisoformat(generated_at)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             age = (now - generated_dt).days
             return max(0, age)  # Non-negative
         except (ValueError, TypeError):
             return 999  # Unparseable dates treated as stale
 
     @staticmethod
-    def get_freshness_status(generated_at: str, profile: str = "transitional") -> tuple[str, int, bool]:
+    def get_freshness_status(
+        generated_at: str, profile: str = "transitional"
+    ) -> tuple[str, int, bool]:
         """Check if fixture is fresh enough for the given profile.
 
         Returns:
@@ -537,8 +569,7 @@ class ConfidenceScorer:
 
     @staticmethod
     def get_release_gate_decision(
-        manifest: FixtureManifest,
-        profile: str = "transitional"
+        manifest: FixtureManifest, profile: str = "transitional"
     ) -> dict[str, Any]:
         """Determine release gate decision based on fixture confidence.
 
@@ -556,7 +587,7 @@ class ConfidenceScorer:
 
         # Check status
         if manifest.status == FixtureStatus.INVALID:
-            rejection_reasons.append(f"Fixture status is INVALID")
+            rejection_reasons.append("Fixture status is INVALID")
 
         # Check freshness
         if not freshness_usable:
@@ -616,9 +647,7 @@ class FixtureIngestion:
         # Determine status
         if is_valid and not diagnostics:
             status = FixtureStatus.VALID
-        elif is_valid and any(d.severity == "WARNING" for d in diagnostics):
-            status = FixtureStatus.PARTIAL
-        elif diagnostics and all(d.severity == "WARNING" for d in diagnostics):
+        elif is_valid and any(d.severity == "WARNING" for d in diagnostics) or diagnostics and all(d.severity == "WARNING" for d in diagnostics):
             status = FixtureStatus.PARTIAL
         else:
             status = FixtureStatus.INVALID
@@ -647,7 +676,7 @@ class FixtureIngestion:
             )
 
         try:
-            with open(metadata_path, "r", encoding="utf-8") as f:
+            with open(metadata_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             return FixtureMetadata(
@@ -703,20 +732,22 @@ class FixtureIngestion:
                     lines.append(f"- **Context:** `{json.dumps(diag.context, ensure_ascii=False)}`")
                 lines.append("")
 
-        lines.extend([
-            "---",
-            "",
-            "## Integrity Information",
-            "",
-            f"- **Content Hash:** `{manifest.integrity.content_hash}`",
-            f"- **Structure Hash:** `{manifest.integrity.structure_hash}`",
-            f"- **File Count:** {manifest.integrity.file_count}",
-            f"- **Total Chars:** {manifest.integrity.total_chars:,}",
-            "",
-            "## Normalized Paths",
-            "",
-            f"- **Root:** `{manifest.normalized_path}`",
-        ])
+        lines.extend(
+            [
+                "---",
+                "",
+                "## Integrity Information",
+                "",
+                f"- **Content Hash:** `{manifest.integrity.content_hash}`",
+                f"- **Structure Hash:** `{manifest.integrity.structure_hash}`",
+                f"- **File Count:** {manifest.integrity.file_count}",
+                f"- **Total Chars:** {manifest.integrity.total_chars:,}",
+                "",
+                "## Normalized Paths",
+                "",
+                f"- **Root:** `{manifest.normalized_path}`",
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -734,7 +765,7 @@ def create_fixture_metadata(
         "schema_version": CURRENT_SCHEMA_VERSION,
         "repository_name": repository_name,
         "repository_type": repository_type,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "generator_version": generator_version,
         "language": language,
         "complexity_score": complexity_score,
@@ -746,17 +777,31 @@ def create_fixture_metadata(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Qoder fixture ingestion and validation tool")
     parser.add_argument("--fixture", type=Path, required=True, help="Path to fixture directory")
-    parser.add_argument("--validate-only", action="store_true", help="Only validate, don't produce output")
+    parser.add_argument(
+        "--validate-only", action="store_true", help="Only validate, don't produce output"
+    )
     parser.add_argument("--output", type=Path, help="Output path for normalized fixture manifest")
-    parser.add_argument("--create-metadata", action="store_true",
-                       help="Create sample fixture_metadata.json in fixture directory")
+    parser.add_argument(
+        "--create-metadata",
+        action="store_true",
+        help="Create sample fixture_metadata.json in fixture directory",
+    )
     parser.add_argument("--repo-name", default="unknown", help="Repository name for metadata")
     parser.add_argument("--repo-type", default="unknown", help="Repository type for metadata")
-    parser.add_argument("--generator-version", default="unknown", help="Generator version for metadata")
-    parser.add_argument("--profile", choices=["strict", "transitional", "pilot"], default="transitional",
-                       help="Profile for freshness validation (strict/transitional/pilot)")
-    parser.add_argument("--check-confidence", action="store_true",
-                       help="Run release gate confidence check and exit with code based on approval")
+    parser.add_argument(
+        "--generator-version", default="unknown", help="Generator version for metadata"
+    )
+    parser.add_argument(
+        "--profile",
+        choices=["strict", "transitional", "pilot"],
+        default="transitional",
+        help="Profile for freshness validation (strict/transitional/pilot)",
+    )
+    parser.add_argument(
+        "--check-confidence",
+        action="store_true",
+        help="Run release gate confidence check and exit with code based on approval",
+    )
 
     args = parser.parse_args()
 
@@ -783,18 +828,20 @@ def main() -> int:
     # Confidence check for release gates
     if args.check_confidence:
         decision = ConfidenceScorer.get_release_gate_decision(manifest, args.profile)
-        print(f"\n=== Release Gate Decision ===")
+        print("\n=== Release Gate Decision ===")
         print(f"Profile: {decision['profile']}")
         print(f"Decision: {decision['decision']}")
-        print(f"Confidence Score: {decision['confidence_score']:.3f} ({decision['confidence_level']})")
+        print(
+            f"Confidence Score: {decision['confidence_score']:.3f} ({decision['confidence_level']})"
+        )
         print(f"Freshness Status: {decision['freshness_status']} ({decision['age_days']} days old)")
 
-        if decision['rejection_reasons']:
-            print(f"\nRejection Reasons:")
-            for reason in decision['rejection_reasons']:
+        if decision["rejection_reasons"]:
+            print("\nRejection Reasons:")
+            for reason in decision["rejection_reasons"]:
                 print(f"  - {reason}")
 
-        if decision['is_approved']:
+        if decision["is_approved"]:
             print(f"\nFixture APPROVED for {args.profile} release gate.")
             return 0
         else:

@@ -17,15 +17,11 @@ Key features:
 from __future__ import annotations
 
 import sqlite3
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import Enum
 from pathlib import Path
-from typing import Any
 
 from repo_wiki.orchestration.generation_state import GenerationStateMachine, RunState
-
 
 # =============================================================================
 # PROVIDER PRICING (per 1M tokens as of 2024)
@@ -97,9 +93,11 @@ def get_pricing(provider: str, model: str) -> tuple[float, float]:
 # COST ESTIMATION
 # =============================================================================
 
+
 @dataclass
 class CostEstimate:
     """Cost estimation for a generation operation."""
+
     run_id: str
     provider: str
     model: str
@@ -118,6 +116,7 @@ class CostEstimate:
 @dataclass
 class PageCostEstimate:
     """Cost estimation for a single page."""
+
     run_id: str
     doc_slug: str
     provider: str
@@ -130,6 +129,7 @@ class PageCostEstimate:
 @dataclass
 class PagePlanCostInput:
     """Lightweight page-plan inputs used for run-level cost estimates."""
+
     page_id: str
     estimated_prompt_tokens: int = 0
     estimated_completion_tokens: int = 0
@@ -138,6 +138,7 @@ class PagePlanCostInput:
 @dataclass
 class BudgetGateDecision:
     """Decision payload returned by budget gate checks."""
+
     allowed: bool
     overridden: bool
     estimate: CostEstimate
@@ -315,7 +316,9 @@ class GenerationCostEstimator:
         total_prompt_tokens = 0
         total_completion_tokens = 0
         for page in pages:
-            total_prompt_tokens += max(0, page.estimated_prompt_tokens) + max(0, prompt_tokens_per_page_overhead)
+            total_prompt_tokens += max(0, page.estimated_prompt_tokens) + max(
+                0, prompt_tokens_per_page_overhead
+            )
             total_completion_tokens += (
                 max(0, page.estimated_completion_tokens)
                 if page.estimated_completion_tokens > 0
@@ -371,8 +374,16 @@ class GenerationCostEstimator:
                     total_tokens = total_tokens + excluded.total_tokens,
                     cost_usd = cost_usd + excluded.cost_usd
                 """,
-                (run_id, provider, model, prompt_tokens, completion_tokens,
-                 prompt_tokens + completion_tokens, cost, datetime.now(UTC).isoformat()),
+                (
+                    run_id,
+                    provider,
+                    model,
+                    prompt_tokens,
+                    completion_tokens,
+                    prompt_tokens + completion_tokens,
+                    cost,
+                    datetime.now(UTC).isoformat(),
+                ),
             )
             conn.commit()
         finally:
@@ -520,7 +531,12 @@ class BudgetGate:
                 SET state = ?, completed_at = ?, error_message = ?
                 WHERE run_id = ?
                 """,
-                (RunState.FAILED.value, datetime.now(UTC).isoformat(), decision.message or "Budget exceeded", run_id),
+                (
+                    RunState.FAILED.value,
+                    datetime.now(UTC).isoformat(),
+                    decision.message or "Budget exceeded",
+                    run_id,
+                ),
             )
             conn.commit()
         finally:
@@ -592,7 +608,9 @@ class BudgetGate:
         Returns:
             True if allowed
         """
-        budget = page_budget_override or (self.default_budget_usd * 0.1)  # 10% of run budget per page
+        budget = page_budget_override or (
+            self.default_budget_usd * 0.1
+        )  # 10% of run budget per page
         return page_estimate.estimated_cost_usd <= budget
 
 

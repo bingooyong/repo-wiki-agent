@@ -4,18 +4,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any
 
 from repo_wiki.llm.config import LLMProviderConfig, ValidationReason
 from repo_wiki.llm.models import (
     ChatRequest,
     ChatResponse,
-    ErrorCode,
-    LLMError,
     LLMProvider,
-    NonRetryableError,
     ProviderCapabilities,
-    RetryableError,
 )
 
 
@@ -35,7 +30,9 @@ class MockLLMProvider(LLMProvider):
     Supports configurable responses, error simulation, and delay.
     """
 
-    def __init__(self, config: LLMProviderConfig, mock_response: MockResponse | None = None) -> None:
+    def __init__(
+        self, config: LLMProviderConfig, mock_response: MockResponse | None = None
+    ) -> None:
         """Initialize mock provider.
 
         Args:

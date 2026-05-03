@@ -231,15 +231,25 @@ class QoderLikeVerifierService(VerifierService):
             return self._skip_check("citation-relevance", "No markdown pages")
 
         # Pattern to extract citation paths and optional symbols
-        cite_pattern = re.compile(r'<cite>\s*([^<>:]+):[0-9]+(?:-[0-9]+)?\s*(?:\([^)]+\))?\s*</cite>')
+        cite_pattern = re.compile(
+            r"<cite>\s*([^<>:]+):[0-9]+(?:-[0-9]+)?\s*(?:\([^)]+\))?\s*</cite>"
+        )
 
         mismatches: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
 
         # Known shared infrastructure paths that could appear in multiple services
         SHARED_INFRA_PATTERNS = [
-            "shared/", "common/", "lib/", "utils/", "base/", "core/",
-            "vendor/", "deps/", "external/", "third_party/",
+            "shared/",
+            "common/",
+            "lib/",
+            "utils/",
+            "base/",
+            "core/",
+            "vendor/",
+            "deps/",
+            "external/",
+            "third_party/",
         ]
 
         # Map page filename keywords to expected service/module patterns
@@ -273,8 +283,7 @@ class QoderLikeVerifierService(VerifierService):
 
                 # Check for shared infrastructure - these get a WARN not FAIL
                 is_shared = any(
-                    shared_pattern in cite_path_lower
-                    for shared_pattern in SHARED_INFRA_PATTERNS
+                    shared_pattern in cite_path_lower for shared_pattern in SHARED_INFRA_PATTERNS
                 )
 
                 # Determine expected service for this page
@@ -303,18 +312,22 @@ class QoderLikeVerifierService(VerifierService):
                             break
 
                 if wrong_service_evidence:
-                    mismatches.append({
-                        "page": page.name,
-                        "citation": cite_path,
-                        "expected_service": page_service,
-                        "reason": "citation path indicates different service",
-                    })
+                    mismatches.append(
+                        {
+                            "page": page.name,
+                            "citation": cite_path,
+                            "expected_service": page_service,
+                            "reason": "citation path indicates different service",
+                        }
+                    )
                 elif is_shared:
-                    warnings.append({
-                        "page": page.name,
-                        "citation": cite_path,
-                        "reason": "shared infrastructure citation",
-                    })
+                    warnings.append(
+                        {
+                            "page": page.name,
+                            "citation": cite_path,
+                            "reason": "shared infrastructure citation",
+                        }
+                    )
 
         if mismatches:
             return CheckResult(
@@ -362,7 +375,10 @@ class QoderLikeVerifierService(VerifierService):
                 content = read_text(f)
             except Exception:
                 continue
-            if re.search(r"^#{1,6}\s+(Table of Contents|目录|Contents|TOC)", content, re.MULTILINE) or "[TOC]" in content:
+            if (
+                re.search(r"^#{1,6}\s+(Table of Contents|目录|Contents|TOC)", content, re.MULTILINE)
+                or "[TOC]" in content
+            ):
                 pages_with_toc += 1
 
         ratio = pages_with_toc / len(md_files)
@@ -561,7 +577,11 @@ class QoderLikeVerifierService(VerifierService):
         content_dir = self._find_content_dir()
         if not content_dir:
             return self._skip_check("endpoint-pages", "No content directory")
-        api_dirs = [path for path in (content_dir / "pages" / "api", content_dir / "API参考") if path.exists()]
+        api_dirs = [
+            path
+            for path in (content_dir / "pages" / "api", content_dir / "API参考")
+            if path.exists()
+        ]
         if not api_dirs:
             return self._skip_check("endpoint-pages", "No API directory")
         method_pattern = re.compile(r"^(get|post|put|patch|delete|options|head)-", re.IGNORECASE)
@@ -593,7 +613,11 @@ class QoderLikeVerifierService(VerifierService):
         content_dir = self._find_content_dir()
         if not content_dir:
             return self._skip_check("raw-model-pages", "No content directory")
-        model_dirs = [path for path in (content_dir / "pages" / "data-models", content_dir / "数据模型") if path.exists()]
+        model_dirs = [
+            path
+            for path in (content_dir / "pages" / "data-models", content_dir / "数据模型")
+            if path.exists()
+        ]
         if not model_dirs:
             return self._skip_check("raw-model-pages", "No data-model directory")
         allowed_keywords = {
@@ -810,7 +834,12 @@ class QoderLikeVerifierService(VerifierService):
                 continue
             if in_code_block:
                 continue
-            if stripped.startswith("#") or stripped.startswith("-") or stripped.startswith("*") or stripped.startswith("|"):
+            if (
+                stripped.startswith("#")
+                or stripped.startswith("-")
+                or stripped.startswith("*")
+                or stripped.startswith("|")
+            ):
                 continue
             prose_lines.append(stripped)
         return len(" ".join(prose_lines))
@@ -850,7 +879,12 @@ class QoderLikeVerifierService(VerifierService):
         return None
 
     def _manifest_commit(self, root: Path) -> str | None:
-        candidates = [root / "manifest.json", root.parent / "manifest.json", root / "meta.json", root / "metadata.json"]
+        candidates = [
+            root / "manifest.json",
+            root.parent / "manifest.json",
+            root / "meta.json",
+            root / "metadata.json",
+        ]
         for path in candidates:
             if not path.exists() or not path.is_file():
                 continue
@@ -860,7 +894,13 @@ class QoderLikeVerifierService(VerifierService):
                 continue
             if not isinstance(payload, dict):
                 continue
-            for key in ("wiki_git_commit", "target_git_commit", "commit_hash", "git_commit", "commit"):
+            for key in (
+                "wiki_git_commit",
+                "target_git_commit",
+                "commit_hash",
+                "git_commit",
+                "commit",
+            ):
                 value = payload.get(key)
                 if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{7,40}", value):
                     return value

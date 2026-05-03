@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import tempfile
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -13,8 +10,6 @@ from scripts.qoder_governance_dashboard import (
     GovernanceDB,
     GovernanceMetric,
     TrendAnalyzer,
-    TrendData,
-    SQLITE_AVAILABLE,
 )
 
 
@@ -30,7 +25,7 @@ class TestQualityTrendPersistence:
         db.init_schema()
 
         # Insert metrics over 7 days
-        base_date = datetime.now(timezone.utc)
+        base_date = datetime.now(UTC)
         scores = [0.50, 0.52, 0.55, 0.54, 0.58, 0.60, 0.62]
 
         for i, score in enumerate(scores):
@@ -47,7 +42,7 @@ class TestQualityTrendPersistence:
                 total_gaps=10 - i,
                 critical_gaps=max(0, 3 - i),
                 major_gaps=max(0, 4 - i),
-                benchmark_date=(base_date - timedelta(days=6-i)).isoformat(),
+                benchmark_date=(base_date - timedelta(days=6 - i)).isoformat(),
                 fixture_hash=f"hash_{i}",
             )
             db.insert_metric(metric)
@@ -96,7 +91,7 @@ class TestQualityTrendPersistence:
         db.init_schema()
 
         # Insert stable metrics
-        base_date = datetime.now(timezone.utc)
+        base_date = datetime.now(UTC)
         for i in range(5):
             metric = GovernanceMetric(
                 repository_name="stable-repo",
@@ -111,7 +106,7 @@ class TestQualityTrendPersistence:
                 total_gaps=5,
                 critical_gaps=0,
                 major_gaps=1,
-                benchmark_date=(base_date - timedelta(days=4-i)).isoformat(),
+                benchmark_date=(base_date - timedelta(days=4 - i)).isoformat(),
                 fixture_hash=f"hash_{i}",
             )
             db.insert_metric(metric)
@@ -189,7 +184,7 @@ class TestMultiRepoTrends:
         db.connect()
         db.init_schema()
 
-        base_date = datetime.now(timezone.utc)
+        base_date = datetime.now(UTC)
 
         # Repository 1 - improving
         for i in range(5):
@@ -206,7 +201,7 @@ class TestMultiRepoTrends:
                 total_gaps=5 - i,
                 critical_gaps=1,
                 major_gaps=2,
-                benchmark_date=(base_date - timedelta(days=4-i)).isoformat(),
+                benchmark_date=(base_date - timedelta(days=4 - i)).isoformat(),
                 fixture_hash=f"alpha_{i}",
             )
             db.insert_metric(metric)
@@ -226,7 +221,7 @@ class TestMultiRepoTrends:
                 total_gaps=2 + i,
                 critical_gaps=0,
                 major_gaps=1,
-                benchmark_date=(base_date - timedelta(days=4-i)).isoformat(),
+                benchmark_date=(base_date - timedelta(days=4 - i)).isoformat(),
                 fixture_hash=f"beta_{i}",
             )
             db.insert_metric(metric)
@@ -298,7 +293,7 @@ class TestTrendPersistenceEdgeCases:
             total_gaps=3,
             critical_gaps=0,
             major_gaps=1,
-            benchmark_date=datetime.now(timezone.utc).isoformat(),
+            benchmark_date=datetime.now(UTC).isoformat(),
             fixture_hash="single_hash",
         )
         db.insert_metric(metric)
@@ -334,7 +329,7 @@ class TestTrendPersistenceEdgeCases:
         ]
         scores = [0.50, 0.60, 0.70]
 
-        for date, score in zip(dates, scores):
+        for date, score in zip(dates, scores, strict=False):
             metric = GovernanceMetric(
                 repository_name="sparse-repo",
                 repository_path="/path/to/sparse",

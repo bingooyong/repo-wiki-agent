@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 

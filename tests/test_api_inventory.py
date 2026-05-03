@@ -12,7 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from repo_wiki.core.config import RepoWikiConfig
-from repo_wiki.core.contracts import Endpoint
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 
 

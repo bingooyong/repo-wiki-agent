@@ -4,10 +4,9 @@ These tests validate that narrative content is repository-specific rather
 than overly generic or template-based boilerplate.
 """
 
-import pytest
 from repo_wiki.generator.contracts import (
-    validate_narrative_not_generic,
     validate_architecture_rationale_exists,
+    validate_narrative_not_generic,
     validate_overview_has_repository_specifics,
 )
 
@@ -135,7 +134,9 @@ class TestOverviewRepositorySpecifics:
         系统提供自动化文档生成能力。
         """
 
-        is_valid, reason = validate_overview_has_repository_specifics(content_without_name, "repo-agent")
+        is_valid, reason = validate_overview_has_repository_specifics(
+            content_without_name, "repo-agent"
+        )
         assert not is_valid, f"Should reject content without repo name: {reason}"
 
     def test_accepts_content_with_repo_name(self):
@@ -145,7 +146,9 @@ class TestOverviewRepositorySpecifics:
         系统提供多 Agent 协调和任务分发能力。
         """
 
-        is_valid, reason = validate_overview_has_repository_specifics(content_with_name, "repo-agent")
+        is_valid, reason = validate_overview_has_repository_specifics(
+            content_with_name, "repo-agent"
+        )
         assert is_valid, f"Should accept content with repo name: {reason}"
 
     def test_case_insensitive_repo_name_check(self):
@@ -187,7 +190,9 @@ class TestNarrativeBuilderIntegration:
 
         # Should detect knowledge management signals
         assert builder.is_knowledge_management_system, "Should detect knowledge management signals"
-        assert not builder.is_document_generation_system, "Should not detect doc gen without signals"
+        assert (
+            not builder.is_document_generation_system
+        ), "Should not detect doc gen without signals"
 
     def test_narrative_builder_derives_document_generation_signals(self):
         """Test that NarrativeBuilder correctly identifies document generation systems."""
@@ -234,12 +239,8 @@ class TestNarrativeBuilderIntegration:
                     "responsibility": "Code scanning",
                 }
             ],
-            endpoints=[
-                {"module": "api", "method": "GET", "path": "/status"}
-            ],
-            models=[
-                {"name": "Repository", "module": "core", "type": "dataclass"}
-            ],
+            endpoints=[{"module": "api", "method": "GET", "path": "/status"}],
+            models=[{"name": "Repository", "module": "core", "type": "dataclass"}],
             commands={"scan": "repo-wiki scan"},
         )
 

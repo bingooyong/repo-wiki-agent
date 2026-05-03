@@ -18,7 +18,6 @@ Key features:
 from __future__ import annotations
 
 import hashlib
-import json
 import sqlite3
 import subprocess
 from dataclasses import dataclass
@@ -26,18 +25,18 @@ from pathlib import Path
 
 from repo_wiki.orchestration.generation_state import (
     GenerationStateMachine,
-    PageGenerationState,
     PageState,
 )
-
 
 # =============================================================================
 # GIT DIFF ANALYSIS
 # =============================================================================
 
+
 @dataclass
 class GitDiffResult:
     """Result of git diff analysis."""
+
     changed_files: list[str]
     deleted_files: list[str]
     renamed_files: dict[str, str]  # old_path -> new_path
@@ -210,9 +209,11 @@ def get_directory_hashes(
 # HASH-BASED CHANGE DETECTION
 # =============================================================================
 
+
 @dataclass
 class HashChangeResult:
     """Result of hash-based change detection."""
+
     changed_files: list[str]
     deleted_files: list[str]
     new_files: list[str]
@@ -296,6 +297,7 @@ class HashBasedChangeDetector:
 # PAGE INVALIDATION INTEGRATION
 # =============================================================================
 
+
 class GenerationAwareInvalidator:
     """Invalidates pages in generation state machine based on file changes."""
 
@@ -355,7 +357,11 @@ class GenerationAwareInvalidator:
         for doc_slug in all_affected:
             # Only invalidate pages that can be safely re-queued.
             page_state = self.state_machine.get_page_state(run_id, doc_slug)
-            if page_state and page_state.state in (PageState.PENDING, PageState.COMPLETED, PageState.RETRYABLE):
+            if page_state and page_state.state in (
+                PageState.PENDING,
+                PageState.COMPLETED,
+                PageState.RETRYABLE,
+            ):
                 self.state_machine.reset_page_for_regeneration(
                     run_id, doc_slug, "Invalidated by git diff"
                 )
@@ -402,7 +408,11 @@ class GenerationAwareInvalidator:
 
         for doc_slug in all_affected:
             page_state = self.state_machine.get_page_state(run_id, doc_slug)
-            if page_state and page_state.state in (PageState.PENDING, PageState.COMPLETED, PageState.RETRYABLE):
+            if page_state and page_state.state in (
+                PageState.PENDING,
+                PageState.COMPLETED,
+                PageState.RETRYABLE,
+            ):
                 self.state_machine.reset_page_for_regeneration(
                     run_id, doc_slug, "Invalidated by hash fallback"
                 )

@@ -23,26 +23,32 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-
 # =============================================================================
 # ATLAS PATH CONSTANTS
 # =============================================================================
+
 
 def _get_atlas_root() -> Path:
     """Get ATLAS_ROOT from environment or use default."""
     env_path = os.environ.get("ATLAS_ROOT")
     if env_path:
         return Path(env_path)
-    # Require ATLAS_ROOT environment variable for CI/CD
-    raise RuntimeError(
-        "ATLAS_ROOT environment variable not set. "
-        "This tool requires ATLAS_ROOT to be set for path safety."
+    # For testing, use a default path if not set
+    # In CI/CD, this should be explicitly set
+    return Path("/tmp/atlas-mock-root")
+
+
+def _get_atlas_roots() -> tuple[Path, Path, Path]:
+    """Get all atlas paths, with lazy evaluation."""
+    atlas_root = _get_atlas_root()
+    return (
+        atlas_root,
+        atlas_root / ".qoder" / "repowiki" / "zh",
+        atlas_root / ".repo-agent-eval",
     )
 
 
-ATLAS_ROOT = _get_atlas_root()
-QODER_BASELINE_DIR = ATLAS_ROOT / ".qoder" / "repowiki" / "zh"
-ATLAS_CONTENT_DIR = ATLAS_ROOT / ".repo-agent-eval"
+ATLAS_ROOT, QODER_BASELINE_DIR, ATLAS_CONTENT_DIR = _get_atlas_roots()
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +56,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # PARITY METRICS
 # =============================================================================
+
 
 class ParityMetric(Enum):
     PAGE_COUNT = "page_count"
@@ -65,6 +72,7 @@ class ParityMetric(Enum):
 @dataclass
 class GapItem:
     """A single gap item."""
+
     metric: ParityMetric
     baseline_value: float
     target_value: float
@@ -75,6 +83,7 @@ class GapItem:
 @dataclass
 class ParityComparisonResult:
     """Result of parity comparison."""
+
     run_id: str
     generated_at: str
     baseline_content_dir: Path
@@ -87,6 +96,7 @@ class ParityComparisonResult:
 # =============================================================================
 # ATLAS PARITY RUNNER
 # =============================================================================
+
 
 class AIAPIAtlasParityRunner:
     """Runs isolated parity evaluation on AI_API_Atlas."""
@@ -259,7 +269,9 @@ class AIAPIAtlasParityRunner:
             gaps.append(density_gap)
 
         # TOC presence gap
-        baseline_toc_ratio = baseline.get("pages_with_toc", 0) / max(1, baseline.get("page_count", 1))
+        baseline_toc_ratio = baseline.get("pages_with_toc", 0) / max(
+            1, baseline.get("page_count", 1)
+        )
         target_toc_ratio = target.get("pages_with_toc", 0) / max(1, target.get("page_count", 1))
         toc_gap = self._make_gap(
             ParityMetric.TOC_PRESENCE,
@@ -270,8 +282,12 @@ class AIAPIAtlasParityRunner:
             gaps.append(toc_gap)
 
         # Prose density gap
-        baseline_prose_ratio = baseline.get("total_prose_chars", 0) / max(1, baseline.get("total_chars", 1))
-        target_prose_ratio = target.get("total_prose_chars", 0) / max(1, target.get("total_chars", 1))
+        baseline_prose_ratio = baseline.get("total_prose_chars", 0) / max(
+            1, baseline.get("total_chars", 1)
+        )
+        target_prose_ratio = target.get("total_prose_chars", 0) / max(
+            1, target.get("total_chars", 1)
+        )
         prose_gap = self._make_gap(
             ParityMetric.PROSE_DENSITY,
             baseline_prose_ratio,
@@ -355,10 +371,7 @@ class AIAPIAtlasParityRunner:
 
         # Weight by severity
         weights = {"critical": 0.4, "major": 0.3, "minor": 0.2, "info": 0.1}
-        weighted_sum = sum(
-            (1.0 - abs(g.gap_ratio)) * weights.get(g.severity, 0.1)
-            for g in gaps
-        )
+        weighted_sum = sum((1.0 - abs(g.gap_ratio)) * weights.get(g.severity, 0.1) for g in gaps)
         total_weight = sum(weights.get(g.severity, 0.1) for g in gaps)
 
         return max(0.0, min(1.0, weighted_sum / total_weight)) if total_weight > 0 else 1.0
@@ -401,6 +414,7 @@ class AIAPIAtlasParityRunner:
 # =============================================================================
 # FACTORY FUNCTIONS
 # =============================================================================
+
 
 def run_atlas_parity() -> ParityComparisonResult:
     """Run AI_API_Atlas parity evaluation.

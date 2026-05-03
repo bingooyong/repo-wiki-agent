@@ -6,7 +6,7 @@ A VS Code extension for browsing repo-agent wiki outputs from a dedicated Activi
 
 1. **安装 `repo-wiki` CLI**：克隆 [repo-agent](https://github.com/bingooyong/repo-agent) 后在该仓库根目录执行 `uv pip install -e .`（或 PyPI 发布后 `pip install repo-wiki`）；需要 Python ≥ 3.11，建议使用 `uv`。
 2. **在目标代码仓库配置 LLM**：根目录添加 `repo-wiki.yaml`，参见仓库内 `docs/operations/llm-provider-configuration.md`。
-3. **生成 Wiki**：在目标仓库执行 `uv run repo-wiki init`、`index`、`generate --profile qoder-like --output .repo-agent-eval`，产出 `.repo-agent-eval/<run>/manifest.json` 与 `content/**`。
+3. **生成并发布 Wiki**：在目标仓库执行 `uv run repo-wiki init`、`index`、`generate --profile qoder-like --output .repo-agent-eval`。候选 run 产出在 `.repo-agent-eval/runs/<run>/repowiki/zh/**`；通过门禁后发布到 `.repo-agent-eval/repowiki/zh/content` 与 `.repo-agent-eval/repowiki/zh/meta`。
 4. **安装本插件**：VSIX「Install from VSIX」，或在本目录 `npm run compile` + `vsce package`。
 5. **浏览**：用编辑器打开该目标仓库 → 活动栏 **Repo Wiki** → 侧栏点文档打开 Markdown 预览。
 6. **更新 Wiki**：侧栏「更新 Wiki」或命令 `Repo Wiki: Update Wiki`，默认终端命令为 `uv run repo-wiki generate --profile qoder-like`（可在设置 `repoWikiBrowser.generateCommand` 修改）。
@@ -16,7 +16,7 @@ A VS Code extension for browsing repo-agent wiki outputs from a dedicated Activi
 ## Features
 
 - **Repo Wiki Activity Bar**: Adds a dedicated Repo Wiki icon in the left Activity Bar.
-- **Qoder-style Sidebar**: Shows run selector, update status, language selector, update/sync actions, and manifest navigation tree.
+- **Qoder-style Sidebar**: Shows the published release, update status, language selector, update/sync actions, and manifest navigation tree.
 - **Rendered Markdown Preview**: Click any wiki item to open VS Code's Markdown preview instead of raw markdown text.
 - **Git Drift Prompt**: Compares current git commit with manifest `wiki_git_commit` / `target_git_commit` and prompts when wiki is stale.
 - **Commands**:
@@ -59,7 +59,7 @@ A VS Code extension for browsing repo-agent wiki outputs from a dedicated Activi
 ## Requirements
 
 - VS Code 1.75.0 or higher
-- A workspace with repo-agent generated wiki content in `.repo-agent-eval/<run>/manifest.json`
+- A workspace with a READY repo-agent release manifest at `.repo-agent-eval/repowiki/zh/manifest.json`
 
 ## CLI environment (generate / update)
 
@@ -90,7 +90,7 @@ extensions/repo-wiki-browser/
 
 1. Open a workspace with repo-agent wiki content
 2. Click the Repo Wiki icon in the Activity Bar
-3. Use the left sidebar to choose latest/target run and browse `navigation_tree`
+3. Use the left sidebar to browse the published release `navigation_tree`
 4. Click on any page to open the rendered Markdown preview
 5. Use commands from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
   - `Repo Wiki: Open Wiki Viewer`
@@ -112,7 +112,7 @@ The extension integrates with:
 - **PATH / CLI**: The extension process does not run `uv` itself; only the integrated terminal does. There is no guaranteed preflight check (extension host PATH often differs from the terminal).
 - Git drift detection depends on manifest `wiki_git_commit` / `target_git_commit` and local git history availability.
 - The language selector is currently UI state only; content localization depends on generated wiki files.
-- If no valid manifest with `navigation_tree` is found, the sidebar only shows generation guidance.
+- If no READY release manifest with `navigation_tree` is found at `.repo-agent-eval/repowiki/zh/manifest.json`, the sidebar only shows generation guidance.
 
 ## Future Enhancements
 

@@ -49,7 +49,6 @@ from repo_wiki.planner.schema import (
     WikiTaxonomyCategory,
 )
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -319,7 +318,9 @@ class TestEndpointFiltering:
             generation_mode=GenerationMode.RULE_FIRST,
         )
         endpoints = generator._get_endpoints_for_page(page_plan)
-        assert all(ep.auth_required or ep.auth_type in ("bearer", "oauth", "api-key") for ep in endpoints)
+        assert all(
+            ep.auth_required or ep.auth_type in ("bearer", "oauth", "api-key") for ep in endpoints
+        )
 
     def test_filter_health_endpoints(self, sample_snapshot):
         """Test filtering health check endpoints."""
@@ -384,7 +385,9 @@ class TestFlowDiagramGeneration:
         # (None if validation failed)
         assert flow_diagram.diagram_plan.diagram_id is not None
 
-    def test_generate_flow_diagram_for_service_family(self, sample_snapshot, python_backend_page_plan):
+    def test_generate_flow_diagram_for_service_family(
+        self, sample_snapshot, python_backend_page_plan
+    ):
         """Test generating flow diagram for service family page."""
         generator = create_api_flow_diagram_generator(sample_snapshot)
         flow_diagram = generator.generate_flow_diagram(python_backend_page_plan)
@@ -507,9 +510,7 @@ class TestSpecializedFlowGenerator:
 class TestConvenienceFunctions:
     """Tests for convenience functions."""
 
-    def test_generate_api_flow_diagram(
-        self, sample_snapshot, health_page_plan
-    ):
+    def test_generate_api_flow_diagram(self, sample_snapshot, health_page_plan):
         """Test the convenience function for generating a single diagram."""
         flow_diagram = generate_api_flow_diagram(
             page_plan=health_page_plan,
@@ -519,9 +520,7 @@ class TestConvenienceFunctions:
         assert flow_diagram is not None
         assert isinstance(flow_diagram, APIFlowDiagram)
 
-    def test_generate_api_flow_diagram_with_evidence_binding(
-        self, sample_snapshot, auth_page_plan
-    ):
+    def test_generate_api_flow_diagram_with_evidence_binding(self, sample_snapshot, auth_page_plan):
         """Test convenience function with evidence binding."""
         span = EvidenceSpanRecord(
             digest="xyz789",
@@ -667,7 +666,8 @@ class TestEdgeCases:
         """Test snapshot where all endpoints require auth."""
         generator = create_api_flow_diagram_generator(sample_snapshot)
         auth_endpoints = [
-            ep for ep in sample_snapshot.endpoints
+            ep
+            for ep in sample_snapshot.endpoints
             if ep.auth_required or ep.auth_type in ("bearer", "oauth", "api-key")
         ]
 

@@ -1,25 +1,23 @@
 """Tests for qoder benchmark matrix and threshold profiles."""
+
 from __future__ import annotations
 
 import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from repo_wiki.generator.io import write_text
 from scripts.qoder_benchmark_matrix import (
+    DEFAULT_THRESHOLDS,
+    THRESHOLD_PROFILES,
     BenchmarkMatrix,
     BenchmarkResult,
-    RepositoryClassifier,
-    RepositoryMetadata,
-    ThresholdProfileGenerator,
-    ScoreDriftDetector,
     Language,
-    RepositorySize,
+    RepositoryClassifier,
     RepositoryComplexity,
-    THRESHOLD_PROFILES,
-    DEFAULT_THRESHOLDS,
+    RepositorySize,
+    ScoreDriftDetector,
+    ThresholdProfileGenerator,
 )
 
 
@@ -34,14 +32,15 @@ def _create_test_fixture(root: Path, name: str = "test-repo") -> None:
         "generator_version": "1.0.0",
     }
     (root / "fixture_metadata.json").write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2),
-        encoding="utf-8"
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     # Create minimal docs structure
     (root / "docs").mkdir(parents=True, exist_ok=True)
 
-    write_text(root / "docs/00-overview.md", """# Overview
+    write_text(
+        root / "docs/00-overview.md",
+        """# Overview
 
 ## 项目定位
 
@@ -54,9 +53,12 @@ We need better docs.
 ## 核心能力
 
 The system can generate docs.
-""")
+""",
+    )
 
-    write_text(root / "docs/01-architecture.md", """# Architecture
+    write_text(
+        root / "docs/01-architecture.md",
+        """# Architecture
 
 ## 系统分层
 
@@ -65,7 +67,8 @@ Three layers.
 ## 服务协作
 
 Services work together.
-""")
+""",
+    )
 
     # Create sections
     (root / "docs/sections").mkdir(parents=True, exist_ok=True)
@@ -141,7 +144,12 @@ class TestThresholdProfileGenerator:
             RepositoryComplexity.LOW,
         )
 
-        assert profile.overall_threshold == THRESHOLD_PROFILES[("python", RepositorySize.SMALL, RepositoryComplexity.LOW)]["overall"]
+        assert (
+            profile.overall_threshold
+            == THRESHOLD_PROFILES[("python", RepositorySize.SMALL, RepositoryComplexity.LOW)][
+                "overall"
+            ]
+        )
         assert profile.description is not None
 
     def test_get_unknown_profile_returns_default(self) -> None:

@@ -176,6 +176,7 @@ CORE_DOCUMENT_CONTRACTS: tuple[DocumentContract, ...] = (
 #   repository-specific topical layers. Aliases are transparent - generation
 #   always uses canonical slugs, but validation recognizes aliases.
 
+
 @dataclass(frozen=True)
 class SectionDefinition:
     """A section definition with optional alias support.
@@ -201,15 +202,29 @@ class SectionDefinition:
 
 SECTION_DEFINITIONS: tuple[SectionDefinition, ...] = (
     SectionDefinition("project", "Project Overview and Getting Started"),
-    SectionDefinition("architecture", "Architecture and System Design", ("q01-architecture", "s01-architecture")),
-    SectionDefinition("services", "Core Services and Business Logic", ("q02-services", "s02-services")),
-    SectionDefinition("python-services", "Python Service Layer", ("q03-python-services", "s03-python-services")),
-    SectionDefinition("data-model", "Data Models and Persistence", ("q04-data-model", "s04-data-model")),
+    SectionDefinition(
+        "architecture", "Architecture and System Design", ("q01-architecture", "s01-architecture")
+    ),
+    SectionDefinition(
+        "services", "Core Services and Business Logic", ("q02-services", "s02-services")
+    ),
+    SectionDefinition(
+        "python-services", "Python Service Layer", ("q03-python-services", "s03-python-services")
+    ),
+    SectionDefinition(
+        "data-model", "Data Models and Persistence", ("q04-data-model", "s04-data-model")
+    ),
     SectionDefinition("api", "API Reference and Contracts", ("q05-api", "s05-api")),
-    SectionDefinition("operations", "Deployment and Operations", ("q06-operations", "s06-operations")),
+    SectionDefinition(
+        "operations", "Deployment and Operations", ("q06-operations", "s06-operations")
+    ),
     SectionDefinition("development", "Development Guide", ("q07-development", "s07-development")),
     SectionDefinition("security", "Security and Compliance", ("q08-security", "s08-security")),
-    SectionDefinition("troubleshooting", "Troubleshooting and Maintenance", ("q09-troubleshooting", "s09-troubleshooting")),
+    SectionDefinition(
+        "troubleshooting",
+        "Troubleshooting and Maintenance",
+        ("q09-troubleshooting", "s09-troubleshooting"),
+    ),
 )
 
 
@@ -306,12 +321,23 @@ def phase_contract(phase_slug: str) -> DocumentContract:
         name=f"phase:{slug}",
         template_path="docs/phase.md.j2",
         output_path=f"docs/phases/{slug}.md",
-        required_keys=("phase_title", "phase_objectives", "phase_deliverables", "phase_dependencies", "phase_status"),
+        required_keys=(
+            "phase_title",
+            "phase_objectives",
+            "phase_deliverables",
+            "phase_dependencies",
+            "phase_status",
+        ),
         layer=DocumentLayer.PHASE,
     )
 
+
 PROMPT_FRAGMENT_CONTRACTS: tuple[DocumentContract, ...] = (
-    DocumentContract("overview_prompt", "prompt-fragments/overview.txt.j2", "ai/source-of-truth/prompt-fragments/overview.txt"),
+    DocumentContract(
+        "overview_prompt",
+        "prompt-fragments/overview.txt.j2",
+        "ai/source-of-truth/prompt-fragments/overview.txt",
+    ),
     DocumentContract(
         "architecture_prompt",
         "prompt-fragments/architecture.txt.j2",
@@ -469,12 +495,18 @@ def validate_overview_prose(content: str) -> tuple[bool, str]:
     prose_text = " ".join(prose_lines)
 
     if len(prose_text) < OVERVIEW_MIN_PROSE_CHARS:
-        return False, f"Overview has only {len(prose_text)} chars of prose, need at least {OVERVIEW_MIN_PROSE_CHARS}"
+        return (
+            False,
+            f"Overview has only {len(prose_text)} chars of prose, need at least {OVERVIEW_MIN_PROSE_CHARS}",
+        )
 
     # Count sections (## headers)
     section_count = sum(1 for line in lines if line.strip().startswith("## "))
     if section_count < OVERVIEW_MIN_SECTIONS:
-        return False, f"Overview has only {section_count} sections, need at least {OVERVIEW_MIN_SECTIONS}"
+        return (
+            False,
+            f"Overview has only {section_count} sections, need at least {OVERVIEW_MIN_SECTIONS}",
+        )
 
     return True, "Overview content passes prose validation"
 
@@ -489,7 +521,14 @@ def validate_overview_not_list_only(content: str) -> tuple[bool, str]:
     # Count list items, table rows, and prose lines
     list_items = sum(1 for l in lines if l.startswith("-"))
     table_rows = sum(1 for l in lines if l.startswith("|"))
-    prose_lines = sum(1 for l in lines if not l.startswith("#") and not l.startswith("-") and not l.startswith("|") and not l.startswith("```"))
+    prose_lines = sum(
+        1
+        for l in lines
+        if not l.startswith("#")
+        and not l.startswith("-")
+        and not l.startswith("|")
+        and not l.startswith("```")
+    )
 
     total_content_lines = list_items + table_rows + prose_lines
     if total_content_lines == 0:
@@ -525,7 +564,10 @@ def validate_architecture_has_mermaid(content: str) -> tuple[bool, str]:
     mermaid_blocks = content.count("```mermaid")
 
     if mermaid_blocks < 2:
-        return False, f"Architecture has only {mermaid_blocks} Mermaid block(s), should have at least 2 for three-layer explanation"
+        return (
+            False,
+            f"Architecture has only {mermaid_blocks} Mermaid block(s), should have at least 2 for three-layer explanation",
+        )
 
     # Check for three-layer explanation
     has_repo_wiki_ref = ".repo-wiki" in content
@@ -549,6 +591,7 @@ def validate_architecture_has_mermaid(content: str) -> tuple[bool, str]:
 # =============================================================================
 # VALIDATION HELPERS (Phase 06 - Architecture contract)
 # =============================================================================
+
 
 def validate_architecture_not_module_enum(content: str) -> tuple[bool, str]:
     """Validate that architecture is not just a raw module or API enumeration.
@@ -574,7 +617,10 @@ def validate_architecture_not_module_enum(content: str) -> tuple[bool, str]:
     if total_lines > 0:
         enum_ratio = enum_lines / total_lines
         if enum_ratio > 0.6:
-            return False, f"Architecture is {enum_ratio*100:.0f}% module/API enumeration, should focus on design reasoning"
+            return (
+                False,
+                f"Architecture is {enum_ratio*100:.0f}% module/API enumeration, should focus on design reasoning",
+            )
 
     return True, "Architecture is not just module enumeration"
 
@@ -606,9 +652,17 @@ def validate_module_map_domain_grouped(content: str) -> tuple[bool, str]:
 
     # Check for domain grouping indicators
     has_domain_header = "## " in content and any(
-        domain in content for domain in [
-            "core-platform", "ai-services", "api-gateway", "data-pipeline",
-            "frontend", "persistence", "tooling", "testing", "operations"
+        domain in content
+        for domain in [
+            "core-platform",
+            "ai-services",
+            "api-gateway",
+            "data-pipeline",
+            "frontend",
+            "persistence",
+            "tooling",
+            "testing",
+            "operations",
         ]
     )
 
@@ -616,7 +670,11 @@ def validate_module_map_domain_grouped(content: str) -> tuple[bool, str]:
         return False, "Module map is not organized by business domain - missing domain headers"
 
     # Count domain sections (### headers with domain names or ## domain overview)
-    domain_sections = sum(1 for line in content.split("\n") if line.strip().startswith("### ") and not "服务族" in line)
+    domain_sections = sum(
+        1
+        for line in content.split("\n")
+        if line.strip().startswith("### ") and "服务族" not in line
+    )
     domain_overview = 1 if "| 业务域 |" in content or "| Domain |" in content else 0
 
     if (domain_sections + domain_overview) < 1:
@@ -637,7 +695,9 @@ def validate_module_map_domain_grouped(content: str) -> tuple[bool, str]:
     return True, "Module map passes domain-grouped validation"
 
 
-def validate_module_map_not_directory_flat(content: str, has_domain_metadata: bool = True) -> tuple[bool, str]:
+def validate_module_map_not_directory_flat(
+    content: str, has_domain_metadata: bool = True
+) -> tuple[bool, str]:
     """Validate that module map is NOT a flat directory listing.
 
     This rejects outputs that:
@@ -665,7 +725,9 @@ def validate_module_map_not_directory_flat(content: str, has_domain_metadata: bo
         ]
 
         # If most lines are just flat enumeration without context, reject
-        potential_flat_lines = sum(1 for line in lines if any(pattern in line for pattern in flat_enum_patterns))
+        potential_flat_lines = sum(
+            1 for line in lines if any(pattern in line for pattern in flat_enum_patterns)
+        )
 
         # Check for structured domain grouping markers
         has_domain_overview = "| 业务域 |" in content or "| Domain |" in content
@@ -756,20 +818,32 @@ def validate_api_contract_not_endpoint_dump(content: str) -> tuple[bool, str]:
 
     # Count raw endpoint lines (lines that look like endpoint entries)
     endpoint_line_patterns = [
-        "| GET |", "| POST |", "| PUT |", "| PATCH |", "| DELETE |",
-        "| *GET* |", "| *POST* |", "| *PUT* |", "| *PATCH* |", "| *DELETE* |",
+        "| GET |",
+        "| POST |",
+        "| PUT |",
+        "| PATCH |",
+        "| DELETE |",
+        "| *GET* |",
+        "| *POST* |",
+        "| *PUT* |",
+        "| *PATCH* |",
+        "| *DELETE* |",
     ]
 
-    raw_endpoint_lines = sum(1 for line in lines if any(pattern in line for pattern in endpoint_line_patterns))
+    raw_endpoint_lines = sum(
+        1 for line in lines if any(pattern in line for pattern in endpoint_line_patterns)
+    )
 
     # If there are more than API_CONTRACT_MAX_RAW_ENDPOINTS raw endpoints, it's a dump
     if raw_endpoint_lines > API_CONTRACT_MAX_RAW_ENDPOINTS:
-        return False, f"API contracts has {raw_endpoint_lines} raw endpoints (>{API_CONTRACT_MAX_RAW_ENDPOINTS}), should aggregate instead"
+        return (
+            False,
+            f"API contracts has {raw_endpoint_lines} raw endpoints (>{API_CONTRACT_MAX_RAW_ENDPOINTS}), should aggregate instead",
+        )
 
     # Check for summary content (分组, 调用约定, 认证)
-    has_summary_sections = (
-        ("分组" in content or "group" in content.lower()) and
-        ("调用约定" in content or "convention" in content.lower())
+    has_summary_sections = ("分组" in content or "group" in content.lower()) and (
+        "调用约定" in content or "convention" in content.lower()
     )
 
     if not has_summary_sections:
@@ -856,12 +930,17 @@ def validate_data_model_not_dump(content: str) -> tuple[bool, str]:
 
     # If there are more than DATA_MODEL_MAX_RAW_MODELS raw model entries, it's likely a dump
     if raw_model_lines > DATA_MODEL_MAX_RAW_MODELS:
-        return False, f"Data model has {raw_model_lines} raw model entries (>{DATA_MODEL_MAX_RAW_MODELS}), should aggregate instead"
+        return (
+            False,
+            f"Data model has {raw_model_lines} raw model entries (>{DATA_MODEL_MAX_RAW_MODELS}), should aggregate instead",
+        )
 
     # Check for aggregation markers
     has_core_indicator = "核心" in content or "core" in content.lower()
     has_service_indicator = "服务" in content or "service" in content.lower()
-    has_db_indicator = "数据库" in content or "database" in content.lower() or "db" in content.lower()
+    has_db_indicator = (
+        "数据库" in content or "database" in content.lower() or "db" in content.lower()
+    )
 
     if not (has_core_indicator and has_service_indicator and has_db_indicator):
         return False, "Data model missing aggregation indicators (core/service/database)"
@@ -922,7 +1001,7 @@ def validate_section_page_content(content: str, section_slug: str) -> tuple[bool
         return False, f"Section {section_slug} content is empty"
 
     # Check for required elements
-    has_title = f"# " in content  # Markdown title
+    has_title = "# " in content  # Markdown title
     has_description = len(content) > 100  # Non-trivial content
     has_nav = "../../00-overview.md" in content or "../" in content  # Navigation links
 
@@ -964,7 +1043,10 @@ def validate_section_cross_links(content: str, section_slug: str) -> tuple[bool,
     # Count internal section links
     internal_links = content.count("../")
     if internal_links < SECTION_NAVIGATION_LINKS:
-        return False, f"Section {section_slug} has only {internal_links} navigation links, need at least {SECTION_NAVIGATION_LINKS}"
+        return (
+            False,
+            f"Section {section_slug} has only {internal_links} navigation links, need at least {SECTION_NAVIGATION_LINKS}",
+        )
 
     return True, f"Section {section_slug} has proper cross-links"
 
@@ -980,8 +1062,14 @@ def validate_all_required_sections_exist(section_dir: Path) -> tuple[bool, list[
     Returns (is_valid, missing_sections) tuple.
     """
     required_sections = [
-        "project", "architecture", "services", "data-model",
-        "api", "operations", "development", "security"
+        "project",
+        "architecture",
+        "services",
+        "data-model",
+        "api",
+        "operations",
+        "development",
+        "security",
     ]
 
     missing = []
@@ -1020,10 +1108,26 @@ def validate_all_required_sections_exist(section_dir: Path) -> tuple[bool, list[
 
 OUTPUT_LAYER_MANIFEST: tuple[tuple[DocumentLayer, OutputLayerPolicy, str], ...] = (
     # Layer, Policy, Description
-    (DocumentLayer.OVERVIEW, OutputLayerPolicy.TARGET_OUTPUT, "Reader-facing fixed entry points (00-05)"),
-    (DocumentLayer.SECTION, OutputLayerPolicy.TARGET_OUTPUT, "Thematic section pages (docs/sections/)"),
-    (DocumentLayer.MODULE, OutputLayerPolicy.TARGET_OUTPUT, "Individual module docs (docs/modules/)"),
-    (DocumentLayer.PHASE, OutputLayerPolicy.GOVERNANCE_ONLY, "Stage-governance docs (docs/phases/) - INTERNAL ONLY"),
+    (
+        DocumentLayer.OVERVIEW,
+        OutputLayerPolicy.TARGET_OUTPUT,
+        "Reader-facing fixed entry points (00-05)",
+    ),
+    (
+        DocumentLayer.SECTION,
+        OutputLayerPolicy.TARGET_OUTPUT,
+        "Thematic section pages (docs/sections/)",
+    ),
+    (
+        DocumentLayer.MODULE,
+        OutputLayerPolicy.TARGET_OUTPUT,
+        "Individual module docs (docs/modules/)",
+    ),
+    (
+        DocumentLayer.PHASE,
+        OutputLayerPolicy.GOVERNANCE_ONLY,
+        "Stage-governance docs (docs/phases/) - INTERNAL ONLY",
+    ),
 )
 
 
@@ -1121,9 +1225,10 @@ def validate_output_boundary(output_path: str, layer: DocumentLayer) -> tuple[bo
 
 class DocType(Enum):
     """Document type for link building."""
-    OVERVIEW = "overview"      # docs/00-overview.md, docs/01-architecture.md, etc.
-    SECTION = "section"        # docs/sections/<slug>/index.md
-    MODULE = "module"          # docs/modules/<name>.md
+
+    OVERVIEW = "overview"  # docs/00-overview.md, docs/01-architecture.md, etc.
+    SECTION = "section"  # docs/sections/<slug>/index.md
+    MODULE = "module"  # docs/modules/<name>.md
 
 
 def get_doc_depth(doc_type: DocType) -> int:
@@ -1319,18 +1424,25 @@ def validate_narrative_not_generic(content: str) -> tuple[bool, str]:
     if found_patterns:
         # Allow up to 2 generic patterns (some boilerplate may be unavoidable)
         if len(found_patterns) > 2:
-            return False, f"Narrative contains {len(found_patterns)} generic patterns: {'; '.join(found_patterns[:3])}..."
+            return (
+                False,
+                f"Narrative contains {len(found_patterns)} generic patterns: {'; '.join(found_patterns[:3])}...",
+            )
 
     # Check for repeated sentences (indicator of template generation)
     sentences = [s.strip() for s in content.split("。") if s.strip()]
     if len(sentences) > 5:
         # Count sentence frequency
         from collections import Counter
+
         sentence_counts = Counter(sentences)
         # Find sentences that appear more than once (length > 6 to catch template duplicates)
         duplicates = {s: c for s, c in sentence_counts.items() if c > 1 and len(s) > 6}
         if len(duplicates) >= 2:
-            return False, f"Narrative has {len(duplicates)} repeated sentences, suggesting template generation"
+            return (
+                False,
+                f"Narrative has {len(duplicates)} repeated sentences, suggesting template generation",
+            )
 
     return True, "Narrative passes generic pattern check"
 
@@ -1374,12 +1486,25 @@ def validate_architecture_rationale_exists(content: str) -> tuple[bool, str]:
     prose_chars = len(content.replace(" ", "").replace("\n", ""))
 
     if len(found_rationale) < 1 and prose_chars < 800:
-        return False, "Architecture explains WHAT but not WHY - missing design rationale explanation"
+        return (
+            False,
+            "Architecture explains WHAT but not WHY - missing design rationale explanation",
+        )
 
     # Check that content explains problems being solved, not just architecture description
     problem_indicators = [
-        "问题", "challenge", "problem", "解决", "solve", "address",
-        "同步", "sync", "不同步", "out of sync", "发现", "discover"
+        "问题",
+        "challenge",
+        "problem",
+        "解决",
+        "solve",
+        "address",
+        "同步",
+        "sync",
+        "不同步",
+        "out of sync",
+        "发现",
+        "discover",
     ]
 
     found_problems = [p for p in problem_indicators if p.lower() in content_lower]
@@ -1405,6 +1530,9 @@ def validate_overview_has_repository_specifics(content: str, repo_name: str) -> 
     if not has_repo_reference:
         # Check if any module names from the project appear
         # This is a softer check - the repo name is the primary identifier
-        return False, f"Overview does not reference repository name '{repo_name}' - content may be generic"
+        return (
+            False,
+            f"Overview does not reference repository name '{repo_name}' - content may be generic",
+        )
 
     return True, f"Overview references repository-specific information ({repo_name})"

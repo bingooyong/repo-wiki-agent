@@ -2,19 +2,15 @@
 
 import json
 import sqlite3
-import tempfile
 from pathlib import Path
-
-import pytest
 
 from repo_wiki.orchestration.content_layout_writer import (
     TAXONOMY_ORDER,
     ContentLayoutWriter,
     build_navigation_tree,
-    get_taxonomy_category,
     compute_stable_slug,
+    get_taxonomy_category,
     organize_content_by_taxonomy,
-    create_content_writer,
     write_qoder_like_content,
 )
 from repo_wiki.orchestration.eval_layout import EvalOutputProfile, get_eval_profile
@@ -318,9 +314,7 @@ class TestWriteQoderLikeContent:
         sqlite_path = tmp_path / ".repo-wiki" / "index" / "runtime.sqlite3"
         sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(sqlite_path) as conn:
-            conn.execute(
-                "CREATE TABLE doc_hierarchy (doc_path TEXT NOT NULL)"
-            )
+            conn.execute("CREATE TABLE doc_hierarchy (doc_path TEXT NOT NULL)")
             conn.execute(
                 "INSERT INTO doc_hierarchy(doc_path) VALUES (?)",
                 ("docs/pages/services/doc-parser-service.md",),

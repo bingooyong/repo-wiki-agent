@@ -13,11 +13,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
-
+from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 
 # ============================================================================
 # Citation Block Types
@@ -27,6 +25,7 @@ from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 @dataclass
 class CiteBlock:
     """A <cite> block for inline source citation."""
+
     file_path: str  # Workspace-relative path
     line_start: int
     line_end: int
@@ -80,6 +79,7 @@ class CiteBlock:
 @dataclass
 class SectionSource:
     """A section-level source citation."""
+
     section_id: str  # e.g., "architecture", "installation"
     page_id: str  # Wiki page this section belongs to
     doc_type: str  # e.g., "section", "module"
@@ -90,7 +90,7 @@ class SectionSource:
         if not self.citations:
             return ""
 
-        lines = [f"!!! cite \"{self.section_id}\""]
+        lines = [f'!!! cite "{self.section_id}"']
         for cite in self.citations:
             lines.append(f"    {cite.render()}")
         lines.append("")  # Empty line after block
@@ -100,6 +100,7 @@ class SectionSource:
 @dataclass
 class DiagramSource:
     """A diagram with provenance/source tracking."""
+
     diagram_id: str
     diagram_type: str  # e.g., "mermaid", "plantuml", "graphviz"
     source_file: str | None = None  # File where diagram is defined
@@ -109,7 +110,7 @@ class DiagramSource:
 
     def render(self) -> str:
         """Render as Markdown diagram source block."""
-        parts = [f"!!! diagram \"{self.diagram_id}\" ({self.diagram_type})"]
+        parts = [f'!!! diagram "{self.diagram_id}" ({self.diagram_type})']
 
         if self.source_file:
             parts.append(f"    source: {self.source_file}")
@@ -131,6 +132,7 @@ class DiagramSource:
 @dataclass
 class FileLineLink:
     """A file:line reference link."""
+
     file_path: str
     line: int
     end_line: int | None = None
@@ -305,8 +307,7 @@ class CitationRenderer:
             List of rendered <cite> block strings
         """
         return [
-            self.render_cite_block_from_candidate(candidate)
-            for candidate in binding.candidates
+            self.render_cite_block_from_candidate(candidate) for candidate in binding.candidates
         ]
 
     def render_diagram_source(
@@ -413,16 +414,19 @@ class CitationRenderer:
 
 class CitationValidationError(Exception):
     """Raised when citation validation fails."""
+
     pass
 
 
 class BrokenPathError(CitationValidationError):
     """Raised when a citation file path is broken/non-existent."""
+
     pass
 
 
 class BadLineError(CitationValidationError):
     """Raised when a citation line range is invalid."""
+
     pass
 
 
@@ -482,7 +486,7 @@ def validate_line_range(
     # Check if lines exist in file
     try:
         path = validate_citation_path(file_path, workspace_root)
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             line_count = sum(1 for _ in f)
 
         if line_end > line_count:

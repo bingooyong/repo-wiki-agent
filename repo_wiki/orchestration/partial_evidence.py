@@ -27,18 +27,17 @@ from typing import Any
 
 from repo_wiki.orchestration.generation_state import (
     GenerationStateMachine,
-    PageGenerationState,
     PageState,
-    RunState,
 )
-
 
 # =============================================================================
 # FAILURE REASON CODES
 # =============================================================================
 
+
 class FailureReason(str, Enum):
     """Structured failure reason codes."""
+
     PROVIDER_ERROR = "provider_error"
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
     AUTHENTICATION_FAILED = "authentication_failed"
@@ -55,9 +54,11 @@ class FailureReason(str, Enum):
 # FAILURE EVIDENCE
 # =============================================================================
 
+
 @dataclass
 class PageFailureEvidence:
     """Evidence for a failed page generation."""
+
     run_id: str
     doc_slug: str
     doc_type: str
@@ -75,6 +76,7 @@ class PageFailureEvidence:
 @dataclass
 class PartialRunManifest:
     """Manifest for a partially completed generation run."""
+
     run_id: str
     profile: str
     total_pages: int
@@ -93,6 +95,7 @@ class PartialRunManifest:
 @dataclass
 class EvidenceBundle:
     """Bundle of evidence from a generation run."""
+
     run_id: str
     manifest: PartialRunManifest
     successful_pages: list[dict[str, Any]]  # Page evidence
@@ -105,6 +108,7 @@ class EvidenceBundle:
 # =============================================================================
 # FAILURE EVIDENCE RECORDER
 # =============================================================================
+
 
 class FailureEvidenceRecorder:
     """Records failure evidence for failed page generations."""
@@ -211,8 +215,15 @@ class FailureEvidenceRecorder:
                     related_failures_json = excluded.related_failures_json
                 """,
                 (
-                    run_id, doc_slug, doc_type, doc_path, attempts, last_error,
-                    reason_code.value, provider, model,
+                    run_id,
+                    doc_slug,
+                    doc_type,
+                    doc_path,
+                    attempts,
+                    last_error,
+                    reason_code.value,
+                    provider,
+                    model,
                     datetime.now(UTC).isoformat(),
                     retry_command,
                     json.dumps(related_failures or []),
@@ -244,20 +255,22 @@ class FailureEvidenceRecorder:
 
             failures = []
             for row in rows:
-                failures.append(PageFailureEvidence(
-                    run_id=row["run_id"],
-                    doc_slug=row["doc_slug"],
-                    doc_type=row["doc_type"] or "",
-                    doc_path=row["doc_path"] or "",
-                    attempts=row["attempts"],
-                    last_error=row["last_error"],
-                    reason_code=FailureReason(row["reason_code"]),
-                    provider=row["provider"],
-                    model=row["model"],
-                    timestamp=row["timestamp"],
-                    retry_command=row["retry_command"],
-                    related_failures=json.loads(row["related_failures_json"] or "[]"),
-                ))
+                failures.append(
+                    PageFailureEvidence(
+                        run_id=row["run_id"],
+                        doc_slug=row["doc_slug"],
+                        doc_type=row["doc_type"] or "",
+                        doc_path=row["doc_path"] or "",
+                        attempts=row["attempts"],
+                        last_error=row["last_error"],
+                        reason_code=FailureReason(row["reason_code"]),
+                        provider=row["provider"],
+                        model=row["model"],
+                        timestamp=row["timestamp"],
+                        retry_command=row["retry_command"],
+                        related_failures=json.loads(row["related_failures_json"] or "[]"),
+                    )
+                )
             return failures
         finally:
             conn.close()
@@ -285,6 +298,7 @@ class FailureEvidenceRecorder:
 # =============================================================================
 # PARTIAL MANIFEST BUILDER
 # =============================================================================
+
 
 class PartialManifestBuilder:
     """Builds partial run manifests for partially completed runs."""
@@ -344,9 +358,8 @@ class PartialManifestBuilder:
 
         # Can resume if there are pending pages and no running pages
         can_resume = (
-            (len(pending) > 0 or any(p.state == PageState.RETRYABLE for p in pages))
-            and not any(p.state == PageState.RUNNING for p in pages)
-        )
+            len(pending) > 0 or any(p.state == PageState.RETRYABLE for p in pages)
+        ) and not any(p.state == PageState.RUNNING for p in pages)
 
         return PartialRunManifest(
             run_id=run_id,
@@ -393,6 +406,7 @@ class PartialManifestBuilder:
 # =============================================================================
 # EVIDENCE BUNDLE CREATOR
 # =============================================================================
+
 
 class EvidenceBundleCreator:
     """Creates evidence bundles for generation runs."""
@@ -444,11 +458,13 @@ class EvidenceBundleCreator:
         successful_pages = []
         if successful_page_content:
             for doc_slug, content in successful_page_content.items():
-                successful_pages.append({
-                    "doc_slug": doc_slug,
-                    "content": content,
-                    "content_length": len(content),
-                })
+                successful_pages.append(
+                    {
+                        "doc_slug": doc_slug,
+                        "content": content,
+                        "content_length": len(content),
+                    }
+                )
 
         bundle = EvidenceBundle(
             run_id=run_id,
@@ -531,6 +547,7 @@ class EvidenceBundleCreator:
 # =============================================================================
 # FACTORY FUNCTIONS
 # =============================================================================
+
 
 def create_failure_recorder(
     root: Path,

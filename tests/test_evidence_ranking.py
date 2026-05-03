@@ -6,29 +6,28 @@ from pathlib import Path
 import pytest
 
 from repo_wiki.evidence.ranking import (
-    EvidenceRanker,
+    MIN_CANDIDATES_PER_PAGE,
     EvidenceCandidate,
+    EvidenceRanker,
     EvidenceRankingResult,
     PageEvidenceBinding,
-    MIN_CANDIDATES_PER_PAGE,
-    score_evidence_for_page,
-    rank_evidence_for_page,
     _category_to_doc_type,
     _extract_keywords_from_page,
-    _score_by_module_match,
     _score_by_api_match,
     _score_by_data_model_match,
+    _score_by_module_match,
+    rank_evidence_for_page,
+    score_evidence_for_page,
+)
+from repo_wiki.orchestration.runtime_store import (
+    EvidenceSpanRecord,
+    SQLiteRuntimeStore,
 )
 from repo_wiki.planner.schema import (
-    GenerationMode,
     SourceRequirement,
     WikiPagePlan,
     WikiPlanManifest,
     WikiTaxonomyCategory,
-)
-from repo_wiki.orchestration.runtime_store import (
-    SQLiteRuntimeStore,
-    EvidenceSpanRecord,
 )
 
 
@@ -558,9 +557,7 @@ class TestGetInsufficientEvidencePages:
                 title="Generic",
                 category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
                 output_path="docs/generic.md",
-                source_requirements=SourceRequirement(
-                    modules=["completely-unrelated-module"]
-                ),
+                source_requirements=SourceRequirement(modules=["completely-unrelated-module"]),
             )
         ]
         manifest = WikiPlanManifest(version="1.0.0", pages=pages)

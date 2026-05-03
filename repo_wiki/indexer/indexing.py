@@ -137,7 +137,9 @@ class SemanticIndexer:
 
 
 def _module_name_for_file(relative_path: str, module_by_path: dict[str, str]) -> str:
-    for module_path, module_name in sorted(module_by_path.items(), key=lambda item: len(item[0]), reverse=True):
+    for module_path, module_name in sorted(
+        module_by_path.items(), key=lambda item: len(item[0]), reverse=True
+    ):
         if relative_path == module_path or relative_path.startswith(f"{module_path}/"):
             return module_name
     return Path(relative_path).parts[0] if Path(relative_path).parts else "root"

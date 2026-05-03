@@ -9,12 +9,11 @@ The LLM is used to:
 - Recommend cross-references between pages
 - Expand page content suggestions
 """
+
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Protocol
 
-from repo_wiki.planner.rule_first import plan_pages_from_snapshot, RuleFirstPlanner
 from repo_wiki.planner.schema import (
     GenerationMode,
     NavNode,
@@ -125,10 +124,14 @@ class LLMAssistedPlanner:
 
         return suggestions
 
-    def _build_category_context(self, category: WikiTaxonomyCategory, pages: list[WikiPagePlan]) -> str:
+    def _build_category_context(
+        self, category: WikiTaxonomyCategory, pages: list[WikiPagePlan]
+    ) -> str:
         """Build context string for a category's current pages."""
         page_titles = ", ".join(p.title for p in pages[:10])
-        return f"Category: {category.value}\nExisting pages: {page_titles}\nTotal pages: {len(pages)}"
+        return (
+            f"Category: {category.value}\nExisting pages: {page_titles}\nTotal pages: {len(pages)}"
+        )
 
     def _build_suggestion_prompt(self, category: WikiTaxonomyCategory, context: str) -> str:
         """Build LLM prompt for page suggestions."""
@@ -161,8 +164,7 @@ Format: Title | Purpose | Audience
         return suggestions[:5]
 
     def _apply_suggestions(
-        self,
-        suggestions: dict[WikiTaxonomyCategory, list[str]]
+        self, suggestions: dict[WikiTaxonomyCategory, list[str]]
     ) -> list[WikiPagePlan]:
         """Apply suggestions to create new pages."""
         new_pages: list[WikiPagePlan] = []
@@ -190,6 +192,7 @@ Format: Title | Purpose | Audience
     def _make_unique_page_id(self, title: str) -> str:
         """Make a unique page ID from title."""
         import re
+
         base = title.lower().replace(" ", "-").replace("_", "-")
         base = re.sub(r"[^a-z0-9-]", "", base)
         base = re.sub(r"-+", "-", base).strip("-")

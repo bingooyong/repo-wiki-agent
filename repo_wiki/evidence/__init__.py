@@ -9,43 +9,44 @@ This module provides:
 - Page evidence scoring (Task 33.2)
 - Service ownership resolver (Task 33.1)
 """
+
 from __future__ import annotations
 
-from repo_wiki.evidence.ranking import (
-    EvidenceRanker,
-    EvidenceCandidate,
-    EvidenceRankingResult,
-    PageEvidenceBinding,
-    MIN_CANDIDATES_PER_PAGE,
-    score_evidence_for_page,
-    rank_evidence_for_page,
-)
 from repo_wiki.evidence.citation_renderer import (
+    BadLineError,
+    BrokenPathError,
     CitationRenderer,
     CiteBlock,
-    SectionSource,
     DiagramSource,
     FileLineLink,
-    BrokenPathError,
-    BadLineError,
+    SectionSource,
+    validate_citation,
     validate_citation_path,
     validate_line_range,
-    validate_citation,
 )
 from repo_wiki.evidence.page_evidence_scorer import (
-    PageEvidenceScorer,
-    ServiceLocalPreference,
     EvidenceRejectionReason,
-    ScoredEvidenceCandidate,
+    PageEvidenceScorer,
     PageEvidenceScoreResult,
-    score_page_evidence,
+    ScoredEvidenceCandidate,
+    ServiceLocalPreference,
     get_rejection_reasons,
+    score_page_evidence,
+)
+from repo_wiki.evidence.ranking import (
+    MIN_CANDIDATES_PER_PAGE,
+    EvidenceCandidate,
+    EvidenceRanker,
+    EvidenceRankingResult,
+    PageEvidenceBinding,
+    rank_evidence_for_page,
+    score_evidence_for_page,
 )
 from repo_wiki.evidence.service_ownership import (
-    ServiceOwnershipResolver,
-    OwnershipVerifier,
     OwnershipConfidence,
     OwnershipDecision,
+    OwnershipVerifier,
+    ServiceOwnershipResolver,
     filter_evidence_by_ownership,
 )
 

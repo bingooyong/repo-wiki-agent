@@ -17,7 +17,6 @@ from repo_wiki.core.contracts import (
     RepositoryStats,
 )
 from repo_wiki.planner.api_topic_planner import (
-    APITopicCategory,
     APITopicPlanner,
     plan_api_topics,
 )
@@ -336,9 +335,7 @@ class TestAPITopicPlanner:
         api_pages = manifest.pages_by_category(WikiTaxonomyCategory.API_REFERENCE)
         assert len(api_pages) >= 15, f"Expected at least 15 API pages, got {len(api_pages)}"
 
-    def test_api_pages_grouped_by_service_family(
-        self, sample_identity, sample_snapshot
-    ):
+    def test_api_pages_grouped_by_service_family(self, sample_identity, sample_snapshot):
         """Test that API pages are grouped by service family, not raw endpoint count."""
         planner = APITopicPlanner(sample_identity, sample_snapshot)
         manifest = planner.generate()
@@ -349,8 +346,7 @@ class TestAPITopicPlanner:
             "api-api-server",
         ]
         found_families = [
-            pid for pid in service_family_ids
-            if any(p.page_id == pid for p in manifest.pages)
+            pid for pid in service_family_ids if any(p.page_id == pid for p in manifest.pages)
         ]
         assert len(found_families) >= 1, "Expected service family API pages"
 
@@ -370,7 +366,8 @@ class TestAPITopicPlanner:
 
         # Should have error handling pages
         error_pages = [
-            p for p in manifest.pages
+            p
+            for p in manifest.pages
             if "error" in p.page_id.lower() or p.title in ("错误处理API", "错误码参考")
         ]
         assert len(error_pages) >= 2, f"Expected error handling pages, got {len(error_pages)}"
@@ -382,7 +379,8 @@ class TestAPITopicPlanner:
 
         # Should have health topic page
         health_pages = [
-            p for p in manifest.pages
+            p
+            for p in manifest.pages
             if "health" in p.page_id.lower() or p.title in ("健康检查API",)
         ]
         assert len(health_pages) >= 1, f"Expected health API pages, got {len(health_pages)}"
@@ -410,9 +408,7 @@ class TestAPITopicPlanner:
 
         assert len(manifest.navigation_tree) > 0
         # Should have category node for API
-        category_nodes = [
-            n for n in manifest.navigation_tree if n.node_type == "category"
-        ]
+        category_nodes = [n for n in manifest.navigation_tree if n.node_type == "category"]
         assert len(category_nodes) >= 1
 
     def test_parent_child_relationships(self, sample_identity, sample_snapshot):

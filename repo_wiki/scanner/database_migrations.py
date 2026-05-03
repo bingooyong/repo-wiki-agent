@@ -9,11 +9,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from repo_wiki.core.contracts import RepositorySnapshot
 from repo_wiki.generator.io import ensure_dir, write_yamlish
-
 
 # SQL file hints for migration detection
 _MIGRATION_FILE_PATTERNS = (
@@ -28,6 +26,7 @@ _MIGRATION_FILE_PATTERNS = (
 @dataclass
 class TableColumn:
     """Represents a database table column."""
+
     name: str
     data_type: str
     is_nullable: bool = True
@@ -41,6 +40,7 @@ class TableColumn:
 @dataclass
 class TableSchema:
     """Represents a database table schema with columns and constraints."""
+
     name: str
     columns: list[TableColumn] = field(default_factory=list)
     primary_key_columns: list[str] = field(default_factory=list)
@@ -53,6 +53,7 @@ class TableSchema:
 @dataclass
 class MigrationFile:
     """Represents a database migration file."""
+
     path: str
     version: str | None = None  # Alembic version or migration number
     down_revision: str | None = None  # Alembic down revision
@@ -68,6 +69,7 @@ class MigrationFile:
 @dataclass
 class SchemaEvolution:
     """Tracks schema evolution across migrations."""
+
     tables: list[TableSchema] = field(default_factory=list)
     migrations: list[MigrationFile] = field(default_factory=list)
     table_to_model_links: dict[str, str] = field(default_factory=dict)  # table_name -> model_name
@@ -95,9 +97,7 @@ class DatabaseMigrationExtractor:
             schema_evolution.tables.extend(tables)
 
             # Extract migration metadata
-            migration = self._extract_migration_info(
-                file_path, content, rel_path, lines
-            )
+            migration = self._extract_migration_info(file_path, content, rel_path, lines)
             if migration:
                 schema_evolution.migrations.append(migration)
 
@@ -145,9 +145,7 @@ class DatabaseMigrationExtractor:
 
         return files
 
-    def _extract_tables(
-        self, content: str, rel_path: str, lines: list[str]
-    ) -> list[TableSchema]:
+    def _extract_tables(self, content: str, rel_path: str, lines: list[str]) -> list[TableSchema]:
         """Extract table definitions from SQL content."""
         tables: list[TableSchema] = []
 
@@ -217,7 +215,7 @@ class DatabaseMigrationExtractor:
             return columns
 
         # Get the column definitions (everything between first pair of parentheses)
-        column_defs = table_body[first_paren + 1:last_paren]
+        column_defs = table_body[first_paren + 1 : last_paren]
 
         # Split by comma, handling nested parentheses
         column_parts = self._split_by_comma(column_defs)
@@ -256,15 +254,11 @@ class DatabaseMigrationExtractor:
                 is_unique = "UNIQUE" in constraints.upper()
 
                 # Extract default value
-                default_match = re.search(
-                    r"""(?ix)DEFAULT\s+([^\s,]+)""", constraints
-                )
+                default_match = re.search(r"""(?ix)DEFAULT\s+([^\s,]+)""", constraints)
                 default_value = default_match.group(1) if default_match else None
 
                 # Extract check constraint
-                check_match = re.search(
-                    r"""(?ix)CHECK\s*\(([^)]+)\)""", constraints
-                )
+                check_match = re.search(r"""(?ix)CHECK\s*\(([^)]+)\)""", constraints)
                 check_constraint = check_match.group(1) if check_match else None
 
                 columns.append(
@@ -290,7 +284,7 @@ class DatabaseMigrationExtractor:
         if first_paren == -1 or last_paren == -1 or first_paren >= last_paren:
             return pk_columns
 
-        column_section = table_body[first_paren + 1:last_paren]
+        column_section = table_body[first_paren + 1 : last_paren]
 
         # Look for PRIMARY KEY (col1, col2, ...) at the end of table definition
         pk_match = re.search(
@@ -299,10 +293,7 @@ class DatabaseMigrationExtractor:
         )
         if pk_match:
             pk_cols_str = pk_match.group(1)
-            pk_columns = [
-                col.strip().strip('"').strip("'")
-                for col in pk_cols_str.split(",")
-            ]
+            pk_columns = [col.strip().strip('"').strip("'") for col in pk_cols_str.split(",")]
 
         # Also check inline PRIMARY KEY on columns
         # Match column definitions with PRIMARY KEY inline
@@ -318,9 +309,7 @@ class DatabaseMigrationExtractor:
 
         return pk_columns
 
-    def _extract_foreign_keys(
-        self, table_body: str
-    ) -> list[tuple[str, str, str]]:
+    def _extract_foreign_keys(self, table_body: str) -> list[tuple[str, str, str]]:
         """Extract foreign key definitions.
 
         Returns list of (column, ref_table, ref_column) tuples.
@@ -387,21 +376,15 @@ class DatabaseMigrationExtractor:
         down_revision = None
         up_revision = None
 
-        version_match = re.search(
-            r"""(?ix)revision\s*=\s*['"]([^'"]+)['"]""", content
-        )
+        version_match = re.search(r"""(?ix)revision\s*=\s*['"]([^'"]+)['"]""", content)
         if version_match:
             version = version_match.group(1)
 
-        down_match = re.search(
-            r"""(?ix)down_revision\s*=\s*['"]([^'"]+)['"]""", content
-        )
+        down_match = re.search(r"""(?ix)down_revision\s*=\s*['"]([^'"]+)['"]""", content)
         if down_match:
             down_revision = down_match.group(1)
 
-        up_match = re.search(
-            r"""(?ix)up_revision\s*=\s*['"]([^'"]+)['"]""", content
-        )
+        up_match = re.search(r"""(?ix)up_revision\s*=\s*['"]([^'"]+)['"]""", content)
         if up_match:
             up_revision = up_match.group(1)
 

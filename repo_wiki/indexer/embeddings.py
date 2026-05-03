@@ -5,19 +5,18 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Protocol, Sequence
+from typing import Protocol
 
 
 class EmbeddingProvider(Protocol):
     """Common embedding interface."""
 
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
-        ...
+    def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
 
     @property
-    def backend_name(self) -> str:
-        ...
+    def backend_name(self) -> str: ...
 
 
 @dataclass
@@ -30,10 +29,10 @@ class DeterministicEmbeddingProvider:
     def backend_name(self) -> str:
         return "deterministic-fallback"
 
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         return [self._embed_one(text) for text in texts]
 
-    def _embed_one(self, text: str) -> List[float]:
+    def _embed_one(self, text: str) -> list[float]:
         vec = [0.0] * self.dims
         for token in re.findall(r"[A-Za-z0-9_]+", text.lower()):
             digest = hashlib.md5(token.encode("utf-8")).digest()
@@ -59,7 +58,7 @@ class SentenceTransformerEmbeddingProvider:
     def backend_name(self) -> str:
         return f"sentence-transformers:{self._model_name}"
 
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         vectors = self._model.encode(
             list(texts),
             normalize_embeddings=True,

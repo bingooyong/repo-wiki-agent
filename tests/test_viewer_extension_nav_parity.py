@@ -4,12 +4,10 @@ These tests ensure the static viewer and VS Code extension
 render the same navigation hierarchy from the manifest.
 """
 
-import pytest
 
 from repo_wiki.viewer.static_viewer import (
-    build_nav_tree_from_manifest,
     _convert_navigation_tree,
-    _build_tree_from_files,
+    build_nav_tree_from_manifest,
 )
 
 
@@ -122,14 +120,24 @@ class TestViewerExtensionNavParity:
                 "type": "category",
                 "label": "项目概述",
                 "children": [
-                    {"type": "page", "id": "overview", "label": "Overview", "path": "content/00-overview.md"},
+                    {
+                        "type": "page",
+                        "id": "overview",
+                        "label": "Overview",
+                        "path": "content/00-overview.md",
+                    },
                 ],
             },
             {
                 "type": "category",
                 "label": "架构设计",
                 "children": [
-                    {"type": "page", "id": "architecture", "label": "Architecture", "path": "content/01-architecture.md"},
+                    {
+                        "type": "page",
+                        "id": "architecture",
+                        "label": "Architecture",
+                        "path": "content/01-architecture.md",
+                    },
                 ],
             },
         ]

@@ -52,7 +52,9 @@ class LLMProviderConfig(BaseModel):
 
     provider: str = Field(default="openai", description="LLM provider name")
     model: str = Field(default="gpt-4o-mini", description="Model identifier")
-    base_url: str | None = Field(default=None, description="API base URL for OpenAI-compatible providers")
+    base_url: str | None = Field(
+        default=None, description="API base URL for OpenAI-compatible providers"
+    )
     api_key_env: str = Field(default="OPENAI_API_KEY", description="Env var name for API key")
     max_tokens: int = Field(default=4096, ge=1, le=128000, description="Max tokens in response")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
@@ -172,7 +174,12 @@ def resolve_llm_config(
 # Secret patterns for redaction
 _SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # API key patterns with explicit key names
-    (re.compile(r"(?i)(api[_-]?key|apikey|secret[_-]?key|access[_-]?token)\s*[=:]\s*['\"]?([a-zA-Z0-9_\-]{20,})['\"]?"), r"\1=[REDACTED]"),
+    (
+        re.compile(
+            r"(?i)(api[_-]?key|apikey|secret[_-]?key|access[_-]?token)\s*[=:]\s*['\"]?([a-zA-Z0-9_\-]{20,})['\"]?"
+        ),
+        r"\1=[REDACTED]",
+    ),
     # Bearer tokens in Authorization headers
     (re.compile(r"(?i)bearer\s+([a-zA-Z0-9_\-\.]{20,})"), "Bearer [REDACTED]"),
     # OpenAI/Minimax style API key formats (sk- prefix)

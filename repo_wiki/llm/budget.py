@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from repo_wiki.llm.models import ChatMessage, ChatRequest
 
-
 # Approximate tokens per word/character ratios
 TOKENS_PER_WORD = 1.33  # Typical English text
 TOKENS_PER_CHAR = 0.25  # For non-space separated text

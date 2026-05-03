@@ -17,20 +17,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from repo_wiki.core.contracts import Endpoint, RepositorySnapshot, extract_service_family_from_page_id
-from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
+from repo_wiki.core.contracts import (
+    Endpoint,
+    RepositorySnapshot,
+    extract_service_family_from_page_id,
+)
+from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.generator.mermaid_planner import (
     DiagramPlan,
-    MermaidDiagramType,
-    MermaidPlanner,
-    MermaidRenderer,
     create_planner,
     create_renderer,
     validate_mermaid_syntax,
 )
-from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.planner.schema import WikiPagePlan
-
 
 # =============================================================================
 # API FLOW DIAGRAM GENERATOR
@@ -40,15 +39,19 @@ from repo_wiki.planner.schema import WikiPagePlan
 @dataclass
 class APIFlowEvidence:
     """Evidence backing an API flow diagram."""
+
     handler_file: str
     handler_line: int
     handler_symbol: str
-    downstream_calls: list[tuple[str, str, str]] = field(default_factory=list)  # (service, path, handler)
+    downstream_calls: list[tuple[str, str, str]] = field(
+        default_factory=list
+    )  # (service, path, handler)
 
 
 @dataclass
 class APIFlowDiagram:
     """An API flow diagram with evidence backing."""
+
     diagram_id: str
     service_family: str
     title: str
@@ -203,21 +206,20 @@ class APIFlowDiagramGenerator:
         # Otherwise filter by service family
         service_family = self._extract_service_family(page_plan.page_id)
         if service_family:
-            return [
-                ep for ep in self.snapshot.endpoints
-                if ep.service_family == service_family
-            ]
+            return [ep for ep in self.snapshot.endpoints if ep.service_family == service_family]
 
         # Check for special pages like authentication, health, etc.
         page_id = page_plan.page_id.lower()
         if "auth" in page_id:
             return [
-                ep for ep in self.snapshot.endpoints
+                ep
+                for ep in self.snapshot.endpoints
                 if ep.auth_required or ep.auth_type in ("bearer", "oauth", "api-key")
             ]
         if "health" in page_id:
             return [
-                ep for ep in self.snapshot.endpoints
+                ep
+                for ep in self.snapshot.endpoints
                 if "health" in ep.path.lower() or "ready" in ep.path.lower()
             ]
 
@@ -242,13 +244,15 @@ class APIFlowDiagramGenerator:
         # Build endpoint info for context
         endpoint_contexts: list[dict[str, Any]] = []
         for ep in endpoints[:10]:  # Limit to 10
-            endpoint_contexts.append({
-                "path": ep.path,
-                "method": ep.method,
-                "service": ep.service_family,
-                "handler": ep.handler,
-                "file_path": ep.file_path,
-            })
+            endpoint_contexts.append(
+                {
+                    "path": ep.path,
+                    "method": ep.method,
+                    "service": ep.service_family,
+                    "handler": ep.handler,
+                    "file_path": ep.file_path,
+                }
+            )
 
         return {
             "page_id": page_plan.page_id,
@@ -323,7 +327,8 @@ class SpecializedAPIFlowGenerator:
         """
         # Get auth endpoints
         auth_endpoints = [
-            ep for ep in self.snapshot.endpoints
+            ep
+            for ep in self.snapshot.endpoints
             if ep.auth_required or ep.auth_type in ("bearer", "oauth", "api-key")
         ]
 
@@ -391,7 +396,8 @@ class SpecializedAPIFlowGenerator:
             APIFlowDiagram showing health check flow or None
         """
         health_endpoints = [
-            ep for ep in self.snapshot.endpoints
+            ep
+            for ep in self.snapshot.endpoints
             if "health" in ep.path.lower() or "ready" in ep.path.lower()
         ]
 

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
-
-from repo_wiki.llm.models import LLMProvider, RetryableError
+from typing import Any, TypeVar
 
 import repo_wiki.llm
-
+from repo_wiki.llm.models import LLMProvider, RetryableError
 
 T = TypeVar("T")
 
@@ -77,12 +76,14 @@ async def with_retry(
             last_error = exc
             if attempt < retry_config.max_retries:
                 # Calculate delay with exponential backoff
-                actual_delay = min(delay * (retry_config.exponential_base ** attempt), retry_config.max_delay)
+                actual_delay = min(
+                    delay * (retry_config.exponential_base**attempt), retry_config.max_delay
+                )
                 if retry_config.jitter:
                     actual_delay = actual_delay * (0.5 + random.random() * 0.5)
 
                 await asyncio.sleep(actual_delay)
-        except Exception as exc:
+        except Exception:
             # Non-retryable error, propagate immediately
             raise
 

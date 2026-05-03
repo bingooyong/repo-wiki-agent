@@ -4,17 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.scanner.database_migrations import (
     DatabaseMigrationExtractor,
-    TableColumn,
-    TableSchema,
     MigrationFile,
     SchemaEvolution,
-    write_schema_contracts,
+    TableColumn,
+    TableSchema,
     enrich_snapshot_with_db_schemas,
+    write_schema_contracts,
 )
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 
@@ -157,9 +155,7 @@ class TestDatabaseMigrationExtractor:
         schema_evolution = extractor.extract()
 
         # Should have migration info with indexes
-        migrations_with_indexes = [
-            m for m in schema_evolution.migrations if m.indexes_created
-        ]
+        migrations_with_indexes = [m for m in schema_evolution.migrations if m.indexes_created]
         assert len(migrations_with_indexes) >= 1
 
     def test_canonical_model_name_guessing(self, tmp_path: Path) -> None:
@@ -292,6 +288,7 @@ class TestWriteSchemaContracts:
 
         # Read and verify content
         import yaml
+
         with open(schema_file) as f:
             data = yaml.safe_load(f)
 
@@ -321,6 +318,7 @@ class TestWriteSchemaContracts:
         assert migrations_file.exists()
 
         import yaml
+
         with open(migrations_file) as f:
             data = yaml.safe_load(f)
 
@@ -329,9 +327,7 @@ class TestWriteSchemaContracts:
 
     def test_write_table_model_links(self, tmp_path: Path) -> None:
         """Test writing table-to-model links to YAML."""
-        schema_evolution = SchemaEvolution(
-            table_to_model_links={"users": "User", "posts": "Post"}
-        )
+        schema_evolution = SchemaEvolution(table_to_model_links={"users": "User", "posts": "Post"})
 
         paths = write_schema_contracts(tmp_path, schema_evolution)
 
@@ -340,6 +336,7 @@ class TestWriteSchemaContracts:
         assert links_file.exists()
 
         import yaml
+
         with open(links_file) as f:
             data = yaml.safe_load(f)
 

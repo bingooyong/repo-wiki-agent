@@ -1,13 +1,13 @@
 """Tests for partial generation evidence bundle."""
 
-import tempfile
-from pathlib import Path
 
 import pytest
 
+from repo_wiki.orchestration.failure_recovery import (
+    FailureRecoveryManager,
+)
 from repo_wiki.orchestration.generation_state import (
     GenerationStateMachine,
-    PageState,
     RunState,
 )
 from repo_wiki.orchestration.partial_evidence import (
@@ -19,9 +19,6 @@ from repo_wiki.orchestration.partial_evidence import (
     PartialRunManifest,
     create_failure_recorder,
     create_partial_manifest,
-)
-from repo_wiki.orchestration.failure_recovery import (
-    FailureRecoveryManager,
 )
 
 

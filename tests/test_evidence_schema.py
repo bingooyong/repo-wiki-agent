@@ -4,16 +4,14 @@ Tests evidence_span, page_source_map, and symbol_reference tables
 for storing source spans with file/line citations.
 """
 
-import json
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from repo_wiki.orchestration.runtime_store import (
-    SQLiteRuntimeStore,
     EvidenceSpanRecord,
-    PageSourceMapRecord,
+    SQLiteRuntimeStore,
     SymbolReferenceRecord,
 )
 

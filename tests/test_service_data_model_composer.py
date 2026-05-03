@@ -30,7 +30,6 @@ from repo_wiki.generator.service_data_model_composer import (
     extract_service_data_models,
     get_service_model_summary,
 )
-from repo_wiki.llm.providers import create_mock_provider
 from repo_wiki.planner.schema import (
     GenerationMode,
     SourceRequirement,
@@ -330,7 +329,11 @@ class TestFormatMethods:
         info = composer._get_service_info("billing-service", None)
         formatted = composer.format_database_access_pattern(info)
 
-        assert "数据库访问模式" in formatted or "Database" in formatted or "database" in formatted.lower()
+        assert (
+            "数据库访问模式" in formatted
+            or "Database" in formatted
+            or "database" in formatted.lower()
+        )
 
     def test_format_schema_variations(self, composer: ServiceDataModelComposer):
         """Test formatting schema variations."""

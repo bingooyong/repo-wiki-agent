@@ -20,12 +20,10 @@ Integration with existing pipeline:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from repo_wiki.core.contracts import Endpoint, RepositorySnapshot
-from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.generator.composer import (
     ComposerContext,
     ComposerInput,
@@ -33,13 +31,13 @@ from repo_wiki.generator.composer import (
     build_composer_input,
     create_composer,
 )
-from repo_wiki.llm.providers import MockLLMProvider, create_mock_provider
-from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
-
+from repo_wiki.llm.providers import MockLLMProvider
+from repo_wiki.planner.schema import WikiPagePlan
 
 # =============================================================================
 # AUTH AND ERROR CONVENTION GENERATOR
 # =============================================================================
+
 
 class AuthErrorConventionGenerator:
     """Generator for auth and error convention API pages.
@@ -145,14 +143,16 @@ class AuthErrorConventionGenerator:
     def get_auth_endpoints(self) -> list[Endpoint]:
         """Get all endpoints that require authentication."""
         return [
-            ep for ep in self.snapshot.endpoints
+            ep
+            for ep in self.snapshot.endpoints
             if ep.auth_required or ep.auth_type in ("bearer", "oauth", "api-key")
         ]
 
     def get_unauth_endpoints(self) -> list[Endpoint]:
         """Get all endpoints that don't require authentication."""
         return [
-            ep for ep in self.snapshot.endpoints
+            ep
+            for ep in self.snapshot.endpoints
             if not ep.auth_required and ep.auth_type in ("none", "unknown")
         ]
 
@@ -233,7 +233,9 @@ class AuthErrorConventionGenerator:
         lines = ["## 状态码约定", ""]
 
         if not analysis["error_codes"]:
-            lines.append("**注意**: 当前仓库端点未提供错误码信息，此部分基于约定俗成的HTTP状态码规范。")
+            lines.append(
+                "**注意**: 当前仓库端点未提供错误码信息，此部分基于约定俗成的HTTP状态码规范。"
+            )
             lines.append("")
             lines.append("### 通用状态码")
             lines.append("")
@@ -266,10 +268,7 @@ class AuthErrorConventionGenerator:
 
     def _format_status_code_table(self, codes: list[int]) -> str:
         """Format status codes as a table."""
-        lines = [
-            "| 状态码 | 名称 | 说明 |",
-            "|--------|------|------|"
-        ]
+        lines = ["| 状态码 | 名称 | 说明 |", "|--------|------|------|"]
         for code in sorted(codes):
             if code in self.STATUS_CODE_CATEGORIES:
                 name, desc = self.STATUS_CODE_CATEGORIES[code]
@@ -280,10 +279,7 @@ class AuthErrorConventionGenerator:
 
     def _format_generic_status_codes(self) -> str:
         """Format generic HTTP status code table."""
-        lines = [
-            "| 状态码 | 名称 | 说明 |",
-            "|--------|------|------|"
-        ]
+        lines = ["| 状态码 | 名称 | 说明 |", "|--------|------|------|"]
         for code, (name, desc) in sorted(self.STATUS_CODE_CATEGORIES.items()):
             lines.append(f"| {code} | {name} | {desc} |")
         return "\n".join(lines)
@@ -307,8 +303,10 @@ class AuthErrorConventionGenerator:
             lines.append(self._format_no_auth_content())
             return "\n".join(lines)
 
-        lines.append(f"当前仓库共有 **{analysis['authenticated_endpoint_count']}** 个需认证端点，"
-                   f"**{analysis['unauthenticated_endpoint_count']}** 个公开端点。")
+        lines.append(
+            f"当前仓库共有 **{analysis['authenticated_endpoint_count']}** 个需认证端点，"
+            f"**{analysis['unauthenticated_endpoint_count']}** 个公开端点。"
+        )
         lines.append("")
 
         # Document auth types
@@ -340,10 +338,7 @@ class AuthErrorConventionGenerator:
 
     def _format_auth_type_table(self, auth_types: list[str]) -> str:
         """Format auth types as a table."""
-        lines = [
-            "| 认证类型 | 说明 |",
-            "|----------|------|"
-        ]
+        lines = ["| 认证类型 | 说明 |", "|----------|------|"]
         for auth_type in auth_types:
             desc = self.AUTH_TYPE_PATTERNS.get(auth_type, "Unknown auth type")
             lines.append(f"| `{auth_type}` | {desc} |")
@@ -460,6 +455,7 @@ class AuthErrorConventionGenerator:
         This is a synchronous wrapper that uses the underlying async method.
         """
         import asyncio
+
         return asyncio.run(self._llm_composer.compose_page(composer_input))
 
     def _build_composer_context(self) -> ComposerContext:
@@ -474,13 +470,15 @@ class AuthErrorConventionGenerator:
         # Collect all endpoints info
         all_endpoints = []
         for ep in self.snapshot.endpoints:
-            all_endpoints.append({
-                "path": ep.path,
-                "method": ep.method,
-                "auth_required": ep.auth_required,
-                "auth_type": ep.auth_type,
-                "error_codes": ep.error_codes,
-            })
+            all_endpoints.append(
+                {
+                    "path": ep.path,
+                    "method": ep.method,
+                    "auth_required": ep.auth_required,
+                    "auth_type": ep.auth_type,
+                    "error_codes": ep.error_codes,
+                }
+            )
 
         return ComposerContext(
             repository_name=self.snapshot.repository.name,
@@ -524,6 +522,7 @@ class AuthErrorConventionGenerator:
 # COMPOSER FACTORY
 # =============================================================================
 
+
 def create_auth_error_convention_generator(
     snapshot: RepositorySnapshot,
     llm_provider: MockLLMProvider | None = None,
@@ -549,6 +548,7 @@ def create_auth_error_convention_generator(
 # =============================================================================
 # STANDALONE COMPOSITION HELPERS
 # =============================================================================
+
 
 def compose_auth_convention_article(
     page_plan: WikiPagePlan,

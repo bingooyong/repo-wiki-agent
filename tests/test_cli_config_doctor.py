@@ -6,10 +6,10 @@ import pytest
 
 from repo_wiki.llm import LLMProviderConfig
 from repo_wiki.llm.diagnostics import (
-    run_llm_diagnostics,
-    format_diagnostics_text,
-    format_diagnostics_json,
     create_provider_from_config,
+    format_diagnostics_json,
+    format_diagnostics_text,
+    run_llm_diagnostics,
 )
 
 
@@ -86,6 +86,7 @@ class TestFormatDiagnosticsJson:
         json_str = format_diagnostics_json(diagnostics)
 
         import json
+
         parsed = json.loads(json_str)
         assert parsed["provider"] == "openai"
 
@@ -106,6 +107,7 @@ class TestCreateProviderFromConfig:
         """Test creating OpenAI provider."""
         config = LLMProviderConfig(provider="openai", model="gpt-4")
         from repo_wiki.llm import OpenAICompatibleProvider
+
         provider = create_provider_from_config(config)
         assert isinstance(provider, OpenAICompatibleProvider)
 
@@ -113,6 +115,7 @@ class TestCreateProviderFromConfig:
         """Test creating Minimax provider."""
         config = LLMProviderConfig(provider="minimax", model="abab6-chat")
         from repo_wiki.llm import MinimaxProvider
+
         provider = create_provider_from_config(config)
         assert isinstance(provider, MinimaxProvider)
 
@@ -120,5 +123,6 @@ class TestCreateProviderFromConfig:
         """Test unknown provider defaults to OpenAI-compatible."""
         config = LLMProviderConfig(provider="unknown")
         from repo_wiki.llm import OpenAICompatibleProvider
+
         provider = create_provider_from_config(config)
         assert isinstance(provider, OpenAICompatibleProvider)

@@ -1,6 +1,6 @@
-from .service import RepoWikiService
+from .invalidation import IncrementalRegenerationPlanner, PageInvalidationEngine
 from .runtime_store import SQLiteRuntimeStore, create_runtime_store
-from .invalidation import PageInvalidationEngine, IncrementalRegenerationPlanner
+from .service import RepoWikiService
 
 __all__ = [
     "RepoWikiService",

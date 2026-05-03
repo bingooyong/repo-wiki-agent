@@ -14,7 +14,6 @@ Phase 24 - Task 24.3: LLM page composer pipeline
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 import pytest
 
@@ -31,7 +30,7 @@ from repo_wiki.generator.composer import (
     create_composer,
     run_smoke_test,
 )
-from repo_wiki.llm.providers import create_mock_provider, MockLLMProvider
+from repo_wiki.llm.providers import MockLLMProvider, create_mock_provider
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.planner.schema import (
     GenerationMode,
@@ -40,7 +39,7 @@ from repo_wiki.planner.schema import (
     WikiTaxonomyCategory,
 )
 from repo_wiki.prompts.contracts import PagePromptContract, PagePromptType
-from repo_wiki.prompts.skeleton import ArticleSkeleton, build_skeleton
+from repo_wiki.prompts.skeleton import build_skeleton
 
 
 class TestCitationPreservationValidator:
@@ -96,7 +95,13 @@ class TestHeadingPreservationValidator:
     @pytest.fixture
     def mock_contract(self) -> PagePromptContract:
         """Create a mock contract for testing."""
-        from repo_wiki.prompts.contracts import HeadingRequirement, EvidenceRequirement, StyleRequirement, AntiHallucinationRequirement
+        from repo_wiki.prompts.contracts import (
+            AntiHallucinationRequirement,
+            EvidenceRequirement,
+            HeadingRequirement,
+            StyleRequirement,
+        )
+
         return PagePromptContract(
             page_type=PagePromptType.OVERVIEW,
             description="Test contract",
@@ -429,6 +434,7 @@ class TestBuildComposerInput:
         )
 
         from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
+
         span = EvidenceSpanRecord(
             digest="abc123",
             file_path="src/test.py",
@@ -477,7 +483,12 @@ class TestLowConfidenceBehavior:
     ):
         """Test that low-confidence pages get appropriate flags."""
         from repo_wiki.generator.composer import build_composer_input
-        from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory, SourceRequirement, GenerationMode
+        from repo_wiki.planner.schema import (
+            GenerationMode,
+            SourceRequirement,
+            WikiPagePlan,
+            WikiTaxonomyCategory,
+        )
 
         page = WikiPagePlan(
             page_id="low-confidence-page",
@@ -507,7 +518,12 @@ class TestLowConfidenceBehavior:
     ):
         """Test that pages without evidence produce uncertainty markers."""
         from repo_wiki.generator.composer import build_composer_input
-        from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory, SourceRequirement, GenerationMode
+        from repo_wiki.planner.schema import (
+            GenerationMode,
+            SourceRequirement,
+            WikiPagePlan,
+            WikiTaxonomyCategory,
+        )
 
         page = WikiPagePlan(
             page_id="no-evidence-page",
@@ -539,7 +555,12 @@ class TestLowConfidenceBehavior:
     ):
         """Test that low-confidence pages cannot fabricate implementation details."""
         from repo_wiki.generator.composer import build_composer_input
-        from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory, SourceRequirement, GenerationMode
+        from repo_wiki.planner.schema import (
+            GenerationMode,
+            SourceRequirement,
+            WikiPagePlan,
+            WikiTaxonomyCategory,
+        )
 
         page = WikiPagePlan(
             page_id="fabrication-test",
@@ -671,17 +692,18 @@ class TestRunSmokeTest:
         """Test that smoke test is skipped when no env is set."""
         # Clear any existing env
         import os
-        env_backup = os.environ.get('REAL_LLM_PROVIDER')
 
-        if 'REAL_LLM_PROVIDER' in os.environ:
-            del os.environ['REAL_LLM_PROVIDER']
+        env_backup = os.environ.get("REAL_LLM_PROVIDER")
+
+        if "REAL_LLM_PROVIDER" in os.environ:
+            del os.environ["REAL_LLM_PROVIDER"]
 
         try:
             result = asyncio.run(run_smoke_test())
             assert result is True  # Skipped returns True
         finally:
             if env_backup:
-                os.environ['REAL_LLM_PROVIDER'] = env_backup
+                os.environ["REAL_LLM_PROVIDER"] = env_backup
 
 
 class TestCategoryToDocType:
@@ -690,30 +712,35 @@ class TestCategoryToDocType:
     def test_project_overview_maps_to_overview(self):
         """Test PROJECT_OVERVIEW maps to 'overview'."""
         from repo_wiki.generator.composer import _category_to_doc_type
+
         result = _category_to_doc_type(WikiTaxonomyCategory.PROJECT_OVERVIEW)
         assert result == "overview"
 
     def test_api_reference_maps_to_api(self):
         """Test API_REFERENCE maps to 'api'."""
         from repo_wiki.generator.composer import _category_to_doc_type
+
         result = _category_to_doc_type(WikiTaxonomyCategory.API_REFERENCE)
         assert result == "api"
 
     def test_data_models_maps_to_data(self):
         """Test DATA_MODELS maps to 'data'."""
         from repo_wiki.generator.composer import _category_to_doc_type
+
         result = _category_to_doc_type(WikiTaxonomyCategory.DATA_MODELS)
         assert result == "data"
 
     def test_deployment_operations_maps_to_ops(self):
         """Test DEPLOYMENT_OPERATIONS maps to 'ops'."""
         from repo_wiki.generator.composer import _category_to_doc_type
+
         result = _category_to_doc_type(WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS)
         assert result == "ops"
 
     def test_development_guide_maps_to_development(self):
         """Test DEVELOPMENT_GUIDE maps to 'development'."""
         from repo_wiki.generator.composer import _category_to_doc_type
+
         result = _category_to_doc_type(WikiTaxonomyCategory.DEVELOPMENT_GUIDE)
         assert result == "development"
 

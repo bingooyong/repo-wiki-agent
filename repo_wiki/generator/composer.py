@@ -24,14 +24,13 @@ from pathlib import Path
 from typing import Any
 
 from repo_wiki.evidence.citation_renderer import CitationRenderer
-from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
+from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.models import ChatMessage, ChatRequest, ChatResponse, LLMProvider
-from repo_wiki.llm.providers import MockLLMProvider, create_mock_provider
+from repo_wiki.llm.providers import create_mock_provider
 from repo_wiki.planner.llm_planner import MockLLMProvider as PlannerMockLLM
-from repo_wiki.planner.schema import WikiPagePlan, WikiPlanManifest
+from repo_wiki.planner.schema import WikiPagePlan
 from repo_wiki.prompts.contracts import (
-    PAGE_PROMPT_CONTRACTS,
     PagePromptContract,
     PagePromptType,
     get_contract_for_page_type,
@@ -42,21 +41,18 @@ from repo_wiki.prompts.fragments import (
 )
 from repo_wiki.prompts.skeleton import (
     ArticleSkeleton,
-    SkeletonBuilder,
     build_skeleton,
-    extract_toc_from_markdown,
-    validate_toc_completeness,
-    validate_heading_hierarchy,
 )
-
 
 # =============================================================================
 # COMPOSER CONTRACTS AND RESULTS
 # =============================================================================
 
+
 @dataclass
 class ComposerContext:
     """Context required for page composition."""
+
     repository_name: str
     primary_language: str
     framework: str
@@ -71,6 +67,7 @@ class ComposerContext:
 @dataclass
 class ComposerInput:
     """Input for a single page composition."""
+
     page_plan: WikiPagePlan
     evidence_binding: PageEvidenceBinding | None
     skeleton: ArticleSkeleton
@@ -81,6 +78,7 @@ class ComposerInput:
 @dataclass
 class ComposerOutput:
     """Output from page composition."""
+
     page_id: str
     markdown: str
     citations_preserved: bool
@@ -100,6 +98,7 @@ class ComposerOutput:
 @dataclass
 class ComposerResult:
     """Result of composing multiple pages."""
+
     outputs: list[ComposerOutput]
     total_pages: int
     successful_pages: int
@@ -111,13 +110,14 @@ class ComposerResult:
 # CITATION PRESERVATION VALIDATOR
 # =============================================================================
 
+
 class CitationPreservationValidator:
     """Validates that citations are preserved through normalization."""
 
     def __init__(self, workspace_root: str | Path | None = None) -> None:
         self.workspace_root = Path(workspace_root) if workspace_root else None
-        self.citation_pattern = re.compile(r'<cite>([^<]+)</cite>')
-        self.link_pattern = re.compile(r'\[([^\]]+)\]\(([^)]+)\)')
+        self.citation_pattern = re.compile(r"<cite>([^<]+)</cite>")
+        self.link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
     def extract_citations(self, content: str) -> list[str]:
         """Extract all citation references from content."""
@@ -127,8 +127,8 @@ class CitationPreservationValidator:
         # Extract [text](path:line) links
         for match in self.link_pattern.finditer(content):
             text, url = match.groups()
-            if ':' in url or ':' in text:
-                citations.append(f"{text}:{url}" if ':' not in text else text)
+            if ":" in url or ":" in text:
+                citations.append(f"{text}:{url}" if ":" not in text else text)
         return citations
 
     def validate_preservation(
@@ -152,8 +152,8 @@ class CitationPreservationValidator:
             if cite_lower in rendered_lower:
                 continue
             # Check just the file path portion
-            if ':' in cite:
-                path_part = cite.split(':')[0].lower()
+            if ":" in cite:
+                path_part = cite.split(":")[0].lower()
                 if path_part in rendered_lower:
                     continue
             missing.append(cite)
@@ -169,6 +169,7 @@ class CitationPreservationValidator:
 # HEADING PRESERVATION VALIDATOR
 # =============================================================================
 
+
 class HeadingPreservationValidator:
     """Validates that required headings are preserved."""
 
@@ -177,9 +178,9 @@ class HeadingPreservationValidator:
 
     def extract_headings(self, content: str) -> list[tuple[int, str]]:
         """Extract all headings from content (level, text)."""
-        pattern = re.compile(r'^(#{1,6})\s+(.+)$')
+        pattern = re.compile(r"^(#{1,6})\s+(.+)$")
         headings = []
-        for line in content.split('\n'):
+        for line in content.split("\n"):
             match = pattern.match(line.strip())
             if match:
                 level = len(match.group(1))
@@ -207,7 +208,7 @@ class HeadingPreservationValidator:
                 # requirement.text might be "## 简介" or "# {title}"
                 expected = requirement.text
                 # Strip markdown heading prefix for comparison
-                expected_text = expected.lstrip('#').strip()
+                expected_text = expected.lstrip("#").strip()
                 # Check if the exact heading text appears in rendered headings (exact match)
                 found = expected_text in rendered_headings
                 if not found:
@@ -223,6 +224,7 @@ class HeadingPreservationValidator:
 # =============================================================================
 # LLM PAGE COMPOSER
 # =============================================================================
+
 
 class LLMPageComposer:
     """Composes Qoder-style Markdown articles from page plans and evidence.
@@ -272,7 +274,7 @@ class LLMPageComposer:
         if provided is not None:
             return provided
 
-        if self.use_real_provider_on_env and os.environ.get('REAL_LLM_PROVIDER'):
+        if self.use_real_provider_on_env and os.environ.get("REAL_LLM_PROVIDER"):
             # Would use real provider here if configured
             # For now, fall back to mock
             pass
@@ -298,7 +300,7 @@ class LLMPageComposer:
                 prompt = self._build_compact_prompt(input, context)
             else:
                 # Render prompt fragment
-                fragment_name = input.page_plan.category.value.lower().replace(' ', '-')
+                fragment_name = input.page_plan.category.value.lower().replace(" ", "-")
                 try:
                     prompt = render_prompt_fragment(fragment_name, context)
                 except ValueError:
@@ -316,7 +318,9 @@ class LLMPageComposer:
 
             # Call LLM
             response = await self._call_llm(prompt, input.page_plan.title)
-            response_content = self._normalize_markdown_response(response.content, input.page_plan.title)
+            response_content = self._normalize_markdown_response(
+                response.content, input.page_plan.title
+            )
             usage = response.usage or {}
             prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
             completion_tokens = int(usage.get("completion_tokens", 0) or 0)
@@ -411,7 +415,9 @@ class LLMPageComposer:
             symbol_info = f" (symbol: {span.symbol})" if span.symbol else ""
             snippet = self._compact_snippet(getattr(span, "span_text", "") or "")
             if snippet:
-                lines.append(f"- {span.file_path}:{span.line_start}-{span.line_end}{symbol_info}: {snippet}")
+                lines.append(
+                    f"- {span.file_path}:{span.line_start}-{span.line_end}{symbol_info}: {snippet}"
+                )
             else:
                 lines.append(f"- {span.file_path}:{span.line_start}-{span.line_end}{symbol_info}")
 
@@ -424,9 +430,7 @@ class LLMPageComposer:
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         page = input.page_plan
         required_headings = [
-            section.heading_text
-            for section in input.skeleton.headings
-            if section.required
+            section.heading_text for section in input.skeleton.headings if section.required
         ]
         headings_text = "\n".join(f"- {heading}" for heading in required_headings[:6])
         evidence_context = (
@@ -636,15 +640,21 @@ class LLMPageComposer:
 
         # Low citation density when evidence exists
         if candidate_count >= 3 and result.evidence_count < 3:
-            uncertainty_reasons.append(f"INSUFFICIENT_CITATIONS: only {result.evidence_count} citations found, expected at least 3")
+            uncertainty_reasons.append(
+                f"INSUFFICIENT_CITATIONS: only {result.evidence_count} citations found, expected at least 3"
+            )
 
         # Low evidence binding
         if candidate_count > 0 and candidate_count < 3:
-            uncertainty_reasons.append(f"LOW_EVIDENCE_BINDING: only {candidate_count} evidence candidates bound")
+            uncertainty_reasons.append(
+                f"LOW_EVIDENCE_BINDING: only {candidate_count} evidence candidates bound"
+            )
 
         # Check for unsupported claims via content analysis
         if self._detect_unsupported_claims(content):
-            uncertainty_reasons.append("UNSUPPORTED_CLAIMS: content may contain assertions not backed by evidence")
+            uncertainty_reasons.append(
+                "UNSUPPORTED_CLAIMS: content may contain assertions not backed by evidence"
+            )
 
         # Mark low-confidence if there are uncertainty reasons but no rejection
         if uncertainty_reasons and not result.rejection_reason:
@@ -670,10 +680,10 @@ class LLMPageComposer:
 
         # Patterns that indicate strong claims requiring evidence
         claim_patterns = [
-            r'\b(always|never|must|guaranteed|100%|impossible)\b',
-            r'\b(best|worst|fastest|slowest|optimal|pessimized)\b',
-            r'\b(cutting-edge|legacy|modern|outdated)\b',
-            r'\b(enterprise-grade|mission-critical|zero-downtime)\b',
+            r"\b(always|never|must|guaranteed|100%|impossible)\b",
+            r"\b(best|worst|fastest|slowest|optimal|pessimized)\b",
+            r"\b(cutting-edge|legacy|modern|outdated)\b",
+            r"\b(enterprise-grade|mission-critical|zero-downtime)\b",
         ]
 
         matches = 0
@@ -682,7 +692,7 @@ class LLMPageComposer:
                 matches += 1
 
         # If multiple strong claim patterns found without citations, likely unsupported
-        cite_count = len(re.findall(r'<cite>', content))
+        cite_count = len(re.findall(r"<cite>", content))
         if matches >= 3 and cite_count == 0:
             return True
 
@@ -693,7 +703,7 @@ class LLMPageComposer:
 
         Strips headers, list items, code blocks, and tables.
         """
-        lines = content.split('\n')
+        lines = content.split("\n")
         prose_lines = []
         in_code_block = False
 
@@ -701,25 +711,26 @@ class LLMPageComposer:
             stripped = line.strip()
             if not stripped:
                 continue
-            if stripped.startswith('```'):
+            if stripped.startswith("```"):
                 in_code_block = not in_code_block
                 continue
             if in_code_block:
                 continue
-            if stripped.startswith('#'):
+            if stripped.startswith("#"):
                 continue
-            if stripped.startswith('-') or stripped.startswith('*'):
+            if stripped.startswith("-") or stripped.startswith("*"):
                 continue
-            if stripped.startswith('|'):
+            if stripped.startswith("|"):
                 continue
             prose_lines.append(stripped)
 
-        return len(' '.join(prose_lines))
+        return len(" ".join(prose_lines))
 
 
 @dataclass
 class ValidationResult:
     """Result of output validation."""
+
     citations_preserved: bool = True
     headings_preserved: bool = True
     evidence_count: int = 0
@@ -733,6 +744,7 @@ class ValidationResult:
 # =============================================================================
 # COMPOSER FACTORY AND HELPERS
 # =============================================================================
+
 
 def create_composer(
     provider: LLMProvider | PlannerMockLLM | None = None,
@@ -814,6 +826,7 @@ def _category_to_doc_type(category) -> str:
 # SMOKE TEST HOOK
 # =============================================================================
 
+
 async def run_smoke_test(
     workspace_root: str | Path | None = None,
 ) -> bool:
@@ -828,13 +841,18 @@ async def run_smoke_test(
     Returns:
         True if smoke test passes or not run, False if fails
     """
-    if not os.environ.get('REAL_LLM_PROVIDER'):
+    if not os.environ.get("REAL_LLM_PROVIDER"):
         # Smoke test skipped - no real provider configured
         return True
 
     try:
         # Create smoke test inputs
-        from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory, SourceRequirement, GenerationMode
+        from repo_wiki.planner.schema import (
+            GenerationMode,
+            SourceRequirement,
+            WikiPagePlan,
+            WikiTaxonomyCategory,
+        )
 
         test_page = WikiPagePlan(
             page_id="test-page",

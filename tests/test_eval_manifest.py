@@ -24,14 +24,16 @@ def test_qoder_like_manifest_references_materialized_content(tmp_path):
     repo_root.mkdir()
     _create_sample_repo(repo_root)
 
-    config = RepoWikiConfig.model_validate({
-        "project": {
-            "name": "manifest-fixture",
-            "root": str(repo_root),
-            "include": ["**/*"],
-            "exclude": [".repo-agent-eval/**", ".qoder/**", ".repo-wiki/**"],
+    config = RepoWikiConfig.model_validate(
+        {
+            "project": {
+                "name": "manifest-fixture",
+                "root": str(repo_root),
+                "include": ["**/*"],
+                "exclude": [".repo-agent-eval/**", ".qoder/**", ".repo-wiki/**"],
+            }
         }
-    })
+    )
     profile = EvalOutputProfile(
         name="qoder-like",
         root=str(repo_root / ".repo-agent-eval"),

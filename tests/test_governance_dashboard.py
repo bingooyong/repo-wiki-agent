@@ -1,19 +1,19 @@
 """Tests for qoder governance dashboard and SQLite export."""
+
 from __future__ import annotations
 
-import json
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from scripts.qoder_governance_dashboard import (
-    GovernanceMetric,
+    SQLITE_AVAILABLE,
     GovernanceDB,
+    GovernanceMetric,
     TrendAnalyzer,
     TrendData,
-    SQLITE_AVAILABLE,
 )
 
 
@@ -131,6 +131,7 @@ class TestGovernanceDB:
             # Verify tables exist
             conn = db_path
             import sqlite3
+
             c = sqlite3.connect(str(conn))
             cursor = c.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -166,7 +167,7 @@ class TestGovernanceDB:
                 total_gaps=5,
                 critical_gaps=0,
                 major_gaps=2,
-                benchmark_date=datetime.now(timezone.utc).isoformat(),
+                benchmark_date=datetime.now(UTC).isoformat(),
                 fixture_hash="abc123",
             )
 

@@ -1,7 +1,5 @@
 """Tests for page invalidation with git diff and hash fallback."""
 
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -10,10 +8,9 @@ from repo_wiki.orchestration.generation_invalidation import (
     GitDiffResult,
     HashBasedChangeDetector,
     HashChangeResult,
-    get_file_hash,
-    get_directory_hashes,
-    get_git_diff,
     create_generation_invalidator,
+    get_directory_hashes,
+    get_file_hash,
 )
 from repo_wiki.orchestration.generation_state import (
     GenerationStateMachine,
@@ -259,8 +256,14 @@ class TestGenerationAwareInvalidator:
 
         invalidated, skipped = invalidator.invalidate_from_hash_comparison(
             run_id=run.run_id,
-            baseline_hashes={"services/service-a/app.py": "aaa", "services/service-b/app.py": "bbb"},
-            current_hashes={"services/service-a/app.py": "changed", "services/service-b/app.py": "bbb"},
+            baseline_hashes={
+                "services/service-a/app.py": "aaa",
+                "services/service-b/app.py": "bbb",
+            },
+            current_hashes={
+                "services/service-a/app.py": "changed",
+                "services/service-b/app.py": "bbb",
+            },
         )
 
         assert "service-a" in invalidated
@@ -307,13 +310,10 @@ class TestGenerationAwareInvalidator:
         runtime_db = invalidator.root / ".repo-wiki" / "index" / "runtime.sqlite3"
         runtime_db.parent.mkdir(parents=True, exist_ok=True)
         import sqlite3
+
         with sqlite3.connect(runtime_db) as conn:
-            conn.execute(
-                "CREATE TABLE evidence_span (id INTEGER PRIMARY KEY, file_path TEXT)"
-            )
-            conn.execute(
-                "CREATE TABLE page_source_map (evidence_id INTEGER, doc_slug TEXT)"
-            )
+            conn.execute("CREATE TABLE evidence_span (id INTEGER PRIMARY KEY, file_path TEXT)")
+            conn.execute("CREATE TABLE page_source_map (evidence_id INTEGER, doc_slug TEXT)")
             conn.execute(
                 "INSERT INTO evidence_span(id, file_path) VALUES (1, ?)",
                 ("services/service-a/app.py",),

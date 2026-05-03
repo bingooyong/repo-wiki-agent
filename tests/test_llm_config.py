@@ -8,11 +8,11 @@ import pytest
 
 from repo_wiki.llm.config import (
     LLMProviderConfig,
-    resolve_llm_config,
-    redact_secrets,
-    format_redacted_diagnostic,
     ValidationReason,
+    format_redacted_diagnostic,
     get_api_key_from_env,
+    redact_secrets,
+    resolve_llm_config,
 )
 
 
@@ -88,15 +88,23 @@ class TestLLMProviderConfig:
 class TestResolveLLMConfig:
     """Tests for configuration resolution."""
 
-    def test_resolve_from_empty_config(self) -> None:
+    def test_resolve_from_empty_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test resolving from empty config uses defaults."""
+        # Clear ALL environment variables that affect LLM config
+        for key in list(os.environ.keys()):
+            if any(k in key for k in ["LLM_", "ANTHROPIC", "MINIMAX", "OPENAI", "APP_LLM"]):
+                monkeypatch.delenv(key, raising=False)
         config, warnings = resolve_llm_config()
         assert config.provider == "openai"
         assert config.model == "gpt-4o-mini"
         assert len(warnings) == 0
 
-    def test_resolve_from_dict(self) -> None:
+    def test_resolve_from_dict(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test resolving from configuration dictionary."""
+        # Clear ALL environment variables that affect LLM config
+        for key in list(os.environ.keys()):
+            if any(k in key for k in ["LLM_", "ANTHROPIC", "MINIMAX", "OPENAI", "APP_LLM"]):
+                monkeypatch.delenv(key, raising=False)
         config_dict = {
             "provider": "minimax",
             "model": "abab6-chat",
@@ -109,15 +117,23 @@ class TestResolveLLMConfig:
         assert config.base_url == "https://api.minimax.chat/v1"
         assert config.api_key_env == "MINIMAX_API_KEY"
 
-    def test_resolve_cli_overrides(self) -> None:
+    def test_resolve_cli_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test CLI overrides take highest priority."""
+        # Clear ALL environment variables that affect LLM config
+        for key in list(os.environ.keys()):
+            if any(k in key for k in ["LLM_", "ANTHROPIC", "MINIMAX", "OPENAI", "APP_LLM"]):
+                monkeypatch.delenv(key, raising=False)
         config_dict = {"provider": "openai", "model": "gpt-4o"}
         cli_overrides = {"model": "gpt-4o-32k"}
         config, warnings = resolve_llm_config(config=config_dict, cli_overrides=cli_overrides)
         assert config.model == "gpt-4o-32k"
 
-    def test_resolve_partial_overrides(self) -> None:
+    def test_resolve_partial_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test partial overrides preserve other defaults."""
+        # Clear ALL environment variables that affect LLM config
+        for key in list(os.environ.keys()):
+            if any(k in key for k in ["LLM_", "ANTHROPIC", "MINIMAX", "OPENAI", "APP_LLM"]):
+                monkeypatch.delenv(key, raising=False)
         cli_overrides = {"timeout": 30.0}
         config, warnings = resolve_llm_config(cli_overrides=cli_overrides)
         assert config.timeout == 30.0

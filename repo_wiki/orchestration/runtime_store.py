@@ -19,10 +19,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, List, Mapping, Sequence
+from typing import Any
 
 
 def _now_iso() -> str:
@@ -261,6 +261,7 @@ MIGRATIONS = {
 @dataclass
 class DocHierarchyRecord:
     """A document hierarchy record."""
+
     doc_type: str
     doc_slug: str
     doc_path: str
@@ -277,6 +278,7 @@ class DocHierarchyRecord:
 @dataclass
 class SectionRegistryRecord:
     """A section registry record."""
+
     canonical_slug: str
     title: str
     description: str | None = None
@@ -288,6 +290,7 @@ class SectionRegistryRecord:
 @dataclass
 class VerifyRunRecord:
     """A verify run record for trend analysis."""
+
     run_id: str
     target_path: str
     grade: str
@@ -304,6 +307,7 @@ class VerifyRunRecord:
 @dataclass
 class CompareRunRecord:
     """A compare run record for trend analysis."""
+
     run_id: str
     target_path: str
     baseline_path: str
@@ -321,6 +325,7 @@ class CompareRunRecord:
 @dataclass
 class PageInvalidationRecord:
     """A page invalidation record."""
+
     doc_slug: str
     doc_type: str
     invalidation_reason: str
@@ -335,6 +340,7 @@ class PageInvalidationRecord:
 @dataclass
 class EvidenceSpanRecord:
     """An evidence span record with file/line citation."""
+
     digest: str
     file_path: str
     line_start: int
@@ -349,6 +355,7 @@ class EvidenceSpanRecord:
 @dataclass
 class PageSourceMapRecord:
     """A page source map record linking evidence to wiki pages."""
+
     doc_slug: str
     doc_type: str
     evidence_id: int
@@ -360,6 +367,7 @@ class PageSourceMapRecord:
 @dataclass
 class SymbolReferenceRecord:
     """A symbol reference record for cross-referencing symbols."""
+
     source_file_path: str
     source_line_start: int
     source_line_end: int
@@ -424,9 +432,7 @@ class SQLiteRuntimeStore:
         self.conn.commit()
 
     def current_schema_version(self) -> int:
-        row = self.conn.execute(
-            "SELECT MAX(version) as v FROM schema_migrations"
-        ).fetchone()
+        row = self.conn.execute("SELECT MAX(version) as v FROM schema_migrations").fetchone()
         return int(row["v"]) if row and row["v"] else 0
 
     def close(self) -> None:
@@ -472,7 +478,7 @@ class SQLiteRuntimeStore:
                 ),
             )
 
-    def list_docs_by_type(self, doc_type: str) -> List[dict]:
+    def list_docs_by_type(self, doc_type: str) -> list[dict]:
         """List all documents of a given type."""
         rows = self.conn.execute(
             """
@@ -484,7 +490,7 @@ class SQLiteRuntimeStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_docs_by_layer(self, layer: str) -> List[dict]:
+    def list_docs_by_layer(self, layer: str) -> list[dict]:
         """List all documents in a given layer."""
         rows = self.conn.execute(
             """
@@ -574,7 +580,7 @@ class SQLiteRuntimeStore:
         ).fetchone()
         return row["canonical_slug"] if row else None
 
-    def list_active_sections(self) -> List[dict]:
+    def list_active_sections(self) -> list[dict]:
         """List all active sections."""
         rows = self.conn.execute(
             """
@@ -605,7 +611,7 @@ class SQLiteRuntimeStore:
                 return dict(row)
         return None
 
-    def list_section_aliases(self, canonical_slug: str) -> List[str]:
+    def list_section_aliases(self, canonical_slug: str) -> list[str]:
         """List all aliases for a canonical slug."""
         rows = self.conn.execute(
             "SELECT alias_slug FROM section_aliases WHERE canonical_slug = ?",
@@ -663,7 +669,7 @@ class SQLiteRuntimeStore:
         ).fetchone()
         return dict(row) if row else None
 
-    def list_nav_nodes_by_type(self, doc_type: str) -> List[dict]:
+    def list_nav_nodes_by_type(self, doc_type: str) -> list[dict]:
         """List all navigation nodes of a given type."""
         rows = self.conn.execute(
             "SELECT * FROM nav_graph WHERE doc_type = ? ORDER BY depth, doc_slug",
@@ -703,7 +709,15 @@ class SQLiteRuntimeStore:
                     target_doc_slug, link_type, link_path, is_valid, validated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
                 """,
-                (source_doc_type, source_doc_slug, target_doc_type, target_doc_slug, link_type, link_path, _now_iso()),
+                (
+                    source_doc_type,
+                    source_doc_slug,
+                    target_doc_type,
+                    target_doc_slug,
+                    link_type,
+                    link_path,
+                    _now_iso(),
+                ),
             )
 
     def validate_cross_links(self, doc_slug: str) -> list[dict]:
@@ -769,7 +783,7 @@ class SQLiteRuntimeStore:
         self,
         target_path: str | None = None,
         limit: int = 100,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """List verify runs, optionally filtered by target path."""
         if target_path:
             rows = self.conn.execute(
@@ -876,9 +890,27 @@ class SQLiteRuntimeStore:
                     summary.get("total_gaps", 0),
                     summary.get("critical_gaps", 0),
                     summary.get("major_gaps", 0),
-                    json.dumps({d["dimension"]: d.get("delta_type", "QUALITY") for d in compare_result.get("dimensions", [])}),
-                    json.dumps({d["dimension"]: d.get("score", 0.0) for d in compare_result.get("dimensions", [])}),
-                    json.dumps([g.to_dict() if hasattr(g, "to_dict") else g for g in sum((d.get("gaps", []) for d in compare_result.get("dimensions", [])), [])]),
+                    json.dumps(
+                        {
+                            d["dimension"]: d.get("delta_type", "QUALITY")
+                            for d in compare_result.get("dimensions", [])
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            d["dimension"]: d.get("score", 0.0)
+                            for d in compare_result.get("dimensions", [])
+                        }
+                    ),
+                    json.dumps(
+                        [
+                            g.to_dict() if hasattr(g, "to_dict") else g
+                            for g in sum(
+                                (d.get("gaps", []) for d in compare_result.get("dimensions", [])),
+                                [],
+                            )
+                        ]
+                    ),
                     json.dumps(compare_result),
                     _now_iso(),
                     duration_ms,
@@ -889,7 +921,7 @@ class SQLiteRuntimeStore:
         self,
         target_path: str | None = None,
         limit: int = 100,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """List compare runs, optionally filtered by target path."""
         if target_path:
             rows = self.conn.execute(
@@ -998,7 +1030,7 @@ class SQLiteRuntimeStore:
     def list_invalidated_pages(
         self,
         reason: str | None = None,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """List all invalidated pages."""
         if reason:
             rows = self.conn.execute(
@@ -1074,10 +1106,13 @@ class SQLiteRuntimeStore:
                     record.created_at or _now_iso(),
                 ),
             )
-            return cursor.lastrowid or self.conn.execute(
-                "SELECT id FROM evidence_span WHERE digest = ?",
-                (record.digest,),
-            ).fetchone()["id"]
+            return (
+                cursor.lastrowid
+                or self.conn.execute(
+                    "SELECT id FROM evidence_span WHERE digest = ?",
+                    (record.digest,),
+                ).fetchone()["id"]
+            )
 
     def get_evidence_span(self, evidence_id: int) -> dict | None:
         """Get an evidence span by id."""
@@ -1101,7 +1136,7 @@ class SQLiteRuntimeStore:
         language: str | None = None,
         symbol: str | None = None,
         limit: int = 100,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """List evidence spans with optional filters."""
         where = ["1=1"]
         params: list[Any] = []
@@ -1154,7 +1189,7 @@ class SQLiteRuntimeStore:
                 (doc_slug, doc_type, evidence_id, citation_order, context_hint, _now_iso()),
             )
 
-    def list_page_sources(self, doc_slug: str, doc_type: str) -> List[dict]:
+    def list_page_sources(self, doc_slug: str, doc_type: str) -> list[dict]:
         """List all evidence sources for a wiki page."""
         rows = self.conn.execute(
             """
@@ -1169,7 +1204,7 @@ class SQLiteRuntimeStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_pages_for_evidence(self, evidence_id: int) -> List[dict]:
+    def list_pages_for_evidence(self, evidence_id: int) -> list[dict]:
         """List all pages that reference an evidence span."""
         rows = self.conn.execute(
             """
@@ -1242,7 +1277,7 @@ class SQLiteRuntimeStore:
         ref_type: str | None = None,
         source_file_path: str | None = None,
         limit: int = 100,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """List symbol references with optional filters."""
         where = ["1=1"]
         params: list[Any] = []
@@ -1267,7 +1302,7 @@ class SQLiteRuntimeStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_symbol_targets(self, source_file_path: str, source_line: int) -> List[dict]:
+    def get_symbol_targets(self, source_file_path: str, source_line: int) -> list[dict]:
         """Get all target symbols referenced from a given source location."""
         rows = self.conn.execute(
             """
@@ -1304,11 +1339,13 @@ class SQLiteRuntimeStore:
         for row in rows:
             doc_path = Path(row["doc_path"])
             if not doc_path.exists():
-                orphaned.append({
-                    "doc_slug": row["doc_slug"],
-                    "doc_path": row["doc_path"],
-                    "issue": "section_page_missing",
-                })
+                orphaned.append(
+                    {
+                        "doc_slug": row["doc_slug"],
+                        "doc_path": row["doc_path"],
+                        "issue": "section_page_missing",
+                    }
+                )
         return orphaned
 
     def check_broken_section_mappings(self) -> list[dict]:
@@ -1323,11 +1360,13 @@ class SQLiteRuntimeStore:
             """
         ).fetchall()
         for row in rows:
-            broken.append({
-                "alias_slug": row["alias_slug"],
-                "canonical_slug": row["canonical_slug"],
-                "issue": "alias_not_resolved",
-            })
+            broken.append(
+                {
+                    "alias_slug": row["alias_slug"],
+                    "canonical_slug": row["canonical_slug"],
+                    "issue": "alias_not_resolved",
+                }
+            )
         return broken
 
     def check_stale_evidence(self, max_age_days: int = 30) -> list[dict]:
@@ -1344,13 +1383,15 @@ class SQLiteRuntimeStore:
             (cutoff,),
         ).fetchall()
         for row in verify_rows:
-            stale.append({
-                "run_id": row["run_id"],
-                "target_path": row["target_path"],
-                "type": "verify_run",
-                "created_at": row["created_at"],
-                "issue": "evidence_stale",
-            })
+            stale.append(
+                {
+                    "run_id": row["run_id"],
+                    "target_path": row["target_path"],
+                    "type": "verify_run",
+                    "created_at": row["created_at"],
+                    "issue": "evidence_stale",
+                }
+            )
 
         compare_rows = self.conn.execute(
             """
@@ -1361,13 +1402,15 @@ class SQLiteRuntimeStore:
             (cutoff,),
         ).fetchall()
         for row in compare_rows:
-            stale.append({
-                "run_id": row["run_id"],
-                "target_path": row["target_path"],
-                "type": "compare_run",
-                "created_at": row["created_at"],
-                "issue": "evidence_stale",
-            })
+            stale.append(
+                {
+                    "run_id": row["run_id"],
+                    "target_path": row["target_path"],
+                    "type": "compare_run",
+                    "created_at": row["created_at"],
+                    "issue": "evidence_stale",
+                }
+            )
 
         return stale
 
@@ -1401,9 +1444,7 @@ class SQLiteRuntimeStore:
         )
 
         # Export nav graph
-        nav_nodes = self.conn.execute(
-            "SELECT * FROM nav_graph ORDER BY doc_type, depth"
-        ).fetchall()
+        nav_nodes = self.conn.execute("SELECT * FROM nav_graph ORDER BY doc_type, depth").fetchall()
         nav_path = target / "nav_graph.json"
         nav_path.write_text(
             json.dumps([dict(row) for row in nav_nodes], indent=2, ensure_ascii=False),
@@ -1481,6 +1522,7 @@ class SQLiteRuntimeStore:
 # =============================================================================
 # Runtime Store Factory
 # =============================================================================
+
 
 def create_runtime_store(root: Path) -> SQLiteRuntimeStore:
     """Create a runtime store at the standard location within a repo.

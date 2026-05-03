@@ -4,7 +4,6 @@ import asyncio
 import math
 import re
 import sqlite3
-import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -15,12 +14,20 @@ from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.core.errors import ErrorCategory, RepoWikiError
 from repo_wiki.core.logging import info
 from repo_wiki.core.runtime import bootstrap
-from repo_wiki.generator.contracts import CORE_DOCUMENT_CONTRACTS, SECTION_DEFINITIONS, get_canonical_slug
+from repo_wiki.generator.contracts import (
+    CORE_DOCUMENT_CONTRACTS,
+    SECTION_DEFINITIONS,
+    get_canonical_slug,
+)
 from repo_wiki.generator.engine import GenerationConfig, GenerationEngine
 from repo_wiki.generator.io import read_json, read_text, read_yamlish
 from repo_wiki.graph.service import build_graph_artifacts
 from repo_wiki.indexer.indexing import SemanticIndexer
-from repo_wiki.orchestration.runtime_store import DocHierarchyRecord, SectionRegistryRecord, create_runtime_store
+from repo_wiki.orchestration.runtime_store import (
+    DocHierarchyRecord,
+    SectionRegistryRecord,
+    create_runtime_store,
+)
 from repo_wiki.retrieval.service import RetrievalService
 from repo_wiki.scanner.artifacts import write_source_of_truth
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
@@ -60,7 +67,9 @@ class RepoWikiService:
 
         stage.start("retrieval")
         retrieval = RetrievalService(self.root, self.config)
-        retrieval_candidates = retrieval.build_retrieval_candidates([module.name for module in snapshot.modules])
+        retrieval_candidates = retrieval.build_retrieval_candidates(
+            [module.name for module in snapshot.modules]
+        )
         stage.stop("retrieval")
 
         stage.start("generate")
@@ -127,7 +136,9 @@ class RepoWikiService:
 
         stage.start("retrieval")
         retrieval = RetrievalService(self.root, self.config)
-        retrieval_candidates = retrieval.build_retrieval_candidates([module.name for module in snapshot.modules])
+        retrieval_candidates = retrieval.build_retrieval_candidates(
+            [module.name for module in snapshot.modules]
+        )
         stage.stop("retrieval")
 
         stage.start("runtime_sync")
@@ -182,7 +193,9 @@ class RepoWikiService:
         stage.stop("graph")
 
         stage.start("retrieval")
-        retrieval_candidates = retrieval.build_retrieval_candidates([module.name for module in snapshot.modules])
+        retrieval_candidates = retrieval.build_retrieval_candidates(
+            [module.name for module in snapshot.modules]
+        )
         stage.stop("retrieval")
 
         stage.start("generate")
@@ -304,11 +317,13 @@ class RepoWikiService:
             for file_path in written_files:
                 if file_path.endswith(".md"):
                     slug = compute_stable_slug(Path(file_path).stem)
-                    page_registry.append({
-                        "path": file_path,
-                        "slug": slug,
-                        "type": "markdown",
-                    })
+                    page_registry.append(
+                        {
+                            "path": file_path,
+                            "slug": slug,
+                            "type": "markdown",
+                        }
+                    )
 
             manifest = generate_manifest(
                 run_id=run_id,
@@ -356,7 +371,10 @@ class RepoWikiService:
 
     def _generate_isolated_eval(self, eval_profile: Any, run_id: str) -> dict[str, Any]:
         """Generate qoder-like eval output without mutating target docs/runtime dirs."""
-        from repo_wiki.orchestration.content_layout_writer import ContentLayoutWriter, build_navigation_tree
+        from repo_wiki.orchestration.content_layout_writer import (
+            ContentLayoutWriter,
+            build_navigation_tree,
+        )
         from repo_wiki.orchestration.eval_layout import (
             generate_manifest,
             get_git_commit_full,
@@ -393,7 +411,9 @@ class RepoWikiService:
         stage.start("plan")
         plan = self._build_qoder_like_page_plan(snapshot)
         stage.stop("plan")
-        info(f"stage plan completed planned_pages={len(plan.pages)} elapsed={stage.timings.get('plan')}s")
+        info(
+            f"stage plan completed planned_pages={len(plan.pages)} elapsed={stage.timings.get('plan')}s"
+        )
 
         info("stage evidence started")
         stage.start("evidence")
@@ -428,7 +448,9 @@ class RepoWikiService:
 
         info("stage content started")
         stage.start("content")
-        plan_md_paths = {page.output_path for page in plan.pages if page.output_path.endswith(".md")}
+        plan_md_paths = {
+            page.output_path for page in plan.pages if page.output_path.endswith(".md")
+        }
         selected_paths = writer.load_selected_paths_from_sqlite(
             self.root / ".repo-wiki" / "index" / "runtime.sqlite3",
             project_root=self.root,
@@ -451,7 +473,9 @@ class RepoWikiService:
         navigation_tree = build_navigation_tree(written_content, content_dir)
         page_registry = writer.build_page_registry(written_content)
         stage.stop("content")
-        info(f"stage content completed files={len(written_content)} elapsed={stage.timings.get('content')}s")
+        info(
+            f"stage content completed files={len(written_content)} elapsed={stage.timings.get('content')}s"
+        )
 
         info("stage manifest started")
         stage.start("manifest")
@@ -477,7 +501,9 @@ class RepoWikiService:
                 "generation_mode": "isolated-qoder-like-llm-composer",
                 "target_dirs_modified": False,
                 "wiki_plan_profile": plan.profile,
-                "repository_identity": plan.repository_identity.model_dump() if plan.repository_identity else None,
+                "repository_identity": plan.repository_identity.model_dump()
+                if plan.repository_identity
+                else None,
             },
             navigation_tree=navigation_tree,
             page_registry=page_registry,
@@ -493,7 +519,9 @@ class RepoWikiService:
         )
         manifest_path = write_manifest(manifest, output_dir)
         stage.stop("manifest")
-        info(f"stage manifest completed path={manifest_path} elapsed={stage.timings.get('manifest')}s")
+        info(
+            f"stage manifest completed path={manifest_path} elapsed={stage.timings.get('manifest')}s"
+        )
 
         return {
             "scan": {
@@ -562,7 +590,11 @@ class RepoWikiService:
             (WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS, "deployment-overview", "部署运维"),
             (WikiTaxonomyCategory.DEVELOPMENT_GUIDE, "development-guide", "开发指南"),
             (WikiTaxonomyCategory.SECURITY_COMPLIANCE, "security-overview", "安全合规"),
-            (WikiTaxonomyCategory.TROUBLESHOOTING, "troubleshooting-maintenance-overview", "故障排除与维护"),
+            (
+                WikiTaxonomyCategory.TROUBLESHOOTING,
+                "troubleshooting-maintenance-overview",
+                "故障排除与维护",
+            ),
         ]
 
         for sort_order, (category, page_id, title) in enumerate(required_roots):
@@ -623,12 +655,16 @@ class RepoWikiService:
         """Remove low-value planner artifacts from the Qoder-like profile."""
         import os
 
-        include_endpoint_pages = os.environ.get("REPO_WIKI_INCLUDE_ENDPOINT_PAGES", "").strip().lower() in {
+        include_endpoint_pages = os.environ.get(
+            "REPO_WIKI_INCLUDE_ENDPOINT_PAGES", ""
+        ).strip().lower() in {
             "1",
             "true",
             "yes",
         }
-        include_raw_model_pages = os.environ.get("REPO_WIKI_INCLUDE_RAW_MODEL_PAGES", "").strip().lower() in {
+        include_raw_model_pages = os.environ.get(
+            "REPO_WIKI_INCLUDE_RAW_MODEL_PAGES", ""
+        ).strip().lower() in {
             "1",
             "true",
             "yes",
@@ -643,7 +679,9 @@ class RepoWikiService:
 
             if not include_endpoint_pages and ("endpoint" in tags or method_title.match(title)):
                 continue
-            if not include_raw_model_pages and ("raw-model" in tags or "model" in tags and page.category.value == "数据模型"):
+            if not include_raw_model_pages and (
+                "raw-model" in tags or "model" in tags and page.category.value == "数据模型"
+            ):
                 continue
             if title.lower().startswith("consider adding"):
                 continue
@@ -669,7 +707,9 @@ class RepoWikiService:
                 selected.append(page)
                 selected_ids.add(page.page_id)
 
-        remaining_by_category: dict[Any, list[Any]] = {category: [] for category in ordered_categories}
+        remaining_by_category: dict[Any, list[Any]] = {
+            category: [] for category in ordered_categories
+        }
         overflow: list[Any] = []
         for page in sorted(pages, key=lambda p: (p.sort_order, p.title)):
             if page.page_id in selected_ids:
@@ -787,7 +827,9 @@ class RepoWikiService:
         max_size = self.config.security.max_file_size_kb * 1024
         max_spans = 3000
 
-        for dirpath, dirnames, filenames in os.walk(self.root, followlinks=self.config.scan.follow_symlinks):
+        for dirpath, dirnames, filenames in os.walk(
+            self.root, followlinks=self.config.scan.follow_symlinks
+        ):
             if len(spans) >= max_spans:
                 break
             current_dir = Path(dirpath)
@@ -826,7 +868,7 @@ class RepoWikiService:
 
                 for span in extractor.extract_from_file(relative, content):
                     lines = content.splitlines()
-                    snippet = "\n".join(lines[max(span.line_start - 1, 0): span.line_end])
+                    snippet = "\n".join(lines[max(span.line_start - 1, 0) : span.line_end])
                     spans.append(
                         EvidenceSpanRecord(
                             digest=span.digest,
@@ -913,7 +955,11 @@ class RepoWikiService:
         snapshot: Any,
         output_dir: Path,
     ) -> dict[str, Any]:
-        from repo_wiki.generator.composer import ComposerContext, build_composer_input, create_composer
+        from repo_wiki.generator.composer import (
+            ComposerContext,
+            build_composer_input,
+            create_composer,
+        )
         from repo_wiki.generator.composer_cache import (
             ComposerCache,
             compute_composer_input_hash,
@@ -1045,15 +1091,17 @@ class RepoWikiService:
 
             if provider_disabled_after_failures:
                 fallback_page_count += 1
-                failed_pages.append({
-                    "page_id": page.page_id,
-                    "title": page.title,
-                    "reason": self._provider_disabled_reason(
-                        max_provider_failures=max_provider_failures,
-                        max_real_provider_calls=max_real_provider_calls,
-                        provider_attempt_count=provider_attempt_count,
-                    ),
-                })
+                failed_pages.append(
+                    {
+                        "page_id": page.page_id,
+                        "title": page.title,
+                        "reason": self._provider_disabled_reason(
+                            max_provider_failures=max_provider_failures,
+                            max_real_provider_calls=max_real_provider_calls,
+                            provider_attempt_count=provider_attempt_count,
+                        ),
+                    }
+                )
                 fallback = self._fallback_markdown_for_failed_page(page, binding)
                 enriched = self._enforce_qoder_page_contract(
                     page=page,
@@ -1064,18 +1112,23 @@ class RepoWikiService:
                 page_results[page_idx] = (page.output_path, enriched)
                 continue
 
-            if max_real_provider_calls is not None and provider_attempt_count >= max_real_provider_calls:
+            if (
+                max_real_provider_calls is not None
+                and provider_attempt_count >= max_real_provider_calls
+            ):
                 provider_disabled_after_failures = True
                 fallback_page_count += 1
-                failed_pages.append({
-                    "page_id": page.page_id,
-                    "title": page.title,
-                    "reason": self._provider_disabled_reason(
-                        max_provider_failures=max_provider_failures,
-                        max_real_provider_calls=max_real_provider_calls,
-                        provider_attempt_count=provider_attempt_count,
-                    ),
-                })
+                failed_pages.append(
+                    {
+                        "page_id": page.page_id,
+                        "title": page.title,
+                        "reason": self._provider_disabled_reason(
+                            max_provider_failures=max_provider_failures,
+                            max_real_provider_calls=max_real_provider_calls,
+                            provider_attempt_count=provider_attempt_count,
+                        ),
+                    }
+                )
                 fallback = self._fallback_markdown_for_failed_page(page, binding)
                 enriched = self._enforce_qoder_page_contract(
                     page=page,
@@ -1088,14 +1141,16 @@ class RepoWikiService:
 
             provider_attempt_count += 1
             attempted_page_ids.append(page.page_id)
-            compose_jobs.append({
-                "attempt_no": provider_attempt_count,
-                "page_idx": page_idx,
-                "page": page,
-                "binding": binding,
-                "input_data": input_data,
-                "input_hash": input_hash,
-            })
+            compose_jobs.append(
+                {
+                    "attempt_no": provider_attempt_count,
+                    "page_idx": page_idx,
+                    "page": page,
+                    "binding": binding,
+                    "input_data": input_data,
+                    "input_hash": input_hash,
+                }
+            )
 
         info(
             "compose llm batch prepared "
@@ -1111,11 +1166,13 @@ class RepoWikiService:
             if result["status"] == "error":
                 provider_failure_count += 1
                 fallback_page_count += 1
-                failed_pages.append({
-                    "page_id": page.page_id,
-                    "title": page.title,
-                    "reason": result["reason"],
-                })
+                failed_pages.append(
+                    {
+                        "page_id": page.page_id,
+                        "title": page.title,
+                        "reason": result["reason"],
+                    }
+                )
                 fallback = self._fallback_markdown_for_failed_page(page, binding)
                 enriched = self._enforce_qoder_page_contract(
                     page=page,
@@ -1133,11 +1190,13 @@ class RepoWikiService:
             if output.rejected:
                 provider_failure_count += 1
                 fallback_page_count += 1
-                failed_pages.append({
-                    "page_id": page.page_id,
-                    "title": page.title,
-                    "reason": output.rejection_reason or "unknown",
-                })
+                failed_pages.append(
+                    {
+                        "page_id": page.page_id,
+                        "title": page.title,
+                        "reason": output.rejection_reason or "unknown",
+                    }
+                )
                 if provider_failure_count >= max_provider_failures:
                     provider_disabled_after_failures = True
                 fallback = self._fallback_markdown_for_failed_page(page, binding)
@@ -1152,12 +1211,14 @@ class RepoWikiService:
 
             provider_failure_count = 0
             if not (output.citations_preserved and output.headings_preserved):
-                quality_warnings.append({
-                    "page_id": page.page_id,
-                    "title": page.title,
-                    "citations_preserved": str(output.citations_preserved),
-                    "headings_preserved": str(output.headings_preserved),
-                })
+                quality_warnings.append(
+                    {
+                        "page_id": page.page_id,
+                        "title": page.title,
+                        "citations_preserved": str(output.citations_preserved),
+                        "headings_preserved": str(output.headings_preserved),
+                    }
+                )
             enriched = self._enforce_qoder_page_contract(
                 page=page,
                 markdown=output.markdown,
@@ -1177,35 +1238,38 @@ class RepoWikiService:
 
         pages = [page_results[idx] for idx in sorted(page_results)]
         provider_disabled_after_failures = provider_disabled_after_failures or (
-            max_real_provider_calls is not None and provider_attempt_count >= max_real_provider_calls
+            max_real_provider_calls is not None
+            and provider_attempt_count >= max_real_provider_calls
         )
 
         if hasattr(provider, "close"):
             await provider.close()
 
-        llm_summary.update({
-            "estimated_tokens": estimated_tokens,
-            "actual_tokens": actual_tokens,
-            "estimated_cost_usd": estimate_cost_from_tokens(estimated_tokens, llm_config.model),
-            "actual_cost_usd": estimate_cost_from_tokens(actual_tokens, llm_config.model),
-            "llm_call_count": llm_call_count,
-            "provider_attempt_count": provider_attempt_count,
-            "attempted_page_ids": attempted_page_ids,
-            "provider_failure_count": provider_failure_count,
-            "fallback_page_count": fallback_page_count,
-            "provider_disabled_after_failures": provider_disabled_after_failures,
-            "page_timeout_seconds": page_timeout_seconds,
-            "max_provider_failures": max_provider_failures,
-            "max_real_provider_calls": max_real_provider_calls,
-            "compose_concurrency": compose_concurrency,
-            "priority_mode": priority_mode,
-            "cache_hits": cache_hits,
-            "cache_misses": cache_misses,
-            "composer_cache_path": str(cache_path),
-            "page_limit": page_limit,
-            "composed_page_count": len(pages),
-            "quality_warning_count": len(quality_warnings),
-        })
+        llm_summary.update(
+            {
+                "estimated_tokens": estimated_tokens,
+                "actual_tokens": actual_tokens,
+                "estimated_cost_usd": estimate_cost_from_tokens(estimated_tokens, llm_config.model),
+                "actual_cost_usd": estimate_cost_from_tokens(actual_tokens, llm_config.model),
+                "llm_call_count": llm_call_count,
+                "provider_attempt_count": provider_attempt_count,
+                "attempted_page_ids": attempted_page_ids,
+                "provider_failure_count": provider_failure_count,
+                "fallback_page_count": fallback_page_count,
+                "provider_disabled_after_failures": provider_disabled_after_failures,
+                "page_timeout_seconds": page_timeout_seconds,
+                "max_provider_failures": max_provider_failures,
+                "max_real_provider_calls": max_real_provider_calls,
+                "compose_concurrency": compose_concurrency,
+                "priority_mode": priority_mode,
+                "cache_hits": cache_hits,
+                "cache_misses": cache_misses,
+                "composer_cache_path": str(cache_path),
+                "page_limit": page_limit,
+                "composed_page_count": len(pages),
+                "quality_warning_count": len(quality_warnings),
+            }
+        )
 
         return {
             "pages": pages,
@@ -1265,80 +1329,92 @@ class RepoWikiService:
         else:
             lines.append("- 当前页面没有匹配到高置信源码片段，后续需要补充扫描规则或页面规划规则。")
 
-        lines.extend([
-            "",
-            "## 详细组件分析",
-            "",
-            "从证据片段看，本主题的实现通常不是单点文件完成，而是由入口、配置、模型和服务逻辑共同支撑。",
-            "阅读时应先确认入口文件，再追踪模型和服务层的引用关系，最后查看部署或测试文件中的运行约束。",
-            "如果某个符号同时出现在多个服务目录中，应优先把它理解为跨服务契约，而不是孤立类或函数。",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "## 详细组件分析",
+                "",
+                "从证据片段看，本主题的实现通常不是单点文件完成，而是由入口、配置、模型和服务逻辑共同支撑。",
+                "阅读时应先确认入口文件，再追踪模型和服务层的引用关系，最后查看部署或测试文件中的运行约束。",
+                "如果某个符号同时出现在多个服务目录中，应优先把它理解为跨服务契约，而不是孤立类或函数。",
+                "",
+            ]
+        )
 
         for item in evidence["snippets"][:4]:
-            lines.extend([
-                f"### {item['symbol']}",
-                "",
-                f"`{item['path']}` 的片段显示：{item['summary']}",
-                "该证据用于限定本文的描述范围，避免生成与仓库无关的通用说明。",
-                "",
-            ])
+            lines.extend(
+                [
+                    f"### {item['symbol']}",
+                    "",
+                    f"`{item['path']}` 的片段显示：{item['summary']}",
+                    "该证据用于限定本文的描述范围，避免生成与仓库无关的通用说明。",
+                    "",
+                ]
+            )
 
         if page.category == WikiTaxonomyCategory.API_REFERENCE:
-            lines.extend([
-                "## 依赖关系分析",
-                "",
-                "API 页面需要同时关注 controller/router、请求响应模型、认证拦截器和错误处理路径。",
-                "服务族的 GET、POST、PUT、PATCH、DELETE 方法应被放在同一个业务流程中理解，避免只输出端点清单。",
-                "当接口返回结构依赖 DTO 或 Entity 时，页面应跳转阅读对应的数据模型页，以确认字段生命周期和兼容性约束。",
-                "",
-                "## 性能考虑",
-                "",
-                "接口性能主要受鉴权、序列化、数据库访问和外部服务调用影响。若证据中出现批处理、分页或异步任务，"
-                "应优先检查限流、超时和幂等策略。缺少这些约束时，后续实现需要补充 API 治理说明。",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## 依赖关系分析",
+                    "",
+                    "API 页面需要同时关注 controller/router、请求响应模型、认证拦截器和错误处理路径。",
+                    "服务族的 GET、POST、PUT、PATCH、DELETE 方法应被放在同一个业务流程中理解，避免只输出端点清单。",
+                    "当接口返回结构依赖 DTO 或 Entity 时，页面应跳转阅读对应的数据模型页，以确认字段生命周期和兼容性约束。",
+                    "",
+                    "## 性能考虑",
+                    "",
+                    "接口性能主要受鉴权、序列化、数据库访问和外部服务调用影响。若证据中出现批处理、分页或异步任务，"
+                    "应优先检查限流、超时和幂等策略。缺少这些约束时，后续实现需要补充 API 治理说明。",
+                    "",
+                ]
+            )
         elif page.category == WikiTaxonomyCategory.DATA_MODELS:
-            lines.extend([
-                "## 依赖关系分析",
-                "",
-                "数据模型页面需要区分核心实体、传输 DTO、配置 Schema 和迁移脚本。"
-                "同名模型如果跨服务出现，应按业务语义归并，而不是把每个类都作为独立核心实体。",
-                "字段解释应优先引用 Entity、migration 或 OpenAPI schema 中的来源。",
-                "",
-                "## 性能考虑",
-                "",
-                "模型性能关注索引、主键、外键、JSON 字段和序列化成本。"
-                "当页面证据只来自 DTO 而缺少数据库定义时，应把该模型标记为服务边界模型，而不是持久化实体。",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## 依赖关系分析",
+                    "",
+                    "数据模型页面需要区分核心实体、传输 DTO、配置 Schema 和迁移脚本。"
+                    "同名模型如果跨服务出现，应按业务语义归并，而不是把每个类都作为独立核心实体。",
+                    "字段解释应优先引用 Entity、migration 或 OpenAPI schema 中的来源。",
+                    "",
+                    "## 性能考虑",
+                    "",
+                    "模型性能关注索引、主键、外键、JSON 字段和序列化成本。"
+                    "当页面证据只来自 DTO 而缺少数据库定义时，应把该模型标记为服务边界模型，而不是持久化实体。",
+                    "",
+                ]
+            )
         else:
-            lines.extend([
-                "## 依赖关系分析",
-                "",
-                "该主题的依赖关系应从文件路径、符号引用和服务目录共同判断。"
-                "如果证据集中在单一服务，说明该页面偏向服务内部知识；如果证据分布在多个服务，说明它更接近平台级能力。",
-                "后续变更时，应优先检查这些证据文件是否发生修改，并据此决定页面是否需要增量重生成。",
-                "",
-                "## 性能考虑",
-                "",
-                "性能风险主要来自跨服务调用、批处理任务、扫描范围和运行时缓存。"
-                "当页面涉及生成、索引或验证流程时，应额外关注是否存在全量重跑、重复 IO 或无法恢复的长任务。",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## 依赖关系分析",
+                    "",
+                    "该主题的依赖关系应从文件路径、符号引用和服务目录共同判断。"
+                    "如果证据集中在单一服务，说明该页面偏向服务内部知识；如果证据分布在多个服务，说明它更接近平台级能力。",
+                    "后续变更时，应优先检查这些证据文件是否发生修改，并据此决定页面是否需要增量重生成。",
+                    "",
+                    "## 性能考虑",
+                    "",
+                    "性能风险主要来自跨服务调用、批处理任务、扫描范围和运行时缓存。"
+                    "当页面涉及生成、索引或验证流程时，应额外关注是否存在全量重跑、重复 IO 或无法恢复的长任务。",
+                    "",
+                ]
+            )
 
-        lines.extend([
-            "## 故障排查指南",
-            "",
-            "排查该主题时，建议按三步执行：先确认页面引用的文件是否仍存在，再检查相关符号是否改名或迁移，"
-            "最后对照运行命令、测试用例和配置文件确认行为是否发生变化。",
-            "如果生成结果与人工理解不一致，应优先扩展 evidence ranking，而不是只修改模板文案。",
-            "",
-            "## 结论",
-            "",
-            f"`{page.title}` 是当前仓库知识树中的一个可追溯专题页。"
-            "本页已提供源码证据、结构解释和维护检查点，可用于 IDE 插件浏览、人工验收和后续增量生成。",
-        ])
+        lines.extend(
+            [
+                "## 故障排查指南",
+                "",
+                "排查该主题时，建议按三步执行：先确认页面引用的文件是否仍存在，再检查相关符号是否改名或迁移，"
+                "最后对照运行命令、测试用例和配置文件确认行为是否发生变化。",
+                "如果生成结果与人工理解不一致，应优先扩展 evidence ranking，而不是只修改模板文案。",
+                "",
+                "## 结论",
+                "",
+                f"`{page.title}` 是当前仓库知识树中的一个可追溯专题页。"
+                "本页已提供源码证据、结构解释和维护检查点，可用于 IDE 插件浏览、人工验收和后续增量生成。",
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -1369,21 +1445,25 @@ class RepoWikiService:
                 summary["symbols"].append(symbol)
                 seen_symbols.add(symbol)
             if path and path not in seen_files:
-                summary["files"].append({
-                    "path": path,
-                    "symbol": symbol,
-                    "line_start": getattr(span, "line_start", 1),
-                    "line_end": getattr(span, "line_end", 1),
-                })
+                summary["files"].append(
+                    {
+                        "path": path,
+                        "symbol": symbol,
+                        "line_start": getattr(span, "line_start", 1),
+                        "line_end": getattr(span, "line_end", 1),
+                    }
+                )
                 seen_files.add(path)
 
             text = self._summarize_span_text(str(getattr(span, "span_text", "") or ""))
             if text:
-                summary["snippets"].append({
-                    "path": path,
-                    "symbol": symbol,
-                    "summary": text,
-                })
+                summary["snippets"].append(
+                    {
+                        "path": path,
+                        "symbol": symbol,
+                        "summary": text,
+                    }
+                )
 
         return summary
 
@@ -1455,9 +1535,9 @@ class RepoWikiService:
                     "这里保留聚合视角，避免逐条复制所有端点。"
                     "\n\n```json\n"
                     "{\n"
-                    "  \"request\": {\"method\": \"GET|POST|PUT|DELETE|PATCH\", \"auth\": \"Bearer token\"},\n"
-                    "  \"response\": {\"code\": \"string\", \"data\": \"object\", \"message\": \"string\"},\n"
-                    "  \"error\": {\"status\": 400, \"reason\": \"validation_or_business_error\"}\n"
+                    '  "request": {"method": "GET|POST|PUT|DELETE|PATCH", "auth": "Bearer token"},\n'
+                    '  "response": {"code": "string", "data": "object", "message": "string"},\n'
+                    '  "error": {"status": 400, "reason": "validation_or_business_error"}\n'
                     "}\n"
                     "```\n"
                 )
@@ -1559,7 +1639,12 @@ class RepoWikiService:
                 continue
             if in_code or not stripped:
                 continue
-            if stripped.startswith("#") or stripped.startswith("-") or stripped.startswith("*") or stripped.startswith("|"):
+            if (
+                stripped.startswith("#")
+                or stripped.startswith("-")
+                or stripped.startswith("*")
+                or stripped.startswith("|")
+            ):
                 continue
             if re.match(r"^\d+\.\s+", stripped):
                 continue
@@ -1661,7 +1746,9 @@ class RepoWikiService:
             page_id = str(getattr(page, "page_id", ""))
             title = str(getattr(page, "title", ""))
             output_path = str(getattr(page, "output_path", ""))
-            category = str(getattr(getattr(page, "category", ""), "value", getattr(page, "category", "")))
+            category = str(
+                getattr(getattr(page, "category", ""), "value", getattr(page, "category", ""))
+            )
             text = f"{page_id} {title} {output_path} {category}".lower()
 
             if page_id in explicit_rank:
@@ -1815,7 +1902,10 @@ class RepoWikiService:
         max_real_provider_calls: int | None,
         provider_attempt_count: int,
     ) -> str:
-        if max_real_provider_calls is not None and provider_attempt_count >= max_real_provider_calls:
+        if (
+            max_real_provider_calls is not None
+            and provider_attempt_count >= max_real_provider_calls
+        ):
             return f"provider disabled after {max_real_provider_calls} real-provider attempts"
         return f"provider disabled after {max_provider_failures} consecutive failures"
 
@@ -1826,7 +1916,10 @@ class RepoWikiService:
 
     def graph(self, module: str) -> dict[str, Any]:
         bootstrap(self.config)
-        graph_payload = read_json(self.root / ".repo-wiki" / "graph" / "knowledge_graph.json", {"modules": {}, "edges": []})
+        graph_payload = read_json(
+            self.root / ".repo-wiki" / "graph" / "knowledge_graph.json",
+            {"modules": {}, "edges": []},
+        )
         modules = graph_payload.get("modules", {}) if isinstance(graph_payload, dict) else {}
         edges = graph_payload.get("edges", []) if isinstance(graph_payload, dict) else []
         node = modules.get(module)
@@ -1834,7 +1927,9 @@ class RepoWikiService:
             return {
                 "module": module,
                 "found": False,
-                "suggestions": sorted(list(modules.keys()))[:20] if isinstance(modules, dict) else [],
+                "suggestions": sorted(list(modules.keys()))[:20]
+                if isinstance(modules, dict)
+                else [],
             }
         connected_edges = [
             edge
@@ -1896,7 +1991,7 @@ class RepoWikiService:
                 "error": f"Runtime database is corrupt: {exc}",
                 "duration_ms": duration_ms,
                 "db_path": str(self.root / ".repo-wiki" / "index" / "runtime.sqlite3"),
-                "remediation": f"Delete runtime.sqlite3 and re-run init to rebuild",
+                "remediation": "Delete runtime.sqlite3 and re-run init to rebuild",
             }
         except Exception as exc:  # pragma: no cover - defensive path
             runtime_evidence = {
@@ -1916,16 +2011,24 @@ class RepoWikiService:
 
     def cost_estimate(self) -> dict[str, Any]:
         bootstrap(self.config)
-        module_index = read_yamlish(self.root / "ai/source-of-truth/module-index.yaml", {"modules": []})
+        module_index = read_yamlish(
+            self.root / "ai/source-of-truth/module-index.yaml", {"modules": []}
+        )
         api_index = read_yamlish(self.root / "ai/source-of-truth/api-index.yaml", {"endpoints": []})
-        data_models = read_yamlish(self.root / "ai/source-of-truth/data-models.yaml", {"models": []})
-        meta = read_json(self.root / ".repo-wiki" / "index" / "meta.json", {"counts": {"chunks": 0, "files": 0}})
+        data_models = read_yamlish(
+            self.root / "ai/source-of-truth/data-models.yaml", {"models": []}
+        )
+        meta = read_json(
+            self.root / ".repo-wiki" / "index" / "meta.json", {"counts": {"chunks": 0, "files": 0}}
+        )
         modules = module_index.get("modules", []) if isinstance(module_index, dict) else []
         endpoints = api_index.get("endpoints", []) if isinstance(api_index, dict) else []
         models = data_models.get("models", []) if isinstance(data_models, dict) else []
         chunks = int((meta.get("counts", {}) or {}).get("chunks", 0))
         docs = 5 + len(modules)
-        estimated_tokens = 1800 + len(modules) * 900 + len(endpoints) * 60 + len(models) * 80 + chunks * 35
+        estimated_tokens = (
+            1800 + len(modules) * 900 + len(endpoints) * 60 + len(models) * 80 + chunks * 35
+        )
         return {
             "module_count": len(modules),
             "endpoint_count": len(endpoints),
@@ -2072,11 +2175,19 @@ class RepoWikiService:
         if sections_dir.exists():
             section_candidates: list[tuple[str, Path]] = []
             for section in SECTION_DEFINITIONS:
-                section_candidates.append((section.canonical_slug, sections_dir / section.canonical_slug / "index.md"))
-                section_candidates.append((section.canonical_slug, sections_dir / f"{section.canonical_slug}.md"))
+                section_candidates.append(
+                    (section.canonical_slug, sections_dir / section.canonical_slug / "index.md")
+                )
+                section_candidates.append(
+                    (section.canonical_slug, sections_dir / f"{section.canonical_slug}.md")
+                )
                 for alias in section.aliases:
-                    section_candidates.append((section.canonical_slug, sections_dir / alias / "index.md"))
-                    section_candidates.append((section.canonical_slug, sections_dir / f"{alias}.md"))
+                    section_candidates.append(
+                        (section.canonical_slug, sections_dir / alias / "index.md")
+                    )
+                    section_candidates.append(
+                        (section.canonical_slug, sections_dir / f"{alias}.md")
+                    )
 
             for canonical_slug, path in section_candidates:
                 resolved = path.resolve()

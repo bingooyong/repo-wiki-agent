@@ -46,10 +46,10 @@ from repo_wiki.planner.schema import (
     WikiTaxonomyCategory,
 )
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
+
 
 @pytest.fixture
 def sample_snapshot() -> RepositorySnapshot:
@@ -218,6 +218,7 @@ def error_codes_page_plan() -> WikiPagePlan:
 # TESTS FOR AUTH PATTERN ANALYSIS
 # =============================================================================
 
+
 class TestAuthPatternAnalysis:
     """Tests for authentication pattern analysis."""
 
@@ -276,6 +277,7 @@ class TestAuthPatternAnalysis:
 # =============================================================================
 # TESTS FOR ERROR CODE ANALYSIS
 # =============================================================================
+
 
 class TestErrorCodeAnalysis:
     """Tests for error code analysis."""
@@ -348,6 +350,7 @@ class TestErrorCodeAnalysis:
 # TESTS FOR STATUS CODE DOCUMENTATION
 # =============================================================================
 
+
 class TestStatusCodeDocumentation:
     """Tests for status code documentation generation."""
 
@@ -396,6 +399,7 @@ class TestStatusCodeDocumentation:
 # =============================================================================
 # TESTS FOR AUTH CONVENTION DOCUMENTATION
 # =============================================================================
+
 
 class TestAuthConventionDocumentation:
     """Tests for auth convention documentation generation."""
@@ -454,6 +458,7 @@ class TestAuthConventionDocumentation:
 # TESTS FOR ERROR HANDLING DOCUMENTATION
 # =============================================================================
 
+
 class TestErrorHandlingDocumentation:
     """Tests for error handling convention documentation."""
 
@@ -501,6 +506,7 @@ class TestErrorHandlingDocumentation:
 # TESTS FOR STATIC CONTENT GENERATION
 # =============================================================================
 
+
 class TestStaticContentGeneration:
     """Tests for static content generation without LLM."""
 
@@ -532,6 +538,7 @@ class TestStaticContentGeneration:
 # =============================================================================
 # TESTS FOR PAGE COMPOSITION
 # =============================================================================
+
 
 class TestPageComposition:
     """Tests for page composition with LLM composer."""
@@ -567,6 +574,7 @@ class TestPageComposition:
 # TESTS FOR FACTORY FUNCTION
 # =============================================================================
 
+
 class TestFactoryFunction:
     """Tests for create_auth_error_convention_generator factory."""
 
@@ -589,6 +597,7 @@ class TestFactoryFunction:
 # TESTS FOR CONVENIENCE FUNCTIONS
 # =============================================================================
 
+
 class TestConvenienceFunctions:
     """Tests for compose_auth_convention_article and compose_error_convention_article."""
 
@@ -602,9 +611,7 @@ class TestConvenienceFunctions:
         assert output is not None
         assert output.page_id == "api-authentication"
 
-    def test_compose_error_convention_article(
-        self, sample_snapshot, error_codes_page_plan
-    ):
+    def test_compose_error_convention_article(self, sample_snapshot, error_codes_page_plan):
         """Test compose_error_convention_article convenience function."""
         output = compose_error_convention_article(
             page_plan=error_codes_page_plan,
@@ -618,6 +625,7 @@ class TestConvenienceFunctions:
 # =============================================================================
 # TESTS FOR EDGE CASES
 # =============================================================================
+
 
 class TestEdgeCases:
     """Tests for edge cases and error handling."""

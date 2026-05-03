@@ -9,7 +9,9 @@ from repo_wiki.retrieval.service import RetrievalService
 
 def test_retrieval_hash_fallback_and_module_mapping(tmp_path: Path) -> None:
     (tmp_path / "src" / "billing").mkdir(parents=True)
-    (tmp_path / "src" / "billing" / "service.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "src" / "billing" / "service.py").write_text(
+        "def run():\n    return 1\n", encoding="utf-8"
+    )
 
     write_json(
         tmp_path / "ai" / "source-of-truth" / "module-index.yaml",

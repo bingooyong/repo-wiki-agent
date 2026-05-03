@@ -5,7 +5,6 @@ from __future__ import annotations
 import sqlite3
 import time
 from pathlib import Path
-from typing import Optional
 
 from .io import ensure_dir
 
@@ -43,7 +42,7 @@ class GenerationCache:
         except Exception:
             return None
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         if self._disk is not None:
             value = self._disk.get(key, default=None)
             if isinstance(value, str):
@@ -51,7 +50,9 @@ class GenerationCache:
 
         conn = sqlite3.connect(self.sqlite_path)
         try:
-            row = conn.execute("SELECT value FROM generation_cache WHERE key = ?", (key,)).fetchone()
+            row = conn.execute(
+                "SELECT value FROM generation_cache WHERE key = ?", (key,)
+            ).fetchone()
             if row:
                 return str(row[0])
             return None

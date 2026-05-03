@@ -12,10 +12,9 @@ Phase 29 - Task 29.4: Golden fixture suite
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
 
 # =============================================================================
 # STRICT QODER-LIKE MARKDOWN (mock LLM outputs, offline CI-safe)
@@ -162,9 +161,11 @@ STRICT_QODER_TREE: dict[str, list[str]] = {
 # GOLDEN FIXTURE DEFINITIONS
 # =============================================================================
 
+
 @dataclass
 class GoldenFixture:
     """A golden fixture for CI validation."""
+
     name: str
     language: str
     repository_type: str
@@ -260,6 +261,7 @@ GOLDEN_FIXTURES = {
 # FIXTURE BUILDER
 # =============================================================================
 
+
 class GoldenFixtureBuilder:
     """Builds golden fixture file structures."""
 
@@ -341,6 +343,7 @@ class GoldenFixtureBuilder:
 # FIXTURE VALIDATOR
 # =============================================================================
 
+
 class GoldenFixtureValidator:
     """Validates golden fixtures."""
 
@@ -401,6 +404,7 @@ class GoldenFixtureValidator:
 # =============================================================================
 # FACTORY FUNCTIONS
 # =============================================================================
+
 
 def create_golden_fixtures(root: Path) -> list[Path]:
     """Create all golden fixtures.

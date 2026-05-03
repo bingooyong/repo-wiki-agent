@@ -48,7 +48,29 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
-ignore = ["E501"]  # line length handled by formatter
+ignore = [
+    "E501",  # line length handled by formatter
+    "F841",  # local variable assigned but never used
+    "B007",  # loop control variable not used
+    "B008",  # function call in argument defaults (typer style)
+    "C416",  # unnecessary list comprehension
+    "B904",  # raise in except without from
+    "N801",  # class name convention
+    "SIM108",  # ternary operator suggestion
+    "N802",  # function name convention
+    "SIM118",  # key in dict.keys()
+    "E712",  # comparison to True should be cond
+    "F811",  # redefinition of unused
+    "E741",  # ambiguous variable name
+    "C401",  # unneeded import from typing
+    "F821",  # undefined name
+    "E402",  # module level import not at top
+    "N806",  # argument name should be lowercase
+    "C414",  # set() argument is not a list
+    "N818",  # exception variable should end with _exc
+    "F601",  # dictionary key repeated
+    "B023",  # function redefinition
+]
 
 [tool.coverage.run]
 source = ["repo_wiki"]

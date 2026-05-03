@@ -30,15 +30,15 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
 
 # Try to import sqlite3, but provide fallback for environments where it's not available
 try:
     import sqlite3
+
     SQLITE_AVAILABLE = True
 except ImportError:
     SQLITE_AVAILABLE = False
@@ -51,6 +51,7 @@ SCHEMA_VERSION = "1.0"
 @dataclass
 class GovernanceMetric:
     """A governance metric for tracking over time."""
+
     id: int | None = None
     repository_name: str = ""
     repository_path: str = ""
@@ -90,6 +91,7 @@ class GovernanceMetric:
 @dataclass
 class TrendData:
     """Trend data for a specific metric."""
+
     metric_name: str
     data_points: list[dict[str, Any]]
     slope: float  # positive = improving, negative = declining
@@ -115,7 +117,9 @@ class GovernanceDB:
 
     def __init__(self, db_path: Path) -> None:
         if not SQLITE_AVAILABLE:
-            raise ImportError("sqlite3 module is not available. Please install Python with SQLite support.")
+            raise ImportError(
+                "sqlite3 module is not available. Please install Python with SQLite support."
+            )
 
         self.db_path = db_path
         self._conn = None
@@ -183,9 +187,12 @@ class GovernanceDB:
         """)
 
         # Record schema version
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT OR IGNORE INTO schema_version (version) VALUES (?)
-        """, (SCHEMA_VERSION,))
+        """,
+            (SCHEMA_VERSION,),
+        )
 
         self._conn.commit()
 
@@ -195,29 +202,32 @@ class GovernanceDB:
             self.connect()
 
         cursor = self._conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO governance_metrics (
                 repository_name, repository_path, language, size_category,
                 complexity, overall_score, structural_score, quality_score,
                 acceptance_blocked, total_gaps, critical_gaps, major_gaps,
                 benchmark_date, fixture_hash
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            metric.repository_name,
-            metric.repository_path,
-            metric.language,
-            metric.size_category,
-            metric.complexity,
-            metric.overall_score,
-            metric.structural_score,
-            metric.quality_score,
-            1 if metric.acceptance_blocked else 0,
-            metric.total_gaps,
-            metric.critical_gaps,
-            metric.major_gaps,
-            metric.benchmark_date,
-            metric.fixture_hash,
-        ))
+        """,
+            (
+                metric.repository_name,
+                metric.repository_path,
+                metric.language,
+                metric.size_category,
+                metric.complexity,
+                metric.overall_score,
+                metric.structural_score,
+                metric.quality_score,
+                1 if metric.acceptance_blocked else 0,
+                metric.total_gaps,
+                metric.critical_gaps,
+                metric.major_gaps,
+                metric.benchmark_date,
+                metric.fixture_hash,
+            ),
+        )
 
         self._conn.commit()
         return cursor.lastrowid
@@ -241,9 +251,13 @@ class GovernanceDB:
                 quality_score=result.get("quality_score", 0.0),
                 acceptance_blocked=result.get("acceptance_blocked", False),
                 total_gaps=len(result.get("gaps", [])),
-                critical_gaps=sum(1 for g in result.get("gaps", []) if g.get("severity") == "CRITICAL"),
+                critical_gaps=sum(
+                    1 for g in result.get("gaps", []) if g.get("severity") == "CRITICAL"
+                ),
                 major_gaps=sum(1 for g in result.get("gaps", []) if g.get("severity") == "MAJOR"),
-                benchmark_date=matrix_data.get("generated_at", datetime.now(timezone.utc).isoformat()),
+                benchmark_date=matrix_data.get(
+                    "generated_at", datetime.now(UTC).isoformat()
+                ),
                 fixture_hash="",
             )
             self.insert_metric(metric)
@@ -266,7 +280,7 @@ class TrendAnalyzer:
         x_mean = sum(x_values) / n
         y_mean = sum(values) / n
 
-        numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_values, values))
+        numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_values, values, strict=False))
         denominator = sum((x - x_mean) ** 2 for x in x_values)
 
         if denominator == 0:
@@ -282,7 +296,7 @@ class TrendAnalyzer:
 
         mean = sum(values) / len(values)
         variance = sum((v - mean) ** 2 for v in values) / len(values)
-        return variance ** 0.5
+        return variance**0.5
 
     @classmethod
     def analyze_trend(cls, data_points: list[dict[str, Any]], metric_name: str) -> TrendData:
@@ -363,17 +377,19 @@ class GovernanceDashboard:
             repo_name = row["repository_name"]
             if repo_name not in by_repo:
                 by_repo[repo_name] = []
-            by_repo[repo_name].append({
-                "repository_name": repo_name,
-                "benchmark_date": row["benchmark_date"],
-                "overall_score": row["overall_score"],
-                "structural_score": row["structural_score"],
-                "quality_score": row["quality_score"],
-                "acceptance_blocked": bool(row["acceptance_blocked"]),
-                "total_gaps": row["total_gaps"],
-                "critical_gaps": row["critical_gaps"],
-                "major_gaps": row["major_gaps"],
-            })
+            by_repo[repo_name].append(
+                {
+                    "repository_name": repo_name,
+                    "benchmark_date": row["benchmark_date"],
+                    "overall_score": row["overall_score"],
+                    "structural_score": row["structural_score"],
+                    "quality_score": row["quality_score"],
+                    "acceptance_blocked": bool(row["acceptance_blocked"]),
+                    "total_gaps": row["total_gaps"],
+                    "critical_gaps": row["critical_gaps"],
+                    "major_gaps": row["major_gaps"],
+                }
+            )
 
         # Analyze trends for each repository
         trends = {}
@@ -420,7 +436,7 @@ class GovernanceDashboard:
         lines = [
             "# Governance Dashboard Report",
             "",
-            f"**Generated:** {datetime.now(timezone.utc).isoformat()}",
+            f"**Generated:** {datetime.now(UTC).isoformat()}",
             f"**Repositories Tracked:** {len(latest)}",
             "",
             "---",
@@ -442,13 +458,15 @@ class GovernanceDashboard:
                     f"{row['quality_score']:.1%} | {status} |"
                 )
 
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## Trend Analysis",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "---",
+                "",
+                "## Trend Analysis",
+                "",
+            ]
+        )
 
         if not trends:
             lines.append("*No trend data available.*")
@@ -463,7 +481,9 @@ class GovernanceDashboard:
 
                 lines.append(f"### {key}")
                 lines.append(f"- **Direction:** {direction}")
-                lines.append(f"- **Change:** {trend.change_pct:+.1f}% ({trend.oldest_value:.1%} → {trend.latest_value:.1%})")
+                lines.append(
+                    f"- **Change:** {trend.change_pct:+.1f}% ({trend.oldest_value:.1%} → {trend.latest_value:.1%})"
+                )
                 lines.append(f"- **Volatility:** {trend.volatility:.3f}")
                 lines.append("")
 
@@ -475,7 +495,7 @@ class GovernanceDashboard:
         trends = self.query_trends()
 
         return {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "repository_count": len(latest),
             "latest_metrics": latest,
             "trends": {k: v.to_dict() for k, v in trends.items()},
@@ -486,11 +506,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Qoder governance dashboard tool")
     parser.add_argument("--db-path", type=Path, required=True, help="Path to SQLite database")
     parser.add_argument("--init", action="store_true", help="Initialize database schema")
-    parser.add_argument("--import", dest="import_file", type=Path, help="Import benchmark matrix JSON")
+    parser.add_argument(
+        "--import", dest="import_file", type=Path, help="Import benchmark matrix JSON"
+    )
     parser.add_argument("--query", choices=["trends", "latest", "both"], help="Query type")
     parser.add_argument("--repository", type=str, help="Filter by repository name")
     parser.add_argument("--output", type=Path, help="Output path for results")
-    parser.add_argument("--format", choices=["json", "markdown", "both"], default="both", help="Output format")
+    parser.add_argument(
+        "--format", choices=["json", "markdown", "both"], default="both", help="Output format"
+    )
 
     args = parser.parse_args()
 
@@ -530,14 +554,18 @@ def main() -> int:
             trends = dashboard.query_trends(repository_name=args.repository)
             if args.output:
                 output_data = {k: v.to_dict() for k, v in trends.items()}
-                args.output.write_text(json.dumps(output_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                args.output.write_text(
+                    json.dumps(output_data, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
                 print(f"Trends written to: {args.output}")
 
         if args.query in ["latest", "both"]:
             latest = dashboard.query_latest(repository_name=args.repository)
             if args.output:
                 output_data = {"latest_metrics": latest}
-                args.output.write_text(json.dumps(output_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                args.output.write_text(
+                    json.dumps(output_data, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
                 print(f"Latest metrics written to: {args.output}")
 
         if args.format in ["markdown", "both"] and args.query:
@@ -551,9 +579,13 @@ def main() -> int:
 
         if args.format in ["json", "both"] and args.query:
             json_output = dashboard.export_machine_readable()
-            json_path = args.output.parent / f"{args.output.stem}_data.json" if args.output else None
+            json_path = (
+                args.output.parent / f"{args.output.stem}_data.json" if args.output else None
+            )
             if json_path:
-                json_path.write_text(json.dumps(json_output, ensure_ascii=False, indent=2), encoding="utf-8")
+                json_path.write_text(
+                    json.dumps(json_output, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
                 print(f"JSON data written to: {json_path}")
             else:
                 print(json.dumps(json_output, ensure_ascii=False, indent=2))

@@ -15,22 +15,12 @@ Key features:
 from __future__ import annotations
 
 import json
-import sqlite3
-import hashlib
 import re
-import time
+import sqlite3
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.generator.contracts import (
-    CORE_DOCUMENT_CONTRACTS,
-    DocumentContract,
-    DocumentLayer,
-    all_section_contracts,
-    get_contracts_by_layer,
-)
 from repo_wiki.orchestration.eval_layout import EvalOutputProfile
-
 
 # Chinese taxonomy hierarchy for Qoder-compatible output
 TAXONOMY_ORDER: list[str] = [
@@ -203,7 +193,12 @@ def get_taxonomy_category(file_path: str) -> str:
         return "核心服务"
 
     # 数据模型
-    if "data-model" in path_lower or "database" in path_lower or "migration" in path_lower or "entity" in path_lower:
+    if (
+        "data-model" in path_lower
+        or "database" in path_lower
+        or "migration" in path_lower
+        or "entity" in path_lower
+    ):
         return "数据模型"
 
     # API参考
@@ -299,7 +294,9 @@ def build_navigation_tree(
             continue
         parts = Path(file_path).parts
         abs_path = _resolve_content_path(content_root, file_path)
-        title = _extract_title_from_file(abs_path) if abs_path.exists() else _title_from_path(file_path)
+        title = (
+            _extract_title_from_file(abs_path) if abs_path.exists() else _title_from_path(file_path)
+        )
         page_node = {
             "type": "page",
             "id": compute_stable_slug(title),
@@ -345,7 +342,13 @@ def _taxonomy_sort_index(label: str) -> int:
 
 
 def _sort_navigation_nodes(nodes: list[dict[str, Any]]) -> None:
-    nodes.sort(key=lambda node: (_taxonomy_sort_index(str(node.get("label", ""))), node.get("type") != "category", str(node.get("label", ""))))
+    nodes.sort(
+        key=lambda node: (
+            _taxonomy_sort_index(str(node.get("label", ""))),
+            node.get("type") != "category",
+            str(node.get("label", "")),
+        )
+    )
     for node in nodes:
         children = node.get("children")
         if isinstance(children, list):
@@ -372,6 +375,7 @@ def _extract_title_from_file(file_path: Path) -> str:
         content = file_path.read_text(encoding="utf-8")
         # Match first # heading
         import re
+
         match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
         if match:
             return match.group(1).strip()
@@ -468,7 +472,9 @@ def _qoder_like_relative_path(source_path: str, markdown: str | None = None) -> 
         return Path("Python服务") / filename
 
     if normalized.startswith("pages/frontend/"):
-        return Path(filename) if slug == "frontend-applications-index" else Path("前端应用") / filename
+        return (
+            Path(filename) if slug == "frontend-applications-index" else Path("前端应用") / filename
+        )
 
     if normalized.startswith("03-module") or normalized.startswith("pages/services/"):
         service_slug = _strip_known_suffixes(slug)
@@ -489,7 +495,9 @@ def _qoder_like_relative_path(source_path: str, markdown: str | None = None) -> 
         if slug == "database-migration-strategy":
             return Path("数据模型") / "数据迁移策略.md"
         service_slug = _strip_known_suffixes(slug)
-        service_title = SERVICE_TITLE_OVERRIDES.get(service_slug, title.replace(" 数据模型", "").replace("数据模型", ""))
+        service_title = SERVICE_TITLE_OVERRIDES.get(
+            service_slug, title.replace(" 数据模型", "").replace("数据模型", "")
+        )
         return Path("数据模型") / "服务数据模型" / service_title / filename
 
     if normalized.startswith("04-api") or normalized.startswith("pages/api/"):
@@ -508,7 +516,9 @@ def _qoder_like_relative_path(source_path: str, markdown: str | None = None) -> 
         }:
             return Path("API参考") / filename
         service_slug = _strip_known_suffixes(slug)
-        service_title = SERVICE_TITLE_OVERRIDES.get(service_slug, title.replace(" API", "").replace("API", ""))
+        service_title = SERVICE_TITLE_OVERRIDES.get(
+            service_slug, title.replace(" API", "").replace("API", "")
+        )
         if service_slug in PYTHON_SERVICE_SLUGS:
             return Path("API参考") / "Python服务API" / service_title / filename
         return Path("API参考") / "核心服务API" / service_title / filename
@@ -558,8 +568,12 @@ def _dedupe_relative_path(relative_path: Path, used_paths: set[str], source_path
     path = relative_path
     counter = 2
     while str(path) in used_paths:
-        suffix = compute_stable_slug(_slug_from_source_path(source_path), max_length=24) or str(counter)
-        path = relative_path.with_name(f"{relative_path.stem}-{suffix}-{counter}{relative_path.suffix}")
+        suffix = compute_stable_slug(_slug_from_source_path(source_path), max_length=24) or str(
+            counter
+        )
+        path = relative_path.with_name(
+            f"{relative_path.stem}-{suffix}-{counter}{relative_path.suffix}"
+        )
         counter += 1
     used_paths.add(str(path))
     return path
@@ -672,7 +686,9 @@ class ContentLayoutWriter:
         selected: set[str] = set()
         try:
             with sqlite3.connect(sqlite_path) as conn:
-                rows = conn.execute("SELECT doc_path FROM doc_hierarchy WHERE doc_path LIKE '%.md'").fetchall()
+                rows = conn.execute(
+                    "SELECT doc_path FROM doc_hierarchy WHERE doc_path LIKE '%.md'"
+                ).fetchall()
             for row in rows:
                 doc_path = row[0]
                 if isinstance(doc_path, str) and doc_path.endswith(".md"):
@@ -765,7 +781,9 @@ class ContentLayoutWriter:
                 continue
             output_file, relative_path = self._output_path_for_markdown(source_path, markdown)
             relative_path = _dedupe_relative_path(relative_path, used_paths, source_path)
-            output_file = self._content_dir / relative_path if self.profile.content_subdir else output_file
+            output_file = (
+                self._content_dir / relative_path if self.profile.content_subdir else output_file
+            )
 
             self._assert_safe_output_path(output_file)
             output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -788,9 +806,7 @@ class ContentLayoutWriter:
         try:
             resolved_output.relative_to(content_root)
         except ValueError as exc:
-            raise ValueError(
-                f"Refusing to write outside content root: {output_file}"
-            ) from exc
+            raise ValueError(f"Refusing to write outside content root: {output_file}") from exc
 
     def build_page_registry(self, written_files: list[str]) -> list[dict[str, Any]]:
         """Build page registry entries for content-relative Markdown files."""
@@ -799,14 +815,20 @@ class ContentLayoutWriter:
             if not file_path.endswith(".md"):
                 continue
             abs_path = _resolve_content_path(self._content_dir, file_path)
-            title = _extract_title_from_file(abs_path) if abs_path.exists() else _title_from_path(file_path)
-            registry.append({
-                "path": file_path,
-                "slug": compute_stable_slug(Path(file_path).stem),
-                "type": "markdown",
-                "title": title,
-                "absolutePath": str(abs_path.resolve()),
-            })
+            title = (
+                _extract_title_from_file(abs_path)
+                if abs_path.exists()
+                else _title_from_path(file_path)
+            )
+            registry.append(
+                {
+                    "path": file_path,
+                    "slug": compute_stable_slug(Path(file_path).stem),
+                    "type": "markdown",
+                    "title": title,
+                    "absolutePath": str(abs_path.resolve()),
+                }
+            )
         return registry
 
     def build_manifest_content(

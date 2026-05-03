@@ -9,11 +9,10 @@ from repo_wiki.planner.llm_planner import (
 )
 from repo_wiki.planner.schema import (
     GenerationMode,
+    RepositoryIdentity,
     WikiPagePlan,
     WikiPlanManifest,
     WikiTaxonomyCategory,
-    RepositoryIdentity,
-    SourceRequirement,
 )
 
 

@@ -1,6 +1,5 @@
 """Tests for Chinese taxonomy baseline."""
 
-import pytest
 
 from repo_wiki.planner.schema import (
     DEFAULT_CHINESE_TAXONOMY,
@@ -50,7 +49,7 @@ class TestChineseTaxonomy:
             WikiTaxonomyCategory.SECURITY_COMPLIANCE,
             WikiTaxonomyCategory.TROUBLESHOOTING,
         ]
-        assert DEFAULT_CHINESE_TAXONOMY == expected_order
+        assert expected_order == DEFAULT_CHINESE_TAXONOMY
 
     def test_qoder_like_taxonomy_mapping(self):
         """Test that the taxonomy maps correctly to Qoder-like output categories."""

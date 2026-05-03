@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 # =============================================================================
 # QODER NAVIGATION METADATA SCHEMA
 # =============================================================================
@@ -93,11 +92,20 @@ class ImportResult:
 # =============================================================================
 
 # Canonical section slugs for mapping
-CANONICAL_SECTIONS: frozenset[str] = frozenset([
-    "project", "architecture", "services", "python-services",
-    "data-model", "api", "operations", "development",
-    "security", "troubleshooting",
-])
+CANONICAL_SECTIONS: frozenset[str] = frozenset(
+    [
+        "project",
+        "architecture",
+        "services",
+        "python-services",
+        "data-model",
+        "api",
+        "operations",
+        "development",
+        "security",
+        "troubleshooting",
+    ]
+)
 
 # Map qoder-style names to canonical slugs
 QODER_TO_CANONICAL: dict[str, str] = {
@@ -165,9 +173,7 @@ class QoderToRepoAgentMapper:
 
         # Check for duplicate IDs
         if node.id in self._seen_ids:
-            result.errors.append(
-                f"{'QODER_DUPLICATE_ID'}: {node.id}"
-            )
+            result.errors.append(f"{'QODER_DUPLICATE_ID'}: {node.id}")
             return result
         self._seen_ids.add(node.id)
 
@@ -263,6 +269,7 @@ class QoderToRepoAgentMapper:
 # IMPORT BRIDGE
 # =============================================================================
 
+
 class QoderImportBridge:
     """Import bridge for qoder-style navigation metadata.
 
@@ -339,6 +346,7 @@ class QoderImportBridge:
         Returns:
             ImportResult with mapping results, warnings, and errors
         """
+
         # Count all nodes including children recursively
         def count_all_nodes(nodes: list[QoderNavNode]) -> int:
             count = len(nodes)
@@ -365,28 +373,34 @@ class QoderImportBridge:
         mapping = self.mapper.map_node(node)
 
         if mapping.success:
-            result.mapped_nodes.append({
-                "qoder_id": node.id,
-                "qoder_label": node.label,
-                "qoder_type": node.nav_type,
-                "repo_agent_path": mapping.repo_agent_path,
-                "children": [],
-            })
+            result.mapped_nodes.append(
+                {
+                    "qoder_id": node.id,
+                    "qoder_label": node.label,
+                    "qoder_type": node.nav_type,
+                    "repo_agent_path": mapping.repo_agent_path,
+                    "children": [],
+                }
+            )
             result.total_mapped += 1
         else:
             result.unmapped_ids.append(node.id)
             for warning in mapping.warnings:
-                result.warnings.append({
-                    "code": self._extract_code(warning),
-                    "node_id": node.id,
-                    "message": warning,
-                })
+                result.warnings.append(
+                    {
+                        "code": self._extract_code(warning),
+                        "node_id": node.id,
+                        "message": warning,
+                    }
+                )
             for error in mapping.errors:
-                result.errors.append({
-                    "code": self._extract_code(error),
-                    "node_id": node.id,
-                    "message": error,
-                })
+                result.errors.append(
+                    {
+                        "code": self._extract_code(error),
+                        "node_id": node.id,
+                        "message": error,
+                    }
+                )
 
         # Process children
         for child in node.children:
@@ -406,11 +420,13 @@ class QoderImportBridge:
 
         def visit(node: QoderNavNode) -> bool:
             if node.id in visited:
-                result.warnings.append({
-                    "code": VALIDATION_REASON_CODES["QODER_CYCLE_DETECTED"],
-                    "node_id": node.id,
-                    "message": f"Cycle detected: {' -> '.join(path)} -> {node.id}",
-                })
+                result.warnings.append(
+                    {
+                        "code": VALIDATION_REASON_CODES["QODER_CYCLE_DETECTED"],
+                        "node_id": node.id,
+                        "message": f"Cycle detected: {' -> '.join(path)} -> {node.id}",
+                    }
+                )
                 return True
             visited.add(node.id)
             path.append(node.id)
@@ -428,6 +444,7 @@ class QoderImportBridge:
 # =============================================================================
 # COMPATIBILITY CHECKS
 # =============================================================================
+
 
 def check_qoder_compatibility(
     qoder_data: dict[str, Any],
@@ -478,9 +495,11 @@ def check_qoder_compatibility(
 # SIDE-BY-SIDE COMPARISON
 # =============================================================================
 
+
 @dataclass
 class SideBySideNode:
     """A node in the side-by-side comparison."""
+
     qoder_id: str | None
     qoder_label: str | None
     qoder_type: str | None
@@ -493,6 +512,7 @@ class SideBySideNode:
 @dataclass
 class SideBySideComparisonResult:
     """Result of side-by-side navigation comparison."""
+
     success: bool
     qoder_nav: list[SideBySideNode]
     repo_agent_nav: list[dict[str, Any]]  # Actual canonical sections
@@ -545,15 +565,17 @@ def generate_side_by_side_comparison(
     depth_mismatches: list[SideBySideNode] = []
 
     for mapped in import_result.mapped_nodes:
-        qoder_nav.append(SideBySideNode(
-            qoder_id=mapped.get("qoder_id"),
-            qoder_label=mapped.get("qoder_label"),
-            qoder_type=mapped.get("qoder_type"),
-            qoder_path=mapped.get("qoder_path"),
-            repo_agent_path=mapped.get("repo_agent_path"),
-            status="mapped",
-            warnings=[],
-        ))
+        qoder_nav.append(
+            SideBySideNode(
+                qoder_id=mapped.get("qoder_id"),
+                qoder_label=mapped.get("qoder_label"),
+                qoder_type=mapped.get("qoder_type"),
+                qoder_path=mapped.get("qoder_path"),
+                repo_agent_path=mapped.get("repo_agent_path"),
+                status="mapped",
+                warnings=[],
+            )
+        )
 
     for unmapped_id in import_result.unmapped_ids:
         # Find the original node data
@@ -569,43 +591,48 @@ def generate_side_by_side_comparison(
 
         if node_found:
             warnings = [
-                w["message"] for w in import_result.warnings
-                if w.get("node_id") == unmapped_id
+                w["message"] for w in import_result.warnings if w.get("node_id") == unmapped_id
             ]
             status = "unmapped"
             for w in warnings:
                 if "ALIAS_CONFLICT" in w:
                     status = "conflict"
-                    alias_conflicts.append(SideBySideNode(
-                        qoder_id=node_found.id,
-                        qoder_label=node_found.label,
-                        qoder_type=node_found.nav_type,
-                        qoder_path=node_found.path,
-                        repo_agent_path=None,
-                        status=status,
-                        warnings=[w],
-                    ))
+                    alias_conflicts.append(
+                        SideBySideNode(
+                            qoder_id=node_found.id,
+                            qoder_label=node_found.label,
+                            qoder_type=node_found.nav_type,
+                            qoder_path=node_found.path,
+                            repo_agent_path=None,
+                            status=status,
+                            warnings=[w],
+                        )
+                    )
                 elif "DEPTH_MISMATCH" in w:
                     status = "depth_mismatch"
-                    depth_mismatches.append(SideBySideNode(
-                        qoder_id=node_found.id,
-                        qoder_label=node_found.label,
-                        qoder_type=node_found.nav_type,
-                        qoder_path=node_found.path,
-                        repo_agent_path=None,
-                        status=status,
-                        warnings=[w],
-                    ))
+                    depth_mismatches.append(
+                        SideBySideNode(
+                            qoder_id=node_found.id,
+                            qoder_label=node_found.label,
+                            qoder_type=node_found.nav_type,
+                            qoder_path=node_found.path,
+                            repo_agent_path=None,
+                            status=status,
+                            warnings=[w],
+                        )
+                    )
                 elif status != "conflict" and status != "depth_mismatch":
-                    unmatched_qoder.append(SideBySideNode(
-                        qoder_id=node_found.id,
-                        qoder_label=node_found.label,
-                        qoder_type=node_found.nav_type,
-                        qoder_path=node_found.path,
-                        repo_agent_path=None,
-                        status=status,
-                        warnings=[w],
-                    ))
+                    unmatched_qoder.append(
+                        SideBySideNode(
+                            qoder_id=node_found.id,
+                            qoder_label=node_found.label,
+                            qoder_type=node_found.nav_type,
+                            qoder_path=node_found.path,
+                            repo_agent_path=None,
+                            status=status,
+                            warnings=[w],
+                        )
+                    )
 
     # Get actual repo-agent canonical sections from qoder data
     repo_agent_nav: list[dict[str, Any]] = [
@@ -664,12 +691,16 @@ def format_side_by_side_report(result: SideBySideComparisonResult) -> str:
     ]
 
     for node in result.qoder_nav:
-        lines.append(f"| {node.qoder_id or ''} | {node.qoder_label or ''} | {node.repo_agent_path or ''} |")
+        lines.append(
+            f"| {node.qoder_id or ''} | {node.qoder_label or ''} | {node.repo_agent_path or ''} |"
+        )
 
     if result.unmatched_qoder:
         lines.extend(["", "## Unmatched Qoder Nodes", ""])
         for node in result.unmatched_qoder:
-            lines.append(f"- **{node.qoder_id}** ({node.qoder_label}): {', '.join(node.warnings) if node.warnings else 'no mapping'}")
+            lines.append(
+                f"- **{node.qoder_id}** ({node.qoder_label}): {', '.join(node.warnings) if node.warnings else 'no mapping'}"
+            )
 
     if result.alias_conflicts:
         lines.extend(["", "## Alias Conflicts", ""])
@@ -681,7 +712,13 @@ def format_side_by_side_report(result: SideBySideComparisonResult) -> str:
         for node in result.depth_mismatches:
             lines.append(f"- **{node.qoder_id}**: {', '.join(node.warnings)}")
 
-    lines.extend(["", "## Canonical Sections", "",])
+    lines.extend(
+        [
+            "",
+            "## Canonical Sections",
+            "",
+        ]
+    )
     for section in result.repo_agent_nav:
         lines.append(f"- {section['slug']}: {section['path']}")
 

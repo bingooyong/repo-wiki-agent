@@ -1,17 +1,16 @@
 """Tests for Qoder parity metrics."""
 
 import json
-from pathlib import Path
 
 import pytest
 
 from repo_wiki.verifier.qoder_parity_metrics import (
+    PARITY_METRIC_SCHEMA_VERSION,
+    PARITY_METRICS,
     MetricCategory,
     MetricResult,
     MetricSeverity,
     MetricStatus,
-    PARITY_METRICS,
-    PARITY_METRIC_SCHEMA_VERSION,
     ParityMetricExtractor,
     ParityReport,
     create_parity_report,
@@ -27,10 +26,17 @@ class TestMetricDefinitions:
     def test_all_metrics_defined(self):
         """Test all expected metrics are defined."""
         expected = [
-            "page_coverage", "directory_depth", "file_reference_integrity",
-            "citation_coverage", "citation_density", "toc_presence",
-            "mermaid_presence", "prose_density", "prose_list_ratio",
-            "api_aggregation", "data_model_aggregation",
+            "page_coverage",
+            "directory_depth",
+            "file_reference_integrity",
+            "citation_coverage",
+            "citation_density",
+            "toc_presence",
+            "mermaid_presence",
+            "prose_density",
+            "prose_list_ratio",
+            "api_aggregation",
+            "data_model_aggregation",
         ]
         for name in expected:
             assert name in PARITY_METRICS, f"Missing metric: {name}"

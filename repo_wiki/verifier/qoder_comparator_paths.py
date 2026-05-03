@@ -17,22 +17,24 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-
 # =============================================================================
 # PATH MODEL TYPES
 # =============================================================================
 
+
 class PathModel(Enum):
     """Path model types for different output formats."""
-    QODER_LIKE = "qoder_like"      # .qoder/repowiki/zh structure
+
+    QODER_LIKE = "qoder_like"  # .qoder/repowiki/zh structure
     REPO_AGENT_EVAL = "repo_agent_eval"  # .repo-agent-eval/<run>/content
-    LEGACY_DOCS = "legacy_docs"    # docs/sections structure (deprecated)
-    GENERIC = "generic"            # Generic content directory
+    LEGACY_DOCS = "legacy_docs"  # docs/sections structure (deprecated)
+    GENERIC = "generic"  # Generic content directory
 
 
 @dataclass
 class PathModelConfig:
     """Configuration for path model detection and comparison."""
+
     content_subdir: str | None = None  # e.g., "content" for qoder-like
     expected_categories: list[str] = field(default_factory=list)
     skip_patterns: list[str] = field(default_factory=list)  # Patterns to skip in comparison
@@ -324,6 +326,7 @@ class PathModelRepair:
 # REPAIRD COMPARATOR INTEGRATION
 # =============================================================================
 
+
 class RepairedBaselineComparator:
     """Baseline comparator with repaired path model assumptions."""
 
@@ -386,6 +389,7 @@ class RepairedBaselineComparator:
 # =============================================================================
 # FACTORY FUNCTIONS
 # =============================================================================
+
 
 def create_repaired_comparator(
     target_root: Path,

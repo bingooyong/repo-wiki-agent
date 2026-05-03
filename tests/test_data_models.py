@@ -6,7 +6,6 @@ These tests validate that:
 3. Model category constants are properly defined
 """
 
-import pytest
 from repo_wiki.generator.engine import (
     DataModel,
     DataModelAggregator,
@@ -122,7 +121,12 @@ class TestDataModelAggregator:
         models = [
             {"name": "User", "module": "auth", "type": "sqlalchemy", "file_path": "auth/models.py"},
             {"name": "User", "module": "api", "type": "pydantic", "file_path": "api/schemas.py"},
-            {"name": "User", "module": "billing", "type": "dataclass", "file_path": "billing/models.py"},
+            {
+                "name": "User",
+                "module": "billing",
+                "type": "dataclass",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "core-platform", "service_family": "python-backend"},
@@ -160,7 +164,12 @@ class TestCoreEntityScoring:
         models = [
             {"name": "User", "module": "auth", "type": "dataclass", "file_path": "auth/models.py"},
             {"name": "User", "module": "api", "type": "pydantic", "file_path": "api/schemas.py"},
-            {"name": "User", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
+            {
+                "name": "User",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "core-platform", "service_family": "python-backend"},
@@ -177,8 +186,18 @@ class TestCoreEntityScoring:
     def test_domain_affects_core_score(self):
         """Test that being in core domain affects core score."""
         models = [
-            {"name": "RepositorySnapshot", "module": "core", "type": "dataclass", "file_path": "core/snapshot.py"},
-            {"name": "Invoice", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
+            {
+                "name": "RepositorySnapshot",
+                "module": "core",
+                "type": "dataclass",
+                "file_path": "core/snapshot.py",
+            },
+            {
+                "name": "Invoice",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "core", "domain": "core-platform", "service_family": "python-backend"},
@@ -201,8 +220,18 @@ class TestModelGrouping:
         """Test models are grouped by module."""
         models = [
             {"name": "User", "module": "auth", "type": "dataclass", "file_path": "auth/models.py"},
-            {"name": "AuthToken", "module": "auth", "type": "dataclass", "file_path": "auth/models.py"},
-            {"name": "Invoice", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
+            {
+                "name": "AuthToken",
+                "module": "auth",
+                "type": "dataclass",
+                "file_path": "auth/models.py",
+            },
+            {
+                "name": "Invoice",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "core-platform", "service_family": "python-backend"},
@@ -221,7 +250,12 @@ class TestModelGrouping:
         """Test models are grouped by domain."""
         models = [
             {"name": "User", "module": "auth", "type": "dataclass", "file_path": "auth/models.py"},
-            {"name": "Invoice", "module": "billing", "type": "sqlalchemy", "file_path": "billing/models.py"},
+            {
+                "name": "Invoice",
+                "module": "billing",
+                "type": "sqlalchemy",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "core-platform", "service_family": "python-backend"},
@@ -241,7 +275,12 @@ class TestMigrationSignals:
     def test_detects_migration_related_models(self):
         """Test that migration-related models are identified."""
         models = [
-            {"name": "current_schema_version", "module": "core", "type": "integer", "file_path": "core/config.py"},
+            {
+                "name": "current_schema_version",
+                "module": "core",
+                "type": "integer",
+                "file_path": "core/config.py",
+            },
             {"name": "User", "module": "auth", "type": "sqlalchemy", "file_path": "auth/models.py"},
         ]
         modules = [
@@ -251,13 +290,20 @@ class TestMigrationSignals:
 
         aggregator = DataModelAggregator(models=models, modules=modules)
 
-        version_model = next(m for m in aggregator.data_models if "schema_version" in m.name.lower())
+        version_model = next(
+            m for m in aggregator.data_models if "schema_version" in m.name.lower()
+        )
         assert version_model.migration_related
 
     def test_detects_alembic_migration(self):
         """Test that Alembic migration strategy is detected."""
         models = [
-            {"name": "User", "module": "auth", "type": "sqlalchemy", "file_path": "alembic/versions/user_model.py"},
+            {
+                "name": "User",
+                "module": "auth",
+                "type": "sqlalchemy",
+                "file_path": "alembic/versions/user_model.py",
+            },
         ]
         modules = [
             {"name": "auth", "domain": "persistence", "service_family": "python-backend"},
@@ -306,7 +352,12 @@ class TestSummarizationMethods:
     def test_build_core_models_section(self):
         """Test core models section building."""
         models = [
-            {"name": "RepositorySnapshot", "module": "core", "type": "dataclass", "file_path": "core/snapshot.py"},
+            {
+                "name": "RepositorySnapshot",
+                "module": "core",
+                "type": "dataclass",
+                "file_path": "core/snapshot.py",
+            },
         ]
         modules = [
             {"name": "core", "domain": "core-platform", "service_family": "python-backend"},
@@ -320,7 +371,12 @@ class TestSummarizationMethods:
     def test_build_service_models_section(self):
         """Test service models section building."""
         models = [
-            {"name": "InvoiceItem", "module": "billing", "type": "dataclass", "file_path": "billing/models.py"},
+            {
+                "name": "InvoiceItem",
+                "module": "billing",
+                "type": "dataclass",
+                "file_path": "billing/models.py",
+            },
         ]
         modules = [
             {"name": "billing", "domain": "operations", "service_family": "python-backend"},

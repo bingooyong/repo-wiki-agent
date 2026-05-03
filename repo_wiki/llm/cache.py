@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from repo_wiki.llm import ChatMessage, ChatRequest, ChatResponse
+from repo_wiki.llm.models import ChatRequest, ChatResponse
 
 
 @dataclass
@@ -63,14 +63,24 @@ class LLMCache:
             for msg in request.messages:
                 # Skip messages with potential secrets
                 content_lower = msg.content.lower()
-                secret_indicators = ["api_key", "api key", "token", "secret", "password", "credential", "sk-"]
+                secret_indicators = [
+                    "api_key",
+                    "api key",
+                    "token",
+                    "secret",
+                    "password",
+                    "credential",
+                    "sk-",
+                ]
                 if any(indicator in content_lower for indicator in secret_indicators):
                     return None
 
-                messages_data.append({
-                    "role": msg.role,
-                    "content": msg.content,
-                })
+                messages_data.append(
+                    {
+                        "role": msg.role,
+                        "content": msg.content,
+                    }
+                )
 
             key_data = {
                 "model": request.model,
@@ -107,6 +117,7 @@ class LLMCache:
 
         # Check TTL
         import time
+
         if time.time() - entry.created_at > self._config.ttl_seconds:
             self._remove_entry(key)
             return None
@@ -145,6 +156,7 @@ class LLMCache:
             self._evict_oldest()
 
         import time
+
         entry = CacheEntry(
             key=key,
             response=response,

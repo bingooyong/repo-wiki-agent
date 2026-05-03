@@ -19,15 +19,15 @@ from __future__ import annotations
 import sqlite3
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 
 class RunState(str, Enum):
     """Generation run states."""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -38,6 +38,7 @@ class RunState(str, Enum):
 
 class PageState(str, Enum):
     """Page-level generation states."""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -49,6 +50,7 @@ class PageState(str, Enum):
 @dataclass
 class GenerationRun:
     """Represents a generation run with state tracking."""
+
     run_id: str
     state: RunState
     created_at: str
@@ -67,6 +69,7 @@ class GenerationRun:
 @dataclass
 class PageGenerationState:
     """Represents the state of a single page generation."""
+
     run_id: str
     doc_slug: str
     doc_type: str
@@ -219,8 +222,15 @@ class GenerationStateMachine:
                 (run_id, state, created_at, total_pages, profile, run_type, target_git_commit)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run.run_id, run.state.value, run.created_at, run.total_pages,
-                 run.profile, run.run_type, run.target_git_commit),
+                (
+                    run.run_id,
+                    run.state.value,
+                    run.created_at,
+                    run.total_pages,
+                    run.profile,
+                    run.run_type,
+                    run.target_git_commit,
+                ),
             )
             conn.commit()
         finally:
@@ -281,9 +291,7 @@ class GenerationStateMachine:
                 final_state = RunState.RETRYABLE
             elif stats["failed"] > 0 and stats["completed"] == 0:
                 final_state = RunState.FAILED
-            elif stats["skipped"] == stats["total"] and stats["total"] > 0:
-                final_state = RunState.COMPLETED
-            elif stats["completed"] == stats["total"]:
+            elif stats["skipped"] == stats["total"] and stats["total"] > 0 or stats["completed"] == stats["total"]:
                 final_state = RunState.COMPLETED
             elif stats["completed"] > 0:
                 final_state = RunState.COMPLETED  # Partial success
@@ -297,8 +305,15 @@ class GenerationStateMachine:
                     failed_pages = ?, skipped_pages = ?, error_message = ?
                 WHERE run_id = ?
                 """,
-                (final_state.value, now, stats["completed"], stats["failed"],
-                 stats["skipped"], error_message, run_id),
+                (
+                    final_state.value,
+                    now,
+                    stats["completed"],
+                    stats["failed"],
+                    stats["skipped"],
+                    error_message,
+                    run_id,
+                ),
             )
             conn.commit()
 
@@ -323,7 +338,12 @@ class GenerationStateMachine:
                 return None
 
             run_state = RunState(run_row["state"])
-            if run_state not in {RunState.PENDING, RunState.RUNNING, RunState.RETRYABLE, RunState.FAILED}:
+            if run_state not in {
+                RunState.PENDING,
+                RunState.RUNNING,
+                RunState.RETRYABLE,
+                RunState.FAILED,
+            }:
                 return self.get_run(run_id)
 
             # Mark interrupted in-flight pages as retryable for safe re-execution.
@@ -373,8 +393,14 @@ class GenerationStateMachine:
                 SET state = ?, completed_at = ?, error_message = ?
                 WHERE run_id = ? AND state IN (?, ?)
                 """,
-                (RunState.CANCELLED.value, now, "Cancelled by user",
-                 run_id, RunState.PENDING.value, RunState.RUNNING.value),
+                (
+                    RunState.CANCELLED.value,
+                    now,
+                    "Cancelled by user",
+                    run_id,
+                    RunState.PENDING.value,
+                    RunState.RUNNING.value,
+                ),
             )
             conn.commit()
 
@@ -458,8 +484,13 @@ class GenerationStateMachine:
             FROM page_generation_states
             WHERE run_id = ?
             """,
-            (PageState.COMPLETED.value, PageState.FAILED.value,
-             PageState.SKIPPED.value, PageState.RETRYABLE.value, run_id),
+            (
+                PageState.COMPLETED.value,
+                PageState.FAILED.value,
+                PageState.SKIPPED.value,
+                PageState.RETRYABLE.value,
+                run_id,
+            ),
         ).fetchone()
 
         return {
@@ -568,8 +599,14 @@ class GenerationStateMachine:
                 (run_id, doc_slug, doc_type, doc_path, state, input_hash)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (state.run_id, state.doc_slug, state.doc_type,
-                 state.doc_path, state.state.value, state.input_hash),
+                (
+                    state.run_id,
+                    state.doc_slug,
+                    state.doc_type,
+                    state.doc_path,
+                    state.state.value,
+                    state.input_hash,
+                ),
             )
             conn.commit()
         finally:
@@ -596,8 +633,14 @@ class GenerationStateMachine:
                 SET state = ?, started_at = ?
                 WHERE run_id = ? AND doc_slug = ? AND state IN (?, ?)
                 """,
-                (PageState.RUNNING.value, now, run_id, doc_slug,
-                 PageState.PENDING.value, PageState.RETRYABLE.value),
+                (
+                    PageState.RUNNING.value,
+                    now,
+                    run_id,
+                    doc_slug,
+                    PageState.PENDING.value,
+                    PageState.RETRYABLE.value,
+                ),
             )
             conn.commit()
 

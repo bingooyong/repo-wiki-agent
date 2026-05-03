@@ -1,16 +1,15 @@
 """Tests for planner persistence into SQLite and manifest."""
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from repo_wiki.planner.persistence import (
-    persist_plan,
-    load_plan_from_sqlite,
-    _nav_node_to_dict,
     _category_to_doc_type,
+    _nav_node_to_dict,
+    load_plan_from_sqlite,
+    persist_plan,
 )
 from repo_wiki.planner.schema import (
     GenerationMode,
@@ -19,7 +18,6 @@ from repo_wiki.planner.schema import (
     WikiPagePlan,
     WikiPlanManifest,
     WikiTaxonomyCategory,
-    SourceRequirement,
 )
 
 
@@ -230,10 +228,22 @@ class TestCategoryMapping:
         """Test unknown category defaults to page type."""
         # Should not raise, returns "page" as fallback
         from repo_wiki.planner.schema import WikiTaxonomyCategory
+
         # This test ensures the mapping doesn't crash on any category
         for cat in WikiTaxonomyCategory:
             result = _category_to_doc_type(cat)
-            assert result in ("overview", "section", "module", "data-model", "api", "ops", "guide", "security", "troubleshooting", "page")
+            assert result in (
+                "overview",
+                "section",
+                "module",
+                "data-model",
+                "api",
+                "ops",
+                "guide",
+                "security",
+                "troubleshooting",
+                "page",
+            )
 
 
 class TestLoadPlanFromSQLite:

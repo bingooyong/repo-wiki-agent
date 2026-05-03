@@ -13,13 +13,13 @@ Phase 24 - Task 24.1: Page prompt contract and prompt fragments
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 
 class PagePromptType(Enum):
     """Page type taxonomy for prompt contracts."""
+
     OVERVIEW = "overview"
     SERVICE = "service"
     API = "api"
@@ -31,6 +31,7 @@ class PagePromptType(Enum):
 
 class CitationStyle(Enum):
     """Citation block style for evidence rendering."""
+
     CITE_BLOCK = "cite_block"  # <cite>file:line</cite>
     MARKDOWN_LINK = "markdown_link"  # [file:line](file://...)
     SOURCE_FOOTER = "source_footer"  # ## Sources section with links
@@ -39,6 +40,7 @@ class CitationStyle(Enum):
 @dataclass(frozen=True)
 class HeadingRequirement:
     """Required heading structure for a page type."""
+
     level: int  # 1-6 (## to ######)
     text: str  # Heading text pattern (can be template)
     required: bool = True
@@ -48,6 +50,7 @@ class HeadingRequirement:
 @dataclass(frozen=True)
 class EvidenceRequirement:
     """Evidence and citation requirements for a page type."""
+
     min_candidates: int = 5  # Minimum evidence candidates needed
     citation_style: CitationStyle = CitationStyle.CITE_BLOCK
     require_symbol_refs: bool = True  # Must reference specific symbols
@@ -58,6 +61,7 @@ class EvidenceRequirement:
 @dataclass(frozen=True)
 class StyleRequirement:
     """Style requirements for generated content."""
+
     prose_density_min: float = 0.4  # At least 40% prose vs lists/tables
     max_list_ratio: float = 0.5  # Max 50% list/table content
     min_sentence_length_avg: int = 10  # Min avg sentence length (words)
@@ -68,6 +72,7 @@ class StyleRequirement:
 @dataclass(frozen=True)
 class AntiHallucinationRequirement:
     """Anti-hallucination guardrails for page generation."""
+
     cite_all_symbols: bool = True  # All symbols must have citation
     cite_all_claims: bool = True  # All factual claims must have citation
     forbid_out_of_scope: bool = True  # No mentioning modules not in scope
@@ -87,6 +92,7 @@ class PagePromptContract:
     - Anti-hallucination guardrails
     - Snapshot test expectations
     """
+
     page_type: PagePromptType
     description: str
     heading_structure: tuple[HeadingRequirement, ...]

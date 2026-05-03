@@ -5,16 +5,14 @@ These tests ensure the failures cannot reappear unnoticed.
 
 Phase 17 Reference: docs/phases/Phase_17_Evidence_Integrity_and_CI_Gate_Repair.md
 """
+
 from __future__ import annotations
 
-import json
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
-
 
 # Get repo root (parent of tests/)
 REPO_ROOT = Path(__file__).parent.parent
@@ -174,9 +172,9 @@ class TestCIWorkflowCorrectness:
         content = self._read_workflow_content(pilot_path)
 
         # Pilot workflow should have --allow-continue flag
-        assert "--allow-continue" in content, (
-            "Pilot workflow should have explicit --allow-continue flag"
-        )
+        assert (
+            "--allow-continue" in content
+        ), "Pilot workflow should have explicit --allow-continue flag"
 
 
 class TestDecisionScriptDependencies:
@@ -201,9 +199,9 @@ class TestDecisionScriptDependencies:
             if "decision.sh" in content:
                 # Look for bc installation in pip install or apt-get
                 has_bc = (
-                    re.search(r"pip install.*\bbc\b", content) or
-                    re.search(r"apt-get.*\binstall.*\bbc\b", content) or
-                    re.search(r"bc\b", content)  # May already be installed
+                    re.search(r"pip install.*\bbc\b", content)
+                    or re.search(r"apt-get.*\binstall.*\bbc\b", content)
+                    or re.search(r"bc\b", content)  # May already be installed
                 )
                 # Note: bc is often pre-installed on ubuntu-latest, but we should verify
                 # For now, we just check the decision.sh content uses bc
@@ -245,7 +243,9 @@ class TestEvidencePathConsistency:
         if referenced_paths:
             # At least one dossier path is referenced
             # Verify the canonical location exists
-            canonical_dossier = REPO_ROOT / ".repo-agent-eval" / "go-no-go-decision" / "Decision_Dossier.md"
+            canonical_dossier = (
+                REPO_ROOT / ".repo-agent-eval" / "go-no-go-decision" / "Decision_Dossier.md"
+            )
 
             # The dossier should exist at the actual location (not necessarily referenced location)
             # We just verify the actual one exists
@@ -274,9 +274,9 @@ class TestEvidencePathConsistency:
 
             evidence_dir_template = evidence_dir_match.group(1)
             # Should contain github.run_id or similar variable
-            assert "run_id" in evidence_dir_template or "workflow" in evidence_dir_template, (
-                f"{workflow_path.name}: EVIDENCE_DIR should include run-specific identifier"
-            )
+            assert (
+                "run_id" in evidence_dir_template or "workflow" in evidence_dir_template
+            ), f"{workflow_path.name}: EVIDENCE_DIR should include run-specific identifier"
 
 
 class TestComparatorConfigSerialization:
@@ -351,19 +351,19 @@ class TestPythonPackagingDiscovery:
             # Should have include for repo_wiki
             if "include" in find_config:
                 includes = find_config["include"]
-                assert any("repo_wiki" in inc for inc in includes), (
-                    "Package discovery should include repo_wiki"
-                )
+                assert any(
+                    "repo_wiki" in inc for inc in includes
+                ), "Package discovery should include repo_wiki"
 
             # Should exclude ai, templates, extensions, scripts, tests, ci, docs
             if "exclude" in find_config:
                 excludes = find_config["exclude"]
-                assert any("ai*" in exc for exc in excludes), (
-                    "Package discovery should exclude ai directory"
-                )
-                assert any("templates*" in exc for exc in excludes), (
-                    "Package discovery should exclude templates directory"
-                )
-                assert any("extensions*" in exc for exc in excludes), (
-                    "Package discovery should exclude extensions directory"
-                )
+                assert any(
+                    "ai*" in exc for exc in excludes
+                ), "Package discovery should exclude ai directory"
+                assert any(
+                    "templates*" in exc for exc in excludes
+                ), "Package discovery should exclude templates directory"
+                assert any(
+                    "extensions*" in exc for exc in excludes
+                ), "Package discovery should exclude extensions directory"

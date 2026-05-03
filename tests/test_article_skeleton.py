@@ -14,31 +14,25 @@ from __future__ import annotations
 import pytest
 
 from repo_wiki.prompts.skeleton import (
+    API_HEADING_CONTRACT,
+    HEADING_CONTRACTS,
+    OVERVIEW_HEADING_CONTRACT,
     # Section definitions
     SECTION_KEYS,
-    HeadingSection,
-    HeadingContract,
-    # Contracts
-    OVERVIEW_HEADING_CONTRACT,
     SERVICE_HEADING_CONTRACT,
-    API_HEADING_CONTRACT,
-    DATA_HEADING_CONTRACT,
-    ENTITY_HEADING_CONTRACT,
-    OPS_HEADING_CONTRACT,
-    DEVELOPMENT_HEADING_CONTRACT,
-    HEADING_CONTRACTS,
-    get_heading_contract,
     # Skeleton
     ArticleSkeleton,
+    HeadingSection,
     SkeletonBuilder,
     build_skeleton,
     # TOC utilities
     extract_toc_from_markdown,
-    validate_toc_completeness,
-    validate_heading_hierarchy,
     # Snapshot utilities
     generate_heading_snapshot,
+    get_heading_contract,
     headings_match_snapshot,
+    validate_heading_hierarchy,
+    validate_toc_completeness,
 )
 
 
@@ -48,8 +42,17 @@ class TestSectionKeys:
     def test_all_required_sections_defined(self) -> None:
         """Test that all required sections are in SECTION_KEYS."""
         required = [
-            "目录", "简介", "项目结构", "核心组件", "架构总览",
-            "详细分析", "依赖", "性能", "排障", "结论", "附录"
+            "目录",
+            "简介",
+            "项目结构",
+            "核心组件",
+            "架构总览",
+            "详细分析",
+            "依赖",
+            "性能",
+            "排障",
+            "结论",
+            "附录",
         ]
         for section in required:
             assert section in SECTION_KEYS, f"Missing section: {section}"
@@ -61,11 +64,7 @@ class TestHeadingSection:
     def test_heading_section_creation(self) -> None:
         """Test creating a HeadingSection."""
         section = HeadingSection(
-            key="目录",
-            heading_text="## 目录",
-            level=2,
-            required=True,
-            min_prose_chars=50
+            key="目录", heading_text="## 目录", level=2, required=True, min_prose_chars=50
         )
         assert section.key == "目录"
         assert section.heading_text == "## 目录"
@@ -145,8 +144,9 @@ class TestHeadingContract:
         for contract in HEADING_CONTRACTS.values():
             for section in contract.sections:
                 if section.required:
-                    assert section.min_prose_chars > 0, \
-                        f"{contract.page_type}.{section.key} required but has no min_prose_chars"
+                    assert (
+                        section.min_prose_chars > 0
+                    ), f"{contract.page_type}.{section.key} required but has no min_prose_chars"
 
 
 class TestGetHeadingContract:
@@ -284,11 +284,7 @@ class TestBuildSkeleton:
 
     def test_build_overview_skeleton(self) -> None:
         """Test building overview skeleton."""
-        skeleton = build_skeleton(
-            "overview",
-            title="My Project",
-            repository_name="my-project"
-        )
+        skeleton = build_skeleton("overview", title="My Project", repository_name="my-project")
 
         assert skeleton.page_type == "overview"
         assert skeleton.title == "My Project"
@@ -297,9 +293,7 @@ class TestBuildSkeleton:
     def test_build_service_skeleton(self) -> None:
         """Test building service skeleton."""
         skeleton = build_skeleton(
-            "service",
-            title="Auth Service",
-            section_description="Authentication service"
+            "service", title="Auth Service", section_description="Authentication service"
         )
 
         assert skeleton.page_type == "service"
@@ -307,11 +301,7 @@ class TestBuildSkeleton:
 
     def test_build_api_skeleton(self) -> None:
         """Test building API skeleton."""
-        skeleton = build_skeleton(
-            "api",
-            title="REST API",
-            api_groups=[]
-        )
+        skeleton = build_skeleton("api", title="REST API", api_groups=[])
 
         assert skeleton.page_type == "api"
         assert skeleton.title == "REST API"
@@ -542,11 +532,7 @@ class TestSkeletonSnapshotTests:
 
     def test_overview_skeleton_snapshot(self) -> None:
         """Test overview skeleton matches expected snapshot."""
-        skeleton = build_skeleton(
-            "overview",
-            title="Test Repository",
-            repository_name="test-repo"
-        )
+        skeleton = build_skeleton("overview", title="Test Repository", repository_name="test-repo")
 
         snapshot = generate_heading_snapshot(skeleton.render_skeleton_markdown())
         # Should contain key sections
@@ -557,10 +543,7 @@ class TestSkeletonSnapshotTests:
 
     def test_api_skeleton_snapshot(self) -> None:
         """Test API skeleton matches expected snapshot."""
-        skeleton = build_skeleton(
-            "api",
-            title="API Reference"
-        )
+        skeleton = build_skeleton("api", title="API Reference")
 
         snapshot = generate_heading_snapshot(skeleton.render_skeleton_markdown())
         # Should contain API-specific sections
@@ -571,10 +554,7 @@ class TestSkeletonSnapshotTests:
 
     def test_ops_skeleton_snapshot(self) -> None:
         """Test Ops skeleton matches expected snapshot."""
-        skeleton = build_skeleton(
-            "ops",
-            title="Deployment Guide"
-        )
+        skeleton = build_skeleton("ops", title="Deployment Guide")
 
         snapshot = generate_heading_snapshot(skeleton.render_skeleton_markdown())
         # Should contain ops-specific sections

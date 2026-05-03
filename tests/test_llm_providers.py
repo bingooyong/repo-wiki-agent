@@ -8,11 +8,10 @@ from repo_wiki.llm import (
     ChatMessage,
     ChatRequest,
     LLMProviderConfig,
-    MockLLMProvider,
-    OpenAICompatibleProvider,
     MinimaxProvider,
-    create_mock_provider,
+    OpenAICompatibleProvider,
     create_minimax_provider,
+    create_mock_provider,
     resolve_llm_config,
 )
 
@@ -44,7 +43,9 @@ class TestOpenAICompatibleProvider:
         assert caps.supports_json_mode is True
         assert caps.max_context_tokens == 128000
 
-    def test_validate_config_with_api_key(self, config: LLMProviderConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_validate_config_with_api_key(
+        self, config: LLMProviderConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test config validation with API key present."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test123456789")
         provider = OpenAICompatibleProvider(config)
@@ -55,7 +56,9 @@ class TestOpenAICompatibleProvider:
         assert api_key_validation[2] == "REDACTED"
         assert "sk-test1" in api_key_validation[1]
 
-    def test_validate_config_without_api_key(self, config: LLMProviderConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_validate_config_without_api_key(
+        self, config: LLMProviderConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test config validation without API key."""
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         provider = OpenAICompatibleProvider(config)
@@ -65,7 +68,9 @@ class TestOpenAICompatibleProvider:
         api_key_validation = next(v for v in validations if v[0] == "api_key_env")
         assert api_key_validation[2] == "MISSING_API_KEY"
 
-    def test_validate_config_missing_model(self, config: LLMProviderConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_validate_config_missing_model(
+        self, config: LLMProviderConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test config validation with missing model."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test123")
         config.model = ""
@@ -102,7 +107,9 @@ class TestMinimaxProvider:
         assert caps.supports_functions is False
         assert caps.max_context_tokens == 163840
 
-    def test_validate_config_with_api_key(self, config: LLMProviderConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_validate_config_with_api_key(
+        self, config: LLMProviderConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test config validation with API key present."""
         monkeypatch.setenv("MINIMAX_API_KEY", "test-api-key-123456")
         provider = MinimaxProvider(config)
@@ -111,7 +118,9 @@ class TestMinimaxProvider:
         api_key_validation = next(v for v in validations if v[0] == "api_key_env")
         assert api_key_validation[2] == "REDACTED"
 
-    def test_validate_config_without_api_key(self, config: LLMProviderConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_validate_config_without_api_key(
+        self, config: LLMProviderConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test config validation without API key."""
         monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
         provider = MinimaxProvider(config)
@@ -190,6 +199,7 @@ class TestMockProviderWithProviders:
         )
 
         import asyncio
+
         asyncio.run(provider.chat(request))
 
         assert provider.last_request is not None
@@ -202,6 +212,7 @@ class TestMockProviderWithProviders:
         provider = create_mock_provider()
 
         import asyncio
+
         request = ChatRequest(
             messages=[ChatMessage(role="user", content="Test")],
             model="test",

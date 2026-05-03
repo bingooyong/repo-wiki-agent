@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from repo_wiki.verifier.qoder_strict_verifier import QoderLikeVerifierService
 from repo_wiki.verifier.qoder_parity_metrics import (
-    ParityMetricDefinition,
-    ParityMetricExtractor,
     PARITY_METRICS,
 )
 
@@ -30,11 +25,11 @@ class TestReadinessSchema:
     def test_metric_has_required_fields(self):
         """Test that each metric definition has required fields."""
         for name, metric in PARITY_METRICS.items():
-            assert hasattr(metric, 'name')
-            assert hasattr(metric, 'category')
-            assert hasattr(metric, 'severity')
-            assert hasattr(metric, 'threshold')
-            assert hasattr(metric, 'weight')
+            assert hasattr(metric, "name")
+            assert hasattr(metric, "category")
+            assert hasattr(metric, "severity")
+            assert hasattr(metric, "threshold")
+            assert hasattr(metric, "weight")
 
     def test_metric_thresholds_valid(self):
         """Test that metric thresholds are in valid range."""

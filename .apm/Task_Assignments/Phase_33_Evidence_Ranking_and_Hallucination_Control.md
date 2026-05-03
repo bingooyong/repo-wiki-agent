@@ -18,22 +18,23 @@ ad_hoc_delegation: false
 Implementation Plan: **Task 33.1 - Service ownership resolver** assigned to **Agent_Scanner**
 
 ## Context from Dependencies
-Depends on Task 32.4 and Task 23.3. Use the deepened page hierarchy and existing evidence ranking implementation.
+Depends on Task 32.4 and Task 23.3. Use the deepened page hierarchy and existing evidence ranking implementation. Treat current API台账服务 output that says `inventory-service` but cites `ai-service` as a required failing fixture.
 
 ## Objective
 Resolve service ownership from repository structure, package metadata, runtime signals, and docs.
 
 ## Detailed Instructions
 - Use module paths, package names, ports, build files, and README cues to determine service ownership.
-- Prevent GitLab, Jenkins, and MCP pages from binding unrelated `ai-service` evidence.
+- Force API台账服务/API inventory topics to resolve to `inventory-service` evidence such as `EndpointsController.java`, `ApiEndpointEntity.java`, and related repositories.
+- Prevent GitLab, Jenkins, MCP, and inventory-service pages from binding unrelated `ai-service` evidence.
 - Emit confidence and rejection reasons for ambiguous ownership.
 - Add fixtures covering similarly named services and unrelated evidence.
 
 ## Expected Output
-- Deliverables: service ownership resolver, confidence model, fixtures, tests.
+- Deliverables: service ownership resolver, inventory-service ownership fixture, confidence model, fixtures, tests.
 - Compile command: `uv run repo-wiki --help`
 - Self-test command: `uv run pytest tests/test_service_ownership.py tests/test_evidence_ranking.py`
-- Completion rule: do not mark complete unless wrong-service evidence fixtures fail before the fix and pass after it.
+- Completion rule: do not mark complete unless wrong-service evidence fixtures fail before the fix and pass after it, including API台账服务 -> inventory-service.
 
 ## Memory Logging
 Upon completion, you **MUST** log work in: `.apm/Memory/Phase_33_Evidence_Ranking_and_Hallucination_Control/Task_33_1_Service_ownership_resolver.md`
@@ -155,4 +156,3 @@ Replace unsupported implementation claims with explicit low-confidence sections.
 ## Memory Logging
 Upon completion, you **MUST** log work in: `.apm/Memory/Phase_33_Evidence_Ranking_and_Hallucination_Control/Task_33_4_Low_confidence_fallback.md`
 ```
-

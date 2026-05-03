@@ -14,7 +14,6 @@ from repo_wiki.indexer.hashing import compute_file_hash, diff_hash_maps
 from repo_wiki.indexer.state_store import SQLiteStateStore
 from repo_wiki.indexer.vector_store import ChromaVectorStore
 
-
 _CODE_SUFFIXES = {".py", ".go", ".ts", ".tsx", ".js", ".jsx"}
 _GLOBAL_TRIGGER_FILES = {
     "pyproject.toml",
@@ -67,9 +66,13 @@ class RetrievalService:
         )
         deleted_files = sorted(changes["deleted"])
         renamed_files = dict(sorted(changes["renamed"].items()))
-        changed_modules = self._map_files_to_modules(changed_files + deleted_files + list(renamed_files.keys()), modules)
+        changed_modules = self._map_files_to_modules(
+            changed_files + deleted_files + list(renamed_files.keys()), modules
+        )
         impacted_modules = self._expand_impacted_modules(changed_modules)
-        global_trigger = self._needs_global_regeneration(changed_files, deleted_files, renamed_files)
+        global_trigger = self._needs_global_regeneration(
+            changed_files, deleted_files, renamed_files
+        )
         return IncrementalImpact(
             changed_files=changed_files,
             deleted_files=deleted_files,
@@ -144,7 +147,9 @@ class RetrievalService:
                 float(item.get("score", 0.0)),
                 float(combined[chunk_id]["semantic_score"]),
             )
-            combined[chunk_id]["reasons"].append(f"semantic(score={float(item.get('score', 0.0)):.4f})")
+            combined[chunk_id]["reasons"].append(
+                f"semantic(score={float(item.get('score', 0.0)):.4f})"
+            )
 
         if not module:
             neighbor_modules = self._expand_modules_from_candidates(list(combined.values())[:20])
@@ -167,7 +172,9 @@ class RetrievalService:
                             "reasons": ["graph-neighbor-expansion"],
                         }
                     else:
-                        combined[chunk_id]["graph_bonus"] = max(float(combined[chunk_id]["graph_bonus"]), 0.1)
+                        combined[chunk_id]["graph_bonus"] = max(
+                            float(combined[chunk_id]["graph_bonus"]), 0.1
+                        )
                         combined[chunk_id]["reasons"].append("graph-neighbor-expansion")
 
         ranked = []
@@ -238,8 +245,14 @@ class RetrievalService:
             if isinstance(node, dict):
                 neighbors.update(node.get("upstream", []) or [])
                 neighbors.update(node.get("downstream", []) or [])
-            neighbor_chunks = self.store.list_chunks(module_names=sorted(neighbors), limit=8) if neighbors else []
-            merged = own + [item for item in neighbor_chunks if item["chunk_id"] not in {c["chunk_id"] for c in own}]
+            neighbor_chunks = (
+                self.store.list_chunks(module_names=sorted(neighbors), limit=8) if neighbors else []
+            )
+            merged = own + [
+                item
+                for item in neighbor_chunks
+                if item["chunk_id"] not in {c["chunk_id"] for c in own}
+            ]
             payload["modules"][module_name] = [
                 {
                     "chunk_id": item["chunk_id"],
@@ -311,7 +324,9 @@ class RetrievalService:
         return diff_hash_maps(previous, current)
 
     def _load_module_index(self) -> list[dict[str, Any]]:
-        data = read_yamlish(self.root / "ai" / "source-of-truth" / "module-index.yaml", {"modules": []})
+        data = read_yamlish(
+            self.root / "ai" / "source-of-truth" / "module-index.yaml", {"modules": []}
+        )
         if not isinstance(data, dict):
             return []
         modules = data.get("modules", [])
@@ -367,7 +382,12 @@ class RetrievalService:
         deleted_files: list[str],
         renamed_files: dict[str, str],
     ) -> bool:
-        candidates = set(changed_files) | set(deleted_files) | set(renamed_files) | set(renamed_files.values())
+        candidates = (
+            set(changed_files)
+            | set(deleted_files)
+            | set(renamed_files)
+            | set(renamed_files.values())
+        )
         for path in candidates:
             if Path(path).name in _GLOBAL_TRIGGER_FILES:
                 return True

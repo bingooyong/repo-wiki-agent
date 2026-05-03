@@ -11,7 +11,6 @@ import pytest
 
 from repo_wiki.core.contracts import (
     DataModel,
-    Endpoint,
     Module,
     RepositoryInfo,
     RepositorySnapshot,
@@ -83,7 +82,15 @@ class TestDataModelTopicPlanner:
                 depends_on=[],
                 depended_by=["repo_wiki", "repo_wiki_core"],
                 interfaces=[],
-                data_models=["RepoWikiConfig", "LlmConfig", "SecurityConfig", "ProjectConfig", "ScanConfig", "IndexConfig", "OutputConfig"],
+                data_models=[
+                    "RepoWikiConfig",
+                    "LlmConfig",
+                    "SecurityConfig",
+                    "ProjectConfig",
+                    "ScanConfig",
+                    "IndexConfig",
+                    "OutputConfig",
+                ],
                 owner="team-core",
                 doc_path="docs/modules/config.md",
                 domain="core-platform",
@@ -224,7 +231,9 @@ class TestDataModelTopicPlanner:
         manifest = planner.generate()
 
         data_model_pages = manifest.pages_by_category(WikiTaxonomyCategory.DATA_MODELS)
-        assert len(data_model_pages) >= 10, f"Expected at least 10 data model pages, got {len(data_model_pages)}"
+        assert (
+            len(data_model_pages) >= 10
+        ), f"Expected at least 10 data model pages, got {len(data_model_pages)}"
 
     def test_data_model_pages_grouped_by_topic(self, sample_identity, sample_snapshot):
         """Test that data model pages are grouped by topic, not raw model count."""
@@ -240,8 +249,7 @@ class TestDataModelTopicPlanner:
             "topic-configuration-models",
         ]
         found_topics = [
-            pid for pid in topic_page_ids
-            if any(p.page_id == pid for p in manifest.pages)
+            pid for pid in topic_page_ids if any(p.page_id == pid for p in manifest.pages)
         ]
         assert len(found_topics) >= 3, "Expected topic overview pages"
 
@@ -251,8 +259,12 @@ class TestDataModelTopicPlanner:
         manifest = planner.generate()
 
         # Should have entity relationships overview
-        er_pages = [p for p in manifest.pages if "entity" in p.page_id.lower() or "er-" in p.page_id]
-        assert len(er_pages) >= 2, f"Expected at least 2 entity relationship pages, got {len(er_pages)}"
+        er_pages = [
+            p for p in manifest.pages if "entity" in p.page_id.lower() or "er-" in p.page_id
+        ]
+        assert (
+            len(er_pages) >= 2
+        ), f"Expected at least 2 entity relationship pages, got {len(er_pages)}"
 
     def test_database_architecture_pages_exist(self, sample_identity, sample_snapshot):
         """Test that database architecture pages are generated."""
@@ -260,8 +272,12 @@ class TestDataModelTopicPlanner:
         manifest = planner.generate()
 
         # Should have database architecture pages
-        db_pages = [p for p in manifest.pages if "database" in p.page_id.lower() or "schema" in p.page_id]
-        assert len(db_pages) >= 2, f"Expected at least 2 database architecture pages, got {len(db_pages)}"
+        db_pages = [
+            p for p in manifest.pages if "database" in p.page_id.lower() or "schema" in p.page_id
+        ]
+        assert (
+            len(db_pages) >= 2
+        ), f"Expected at least 2 database architecture pages, got {len(db_pages)}"
 
     def test_migration_strategy_pages_exist(self, sample_identity, sample_snapshot):
         """Test that migration strategy pages are generated."""
@@ -270,7 +286,9 @@ class TestDataModelTopicPlanner:
 
         # Should have migration strategy pages
         migration_pages = [p for p in manifest.pages if "migration" in p.page_id.lower()]
-        assert len(migration_pages) >= 2, f"Expected at least 2 migration pages, got {len(migration_pages)}"
+        assert (
+            len(migration_pages) >= 2
+        ), f"Expected at least 2 migration pages, got {len(migration_pages)}"
 
     def test_all_pages_use_rule_first_mode(self, sample_identity, sample_snapshot):
         """Test all data model pages use RULE_FIRST generation mode."""
@@ -295,9 +313,7 @@ class TestDataModelTopicPlanner:
 
         assert len(manifest.navigation_tree) > 0
         # Should have category node for data models
-        category_nodes = [
-            n for n in manifest.navigation_tree if n.node_type == "category"
-        ]
+        category_nodes = [n for n in manifest.navigation_tree if n.node_type == "category"]
         assert len(category_nodes) >= 1
 
     def test_parent_child_relationships(self, sample_identity, sample_snapshot):
@@ -481,7 +497,13 @@ class TestDataModelTopicPlannerEdgeCases:
                     depends_on=[],
                     depended_by=[],
                     interfaces=[],
-                    data_models=["CoreEntity", "ConfigEntity", "RepoInfo", "VerifyResult", "RuntimeState"],
+                    data_models=[
+                        "CoreEntity",
+                        "ConfigEntity",
+                        "RepoInfo",
+                        "VerifyResult",
+                        "RuntimeState",
+                    ],
                     owner="team-core",
                     doc_path="docs/modules/core.md",
                     domain="core-platform",
@@ -490,11 +512,33 @@ class TestDataModelTopicPlannerEdgeCases:
             ],
             endpoints=[],
             data_models=[
-                DataModel(name="CoreEntity", type="python_class", module="core", file_path="core/entities.py"),
-                DataModel(name="ConfigEntity", type="python_class", module="core", file_path="core/config.py"),
-                DataModel(name="RepoInfo", type="python_class", module="core", file_path="core/repo.py"),
-                DataModel(name="VerifyResult", type="python_class", module="core", file_path="core/result.py"),
-                DataModel(name="RuntimeState", type="python_class", module="core", file_path="core/state.py"),
+                DataModel(
+                    name="CoreEntity",
+                    type="python_class",
+                    module="core",
+                    file_path="core/entities.py",
+                ),
+                DataModel(
+                    name="ConfigEntity",
+                    type="python_class",
+                    module="core",
+                    file_path="core/config.py",
+                ),
+                DataModel(
+                    name="RepoInfo", type="python_class", module="core", file_path="core/repo.py"
+                ),
+                DataModel(
+                    name="VerifyResult",
+                    type="python_class",
+                    module="core",
+                    file_path="core/result.py",
+                ),
+                DataModel(
+                    name="RuntimeState",
+                    type="python_class",
+                    module="core",
+                    file_path="core/state.py",
+                ),
             ],
         )
 
@@ -591,9 +635,10 @@ class TestDataModelTopicPlannerDuplicateDetection:
         titles = [p.title for p in manifest.pages]
         # Check for duplicate titles or titles with numeric suffixes that indicate duplication
         import re
+
         for title in titles:
             # Should not have titles ending in -2, -3, etc (indicating duplicate)
-            assert not re.search(r'-\d+$', title), f"Found duplicate title suffix in: {title}"
+            assert not re.search(r"-\d+$", title), f"Found duplicate title suffix in: {title}"
 
     def test_duplicate_detection_prevents_same_title_pages(self, sample_identity, sample_snapshot):
         """Test that _check_duplicate_title detects similar titles."""

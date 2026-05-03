@@ -5,9 +5,8 @@ from __future__ import annotations
 import ast
 import hashlib
 import re
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Sequence
-
 
 SanitizeFn = Callable[[str], str]
 
@@ -22,7 +21,7 @@ class Chunk:
     symbol_name: str
     line_start: int
     line_end: int
-    dependencies: List[str]
+    dependencies: list[str]
     text: str
 
     def to_record(self) -> dict:
@@ -58,7 +57,7 @@ def _build_chunk_id(
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
-def _python_dependencies(tree: ast.AST) -> List[str]:
+def _python_dependencies(tree: ast.AST) -> list[str]:
     deps = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -75,7 +74,7 @@ def _python_chunks(
     module_name: str,
     language: str,
     sanitize_text: SanitizeFn,
-) -> List[Chunk]:
+) -> list[Chunk]:
     tree = ast.parse(source)
     parent = {}
     for node in ast.walk(tree):
@@ -83,7 +82,7 @@ def _python_chunks(
             parent[child] = node
 
     deps = _python_dependencies(tree)
-    chunks: List[Chunk] = []
+    chunks: list[Chunk] = []
 
     function_nodes = []
     class_nodes = []
@@ -153,7 +152,9 @@ def _python_chunks(
     return chunks
 
 
-def _heuristic_ranges(source: str, patterns: Sequence[tuple[str, str]]) -> Iterable[tuple[str, str, int, int]]:
+def _heuristic_ranges(
+    source: str, patterns: Sequence[tuple[str, str]]
+) -> Iterable[tuple[str, str, int, int]]:
     lines = source.splitlines()
     markers = []
     for idx, line in enumerate(lines, start=1):
@@ -183,7 +184,7 @@ def _generic_chunks(
     module_name: str,
     language: str,
     sanitize_text: SanitizeFn,
-) -> List[Chunk]:
+) -> list[Chunk]:
     patterns = [
         ("function", r"^\s*(?:def|async\s+def|function|func)\s+([A-Za-z_][A-Za-z0-9_]*)"),
         ("class", r"^\s*(?:class|type)\s+([A-Za-z_][A-Za-z0-9_]*)"),
@@ -193,7 +194,7 @@ def _generic_chunks(
     class_ranges = [item for item in chunk_ranges if item[0] == "class"]
     ordered_ranges = function_ranges + class_ranges
 
-    chunks: List[Chunk] = []
+    chunks: list[Chunk] = []
     for chunk_type, symbol, start, end in ordered_ranges:
         text = sanitize_text(_slice_lines(source, start, end))
         chunks.append(
@@ -236,7 +237,7 @@ def chunk_source(
     module_name: str,
     language: str = "python",
     sanitize_text: SanitizeFn | None = None,
-) -> List[Chunk]:
+) -> list[Chunk]:
     sanitize = sanitize_text or (lambda text: text)
     if language.lower() == "python":
         try:

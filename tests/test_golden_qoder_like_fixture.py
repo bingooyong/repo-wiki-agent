@@ -1,8 +1,6 @@
 """Tests for golden fixture suite."""
 
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 

@@ -19,27 +19,27 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.core.contracts import DataModel as CoreDataModel, RepositorySnapshot
+from repo_wiki.core.contracts import RepositorySnapshot
 from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.generator.composer import (
     ComposerContext,
-    ComposerInput,
     ComposerOutput,
     build_composer_input,
     create_composer,
 )
 from repo_wiki.generator.engine import DataModel, DataModelAggregator, ModelCategory
-from repo_wiki.llm.providers import MockLLMProvider, create_mock_provider
-from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
-
+from repo_wiki.llm.providers import MockLLMProvider
+from repo_wiki.planner.schema import WikiPagePlan
 
 # =============================================================================
 # SERVICE DATA MODEL COMPOSER
 # =============================================================================
 
+
 @dataclass
 class ServiceDataModelInfo:
     """Information about a service's data models."""
+
     service_name: str
     domain: str
     models: list[DataModel] = field(default_factory=list)
@@ -94,8 +94,8 @@ class ServiceDataModelComposer:
         module_lookup: dict[str, dict[str, str]] = {}
         for m in self.snapshot.modules:
             module_lookup[m.name] = {
-                "service_family": getattr(m, 'service_family', None) or "unknown",
-                "domain": getattr(m, 'domain', None) or "unknown",
+                "service_family": getattr(m, "service_family", None) or "unknown",
+                "domain": getattr(m, "domain", None) or "unknown",
             }
 
         # Use DataModelAggregator to analyze models
@@ -140,8 +140,8 @@ class ServiceDataModelComposer:
         # Use original snapshot models for classification (they have correct model_category)
         for model in self.snapshot.data_models:
             # Get service_family and domain from model or fall back to module lookup
-            service_key = getattr(model, 'service_family', None)
-            domain = getattr(model, 'domain', None)
+            service_key = getattr(model, "service_family", None)
+            domain = getattr(model, "domain", None)
 
             # Fall back to module lookup if not present on model
             if not service_key:
@@ -154,9 +154,9 @@ class ServiceDataModelComposer:
             if service_key is None:
                 service_key = "unknown"
 
-            is_core = getattr(model, 'is_core_entity', False)
-            model_cat = getattr(model, 'model_category', None) or "unknown"
-            migration_related = getattr(model, 'migration_related', False)
+            is_core = getattr(model, "is_core_entity", False)
+            model_cat = getattr(model, "model_category", None) or "unknown"
+            migration_related = getattr(model, "migration_related", False)
 
             if service_key not in self._service_models:
                 self._service_models[service_key] = ServiceDataModelInfo(
@@ -197,7 +197,7 @@ class ServiceDataModelComposer:
         for service_name, info in self._service_models.items():
             for model in info.models:
                 # Use dedup_key if available, otherwise use lowercase name
-                dedup_key = getattr(model, 'dedup_key', None) or ""
+                dedup_key = getattr(model, "dedup_key", None) or ""
                 key = f"{dedup_key or model.name.lower()}"
                 if key not in model_to_services:
                     model_to_services[key] = set()
@@ -206,7 +206,7 @@ class ServiceDataModelComposer:
         # Update related services
         for service_name, info in self._service_models.items():
             for model in info.models:
-                dedup_key = getattr(model, 'dedup_key', None) or ""
+                dedup_key = getattr(model, "dedup_key", None) or ""
                 key = f"{dedup_key or model.name.lower()}"
                 related = model_to_services.get(key, set()) - {service_name}
                 info.related_services = list(set(info.related_services + list(related)))
@@ -269,7 +269,11 @@ class ServiceDataModelComposer:
             ServiceDataModelInfo for the service
         """
         # If page has specific models in source requirements, use those
-        if page_plan and page_plan.source_requirements and page_plan.source_requirements.data_models:
+        if (
+            page_plan
+            and page_plan.source_requirements
+            and page_plan.source_requirements.data_models
+        ):
             model_names = set(page_plan.source_requirements.data_models)
             all_models: list[DataModel] = []
             for info in self._service_models.values():
@@ -278,7 +282,7 @@ class ServiceDataModelComposer:
                         all_models.append(model)
             if all_models:
                 # Safely get domain attribute
-                domain = getattr(all_models[0], 'domain', None) or "unknown"
+                domain = getattr(all_models[0], "domain", None) or "unknown"
                 service_info = ServiceDataModelInfo(
                     service_name=service_family or "unknown",
                     domain=domain,
@@ -336,7 +340,7 @@ class ServiceDataModelComposer:
 
         # Check for migration evidence
         has_migrations = any(
-            getattr(model, 'migration_related', False) for model in service_info.models
+            getattr(model, "migration_related", False) for model in service_info.models
         )
         context["has_migration_evidence"] = has_migrations
 
@@ -399,8 +403,8 @@ class ServiceDataModelComposer:
                 "type": model.type,
                 "module": model.module,
                 "file_path": model.file_path,
-                "is_core_entity": getattr(model, 'is_core_entity', False),
-                "migration_related": getattr(model, 'migration_related', False),
+                "is_core_entity": getattr(model, "is_core_entity", False),
+                "migration_related": getattr(model, "migration_related", False),
             }
             for model in service_info.models[:20]  # Limit to 20 models
         ]
@@ -425,6 +429,7 @@ class ServiceDataModelComposer:
         This is a synchronous wrapper that uses the underlying async method.
         """
         import asyncio
+
         return asyncio.run(self.compose_data_model_page_async(page_plan, evidence_binding))
 
     def format_service_data_ownership(self, service_info: ServiceDataModelInfo) -> str:
@@ -439,7 +444,7 @@ class ServiceDataModelComposer:
         if not service_info.models:
             return f"服务 **{service_info.service_name}** 没有关联的数据模型。"
 
-        parts = [f"### 数据所有权\n"]
+        parts = ["### 数据所有权\n"]
         parts.append(f"服务 **{service_info.service_name}** 拥有以下数据模型：\n")
 
         # Core entities
@@ -498,8 +503,7 @@ class ServiceDataModelComposer:
         # Check for migration evidence
         if service_info.infrastructure_models:
             migration_models = [
-                m for m in service_info.infrastructure_models
-                if m.migration_related
+                m for m in service_info.infrastructure_models if m.migration_related
             ]
             if migration_models:
                 parts.append(f"\n**迁移相关模型**: {', '.join([m.name for m in migration_models])}")
@@ -546,8 +550,7 @@ class ServiceDataModelComposer:
             Prose describing migration evidence
         """
         migration_models = [
-            m for m in service_info.models
-            if getattr(m, 'migration_related', False)
+            m for m in service_info.models if getattr(m, "migration_related", False)
         ]
 
         if not migration_models:
@@ -565,6 +568,7 @@ class ServiceDataModelComposer:
 # =============================================================================
 # COMPOSER FACTORY
 # =============================================================================
+
 
 def create_service_data_model_composer(
     snapshot: RepositorySnapshot,
@@ -591,6 +595,7 @@ def create_service_data_model_composer(
 # =============================================================================
 # STANDALONE COMPOSITION HELPERS
 # =============================================================================
+
 
 def compose_service_data_model_article(
     page_plan: WikiPagePlan,
@@ -649,6 +654,7 @@ async def compose_service_data_model_article_async(
 # =============================================================================
 # SERVICE DATA MODEL INFO EXTRACTION
 # =============================================================================
+
 
 def extract_service_data_models(
     snapshot: RepositorySnapshot,

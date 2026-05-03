@@ -1,7 +1,5 @@
 """Tests for Qoder-like strict verifier."""
 
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -32,6 +30,7 @@ class TestQoderLikeSeverityThreshold:
     def test_soft_to_hard_conversion(self):
         """Test that soft codes become hard in strict mode."""
         from repo_wiki.verifier.service import GateType
+
         threshold = QoderLikeSeverityThreshold()
         assert threshold.get_gate_type("CONTENT_LIST_ONLY") == GateType.HARD
         assert threshold.get_gate_type("CITATION_MISSING") == GateType.HARD
@@ -227,7 +226,11 @@ More content here.
             hard_codes = result.get("hard_gate_codes", [])
             # At minimum, should not have false positive codes
             for code in hard_codes:
-                assert code.startswith("QODER_") or code.startswith("STRUCT") or code.startswith("CONTENT")
+                assert (
+                    code.startswith("QODER_")
+                    or code.startswith("STRUCT")
+                    or code.startswith("CONTENT")
+                )
 
     def test_file_ref_check_handles_relative_paths(self, tmp_path):
         """Test file reference check handles relative paths correctly."""
@@ -235,7 +238,9 @@ More content here.
         content_dir.mkdir()
 
         # Create content with relative reference to existing file
-        (content_dir / "00-overview.md").write_text("# Overview\n\n[Intro](01-intro.md)\n\n<cite>x</cite>")
+        (content_dir / "00-overview.md").write_text(
+            "# Overview\n\n[Intro](01-intro.md)\n\n<cite>x</cite>"
+        )
         (content_dir / "01-intro.md").write_text("# Introduction\n\n<cite>y</cite>")
 
         verifier = QoderLikeVerifierService(tmp_path, strict=True)
@@ -320,6 +325,7 @@ The system uses microservices.
             "version": "1.0",
         }
         import json
+
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text(json.dumps(manifest))
 

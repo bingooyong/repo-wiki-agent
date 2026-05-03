@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Dict, Mapping
 
 
 def _xxhash_available() -> bool:
@@ -37,7 +37,7 @@ def compute_file_hash(path: str | Path) -> str:
 def diff_hash_maps(
     previous: Mapping[str, str],
     current: Mapping[str, str],
-) -> Dict[str, Dict[str, str]]:
+) -> dict[str, dict[str, str]]:
     """Diff two path->hash maps and detect simple renames by hash."""
     prev = dict(previous)
     curr = dict(current)
@@ -46,16 +46,8 @@ def diff_hash_maps(
 
     added = {k: curr[k] for k in sorted(curr_keys - prev_keys)}
     deleted = {k: prev[k] for k in sorted(prev_keys - curr_keys)}
-    modified = {
-        k: curr[k]
-        for k in sorted(prev_keys & curr_keys)
-        if prev[k] != curr[k]
-    }
-    unchanged = {
-        k: curr[k]
-        for k in sorted(prev_keys & curr_keys)
-        if prev[k] == curr[k]
-    }
+    modified = {k: curr[k] for k in sorted(prev_keys & curr_keys) if prev[k] != curr[k]}
+    unchanged = {k: curr[k] for k in sorted(prev_keys & curr_keys) if prev[k] == curr[k]}
 
     # Pair newly-added and deleted files that share a hash as renames.
     deleted_by_hash = {}

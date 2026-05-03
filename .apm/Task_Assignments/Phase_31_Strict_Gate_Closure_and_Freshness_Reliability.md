@@ -18,7 +18,7 @@ ad_hoc_delegation: false
 Implementation Plan: **Task 31.1 - Commit freshness preflight** assigned to **Agent_IndexGraph**
 
 ## Context from Dependencies
-Depends on Task 30.6 and Task 27.3. Read the final Phase 30 dossier, manifest navigation/commit metadata implementation, and the latest PLAN0501 findings before changing behavior.
+Depends on Task 30.6 and Task 27.3. Read the final Phase 30 dossier, manifest navigation/commit metadata implementation, and the latest PLAN0501 findings before changing behavior. Treat `run-1777730692266` as an example of a newest-by-mtime run that must not be selected as READY because its manifest has `target_dirty=true` and no readiness field.
 
 ## Objective
 Record and verify target repository freshness around qoder-like generation.
@@ -28,13 +28,14 @@ Record and verify target repository freshness around qoder-like generation.
 - Re-check target HEAD after generation completes.
 - In strict mode, require a clean target worktree by default and emit `QODER_STALE_GIT_COMMIT` for stale generation metadata.
 - If dirty runs are allowed for manual review, mark `target_dirty=true` and force comparison output to `NOT_READY`.
-- Add stale commit and dirty tree regression tests.
+- Add explicit manifest readiness fields and latest-run selection rules so tools prefer latest READY run over newest directory mtime.
+- Add stale commit, dirty tree, missing readiness, and latest-run selector regression tests.
 
 ## Expected Output
-- Deliverables: target HEAD metadata, dirty-state manifest fields, stale-run strict gate behavior, tests.
+- Deliverables: target HEAD metadata, dirty-state manifest fields, readiness metadata, latest-run selector, stale-run strict gate behavior, tests.
 - Compile command: `uv run repo-wiki --help`
 - Self-test command: `uv run pytest tests/test_qoder_like_verifier.py tests/test_manifest_navigation.py`
-- Completion rule: do not mark complete unless strict stale/dirty behavior is tested and `.qoder/**` remains read-only.
+- Completion rule: do not mark complete unless strict stale/dirty behavior, missing readiness, latest READY selection, and `.qoder/**` read-only behavior are tested.
 
 ## Memory Logging
 Upon completion, you **MUST** log work in: `.apm/Memory/Phase_31_Strict_Gate_Closure_and_Freshness_Reliability/Task_31_1_Commit_freshness_preflight.md`

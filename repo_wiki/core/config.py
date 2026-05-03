@@ -130,7 +130,9 @@ class RepoWikiConfig(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
 
 
-def load_config(config_path: Path | None = None, cli_overrides: dict[str, Any] | None = None) -> RepoWikiConfig:
+def load_config(
+    config_path: Path | None = None, cli_overrides: dict[str, Any] | None = None
+) -> RepoWikiConfig:
     raw: dict[str, Any] = {}
     resolved_path = _resolve_config_path(config_path)
     if resolved_path and resolved_path.exists():
@@ -188,11 +190,7 @@ def _apply_dot_overrides(target: dict[str, Any], overrides: dict[str, Any]) -> N
 def _deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     result = dict(base)
     for key, value in override.items():
-        if (
-            key in result
-            and isinstance(result[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = _deep_merge_dict(result[key], value)
         else:
             result[key] = value

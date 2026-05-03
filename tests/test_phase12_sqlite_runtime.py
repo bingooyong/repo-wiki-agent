@@ -8,21 +8,16 @@ from pathlib import Path
 import pytest
 
 from repo_wiki.core.config import RepoWikiConfig
-from repo_wiki.orchestration.service import RepoWikiService
-from repo_wiki.orchestration.runtime_store import (
-    SQLiteRuntimeStore,
-    DocHierarchyRecord,
-    SectionRegistryRecord,
-    VerifyRunRecord,
-    CompareRunRecord,
-    PageInvalidationRecord,
-)
 from repo_wiki.orchestration.invalidation import (
-    PageInvalidationEngine,
-    IncrementalRegenerationPlanner,
     InvalidationResult,
     RegenerationTask,
 )
+from repo_wiki.orchestration.runtime_store import (
+    DocHierarchyRecord,
+    SectionRegistryRecord,
+    SQLiteRuntimeStore,
+)
+from repo_wiki.orchestration.service import RepoWikiService
 
 
 class TestSQLiteRuntimeStore:
@@ -355,13 +350,15 @@ class TestIncrementalRegenerationPlanner:
         for doc_slug in invalidation.regeneration_plan:
             doc_type = "overview" if doc_slug.startswith("0") else "section"
             priority = 1 if doc_slug in ("00-overview", "01-architecture") else 2
-            tasks.append(RegenerationTask(
-                doc_slug=doc_slug,
-                doc_type=doc_type,
-                priority=priority,
-                reason=invalidation.reason,
-                dependencies=[],
-            ))
+            tasks.append(
+                RegenerationTask(
+                    doc_slug=doc_slug,
+                    doc_type=doc_type,
+                    priority=priority,
+                    reason=invalidation.reason,
+                    dependencies=[],
+                )
+            )
 
         by_priority = {1: [], 2: [], 3: []}
         for task in tasks:
@@ -393,7 +390,9 @@ class TestRuntimeSyncIntegration:
         sections_dir.mkdir(parents=True, exist_ok=True)
         modules_dir.mkdir(parents=True, exist_ok=True)
 
-        (docs_dir / "00-overview.md").write_text("# Overview\n\nSee [Architecture](01-architecture.md)\n", encoding="utf-8")
+        (docs_dir / "00-overview.md").write_text(
+            "# Overview\n\nSee [Architecture](01-architecture.md)\n", encoding="utf-8"
+        )
         (docs_dir / "01-architecture.md").write_text("# Architecture\n", encoding="utf-8")
         (docs_dir / "03-module-map.md").write_text("# Module Map\n", encoding="utf-8")
         (docs_dir / "04-api-contracts.md").write_text("# API\n", encoding="utf-8")
@@ -456,7 +455,9 @@ class TestRuntimeSyncIntegration:
                     },
                 }
 
-        monkeypatch.setattr("repo_wiki.orchestration.service.RetrievalService", FakeRetrievalService)
+        monkeypatch.setattr(
+            "repo_wiki.orchestration.service.RetrievalService", FakeRetrievalService
+        )
         monkeypatch.setattr("repo_wiki.orchestration.service.VerifierService", FakeVerifierService)
 
         result = svc.verify(ci=True)
@@ -543,18 +544,32 @@ class TestRuntimeStoreFallbackBehavior:
                     "ci_mode": ci,
                     "exit_code": 0,
                     "checks": [],
-                    "summary": {"total": 1, "pass": 1, "warn": 0, "fail": 0, "hard_gate_failures": 0, "soft_gate_failures": 0},
+                    "summary": {
+                        "total": 1,
+                        "pass": 1,
+                        "warn": 0,
+                        "fail": 0,
+                        "hard_gate_failures": 0,
+                        "soft_gate_failures": 0,
+                    },
                     "reason_codes": [],
                     "hard_gate_codes": [],
                     "soft_gate_codes": [],
-                    "gate_summary": {"hard_gate_blocking": False, "soft_gate_warnings": False, "acceptance_blocked": False},
+                    "gate_summary": {
+                        "hard_gate_blocking": False,
+                        "soft_gate_warnings": False,
+                        "acceptance_blocked": False,
+                    },
                 }
 
-        monkeypatch.setattr("repo_wiki.orchestration.service.RetrievalService", FakeRetrievalService)
+        monkeypatch.setattr(
+            "repo_wiki.orchestration.service.RetrievalService", FakeRetrievalService
+        )
         monkeypatch.setattr("repo_wiki.orchestration.service.VerifierService", FakeVerifierService)
 
         # Ensure .repo-wiki directory does NOT exist
         import shutil
+
         repo_wiki_dir = tmp_path / ".repo-wiki"
         if repo_wiki_dir.exists():
             shutil.rmtree(repo_wiki_dir)
@@ -654,14 +669,27 @@ class TestRuntimeEvidenceWorkflow:
                     "ci_mode": ci,
                     "exit_code": 0,
                     "checks": [],
-                    "summary": {"total": 1, "pass": 1, "warn": 0 if grade == "PASS" else 1, "fail": 0, "hard_gate_failures": 0, "soft_gate_failures": 0 if grade == "PASS" else 1},
+                    "summary": {
+                        "total": 1,
+                        "pass": 1,
+                        "warn": 0 if grade == "PASS" else 1,
+                        "fail": 0,
+                        "hard_gate_failures": 0,
+                        "soft_gate_failures": 0 if grade == "PASS" else 1,
+                    },
                     "reason_codes": [],
                     "hard_gate_codes": [],
                     "soft_gate_codes": [],
-                    "gate_summary": {"hard_gate_blocking": False, "soft_gate_warnings": grade == "WARN", "acceptance_blocked": False},
+                    "gate_summary": {
+                        "hard_gate_blocking": False,
+                        "soft_gate_warnings": grade == "WARN",
+                        "acceptance_blocked": False,
+                    },
                 }
 
-        monkeypatch.setattr("repo_wiki.orchestration.service.RetrievalService", FakeRetrievalService)
+        monkeypatch.setattr(
+            "repo_wiki.orchestration.service.RetrievalService", FakeRetrievalService
+        )
         monkeypatch.setattr("repo_wiki.orchestration.service.VerifierService", FakeVerifierService)
 
         svc = RepoWikiService(cfg)
@@ -704,14 +732,27 @@ class TestRuntimeEvidenceWorkflow:
                     "ci_mode": ci,
                     "exit_code": 0,
                     "checks": [],
-                    "summary": {"total": 1, "pass": 1, "warn": 0, "fail": 0, "hard_gate_failures": 0, "soft_gate_failures": 0},
+                    "summary": {
+                        "total": 1,
+                        "pass": 1,
+                        "warn": 0,
+                        "fail": 0,
+                        "hard_gate_failures": 0,
+                        "soft_gate_failures": 0,
+                    },
                     "reason_codes": [],
                     "hard_gate_codes": [],
                     "soft_gate_codes": [],
-                    "gate_summary": {"hard_gate_blocking": False, "soft_gate_warnings": False, "acceptance_blocked": False},
+                    "gate_summary": {
+                        "hard_gate_blocking": False,
+                        "soft_gate_warnings": False,
+                        "acceptance_blocked": False,
+                    },
                 }
 
-        monkeypatch.setattr("repo_wiki.orchestration.service.RetrievalService", FakeRetrievalService)
+        monkeypatch.setattr(
+            "repo_wiki.orchestration.service.RetrievalService", FakeRetrievalService
+        )
         monkeypatch.setattr("repo_wiki.orchestration.service.VerifierService", FakeVerifierService)
 
         svc = RepoWikiService(cfg)

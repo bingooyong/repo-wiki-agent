@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from repo_wiki.llm import (
@@ -11,8 +9,8 @@ from repo_wiki.llm import (
     ChatRequest,
     ChatResponse,
     ErrorCode,
-    LLMProviderConfig,
     LLMError,
+    LLMProviderConfig,
     MockLLMProvider,
     NonRetryableError,
     ProviderCapabilities,

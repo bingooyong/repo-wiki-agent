@@ -7,17 +7,16 @@ from typing import Any
 
 from repo_wiki.llm import (
     LLMProviderConfig,
-    OpenAICompatibleProvider,
     MinimaxProvider,
-    create_minimax_provider,
-    format_redacted_diagnostic,
-    redact_secrets,
+    OpenAICompatibleProvider,
     ValidationReason,
     get_api_key_from_env,
 )
 
 
-def create_provider_from_config(config: LLMProviderConfig) -> OpenAICompatibleProvider | MinimaxProvider:
+def create_provider_from_config(
+    config: LLMProviderConfig,
+) -> OpenAICompatibleProvider | MinimaxProvider:
     """Create provider instance from config.
 
     Args:
@@ -144,15 +143,17 @@ def format_diagnostics_text(diagnostics: dict[str, Any]) -> str:
         else:
             lines.append(f"    {key}: (not set) [{reason}]")
 
-    lines.extend([
-        "",
-        "  Capabilities:",
-        f"    Streaming: {diagnostics['capabilities']['supports_streaming']}",
-        f"    Functions: {diagnostics['capabilities']['supports_functions']}",
-        f"    Vision: {diagnostics['capabilities']['supports_vision']}",
-        f"    JSON Mode: {diagnostics['capabilities']['supports_json_mode']}",
-        f"    Max Context: {diagnostics['capabilities']['max_context_tokens']} tokens",
-    ])
+    lines.extend(
+        [
+            "",
+            "  Capabilities:",
+            f"    Streaming: {diagnostics['capabilities']['supports_streaming']}",
+            f"    Functions: {diagnostics['capabilities']['supports_functions']}",
+            f"    Vision: {diagnostics['capabilities']['supports_vision']}",
+            f"    JSON Mode: {diagnostics['capabilities']['supports_json_mode']}",
+            f"    Max Context: {diagnostics['capabilities']['max_context_tokens']} tokens",
+        ]
+    )
 
     if diagnostics["issues"]:
         lines.extend(["", "  Issues:"])

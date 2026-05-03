@@ -32,11 +32,30 @@ def _write_minimum_artifacts(root: Path, with_module_doc: bool = True) -> None:
     )
     write_json(
         root / "ai/source-of-truth/api-index.yaml",
-        {"endpoints": [{"method": "GET", "path": "/health", "module": "billing", "handler": "h", "file_path": "src/billing/api.py"}]},
+        {
+            "endpoints": [
+                {
+                    "method": "GET",
+                    "path": "/health",
+                    "module": "billing",
+                    "handler": "h",
+                    "file_path": "src/billing/api.py",
+                }
+            ]
+        },
     )
     write_json(
         root / "ai/source-of-truth/data-models.yaml",
-        {"models": [{"name": "Invoice", "type": "python_class", "module": "billing", "file_path": "src/billing/model.py"}]},
+        {
+            "models": [
+                {
+                    "name": "Invoice",
+                    "type": "python_class",
+                    "module": "billing",
+                    "file_path": "src/billing/model.py",
+                }
+            ]
+        },
     )
     write_json(root / "ai/source-of-truth/task-catalog.yaml", {"tasks": []})
     write_text(root / "ai/source-of-truth/prompt-fragments/overview.txt", "overview")
@@ -58,7 +77,10 @@ def _write_minimum_artifacts(root: Path, with_module_doc: bool = True) -> None:
     write_text(root / ".claude/CLAUDE.md", "`docs/00-overview.md`")
     write_text(root / "AGENTS.md", "`docs/01-architecture.md`\n`http://localhost:8007`")
     write_json(root / ".opencode/opencode.json", {"knowledge_paths": ["docs/00-overview.md"]})
-    write_text(root / ".codex/config.toml", 'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n')
+    write_text(
+        root / ".codex/config.toml",
+        'project = "repo-wiki"\n[knowledge]\npath_1 = "docs/00-overview.md"\n',
+    )
     write_json(root / ".codex/hooks.json", {"post_commands": []})
 
 
@@ -78,12 +100,23 @@ def test_verifier_fail_for_missing_module_doc(tmp_path: Path) -> None:
 # Phase 08: Content Quality Tests
 # =============================================================================
 
+
 def _write_minimum_with_sections(root: Path) -> None:
     """Write minimum artifacts plus proper section pages for Phase 08 tests."""
     _write_minimum_artifacts(root, with_module_doc=True)
 
     # Create required section pages with proper navigation
-    sections = ["project", "architecture", "services", "data-model", "api", "operations", "development", "security", "troubleshooting"]
+    sections = [
+        "project",
+        "architecture",
+        "services",
+        "data-model",
+        "api",
+        "operations",
+        "development",
+        "security",
+        "troubleshooting",
+    ]
     for section in sections:
         section_dir = root / "docs/sections" / section
         section_dir.mkdir(parents=True, exist_ok=True)
@@ -100,8 +133,13 @@ def _write_quality_artifacts(root: Path) -> None:
     # Create source files for citations
     src_dir = root / "src" / "billing"
     src_dir.mkdir(parents=True, exist_ok=True)
-    write_text(src_dir / "api.py", "def health():\n    return 'ok'\n\ndef create_billing():\n    pass\n")
-    write_text(src_dir / "model.py", "class Invoice:\n    def __init__(self):\n        self.amount = 0\n\nclass LineItem:\n    def __init__(self):\n        self.quantity = 0\n")
+    write_text(
+        src_dir / "api.py", "def health():\n    return 'ok'\n\ndef create_billing():\n    pass\n"
+    )
+    write_text(
+        src_dir / "model.py",
+        "class Invoice:\n    def __init__(self):\n        self.amount = 0\n\nclass LineItem:\n    def __init__(self):\n        self.quantity = 0\n",
+    )
 
     # Write overview with proper prose and citations
     write_text(
@@ -268,7 +306,9 @@ def test_overview_prose_quality_fail_on_empty(tmp_path: Path) -> None:
 
     result = VerifierService(tmp_path).verify(ci=True)
     # Find the overview-prose-quality check
-    overview_check = next((c for c in result["checks"] if c["name"] == "overview-prose-quality"), None)
+    overview_check = next(
+        (c for c in result["checks"] if c["name"] == "overview-prose-quality"), None
+    )
     assert overview_check is not None
     assert overview_check["status"] == "FAIL"
     assert "reason_code" in overview_check
@@ -330,7 +370,9 @@ Run poetry install to set up dependencies.
     )
 
     result = VerifierService(tmp_path).verify(ci=True)
-    overview_check = next((c for c in result["checks"] if c["name"] == "overview-prose-quality"), None)
+    overview_check = next(
+        (c for c in result["checks"] if c["name"] == "overview-prose-quality"), None
+    )
     assert overview_check is not None
     assert overview_check["status"] == "FAIL"
     # Should fail for list ratio, not prose length or sections
@@ -355,7 +397,9 @@ More text without diagrams.
     )
 
     result = VerifierService(tmp_path).verify(ci=True)
-    arch_check = next((c for c in result["checks"] if c["name"] == "architecture-prose-quality"), None)
+    arch_check = next(
+        (c for c in result["checks"] if c["name"] == "architecture-prose-quality"), None
+    )
     assert arch_check is not None
     assert arch_check["status"] == "FAIL"
     assert arch_check.get("reason_code") == "ARCH_MERMAID_MISSING"
@@ -387,7 +431,9 @@ Just some text describing the layers without specific references.
     )
 
     result = VerifierService(tmp_path).verify(ci=True)
-    arch_check = next((c for c in result["checks"] if c["name"] == "architecture-prose-quality"), None)
+    arch_check = next(
+        (c for c in result["checks"] if c["name"] == "architecture-prose-quality"), None
+    )
     assert arch_check is not None
     assert arch_check["status"] == "FAIL"
     assert arch_check.get("reason_code") == "ARCH_LAYER_EXPLANATION_MISSING"
@@ -628,7 +674,11 @@ def test_reason_codes_are_precise(tmp_path: Path) -> None:
 
     # Find the overview check with FAIL
     overview_check = next(
-        (c for c in result["checks"] if c["name"] == "overview-prose-quality" and c["status"] == "FAIL"),
+        (
+            c
+            for c in result["checks"]
+            if c["name"] == "overview-prose-quality" and c["status"] == "FAIL"
+        ),
         None,
     )
     assert overview_check is not None
@@ -730,7 +780,9 @@ def test_soft_gate_codes_are_correctly_classified(tmp_path: Path) -> None:
     result = VerifierService(tmp_path).verify(ci=True)
 
     # Find the overview-prose-quality check
-    overview_check = next((c for c in result["checks"] if c["name"] == "overview-prose-quality"), None)
+    overview_check = next(
+        (c for c in result["checks"] if c["name"] == "overview-prose-quality"), None
+    )
     assert overview_check is not None
     assert overview_check["status"] == "FAIL"
     # Should be soft gate (list-only content)
@@ -746,7 +798,9 @@ def test_empty_content_is_hard_gate(tmp_path: Path) -> None:
     result = VerifierService(tmp_path).verify(ci=True)
 
     # Find the overview-prose-quality check
-    overview_check = next((c for c in result["checks"] if c["name"] == "overview-prose-quality"), None)
+    overview_check = next(
+        (c for c in result["checks"] if c["name"] == "overview-prose-quality"), None
+    )
     assert overview_check is not None
     assert overview_check["status"] == "FAIL"
     # Empty content is HARD gate
@@ -790,8 +844,12 @@ X.
     # Create thresholds that treat CONTENT_TOO_SHORT as blocking
     # Also include CITATION_MISSING in soft codes to prevent it from being HARD gate
     from repo_wiki.verifier.service import SeverityThreshold
+
     custom_thresholds = SeverityThreshold(
-        soft_gate_codes={"CONTENT_TOO_SHORT", "CITATION_MISSING"},  # Make CONTENT_TOO_SHORT blocking
+        soft_gate_codes={
+            "CONTENT_TOO_SHORT",
+            "CITATION_MISSING",
+        },  # Make CONTENT_TOO_SHORT blocking
         warn_on_soft=False,  # Don't warn, fail
     )
 
@@ -927,7 +985,17 @@ def test_canonical_only_mode(tmp_path: Path) -> None:
     sections_dir.mkdir(parents=True, exist_ok=True)
 
     # Create all required canonical sections as directories
-    for section in ["project", "architecture", "services", "data-model", "api", "operations", "development", "security", "troubleshooting"]:
+    for section in [
+        "project",
+        "architecture",
+        "services",
+        "data-model",
+        "api",
+        "operations",
+        "development",
+        "security",
+        "troubleshooting",
+    ]:
         section_dir = sections_dir / section
         section_dir.mkdir(parents=True, exist_ok=True)
         write_text(section_dir / "index.md", f"# {section}\n")
@@ -940,7 +1008,16 @@ def test_canonical_only_mode(tmp_path: Path) -> None:
     # Should not be legacy mode when all canonical sections exist
     assert sections_check["details"].get("mode") != "legacy_qs_compatibility"
     # All should be resolved via canonical
-    for section in ["project", "architecture", "services", "data-model", "api", "operations", "development", "security"]:
+    for section in [
+        "project",
+        "architecture",
+        "services",
+        "data-model",
+        "api",
+        "operations",
+        "development",
+        "security",
+    ]:
         assert sections_check["details"]["alias_resolutions"].get(section) == "canonical"
 
 

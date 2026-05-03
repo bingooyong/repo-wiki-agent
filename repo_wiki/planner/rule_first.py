@@ -5,10 +5,8 @@ Uses repository identity, modules, APIs, data models, and runtime roles.
 
 Output: deterministic page IDs, paths, parent links, and order.
 """
-from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from __future__ import annotations
 
 from repo_wiki.core.contracts import Module, RepositorySnapshot
 from repo_wiki.planner.schema import (
@@ -22,7 +20,6 @@ from repo_wiki.planner.schema import (
     WikiTaxonomyCategory,
     current_schema_version,
 )
-
 
 # Category ordering for navigation
 _CATEGORY_ORDER = {
@@ -188,17 +185,28 @@ class RuleFirstPlanner:
         if name in known:
             return known[name]
         words = [part for part in re.split(r"[-_]+", name) if part]
-        return " ".join(part.upper() if part.lower() in {"api", "mcp", "ai"} else part.capitalize() for part in words)
+        return " ".join(
+            part.upper() if part.lower() in {"api", "mcp", "ai"} else part.capitalize()
+            for part in words
+        )
 
     def _include_endpoint_pages(self) -> bool:
         import os
 
-        return os.environ.get("REPO_WIKI_INCLUDE_ENDPOINT_PAGES", "").strip().lower() in {"1", "true", "yes"}
+        return os.environ.get("REPO_WIKI_INCLUDE_ENDPOINT_PAGES", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
 
     def _include_raw_model_pages(self) -> bool:
         import os
 
-        return os.environ.get("REPO_WIKI_INCLUDE_RAW_MODEL_PAGES", "").strip().lower() in {"1", "true", "yes"}
+        return os.environ.get("REPO_WIKI_INCLUDE_RAW_MODEL_PAGES", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
 
     def _add_page(
         self,
@@ -295,12 +303,18 @@ class RuleFirstPlanner:
 
         # Architecture overview
         self._add_page(
-            page_id=self._make_page_id("architecture-overview", WikiTaxonomyCategory.ARCHITECTURE_DESIGN),
+            page_id=self._make_page_id(
+                "architecture-overview", WikiTaxonomyCategory.ARCHITECTURE_DESIGN
+            ),
             title="架构设计",
             category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
             parent=None,
             source_requirements=SourceRequirement(
-                modules=[m.name for m in self.snapshot.modules if m.domain in ("core-platform", "ai-services")]
+                modules=[
+                    m.name
+                    for m in self.snapshot.modules
+                    if m.domain in ("core-platform", "ai-services")
+                ]
             ),
             sort_order=0,
             tags=["architecture", "design"],
@@ -308,20 +322,22 @@ class RuleFirstPlanner:
 
         # System components
         self._add_page(
-            page_id=self._make_page_id("system-components", WikiTaxonomyCategory.ARCHITECTURE_DESIGN),
+            page_id=self._make_page_id(
+                "system-components", WikiTaxonomyCategory.ARCHITECTURE_DESIGN
+            ),
             title="系统组件",
             category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
             parent="architecture-overview",
-            source_requirements=SourceRequirement(
-                modules=[m.name for m in self.snapshot.modules]
-            ),
+            source_requirements=SourceRequirement(modules=[m.name for m in self.snapshot.modules]),
             sort_order=1,
             tags=["components", "modules"],
         )
 
         # Module relationships
         self._add_page(
-            page_id=self._make_page_id("module-relationships", WikiTaxonomyCategory.ARCHITECTURE_DESIGN),
+            page_id=self._make_page_id(
+                "module-relationships", WikiTaxonomyCategory.ARCHITECTURE_DESIGN
+            ),
             title="模块关系",
             category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
             parent="architecture-overview",
@@ -367,7 +383,9 @@ class RuleFirstPlanner:
 
         # Event driven architecture
         self._add_page(
-            page_id=self._make_page_id("event-architecture", WikiTaxonomyCategory.ARCHITECTURE_DESIGN),
+            page_id=self._make_page_id(
+                "event-architecture", WikiTaxonomyCategory.ARCHITECTURE_DESIGN
+            ),
             title="事件驱动架构",
             category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
             parent="architecture-overview",
@@ -377,7 +395,9 @@ class RuleFirstPlanner:
 
         # Microservices pattern
         self._add_page(
-            page_id=self._make_page_id("microservices-pattern", WikiTaxonomyCategory.ARCHITECTURE_DESIGN),
+            page_id=self._make_page_id(
+                "microservices-pattern", WikiTaxonomyCategory.ARCHITECTURE_DESIGN
+            ),
             title="微服务模式",
             category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
             parent="architecture-overview",
@@ -428,7 +448,9 @@ class RuleFirstPlanner:
                 page_id=module_page_id,
                 title=self._humanize_service_title(module.name),
                 category=WikiTaxonomyCategory.CORE_SERVICES,
-                parent="core-services-index" if module.domain == "core-platform" else "ai-services-index",
+                parent="core-services-index"
+                if module.domain == "core-platform"
+                else "ai-services-index",
                 source_requirements=SourceRequirement(
                     modules=[module.name],
                     files=[module.doc_path] if module.doc_path else [],
@@ -440,7 +462,9 @@ class RuleFirstPlanner:
             # Module data models sub-page
             if module.data_models:
                 self._add_page(
-                    page_id=self._make_page_id(f"{module.name}-models", WikiTaxonomyCategory.DATA_MODELS),
+                    page_id=self._make_page_id(
+                        f"{module.name}-models", WikiTaxonomyCategory.DATA_MODELS
+                    ),
                     title=f"{self._humanize_service_title(module.name)} 数据模型",
                     category=WikiTaxonomyCategory.DATA_MODELS,
                     parent=module_page_id,
@@ -474,7 +498,8 @@ class RuleFirstPlanner:
                 "core-service-apis",
                 "核心服务API",
                 lambda module_name, endpoints: any(
-                    getattr(e, "domain", "") == "core-platform" or self._module_domain(module_name) == "core-platform"
+                    getattr(e, "domain", "") == "core-platform"
+                    or self._module_domain(module_name) == "core-platform"
                     for e in endpoints
                 ),
             ),
@@ -482,7 +507,8 @@ class RuleFirstPlanner:
                 "python-service-apis",
                 "Python服务API",
                 lambda module_name, endpoints: any(
-                    "python" in getattr(e, "service_family", "") or self._module_runtime(module_name) in {"python", "fastapi"}
+                    "python" in getattr(e, "service_family", "")
+                    or self._module_runtime(module_name) in {"python", "fastapi"}
                     for e in endpoints
                 ),
             ),
@@ -494,7 +520,8 @@ class RuleFirstPlanner:
             (
                 "agent-proxy-api",
                 "Agent代理API",
-                lambda module_name, endpoints: "agent" in module_name.lower() or any("agent" in e.path.lower() for e in endpoints),
+                lambda module_name, endpoints: "agent" in module_name.lower()
+                or any("agent" in e.path.lower() for e in endpoints),
             ),
             (
                 "frontend-application-api",
@@ -510,7 +537,11 @@ class RuleFirstPlanner:
                 if predicate(module_name, endpoints):
                     grouped_modules.append(module_name)
                     grouped_endpoints.extend(f"{e.method} {e.path}" for e in endpoints)
-            if not grouped_modules and page_id_base not in {"api-gateway-api", "agent-proxy-api", "frontend-application-api"}:
+            if not grouped_modules and page_id_base not in {
+                "api-gateway-api",
+                "agent-proxy-api",
+                "frontend-application-api",
+            }:
                 continue
             self._add_page(
                 page_id=self._make_page_id(page_id_base, WikiTaxonomyCategory.API_REFERENCE),
@@ -528,10 +559,13 @@ class RuleFirstPlanner:
         auth_endpoints = [
             f"{e.method} {e.path}"
             for e in self.snapshot.endpoints
-            if getattr(e, "auth_required", False) or getattr(e, "auth_type", "unknown") not in {"unknown", "none"}
+            if getattr(e, "auth_required", False)
+            or getattr(e, "auth_type", "unknown") not in {"unknown", "none"}
         ]
         self._add_page(
-            page_id=self._make_page_id("authentication-authorization-api", WikiTaxonomyCategory.API_REFERENCE),
+            page_id=self._make_page_id(
+                "authentication-authorization-api", WikiTaxonomyCategory.API_REFERENCE
+            ),
             title="认证授权API",
             category=WikiTaxonomyCategory.API_REFERENCE,
             parent="api-overview",
@@ -540,12 +574,18 @@ class RuleFirstPlanner:
             tags=["api", "auth", "security"],
         )
         self._add_page(
-            page_id=self._make_page_id("error-handling-status-codes", WikiTaxonomyCategory.API_REFERENCE),
+            page_id=self._make_page_id(
+                "error-handling-status-codes", WikiTaxonomyCategory.API_REFERENCE
+            ),
             title="错误处理与状态码",
             category=WikiTaxonomyCategory.API_REFERENCE,
             parent="api-overview",
             source_requirements=SourceRequirement(
-                endpoints=[f"{e.method} {e.path}" for e in self.snapshot.endpoints if getattr(e, "error_codes", [])]
+                endpoints=[
+                    f"{e.method} {e.path}"
+                    for e in self.snapshot.endpoints
+                    if getattr(e, "error_codes", [])
+                ]
             ),
             sort_order=21,
             tags=["api", "errors", "status-codes"],
@@ -556,7 +596,9 @@ class RuleFirstPlanner:
             if not endpoints:
                 continue
             self._add_page(
-                page_id=self._make_page_id(f"{module_name}-api-reference", WikiTaxonomyCategory.API_REFERENCE),
+                page_id=self._make_page_id(
+                    f"{module_name}-api-reference", WikiTaxonomyCategory.API_REFERENCE
+                ),
                 title=f"{self._humanize_service_title(module_name)} API",
                 category=WikiTaxonomyCategory.API_REFERENCE,
                 parent="api-overview",
@@ -570,7 +612,9 @@ class RuleFirstPlanner:
 
         if self._include_endpoint_pages():
             for module_name, endpoints in sorted(by_module.items()):
-                module_api_id = self._make_page_id(f"{module_name}-endpoints", WikiTaxonomyCategory.API_REFERENCE)
+                module_api_id = self._make_page_id(
+                    f"{module_name}-endpoints", WikiTaxonomyCategory.API_REFERENCE
+                )
                 self._add_page(
                     page_id=module_api_id,
                     title=f"{self._humanize_service_title(module_name)} 接口清单",
@@ -607,7 +651,10 @@ class RuleFirstPlanner:
         core_names = [
             model.name
             for model in self.snapshot.data_models
-            if any(token in model.name.lower() for token in ["entity", "apiatom", "contract", "workflow", "audit", "execution"])
+            if any(
+                token in model.name.lower()
+                for token in ["entity", "apiatom", "contract", "workflow", "audit", "execution"]
+            )
         ]
         self._add_page(
             page_id=self._make_page_id("core-data-models", WikiTaxonomyCategory.DATA_MODELS),
@@ -623,7 +670,9 @@ class RuleFirstPlanner:
             title="服务数据模型",
             category=WikiTaxonomyCategory.DATA_MODELS,
             parent="data-models-overview",
-            source_requirements=SourceRequirement(data_models=[dm.name for dm in self.snapshot.data_models]),
+            source_requirements=SourceRequirement(
+                data_models=[dm.name for dm in self.snapshot.data_models]
+            ),
             sort_order=11,
             tags=["models", "service-models"],
         )
@@ -637,7 +686,9 @@ class RuleFirstPlanner:
             tags=["database", "schema"],
         )
         self._add_page(
-            page_id=self._make_page_id("database-migration-strategy", WikiTaxonomyCategory.DATA_MODELS),
+            page_id=self._make_page_id(
+                "database-migration-strategy", WikiTaxonomyCategory.DATA_MODELS
+            ),
             title="数据迁移策略",
             category=WikiTaxonomyCategory.DATA_MODELS,
             parent="database-architecture",
@@ -647,7 +698,9 @@ class RuleFirstPlanner:
         )
 
         for idx, (module_name, models) in enumerate(sorted(by_module.items())):
-            module_models_id = self._make_page_id(f"{module_name}-data-models", WikiTaxonomyCategory.DATA_MODELS)
+            module_models_id = self._make_page_id(
+                f"{module_name}-data-models", WikiTaxonomyCategory.DATA_MODELS
+            )
             self._add_page(
                 page_id=module_models_id,
                 title=f"{self._humanize_service_title(module_name)} 数据模型",
@@ -661,7 +714,9 @@ class RuleFirstPlanner:
             if not self._include_raw_model_pages():
                 continue
             for model_idx, model in enumerate(sorted(models, key=lambda m: m.name)):
-                model_id = self._make_page_id(f"{module_name}-{model.name}", WikiTaxonomyCategory.DATA_MODELS)
+                model_id = self._make_page_id(
+                    f"{module_name}-{model.name}", WikiTaxonomyCategory.DATA_MODELS
+                )
                 self._add_page(
                     page_id=model_id,
                     title=model.name,
@@ -679,7 +734,9 @@ class RuleFirstPlanner:
         """Generate deployment and operations pages."""
         # Deployment overview
         self._add_page(
-            page_id=self._make_page_id("deployment-overview", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS),
+            page_id=self._make_page_id(
+                "deployment-overview", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS
+            ),
             title="部署运维概览",
             category=WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
             parent=None,
@@ -694,16 +751,16 @@ class RuleFirstPlanner:
             title="配置指南",
             category=WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
             parent="deployment-overview",
-            source_requirements=SourceRequirement(
-                files=["repo-wiki.yaml", ".repo-wiki.yaml"]
-            ),
+            source_requirements=SourceRequirement(files=["repo-wiki.yaml", ".repo-wiki.yaml"]),
             sort_order=1,
             tags=["config", "settings"],
         )
 
         # Environment setup
         self._add_page(
-            page_id=self._make_page_id("environment-setup", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS),
+            page_id=self._make_page_id(
+                "environment-setup", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS
+            ),
             title="环境配置",
             category=WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
             parent="deployment-overview",
@@ -733,7 +790,9 @@ class RuleFirstPlanner:
 
         # Container deployment
         self._add_page(
-            page_id=self._make_page_id("container-deployment", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS),
+            page_id=self._make_page_id(
+                "container-deployment", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS
+            ),
             title="容器化部署",
             category=WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
             parent="deployment-overview",
@@ -743,7 +802,9 @@ class RuleFirstPlanner:
 
         # Kubernetes deployment
         self._add_page(
-            page_id=self._make_page_id("kubernetes-deployment", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS),
+            page_id=self._make_page_id(
+                "kubernetes-deployment", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS
+            ),
             title="Kubernetes部署",
             category=WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
             parent="deployment-overview",
@@ -763,7 +824,9 @@ class RuleFirstPlanner:
 
         # Backup and recovery
         self._add_page(
-            page_id=self._make_page_id("backup-recovery", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS),
+            page_id=self._make_page_id(
+                "backup-recovery", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS
+            ),
             title="备份恢复",
             category=WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
             parent="deployment-overview",
@@ -846,7 +909,9 @@ class RuleFirstPlanner:
 
         # Performance optimization
         self._add_page(
-            page_id=self._make_page_id("performance-optimization", WikiTaxonomyCategory.DEVELOPMENT_GUIDE),
+            page_id=self._make_page_id(
+                "performance-optimization", WikiTaxonomyCategory.DEVELOPMENT_GUIDE
+            ),
             title="性能优化",
             category=WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
             parent="development-guide",
@@ -886,7 +951,9 @@ class RuleFirstPlanner:
 
         # Database migration
         self._add_page(
-            page_id=self._make_page_id("database-migration", WikiTaxonomyCategory.DEVELOPMENT_GUIDE),
+            page_id=self._make_page_id(
+                "database-migration", WikiTaxonomyCategory.DEVELOPMENT_GUIDE
+            ),
             title="数据库迁移",
             category=WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
             parent="development-guide",
@@ -898,7 +965,9 @@ class RuleFirstPlanner:
         """Generate security and compliance pages."""
         # Security overview
         self._add_page(
-            page_id=self._make_page_id("security-overview", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
+            page_id=self._make_page_id(
+                "security-overview", WikiTaxonomyCategory.SECURITY_COMPLIANCE
+            ),
             title="安全合规概览",
             category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
             parent=None,
@@ -968,7 +1037,9 @@ class RuleFirstPlanner:
 
         # Compliance frameworks
         self._add_page(
-            page_id=self._make_page_id("compliance-frameworks", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
+            page_id=self._make_page_id(
+                "compliance-frameworks", WikiTaxonomyCategory.SECURITY_COMPLIANCE
+            ),
             title="合规框架",
             category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
             parent="security-overview",
@@ -978,7 +1049,9 @@ class RuleFirstPlanner:
 
         # Security best practices
         self._add_page(
-            page_id=self._make_page_id("security-best-practices", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
+            page_id=self._make_page_id(
+                "security-best-practices", WikiTaxonomyCategory.SECURITY_COMPLIANCE
+            ),
             title="安全最佳实践",
             category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
             parent="security-overview",
@@ -988,7 +1061,9 @@ class RuleFirstPlanner:
 
         # Vulnerability management
         self._add_page(
-            page_id=self._make_page_id("vulnerability-management", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
+            page_id=self._make_page_id(
+                "vulnerability-management", WikiTaxonomyCategory.SECURITY_COMPLIANCE
+            ),
             title="漏洞管理",
             category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
             parent="security-overview",
@@ -1000,7 +1075,9 @@ class RuleFirstPlanner:
         """Generate troubleshooting pages."""
         # Troubleshooting overview
         self._add_page(
-            page_id=self._make_page_id("troubleshooting-overview", WikiTaxonomyCategory.TROUBLESHOOTING),
+            page_id=self._make_page_id(
+                "troubleshooting-overview", WikiTaxonomyCategory.TROUBLESHOOTING
+            ),
             title="故障排除概览",
             category=WikiTaxonomyCategory.TROUBLESHOOTING,
             parent=None,

@@ -3,6 +3,7 @@
 Stores planned pages, nav nodes, profile, source digests, and path registry.
 Writes `.repo-agent-eval/<run>/manifest.json` with plugin-readable navigation tree.
 """
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,6 @@ from repo_wiki.orchestration.runtime_store import SQLiteRuntimeStore, create_run
 from repo_wiki.planner.schema import (
     GenerationMode,
     NavNode,
-    RepositoryIdentity,
     WikiPagePlan,
     WikiPlanManifest,
     WikiTaxonomyCategory,
@@ -167,7 +167,9 @@ def _write_manifest(
         "profile": plan.profile,
         "repository": {
             "name": plan.repository_identity.name if plan.repository_identity else "unknown",
-            "display_name": plan.repository_identity.display_name if plan.repository_identity else "unknown",
+            "display_name": plan.repository_identity.display_name
+            if plan.repository_identity
+            else "unknown",
             "root_path": plan.repository_identity.root_path if plan.repository_identity else "",
         },
         "page_count": plan.page_count(),
@@ -199,16 +201,18 @@ def _nav_node_to_dict(nodes: list[NavNode]) -> list[dict[str, Any]]:
     """Convert nav node tree to dict for JSON serialization."""
     result = []
     for node in nodes:
-        result.append({
-            "node_id": node.node_id,
-            "label": node.label,
-            "node_type": node.node_type,
-            "path": node.path,
-            "icon": node.icon,
-            "sort_order": node.sort_order,
-            "metadata": node.metadata,
-            "children": _nav_node_to_dict(node.children),
-        })
+        result.append(
+            {
+                "node_id": node.node_id,
+                "label": node.label,
+                "node_type": node.node_type,
+                "path": node.path,
+                "icon": node.icon,
+                "sort_order": node.sort_order,
+                "metadata": node.metadata,
+                "children": _nav_node_to_dict(node.children),
+            }
+        )
     return result
 
 

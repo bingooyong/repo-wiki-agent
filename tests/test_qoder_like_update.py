@@ -1,6 +1,5 @@
 """Tests for qoder-like update integration."""
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -79,15 +78,11 @@ class TestQoderUpdateIntegrator:
 
         # Create a run
         run_id, _ = integrator.create_run(profile="test", total_pages=3)
-        integrator.state_machine.add_page(
-            run_id, "00-overview", "overview", "docs/00-overview.md"
-        )
+        integrator.state_machine.add_page(run_id, "00-overview", "overview", "docs/00-overview.md")
         integrator.state_machine.add_page(
             run_id, "01-architecture", "overview", "docs/01-architecture.md"
         )
-        integrator.state_machine.add_page(
-            run_id, "02-services", "module", "docs/02-services.md"
-        )
+        integrator.state_machine.add_page(run_id, "02-services", "module", "docs/02-services.md")
 
         # Plan update
         plan = integrator.plan_incremental_update(run_id)
@@ -103,9 +98,7 @@ class TestQoderUpdateIntegrator:
 
         # Create and complete a run
         run_id, _ = integrator.create_run(profile="test", total_pages=2)
-        integrator.state_machine.add_page(
-            run_id, "00-overview", "overview", "docs/00-overview.md"
-        )
+        integrator.state_machine.add_page(run_id, "00-overview", "overview", "docs/00-overview.md")
         integrator.state_machine.add_page(
             run_id, "01-architecture", "overview", "docs/01-architecture.md"
         )
@@ -126,21 +119,18 @@ class TestQoderUpdateIntegrator:
 
         # Create run with failures
         run_id, _ = integrator.create_run(profile="test", total_pages=2)
-        integrator.state_machine.add_page(
-            run_id, "00-overview", "overview", "docs/00-overview.md"
-        )
+        integrator.state_machine.add_page(run_id, "00-overview", "overview", "docs/00-overview.md")
         integrator.state_machine.add_page(
             run_id, "01-architecture", "overview", "docs/01-architecture.md"
         )
 
         integrator.state_machine.complete_page(run_id, "00-overview")
         integrator.state_machine.start_page(run_id, "01-architecture")
-        integrator.state_machine.fail_page(
-            run_id, "01-architecture", "timeout", retryable=False
-        )
+        integrator.state_machine.fail_page(run_id, "01-architecture", "timeout", retryable=False)
 
         # Record failure
         from repo_wiki.orchestration.partial_evidence import FailureReason
+
         integrator.evidence_recorder.record_failure(
             run_id=run_id,
             doc_slug="01-architecture",
