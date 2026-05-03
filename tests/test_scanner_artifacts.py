@@ -78,12 +78,12 @@ def test_source_of_truth_includes_domain_classification_metadata(tmp_path: Path)
         assert "domain" in module, f"Module {module['name']} missing 'domain' field"
         assert "service_family" in module, f"Module {module['name']} missing 'service_family' field"
         assert "runtime_role" in module, f"Module {module['name']} missing 'runtime_role' field"
-        assert (
-            "domain_confidence" in module
-        ), f"Module {module['name']} missing 'domain_confidence' field"
-        assert (
-            "domain_classification_reason" in module
-        ), f"Module {module['name']} missing 'domain_classification_reason' field"
+        assert "domain_confidence" in module, (
+            f"Module {module['name']} missing 'domain_confidence' field"
+        )
+        assert "domain_classification_reason" in module, (
+            f"Module {module['name']} missing 'domain_classification_reason' field"
+        )
 
 
 def test_classification_diagnostics_for_mixed_repository(tmp_path: Path) -> None:

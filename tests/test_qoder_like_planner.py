@@ -103,9 +103,9 @@ class TestModuleHierarchyDepth:
             if page.parent:
                 # Verify parent exists
                 parent_exists = any(p.page_id == page.parent for p in sample_manifest.pages)
-                assert (
-                    parent_exists
-                ), f"Page {page.page_id} references non-existent parent {page.parent}"
+                assert parent_exists, (
+                    f"Page {page.page_id} references non-existent parent {page.parent}"
+                )
 
 
 class TestQoderPathCommonCount:
@@ -193,9 +193,9 @@ class TestQoderPathCommonCount:
                     found_prefixes.add(prefix)
 
         # Should have at least 6 common prefix categories
-        assert (
-            len(found_prefixes) >= 6
-        ), f"Only {len(found_prefixes)} common prefixes found, expected at least 6"
+        assert len(found_prefixes) >= 6, (
+            f"Only {len(found_prefixes)} common prefixes found, expected at least 6"
+        )
 
 
 class TestRepoAgentPageCountRatio:
@@ -279,9 +279,9 @@ class TestRepoAgentPageCountRatio:
 
         # Current ratio is ~50%, showing growth trajectory toward 90-120% target
         # This test documents the current state and growth goal
-        assert (
-            ratio >= 0.45
-        ), f"Repo-agent page count {repo_agent_count} is {ratio*100:.1f}% of Qoder target {qoder_target}, expected at least 45% to show growth trajectory"
+        assert ratio >= 0.45, (
+            f"Repo-agent page count {repo_agent_count} is {ratio * 100:.1f}% of Qoder target {qoder_target}, expected at least 45% to show growth trajectory"
+        )
 
     def test_page_count_growth_goal_90_to_120_percent(self):
         """Test page count growth goal: reach 90%-120% of Qoder baseline.
@@ -436,9 +436,9 @@ class TestAIAPIAtlasPathComparisonEvidence:
 
         # repo-agent eval structure should be detected as REPO_AGENT_EVAL
         detected = repair.detect_path_model(repo_agent_eval_structure)
-        assert (
-            detected == PathModel.REPO_AGENT_EVAL
-        ), "repo-agent eval structure not detected as REPO_AGENT_EVAL"
+        assert detected == PathModel.REPO_AGENT_EVAL, (
+            "repo-agent eval structure not detected as REPO_AGENT_EVAL"
+        )
 
     def test_path_normalization_comparison(self, ai_api_atlas_structure, repo_agent_eval_structure):
         """Test path normalization for comparison."""
@@ -474,9 +474,9 @@ class TestAIAPIAtlasPathComparisonEvidence:
 
         for path, expected_category in categories_to_test:
             # Verify category is in known taxonomy
-            assert (
-                expected_category in QODER_TAXONOMY_CATEGORIES
-            ), f"Category {expected_category} not in QODER_TAXONOMY_CATEGORIES"
+            assert expected_category in QODER_TAXONOMY_CATEGORIES, (
+                f"Category {expected_category} not in QODER_TAXONOMY_CATEGORIES"
+            )
 
     def test_comparison_result_structure(self, ai_api_atlas_structure, repo_agent_eval_structure):
         """Test comparison result structure contains expected fields."""

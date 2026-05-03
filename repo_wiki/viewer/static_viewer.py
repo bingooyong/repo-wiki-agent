@@ -389,7 +389,7 @@ def build_tree_html(nodes: list[dict[str, Any]], base_path: str = "") -> str:
         # Tree item
         link = f"{base_path}{path}" if base_path else path
         icon = get_tree_icon(node_type)
-        lines.append(f'<a class="tree-item tree-{node_type}" href="{link}">' f"{icon} {label}</a>")
+        lines.append(f'<a class="tree-item tree-{node_type}" href="{link}">{icon} {label}</a>')
 
     if current_section is not None:
         lines.append("</div>")

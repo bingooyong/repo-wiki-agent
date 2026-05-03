@@ -490,7 +490,7 @@ class NarrativeBuilder:
             extraction_parts.append(f"{len(self.models)} 个数据模型")
 
         if extraction_parts:
-            flow_steps.append(f"**信息提取**：Indexer 从代码中提取 { '、'.join(extraction_parts)}")
+            flow_steps.append(f"**信息提取**：Indexer 从代码中提取 {'、'.join(extraction_parts)}")
         else:
             flow_steps.append("**信息提取**：Indexer 分析代码结构和符号")
 

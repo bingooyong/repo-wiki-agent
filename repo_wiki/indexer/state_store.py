@@ -364,7 +364,7 @@ class SQLiteStateStore:
                 bm25(chunks_fts) AS bm25_score
             FROM chunks_fts
             JOIN chunks c ON c.chunk_id = chunks_fts.chunk_id
-            WHERE {' AND '.join(where)}
+            WHERE {" AND ".join(where)}
             ORDER BY bm25_score ASC, c.chunk_id ASC
             LIMIT ?
         """
@@ -412,7 +412,7 @@ class SQLiteStateStore:
         sql = f"""
             SELECT chunk_id, file_path, module_name, language, chunk_type, symbol_name, text
             FROM chunks
-            WHERE {' AND '.join(where)}
+            WHERE {" AND ".join(where)}
             ORDER BY chunk_id ASC
             LIMIT ?
         """

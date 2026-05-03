@@ -524,8 +524,7 @@ def get_prompt_fragment(fragment_name: str) -> str:
     """
     if fragment_name not in _FRAGMENT_REGISTRY:
         raise ValueError(
-            f"Unknown fragment name: {fragment_name}. "
-            f"Available: {list(_FRAGMENT_REGISTRY.keys())}"
+            f"Unknown fragment name: {fragment_name}. Available: {list(_FRAGMENT_REGISTRY.keys())}"
         )
     return _FRAGMENT_REGISTRY[fragment_name]
 

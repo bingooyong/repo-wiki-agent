@@ -520,8 +520,10 @@ class RuleFirstPlanner:
             (
                 "agent-proxy-api",
                 "Agent代理API",
-                lambda module_name, endpoints: "agent" in module_name.lower()
-                or any("agent" in e.path.lower() for e in endpoints),
+                lambda module_name, endpoints: (
+                    "agent" in module_name.lower()
+                    or any("agent" in e.path.lower() for e in endpoints)
+                ),
             ),
             (
                 "frontend-application-api",

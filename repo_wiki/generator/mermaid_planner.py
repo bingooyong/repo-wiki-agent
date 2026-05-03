@@ -741,7 +741,7 @@ class MermaidRenderer:
 
         for i, node in enumerate(plan.nodes[:5]):
             lines.append(f"    section {node.label}")
-            lines.append(f"      {node.id}: {i+1}")
+            lines.append(f"      {node.id}: {i + 1}")
 
         return "\n".join(lines)
 

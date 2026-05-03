@@ -134,7 +134,7 @@ class TestGenerationStateMachine:
         # Exhaust retries (default max_attempts is 3)
         for i in range(2):
             sm.start_page(run.run_id, "00-overview")
-            sm.fail_page(run.run_id, "00-overview", f"Test error {i+1}")
+            sm.fail_page(run.run_id, "00-overview", f"Test error {i + 1}")
 
         page = sm.get_page_state(run.run_id, "00-overview")
         assert page.state == PageState.FAILED

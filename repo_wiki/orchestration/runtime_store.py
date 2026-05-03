@@ -1153,7 +1153,7 @@ class SQLiteRuntimeStore:
         rows = self.conn.execute(
             f"""
             SELECT * FROM evidence_span
-            WHERE {' AND '.join(where)}
+            WHERE {" AND ".join(where)}
             ORDER BY file_path, line_start
             LIMIT ?
             """,
@@ -1294,7 +1294,7 @@ class SQLiteRuntimeStore:
         rows = self.conn.execute(
             f"""
             SELECT * FROM symbol_reference
-            WHERE {' AND '.join(where)}
+            WHERE {" AND ".join(where)}
             ORDER BY source_file_path, source_line_start
             LIMIT ?
             """,

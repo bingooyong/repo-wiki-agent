@@ -172,9 +172,9 @@ class TestCIWorkflowCorrectness:
         content = self._read_workflow_content(pilot_path)
 
         # Pilot workflow should have --allow-continue flag
-        assert (
-            "--allow-continue" in content
-        ), "Pilot workflow should have explicit --allow-continue flag"
+        assert "--allow-continue" in content, (
+            "Pilot workflow should have explicit --allow-continue flag"
+        )
 
 
 class TestDecisionScriptDependencies:
@@ -274,9 +274,9 @@ class TestEvidencePathConsistency:
 
             evidence_dir_template = evidence_dir_match.group(1)
             # Should contain github.run_id or similar variable
-            assert (
-                "run_id" in evidence_dir_template or "workflow" in evidence_dir_template
-            ), f"{workflow_path.name}: EVIDENCE_DIR should include run-specific identifier"
+            assert "run_id" in evidence_dir_template or "workflow" in evidence_dir_template, (
+                f"{workflow_path.name}: EVIDENCE_DIR should include run-specific identifier"
+            )
 
 
 class TestComparatorConfigSerialization:
@@ -351,19 +351,19 @@ class TestPythonPackagingDiscovery:
             # Should have include for repo_wiki
             if "include" in find_config:
                 includes = find_config["include"]
-                assert any(
-                    "repo_wiki" in inc for inc in includes
-                ), "Package discovery should include repo_wiki"
+                assert any("repo_wiki" in inc for inc in includes), (
+                    "Package discovery should include repo_wiki"
+                )
 
             # Should exclude ai, templates, extensions, scripts, tests, ci, docs
             if "exclude" in find_config:
                 excludes = find_config["exclude"]
-                assert any(
-                    "ai*" in exc for exc in excludes
-                ), "Package discovery should exclude ai directory"
-                assert any(
-                    "templates*" in exc for exc in excludes
-                ), "Package discovery should exclude templates directory"
-                assert any(
-                    "extensions*" in exc for exc in excludes
-                ), "Package discovery should exclude extensions directory"
+                assert any("ai*" in exc for exc in excludes), (
+                    "Package discovery should exclude ai directory"
+                )
+                assert any("templates*" in exc for exc in excludes), (
+                    "Package discovery should exclude templates directory"
+                )
+                assert any("extensions*" in exc for exc in excludes), (
+                    "Package discovery should exclude extensions directory"
+                )

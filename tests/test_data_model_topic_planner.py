@@ -231,9 +231,9 @@ class TestDataModelTopicPlanner:
         manifest = planner.generate()
 
         data_model_pages = manifest.pages_by_category(WikiTaxonomyCategory.DATA_MODELS)
-        assert (
-            len(data_model_pages) >= 10
-        ), f"Expected at least 10 data model pages, got {len(data_model_pages)}"
+        assert len(data_model_pages) >= 10, (
+            f"Expected at least 10 data model pages, got {len(data_model_pages)}"
+        )
 
     def test_data_model_pages_grouped_by_topic(self, sample_identity, sample_snapshot):
         """Test that data model pages are grouped by topic, not raw model count."""
@@ -262,9 +262,9 @@ class TestDataModelTopicPlanner:
         er_pages = [
             p for p in manifest.pages if "entity" in p.page_id.lower() or "er-" in p.page_id
         ]
-        assert (
-            len(er_pages) >= 2
-        ), f"Expected at least 2 entity relationship pages, got {len(er_pages)}"
+        assert len(er_pages) >= 2, (
+            f"Expected at least 2 entity relationship pages, got {len(er_pages)}"
+        )
 
     def test_database_architecture_pages_exist(self, sample_identity, sample_snapshot):
         """Test that database architecture pages are generated."""
@@ -275,9 +275,9 @@ class TestDataModelTopicPlanner:
         db_pages = [
             p for p in manifest.pages if "database" in p.page_id.lower() or "schema" in p.page_id
         ]
-        assert (
-            len(db_pages) >= 2
-        ), f"Expected at least 2 database architecture pages, got {len(db_pages)}"
+        assert len(db_pages) >= 2, (
+            f"Expected at least 2 database architecture pages, got {len(db_pages)}"
+        )
 
     def test_migration_strategy_pages_exist(self, sample_identity, sample_snapshot):
         """Test that migration strategy pages are generated."""
@@ -286,9 +286,9 @@ class TestDataModelTopicPlanner:
 
         # Should have migration strategy pages
         migration_pages = [p for p in manifest.pages if "migration" in p.page_id.lower()]
-        assert (
-            len(migration_pages) >= 2
-        ), f"Expected at least 2 migration pages, got {len(migration_pages)}"
+        assert len(migration_pages) >= 2, (
+            f"Expected at least 2 migration pages, got {len(migration_pages)}"
+        )
 
     def test_all_pages_use_rule_first_mode(self, sample_identity, sample_snapshot):
         """Test all data model pages use RULE_FIRST generation mode."""

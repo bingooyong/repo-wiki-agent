@@ -217,9 +217,9 @@ class TestScoreIntegrity:
             report = comparator.compare_all()
 
             for dim in report.dimensions:
-                assert (
-                    0.0 <= dim.score <= 1.0
-                ), f"Score {dim.score} out of bounds for {dim.dimension}"
+                assert 0.0 <= dim.score <= 1.0, (
+                    f"Score {dim.score} out of bounds for {dim.dimension}"
+                )
 
     def test_overall_score_is_weighted_sum(self) -> None:
         """Test that overall score is weighted sum of dimension scores (Phase 14)."""

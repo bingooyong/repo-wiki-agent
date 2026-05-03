@@ -537,7 +537,10 @@ def validate_overview_not_list_only(content: str) -> tuple[bool, str]:
     # If more than 70% are list/table items, it's list-only
     list_ratio = (list_items + table_rows) / total_content_lines if total_content_lines > 0 else 1.0
     if list_ratio > 0.7:
-        return False, f"Overview is {list_ratio*100:.0f}% list/table content, must be less than 70%"
+        return (
+            False,
+            f"Overview is {list_ratio * 100:.0f}% list/table content, must be less than 70%",
+        )
 
     return True, "Overview is not list-only"
 
@@ -619,7 +622,7 @@ def validate_architecture_not_module_enum(content: str) -> tuple[bool, str]:
         if enum_ratio > 0.6:
             return (
                 False,
-                f"Architecture is {enum_ratio*100:.0f}% module/API enumeration, should focus on design reasoning",
+                f"Architecture is {enum_ratio * 100:.0f}% module/API enumeration, should focus on design reasoning",
             )
 
     return True, "Architecture is not just module enumeration"

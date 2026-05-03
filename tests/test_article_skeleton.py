@@ -144,9 +144,9 @@ class TestHeadingContract:
         for contract in HEADING_CONTRACTS.values():
             for section in contract.sections:
                 if section.required:
-                    assert (
-                        section.min_prose_chars > 0
-                    ), f"{contract.page_type}.{section.key} required but has no min_prose_chars"
+                    assert section.min_prose_chars > 0, (
+                        f"{contract.page_type}.{section.key} required but has no min_prose_chars"
+                    )
 
 
 class TestGetHeadingContract:

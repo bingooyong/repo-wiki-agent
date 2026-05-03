@@ -190,9 +190,9 @@ class TestNarrativeBuilderIntegration:
 
         # Should detect knowledge management signals
         assert builder.is_knowledge_management_system, "Should detect knowledge management signals"
-        assert (
-            not builder.is_document_generation_system
-        ), "Should not detect doc gen without signals"
+        assert not builder.is_document_generation_system, (
+            "Should not detect doc gen without signals"
+        )
 
     def test_narrative_builder_derives_document_generation_signals(self):
         """Test that NarrativeBuilder correctly identifies document generation systems."""

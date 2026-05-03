@@ -64,9 +64,9 @@ class TestNavigationTreeRegression:
         ]
         for path, expected_label in test_cases:
             label = get_label_from_path(path)
-            assert (
-                label == expected_label
-            ), f"Label for {path}: got '{label}', expected '{expected_label}'"
+            assert label == expected_label, (
+                f"Label for {path}: got '{label}', expected '{expected_label}'"
+            )
 
     def test_nav_tree_html_structure(self):
         """Tree HTML should have correct structure for CSS styling."""

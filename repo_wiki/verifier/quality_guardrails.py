@@ -553,7 +553,7 @@ class QualityGuardrailsChecker:
             issues.append(
                 QualityIssue(
                     reason_code=QualityReasonCode.LOW_PROSE_RATIO,
-                    message=f"Prose ratio too low: {prose_ratio*100:.0f}% (min: {self.MIN_PROSE_RATIO*100:.0f}%)",
+                    message=f"Prose ratio too low: {prose_ratio * 100:.0f}% (min: {self.MIN_PROSE_RATIO * 100:.0f}%)",
                     location=doc_path.name,
                     severity="ERROR",
                     details={

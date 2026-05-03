@@ -664,7 +664,7 @@ class VerifierService:
                 return CheckResult(
                     name="overview-prose-quality",
                     status="FAIL",
-                    message=f"Overview is {list_ratio*100:.0f}% list/table content, must be less than 70%",
+                    message=f"Overview is {list_ratio * 100:.0f}% list/table content, must be less than 70%",
                     details={
                         "list_ratio": round(list_ratio, 2),
                         "max_allowed": self.OVERVIEW_MAX_LIST_RATIO,

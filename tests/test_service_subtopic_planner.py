@@ -281,9 +281,9 @@ class TestServiceSubtopicPlanner:
                 if keyword in page.page_id:
                     subtopic_keywords[keyword] = True
 
-        assert all(
-            subtopic_keywords.values()
-        ), f"Missing subtopics: {[k for k, v in subtopic_keywords.items() if not v]}"
+        assert all(subtopic_keywords.values()), (
+            f"Missing subtopics: {[k for k, v in subtopic_keywords.items() if not v]}"
+        )
 
     def test_navigation_tree_contains_service_pages(
         self,

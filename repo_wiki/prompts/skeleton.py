@@ -237,7 +237,7 @@ def get_heading_contract(page_type: str) -> HeadingContract:
     """
     if page_type not in HEADING_CONTRACTS:
         raise ValueError(
-            f"Unknown page type: {page_type}. " f"Available: {list(HEADING_CONTRACTS.keys())}"
+            f"Unknown page type: {page_type}. Available: {list(HEADING_CONTRACTS.keys())}"
         )
     return HEADING_CONTRACTS[page_type]
 
