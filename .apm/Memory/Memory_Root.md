@@ -152,19 +152,49 @@
 - Manager judgment: `Planned`. Exit requires qoder-like output profile, manifest-driven IDE tree, Markdown preview, and stale update UX.
 
 ## Phase 28 – Generation Orchestration, Cost Control, and Incremental Update Summary
-- Outcome summary: `Planned`. This phase makes Qoder-like generation resumable, budget-aware, rate-limited, partially recoverable, and incrementally updatable.
-- Involved Agents: `Agent_IndexGraph`, `Agent_PlatformCore`, `Agent_QualityRelease`
-- Logs: `.apm/Memory/Phase_28_Generation_Orchestration_Cost_Control_and_Incremental_Update/Task_28_1_Generation_run_state_machine.md`, `.apm/Memory/Phase_28_Generation_Orchestration_Cost_Control_and_Incremental_Update/Task_28_2_LLM_cost_estimator_and_budget_gate.md`, `.apm/Memory/Phase_28_Generation_Orchestration_Cost_Control_and_Incremental_Update/Task_28_3_Concurrent_generation_scheduler.md`, `.apm/Memory/Phase_28_Generation_Orchestration_Cost_Control_and_Incremental_Update/Task_28_4_Page_level_invalidation_from_git_diff_and_hash_fallback.md`, `.apm/Memory/Phase_28_Generation_Orchestration_Cost_Control_and_Incremental_Update/Task_28_5_Failure_recovery_and_partial_evidence_bundle.md`, `.apm/Memory/Phase_28_Generation_Orchestration_Cost_Control_and_Incremental_Update/Task_28_6_update_integration_for_qoder_like_profile.md`
-- Manager judgment: `Planned`. Exit requires resumable generation and page-level invalidation.
+- Outcome summary: `Completed`. Resumable generation with state machine (`pending/running/completed/failed/retryable`), LLM cost estimator and budget gate, concurrent scheduler, page-level invalidation from git diff, failure recovery with partial evidence, and update integration for qoder-like profile.
+- Involved Agents: `Agent_IndexGraph`
+- Logs: `.apm/Memory/Phase_28_Generation_Orchestration_Cost_Control_and_Incremental_Update/Phase_28_Summary.md`
+- Manager judgment: `GO`. Resumable generation with page-level invalidation and cost control achieved.
 
 ## Phase 29 – Quality Governance and Qoder Parity Benchmark Summary
-- Outcome summary: `Planned`. This phase defines Qoder parity metrics, repairs comparator path models, adds strict qoder-like verification, builds golden fixtures, reruns AI_API_Atlas parity, and persists trends.
+- Outcome summary: `Completed`. Qoder parity metric schema, comparator path model repair, strict verifier for qoder-like profile, golden fixture suite, AI_API_Atlas parity rerun (overall_score 0.961), regression dashboard with trend persistence.
 - Involved Agents: `Agent_QualityRelease`, `Agent_AdapterGovernance`, `Agent_IndexGraph`
-- Logs: `.apm/Memory/Phase_29_Quality_Governance_and_Qoder_Parity_Benchmark/Task_29_1_Qoder_parity_metric_schema.md`, `.apm/Memory/Phase_29_Quality_Governance_and_Qoder_Parity_Benchmark/Task_29_2_Comparator_path_model_repair.md`, `.apm/Memory/Phase_29_Quality_Governance_and_Qoder_Parity_Benchmark/Task_29_3_Strict_verifier_for_qoder_like_profile.md`, `.apm/Memory/Phase_29_Quality_Governance_and_Qoder_Parity_Benchmark/Task_29_4_Golden_fixture_suite.md`, `.apm/Memory/Phase_29_Quality_Governance_and_Qoder_Parity_Benchmark/Task_29_5_AI_API_Atlas_qoder_parity_rerun.md`, `.apm/Memory/Phase_29_Quality_Governance_and_Qoder_Parity_Benchmark/Task_29_6_Regression_dashboard_and_trend_persistence.md`
-- Manager judgment: `Planned`. Exit requires credible AI_API_Atlas gap matrix and strict verifier coverage.
+- Logs: `.apm/Memory/Phase_29_Quality_Governance_and_Qoder_Parity_Benchmark/Phase_29_Summary.md`
+- Manager judgment: `GO`. Parity framework established (0.961 overall score). Strict gates later resolved in Phase 31-35, culminating in GO decision.
 
 ## Phase 30 – Replacement Candidate Release and Documentation Summary
-- Outcome summary: `Planned`. This phase packages configuration docs, install/extension workflow, AI_API_Atlas pilot, multi-repo pilot, release gate, rollback, and final go/no-go dossier.
+- Outcome summary: `Completed`. Delivered end-user LLM configuration (`docs/configuration.md`), installation/extension workflow evidence (Task 30.2), **AI_API_Atlas** qoder-like pilots and **multi-repository pilots** (Task 30.4), release gate + rollback docs (`docs/release-gate-policy.md`, `docs/rollback-plan.md`), and **go/no-go dossier** (`docs/go-no-go-dossier.md`). **Phase 35 closure:** P0/P1 fixes (dump, content-empty/SQLite path, qoder LLM resolution, min/max page config, prose) and **Task 35.1** Atlas re-verification run **`task-35-1-reverify-20260502`** with **strict `grade` PASS** (`AI_API_Atlas/.repo-agent-eval/task-35-1-reverify-20260502/reports/strict-verify-output.json`). Summary index: `.apm/Phase_30_summary.md` (update dossier link text if needed).
 - Involved Agents: `Agent_QualityRelease`, `Agent_PlatformCore`, `Agent_AdapterGovernance`
 - Logs: `.apm/Memory/Phase_30_Replacement_Candidate_Release_and_Documentation/Task_30_1_End_user_configuration_documentation.md`, `.apm/Memory/Phase_30_Replacement_Candidate_Release_and_Documentation/Task_30_2_Installation_and_VS_Code_extension_workflow.md`, `.apm/Memory/Phase_30_Replacement_Candidate_Release_and_Documentation/Task_30_3_AI_API_Atlas_full_replacement_pilot.md`, `.apm/Memory/Phase_30_Replacement_Candidate_Release_and_Documentation/Task_30_4_Multi_repository_replacement_pilot.md`, `.apm/Memory/Phase_30_Replacement_Candidate_Release_and_Documentation/Task_30_5_Release_gate_and_rollback_plan.md`, `.apm/Memory/Phase_30_Replacement_Candidate_Release_and_Documentation/Task_30_6_Final_go_no_go_dossier.md`
-- Manager judgment: `Planned`. Exit requires final evidence-backed go/no-go on replacing Qoder Repo Wiki for target usage.
+- Manager judgment: **`Go`** for **AI_API_Atlas strict qoder-like CI replacement-readiness** per **`docs/go-no-go-dossier.md`** (evidence **E7**). Initial Phase 30 **No-Go** superseded after Phase 35 fixes + passing verify. **General cross-repo readiness** remains **conditional** (mock pilots; historical repo-agent dogfood gap—track separately).
+
+## Phase 31 – Strict Gate Closure and Freshness Reliability Summary
+- Outcome summary: `Completed`. Closed all P0/P1 strict gates: QODER_DIRTY_WORKTREE gate added, QODER_PAGE_DUMP fixed (3 pages rewritten), QODER_CONTENT_EMPTY fixed (SQLite path normalization), QODER_PROSE_TOO_LOW fixed (2 pages repaired).
+- Involved Agents: `Agent_IndexGraph`, `Agent_DocGen`, `Agent_QualityRelease`
+- Logs: `.apm/Memory/Phase_31_Strict_Gate_Closure_and_Freshness_Reliability/Phase_31_Summary.md`
+- Manager judgment: **`GO`** — All strict gates closed, AI_API_Atlas strict verify PASS (13/13 checks, exit code 0).
+
+## Phase 32 – Qoder-style Information Architecture Deepening Summary
+- Outcome summary: `Completed`. Qoder baseline topic mining (6 gaps identified), service subtopic planner (5 subtopics), data-model entity topic planner (6 categories, duplicate guard), module hierarchy planner (4-level depth).
+- Involved Agents: `Agent_QualityRelease`, `Agent_DocGen`
+- Logs: `.apm/Memory/Phase_32_Qoder_style_Information_Architecture_Deepening/Phase_32_Summary.md`
+- Manager judgment: **`GO`** — Information architecture deepened with service subtopic plans, data-model entity topics, and module hierarchy.
+
+## Phase 33 – Evidence Ranking and Hallucination Control Summary
+- Outcome summary: `Completed`. Service ownership resolver (54 tests), page evidence scoring (75 tests), citation relevance verifier (42 tests), low-confidence fallback (68 tests).
+- Involved Agents: `Agent_Scanner`, `Agent_IndexGraph`, `Agent_AdapterGovernance`, `Agent_DocGen`
+- Logs: `.apm/Memory/Phase_33_Evidence_Ranking_and_Hallucination_Control/Phase_33_Summary.md`
+- Manager judgment: **`GO`** — Hallucination control achieved through evidence ranking and explicit low-confidence sections.
+
+## Phase 34 – LLM Composer Quality Loop Summary
+- Outcome summary: `Completed`. Quality loop accomplished through prose density repair (2 pages) and AI_API_Atlas strict verify rerun.
+- Involved Agents: `Agent_DocGen`, `Agent_QualityRelease`
+- Logs: `.apm/Memory/Phase_34_LLM_Composer_Quality_Loop/Phase_34_Summary.md`
+- Manager judgment: **`GO`** — Quality loop completed, culminating in Phase 35 GO decision.
+
+## Phase 35 – Replacement Candidate Acceptance Summary
+- Outcome summary: `Completed` (go/no-go uplift). Updated **`docs/go-no-go-dossier.md`** to **Go** with P0/P1 fix narrative and Atlas strict PASS evidence.
+- Involved Agents: `Agent_QualityRelease`
+- Logs: `.apm/Memory/Phase_35_Replacement_Candidate_Acceptance/Task_35_4_Go_no_go_dossier.md`
+- Manager judgment: **`Go`** (Atlas strict benchmark); see dossier §4 for non-blocking residual risks.
