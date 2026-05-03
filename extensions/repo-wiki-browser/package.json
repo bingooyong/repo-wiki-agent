@@ -98,7 +98,7 @@
     "@types/vscode": "^1.75.0",
     "@vscode/test-cli": "^0.0.4",
     "@vscode/test-electron": "^2.3.0",
-    "typescript": "^5.0.0"
+    "typescript": "^6.0.3"
   },
   "license": "MIT",
   "overrides": {
