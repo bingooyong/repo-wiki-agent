@@ -22,6 +22,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.2",
+  "pytest-cov>=4.1",
+  "ruff>=0.1",
+  "mypy>=1.8",
 ]
 
 [project.scripts]
@@ -38,3 +41,24 @@ exclude = ["tests*", "scripts*", "ci*", "docs*", "templates*", "extensions*", "a
 addopts = "-q"
 pythonpath = ["."]
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.coverage.run]
+source = ["repo_wiki"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]

@@ -1,0 +1,43 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature] "
+labels: ["feature"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Feature Request
+
+        Have an idea for a new feature? We'd love to hear it!
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Feature Description
+      placeholder: Describe the feature you want and the problem it solves
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      placeholder: What alternatives have you considered?
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      placeholder: "Who would use this feature and what would they accomplish with it?"
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I have searched the existing issues
+          required: true
+        - label: This is not a duplicate feature request
+          required: true

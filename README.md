@@ -2,6 +2,8 @@
 
 **Local-first repository wiki generator** — 无需 `.qoder` 目录即可为任意工程生成结构化 Wiki 文档。
 
+[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Strict Verify: PASS](https://img.shields.io/badge/Strict%20Verify-PASS-brightgreen)](#)
 [![Tests: 1200+](https://img.shields.io/badge/Tests-1200%2B-blue)](#)
 [![GO Decision: 2026-05-02](https://img.shields.io/badge/GO-2026--05--02-green)](#)
@@ -122,4 +124,4 @@ uv run repo-wiki verify --profile qoder-like --ci --output my-run
 
 ## License
 
-MIT
+Apache License 2.0 - see [LICENSE](LICENSE)

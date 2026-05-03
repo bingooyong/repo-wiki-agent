@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/bingooyong/repo-wiki-agent/wiki
+    about: Please check the wiki for usage documentation
+  - name: Discussions
+    url: https://github.com/bingooyong/repo-wiki-agent/discussions
+    about: Use GitHub Discussions for questions and general help
