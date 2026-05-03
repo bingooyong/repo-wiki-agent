@@ -71,6 +71,12 @@ ignore = [
     "F601",  # dictionary key repeated
     "B023",  # function redefinition
     "UP042",  # class inherits from both str and Enum ( intentional pattern for error codes)
+    "SIM102",  # nested if statements (intentional for readability)
+    "SIM103",  # return condition directly (not always clearer)
+    "SIM110",  # any() in loop (sometimes less readable)
+    "SIM113",  # enumerate() (index variable is meaningful)
+    "UP038",  # use X | Y in isinstance (not always clearer for readability)
+    "SIM117",  # single with statement (nested with is sometimes clearer)
 ]
 
 [tool.coverage.run]
