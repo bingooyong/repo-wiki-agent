@@ -3,6 +3,28 @@
 .env.local
 .env.*.local
 
+# Claude / APM
+.claude/
+.apm/
+.agents/
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Settings (local only)
+.claude/settings.local.json
+
+# traefik / dev tools
+.trae/
+
+# skills (local plugins)
+skills/
+skills-lock.json
+
 # Python
 __pycache__/
 *.py[cod]
@@ -18,12 +40,6 @@ ENV/
 .coverage
 htmlcov/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
 # Build outputs
 .repo-agent-eval/
 .repo-wiki/
@@ -31,3 +47,7 @@ htmlcov/
 
 # Logs
 *.log
+
+# OS
+.DS_Store
+Thumbs.db
