@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 0.1.0)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Package VS Code extension
+        run: |
+          cd extensions/repo-wiki-browser
+          npm ci
+          npm run compile
+          npx vsce package --version ${{ github.ref_name || inputs.version }}
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-wiki-browser-${{ github.ref_name || inputs.version }}.vsix
+          path: extensions/repo-wiki-browser/*.vsix
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: extensions/repo-wiki-browser/*.vsix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload delivery docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: delivery-docs
+          path: docs/delivery/
+          retention-days: 30
