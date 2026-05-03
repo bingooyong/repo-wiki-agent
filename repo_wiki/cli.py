@@ -6,17 +6,17 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import typer
 
 from repo_wiki.core import RepoWikiError, load_config
 from repo_wiki.core.logging import error, info
-from repo_wiki.llm import LLMProviderConfig, resolve_llm_config
+from repo_wiki.llm import resolve_llm_config
 from repo_wiki.llm.diagnostics import (
-    run_llm_diagnostics,
-    format_diagnostics_text,
     format_diagnostics_json,
+    format_diagnostics_text,
+    run_llm_diagnostics,
 )
 from repo_wiki.orchestration.service import RepoWikiService
 
@@ -24,31 +24,31 @@ app = typer.Typer(help="repo-wiki: local-first repository wiki generator")
 
 
 @app.command("init")
-def init_command(config: Optional[Path] = typer.Option(None, "--config")) -> None:
+def init_command(config: Path | None = typer.Option(None, "--config")) -> None:
     _run_with_service("init", config)
 
 
 @app.command("index")
-def index_command(config: Optional[Path] = typer.Option(None, "--config")) -> None:
+def index_command(config: Path | None = typer.Option(None, "--config")) -> None:
     _run_with_service("index", config)
 
 
 @app.command("update")
-def update_command(config: Optional[Path] = typer.Option(None, "--config")) -> None:
+def update_command(config: Path | None = typer.Option(None, "--config")) -> None:
     _run_with_service("update", config)
 
 
 @app.command("sync")
-def sync_command(config: Optional[Path] = typer.Option(None, "--config")) -> None:
+def sync_command(config: Path | None = typer.Option(None, "--config")) -> None:
     _run_with_service("sync", config)
 
 
 @app.command("search")
 def search_command(
     query: str = typer.Argument(..., help="Semantic search query"),
-    module: Optional[str] = typer.Option(None, "--module"),
+    module: str | None = typer.Option(None, "--module"),
     top_k: int = typer.Option(10, "--top-k"),
-    config: Optional[Path] = typer.Option(None, "--config"),
+    config: Path | None = typer.Option(None, "--config"),
 ) -> None:
     cfg = load_config(config)
     service = RepoWikiService(cfg)
@@ -59,7 +59,7 @@ def search_command(
 @app.command("graph")
 def graph_command(
     module: str = typer.Argument(..., help="Module name"),
-    config: Optional[Path] = typer.Option(None, "--config"),
+    config: Path | None = typer.Option(None, "--config"),
 ) -> None:
     cfg = load_config(config)
     service = RepoWikiService(cfg)
@@ -69,10 +69,12 @@ def graph_command(
 
 @app.command("generate")
 def generate_command(
-    profile: str = typer.Option("default", "--profile", help="Eval profile name (default, ci, qoder-like)"),
-    output: Optional[str] = typer.Option(None, "--output", help="Override eval output root"),
-    run_id: Optional[str] = typer.Option(None, "--run-id", help="Custom run identifier"),
-    config: Optional[Path] = typer.Option(None, "--config"),
+    profile: str = typer.Option(
+        "default", "--profile", help="Eval profile name (default, ci, qoder-like)"
+    ),
+    output: str | None = typer.Option(None, "--output", help="Override eval output root"),
+    run_id: str | None = typer.Option(None, "--run-id", help="Custom run identifier"),
+    config: Path | None = typer.Option(None, "--config"),
     ci: bool = typer.Option(False, "--ci", help="Run in CI mode (strict verification)"),
 ) -> None:
     """Generate wiki content using specified eval profile."""
@@ -84,6 +86,7 @@ def generate_command(
     # Override output root if specified
     if output:
         from repo_wiki.orchestration.eval_layout import EvalOutputProfile
+
         eval_profile = EvalOutputProfile(
             name=profile,
             root=output,
@@ -105,19 +108,29 @@ def generate_command(
 
 @app.command("improve")
 def improve_command(
-    profile: str = typer.Option("qoder-like", "--profile", help="Improvement profile; currently qoder-like is supported"),
+    profile: str = typer.Option(
+        "qoder-like", "--profile", help="Improvement profile; currently qoder-like is supported"
+    ),
     output: str = typer.Option(".repo-agent-eval", "--output", help="Eval output root"),
-    run_id: Optional[str] = typer.Option(None, "--run-id", help="Custom run identifier"),
-    real_max_calls: int = typer.Option(5, "--real-max-calls", help="Maximum real LLM page calls for this batch"),
+    run_id: str | None = typer.Option(None, "--run-id", help="Custom run identifier"),
+    real_max_calls: int = typer.Option(
+        5, "--real-max-calls", help="Maximum real LLM page calls for this batch"
+    ),
     timeout_seconds: float = typer.Option(90.0, "--timeout-seconds", help="Per-page LLM timeout"),
     concurrency: int = typer.Option(1, "--concurrency", help="Concurrent real LLM page calls"),
     max_tokens: int = typer.Option(1000, "--max-tokens", help="Max completion tokens per page"),
     max_pages: int = typer.Option(220, "--max-pages", help="Curated qoder-like page-plan cap"),
-    priority: str = typer.Option("qoder", "--priority", help="LLM call priority: qoder, overview, api, plan"),
-    priority_page_ids: Optional[str] = typer.Option(None, "--priority-page-ids", help="Comma-separated page IDs to attempt first"),
-    baseline: Optional[Path] = typer.Option(None, "--baseline", exists=True, file_okay=False, resolve_path=True),
+    priority: str = typer.Option(
+        "qoder", "--priority", help="LLM call priority: qoder, overview, api, plan"
+    ),
+    priority_page_ids: str | None = typer.Option(
+        None, "--priority-page-ids", help="Comma-separated page IDs to attempt first"
+    ),
+    baseline: Path | None = typer.Option(
+        None, "--baseline", exists=True, file_okay=False, resolve_path=True
+    ),
     ci: bool = typer.Option(False, "--ci", help="Run strict verify and optional baseline compare"),
-    config: Optional[Path] = typer.Option(None, "--config"),
+    config: Path | None = typer.Option(None, "--config"),
 ) -> None:
     """Incrementally improve qoder-like wiki pages using real LLM calls.
 
@@ -128,7 +141,11 @@ def improve_command(
     if profile != "qoder-like":
         raise typer.BadParameter("improve currently supports --profile qoder-like only")
 
-    from repo_wiki.orchestration.eval_layout import EvalOutputProfile, get_eval_profile, reject_unsafe_output_root
+    from repo_wiki.orchestration.eval_layout import (
+        EvalOutputProfile,
+        get_eval_profile,
+        reject_unsafe_output_root,
+    )
 
     eval_profile = get_eval_profile(profile)
     eval_profile = EvalOutputProfile(
@@ -160,7 +177,9 @@ def improve_command(
     info("improve completed")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
-    generated_root = Path(result.get("manifest_path", "")).parent if result.get("manifest_path") else None
+    generated_root = (
+        Path(result.get("manifest_path", "")).parent if result.get("manifest_path") else None
+    )
     if ci and generated_root:
         from repo_wiki.verifier.qoder_strict_verifier import verify_qoder_like
 
@@ -198,7 +217,7 @@ def improve_status_command(
         resolve_path=True,
         help="Eval output root that contains qoder-like runs",
     ),
-    run: Optional[str] = typer.Option(
+    run: str | None = typer.Option(
         None,
         "--run",
         help="Run id or run directory. Defaults to the latest run with manifest.json.",
@@ -217,7 +236,11 @@ def improve_status_command(
     cache_path = _resolve_status_cache_path(output, run_dir, llm_stats)
     cache_summary = _read_composer_cache_summary(cache_path, limit=limit)
 
-    content_root = Path(manifest.get("content_root") or run_dir / "content") if isinstance(manifest, dict) else run_dir / "content"
+    content_root = (
+        Path(manifest.get("content_root") or run_dir / "content")
+        if isinstance(manifest, dict)
+        else run_dir / "content"
+    )
     status_payload = {
         "run_id": manifest.get("run_id") if isinstance(manifest, dict) else run_dir.name,
         "run_dir": str(run_dir),
@@ -253,14 +276,16 @@ def improve_status_command(
 
 @app.command("verify")
 def verify_command(
-    profile: str = typer.Option("default", "--profile", help="Verification profile (default, qoder-like)"),
-    output: Optional[str] = typer.Option(
+    profile: str = typer.Option(
+        "default", "--profile", help="Verification profile (default, qoder-like)"
+    ),
+    output: str | None = typer.Option(
         None,
         "--output",
         help="For qoder-like: run id, run dir, or content dir under .repo-agent-eval",
     ),
     ci: bool = typer.Option(False, "--ci", help="CI strict mode (exit non-zero on failure)"),
-    config: Optional[Path] = typer.Option(None, "--config"),
+    config: Path | None = typer.Option(None, "--config"),
 ) -> None:
     """Run wiki verification checks without regenerating content."""
     cfg = load_config(config)
@@ -283,10 +308,12 @@ def verify_command(
 @app.command("compare")
 def compare_command(
     target: Path = typer.Option(..., "--target", exists=True, file_okay=False, resolve_path=True),
-    baseline: Path = typer.Option(..., "--baseline", exists=True, file_okay=False, resolve_path=True),
+    baseline: Path = typer.Option(
+        ..., "--baseline", exists=True, file_okay=False, resolve_path=True
+    ),
     format: str = typer.Option("both", "--format", help="markdown,json,both"),
     output: Path = typer.Option(..., "--output", file_okay=False, resolve_path=True),
-    ci: bool = typer.Option(True, "--ci", help="Exit non-zero when NOT_READY"),
+    ci: bool = typer.Option(False, "--ci", help="Exit non-zero when NOT_READY"),
 ) -> None:
     """Compare repo-agent output with qoder baseline and emit report artifacts."""
     from repo_wiki.verifier.qoder_comparator_paths import create_repaired_comparator
@@ -322,7 +349,9 @@ def compare_command(
                 "target": pages_target,
                 "baseline": pages_baseline,
                 "delta": pages_target - pages_baseline,
-                "ratio_vs_baseline": round((pages_target / pages_baseline), 4) if pages_baseline else None,
+                "ratio_vs_baseline": round((pages_target / pages_baseline), 4)
+                if pages_baseline
+                else None,
             },
             "chinese_directory_depth": chinese_depth,
             "toc_coverage": _metric_score(metrics_by_name.get("toc_presence")),
@@ -331,7 +360,9 @@ def compare_command(
             "mermaid_coverage": _metric_score(metrics_by_name.get("mermaid_presence")),
             "prose_list_ratio": _metric_score(metrics_by_name.get("prose_list_ratio")),
             "api_aggregation_quality": _metric_score(metrics_by_name.get("api_aggregation")),
-            "data_model_aggregation_quality": _metric_score(metrics_by_name.get("data_model_aggregation")),
+            "data_model_aggregation_quality": _metric_score(
+                metrics_by_name.get("data_model_aggregation")
+            ),
             "broken_links": _broken_links(metrics_by_name.get("file_reference_integrity")),
             "stale_git_commit": stale_git,
             "llm_generation_coverage": llm_generation,
@@ -365,21 +396,29 @@ def compare_command(
     if "markdown" in requested_formats:
         md_path.write_text(_render_compare_markdown(report_json), encoding="utf-8")
     if "json" in requested_formats:
-        json_path.write_text(json.dumps(report_json, ensure_ascii=False, indent=2), encoding="utf-8")
+        json_path.write_text(
+            json.dumps(report_json, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
-    print(json.dumps({
-        "status": report_json["status"],
-        "report_markdown": str(md_path) if "markdown" in requested_formats else None,
-        "report_json": str(json_path) if "json" in requested_formats else None,
-        "baseline_read_only_verified": baseline_untouched,
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "status": report_json["status"],
+                "report_markdown": str(md_path) if "markdown" in requested_formats else None,
+                "report_json": str(json_path) if "json" in requested_formats else None,
+                "baseline_read_only_verified": baseline_untouched,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
     if ci and report_json["status"] != "READY":
         raise typer.Exit(code=1)
 
 
 @app.command("cost-estimate")
-def cost_estimate_command(config: Optional[Path] = typer.Option(None, "--config")) -> None:
+def cost_estimate_command(config: Path | None = typer.Option(None, "--config")) -> None:
     cfg = load_config(config)
     service = RepoWikiService(cfg)
     result = service.cost_estimate()
@@ -397,7 +436,7 @@ def config_command(
     timeout: float = typer.Option(None, "--timeout", help="Request timeout in seconds"),
     max_retries: int = typer.Option(None, "--max-retries", help="Max retry attempts"),
     ci: bool = typer.Option(False, "--ci", help="Machine-readable JSON output"),
-    config: Optional[Path] = typer.Option(None, "--config", help="Config file path"),
+    config: Path | None = typer.Option(None, "--config", help="Config file path"),
 ) -> None:
     """Run LLM configuration diagnostics.
 
@@ -431,7 +470,9 @@ def config_command(
         llm_config_dict = {}
 
     # Resolve with CLI overrides
-    resolved_config, warnings = resolve_llm_config(config=llm_config_dict, cli_overrides=cli_overrides)
+    resolved_config, warnings = resolve_llm_config(
+        config=llm_config_dict, cli_overrides=cli_overrides
+    )
 
     # Run diagnostics
     diagnostics = run_llm_diagnostics(config=resolved_config, json_output=ci)
@@ -448,7 +489,7 @@ def config_command(
 
 def _run_with_service(
     action: str,
-    config: Optional[Path],
+    config: Path | None,
     eval_profile: Any = None,
     run_id: str | None = None,
 ) -> None:
@@ -486,21 +527,21 @@ class _temporary_env:
                 os.environ[key] = value
 
 
-def _resolve_verify_root(project_root: Path, output: Optional[str]) -> Path:
+def _resolve_verify_root(project_root: Path, output: str | None) -> Path:
     if not output:
         return project_root
     raw = Path(output)
     if raw.exists():
         return raw.resolve()
     # run-id mode
-    candidate = (project_root / ".repo-agent-eval" / output)
+    candidate = project_root / ".repo-agent-eval" / output
     if candidate.exists():
         return candidate.resolve()
     # allow content/run paths even if they do not exist yet
     return candidate.resolve()
 
 
-def _resolve_improve_run(output: Path, run: Optional[str]) -> Path:
+def _resolve_improve_run(output: Path, run: str | None) -> Path:
     root = output.resolve()
     if run:
         raw = Path(run)
@@ -512,11 +553,15 @@ def _resolve_improve_run(output: Path, run: Optional[str]) -> Path:
             raise typer.BadParameter(f"Run does not contain manifest.json: {candidate}")
         return candidate
 
-    candidates = [
-        path
-        for path in root.iterdir()
-        if path.is_dir() and not path.name.startswith(".") and (path / "manifest.json").exists()
-    ] if root.exists() else []
+    candidates = (
+        [
+            path
+            for path in root.iterdir()
+            if path.is_dir() and not path.name.startswith(".") and (path / "manifest.json").exists()
+        ]
+        if root.exists()
+        else []
+    )
     if not candidates:
         raise typer.BadParameter(f"No eval runs with manifest.json found under: {root}")
     return max(candidates, key=lambda p: (p / "manifest.json").stat().st_mtime).resolve()
@@ -584,8 +629,12 @@ def _summarize_strict_verify(report: dict[str, Any]) -> dict[str, Any]:
         "grade": report.get("grade"),
         "status": report.get("status"),
         "summary": report.get("summary"),
-        "failure_count": len(report.get("failures", [])) if isinstance(report.get("failures"), list) else None,
-        "warning_count": len(report.get("warnings", [])) if isinstance(report.get("warnings"), list) else None,
+        "failure_count": len(report.get("failures", []))
+        if isinstance(report.get("failures"), list)
+        else None,
+        "warning_count": len(report.get("warnings", []))
+        if isinstance(report.get("warnings"), list)
+        else None,
     }
 
 
@@ -593,7 +642,9 @@ def _summarize_qoder_compare(report: dict[str, Any]) -> dict[str, Any]:
     if not report:
         return {"available": False}
     metrics = report.get("metrics", {}) if isinstance(report.get("metrics"), dict) else {}
-    page_count = metrics.get("page_count", {}) if isinstance(metrics.get("page_count"), dict) else {}
+    page_count = (
+        metrics.get("page_count", {}) if isinstance(metrics.get("page_count"), dict) else {}
+    )
     return {
         "available": True,
         "status": report.get("status"),
@@ -664,40 +715,48 @@ def _compare_readiness_failures(report: dict[str, Any]) -> list[dict[str, Any]]:
 
     page_ratio = metrics.get("page_count", {}).get("ratio_vs_baseline")
     if page_ratio is not None and page_ratio < 0.80:
-        failures.append({
-            "code": "QODER_PAGE_COVERAGE_LOW",
-            "message": "Generated page count is below 80% of Qoder baseline",
-            "actual": page_ratio,
-            "threshold": 0.80,
-        })
+        failures.append(
+            {
+                "code": "QODER_PAGE_COVERAGE_LOW",
+                "message": "Generated page count is below 80% of Qoder baseline",
+                "actual": page_ratio,
+                "threshold": 0.80,
+            }
+        )
 
     depth = metrics.get("chinese_directory_depth", {})
     depth_ratio = depth.get("ratio_vs_baseline")
     baseline_depth = depth.get("baseline_depth")
     if baseline_depth and depth_ratio is not None and depth_ratio < 0.70:
-        failures.append({
-            "code": "QODER_DIRECTORY_DEPTH_LOW",
-            "message": "Generated Chinese directory hierarchy is shallower than Qoder baseline",
-            "actual": depth_ratio,
-            "threshold": 0.70,
-        })
+        failures.append(
+            {
+                "code": "QODER_DIRECTORY_DEPTH_LOW",
+                "message": "Generated Chinese directory hierarchy is shallower than Qoder baseline",
+                "actual": depth_ratio,
+                "threshold": 0.70,
+            }
+        )
 
     if report.get("baseline_read_only_verified") is False:
-        failures.append({
-            "code": "QODER_BASELINE_MODIFIED",
-            "message": "Qoder baseline changed during comparison",
-            "actual": False,
-            "threshold": True,
-        })
+        failures.append(
+            {
+                "code": "QODER_BASELINE_MODIFIED",
+                "message": "Qoder baseline changed during comparison",
+                "actual": False,
+                "threshold": True,
+            }
+        )
 
     llm_coverage = metrics.get("llm_generation_coverage", {}).get("coverage")
     if llm_coverage is not None and llm_coverage < 0.80:
-        failures.append({
-            "code": "QODER_LLM_COVERAGE_LOW",
-            "message": "LLM-composed plus cached page coverage is below 80%",
-            "actual": llm_coverage,
-            "threshold": 0.80,
-        })
+        failures.append(
+            {
+                "code": "QODER_LLM_COVERAGE_LOW",
+                "message": "LLM-composed plus cached page coverage is below 80%",
+                "actual": llm_coverage,
+                "threshold": 0.80,
+            }
+        )
 
     return failures
 
@@ -719,7 +778,9 @@ def _compute_file_line_citation_coverage(root: Path) -> dict[str, Any]:
 
 
 def _compute_llm_generation_coverage(target: Path) -> dict[str, Any]:
-    manifest_path = target.parent / "manifest.json" if target.name == "content" else target / "manifest.json"
+    manifest_path = (
+        target.parent / "manifest.json" if target.name == "content" else target / "manifest.json"
+    )
     if not manifest_path.exists():
         return {"coverage": None, "status": "missing", "manifest": None}
     try:
@@ -727,7 +788,9 @@ def _compute_llm_generation_coverage(target: Path) -> dict[str, Any]:
     except Exception:
         return {"coverage": None, "status": "invalid", "manifest": str(manifest_path)}
 
-    generation = manifest.get("generation") or manifest.get("generate") or manifest.get("stats") or {}
+    generation = (
+        manifest.get("generation") or manifest.get("generate") or manifest.get("stats") or {}
+    )
     llm = generation.get("llm") if isinstance(generation, dict) else {}
     if not isinstance(llm, dict):
         return {"coverage": None, "status": "missing", "manifest": str(manifest_path)}
@@ -774,8 +837,16 @@ def _compute_stale_git(target: Path, baseline: Path) -> dict[str, Any]:
     current = _git_commit(target)
     target_commit = _find_manifest_commit(target)
     baseline_commit = _find_manifest_commit(baseline)
-    target_stale = bool(current and target_commit and not (current.startswith(target_commit) or target_commit.startswith(current)))
-    baseline_stale = bool(current and baseline_commit and not (current.startswith(baseline_commit) or baseline_commit.startswith(current)))
+    target_stale = bool(
+        current
+        and target_commit
+        and not (current.startswith(target_commit) or target_commit.startswith(current))
+    )
+    baseline_stale = bool(
+        current
+        and baseline_commit
+        and not (current.startswith(baseline_commit) or baseline_commit.startswith(current))
+    )
     return {
         "current_repo_commit": current,
         "target_wiki_commit": target_commit,
@@ -785,7 +856,7 @@ def _compute_stale_git(target: Path, baseline: Path) -> dict[str, Any]:
     }
 
 
-def _git_commit(path: Path) -> Optional[str]:
+def _git_commit(path: Path) -> str | None:
     cwd = _find_git_root(path)
     if cwd is None:
         return None
@@ -803,7 +874,7 @@ def _git_commit(path: Path) -> Optional[str]:
     return value or None
 
 
-def _find_git_root(path: Path) -> Optional[Path]:
+def _find_git_root(path: Path) -> Path | None:
     current = path if path.is_dir() else path.parent
     for candidate in [current, *current.parents]:
         if (candidate / ".git").exists():
@@ -811,7 +882,7 @@ def _find_git_root(path: Path) -> Optional[Path]:
     return None
 
 
-def _find_manifest_commit(root: Path) -> Optional[str]:
+def _find_manifest_commit(root: Path) -> str | None:
     candidates = [
         root / "manifest.json",
         root.parent / "manifest.json",
@@ -877,10 +948,12 @@ def _render_compare_markdown(report: dict[str, Any]) -> str:
         "",
     ]
     if failures:
-        lines.extend([
-            "| Code | Actual | Threshold | Message |",
-            "|---|---:|---:|---|",
-        ])
+        lines.extend(
+            [
+                "| Code | Actual | Threshold | Message |",
+                "|---|---:|---:|---|",
+            ]
+        )
         for failure in failures:
             lines.append(
                 f"| {failure.get('code')} | {failure.get('actual')} | {failure.get('threshold')} | {failure.get('message')} |"
@@ -888,11 +961,13 @@ def _render_compare_markdown(report: dict[str, Any]) -> str:
         lines.append("")
     else:
         lines.extend(["No comparison gate failures.", ""])
-    lines.extend([
-        "## Strict Verify",
-        "",
-        "```json",
-        json.dumps(report.get("strict_verify", {}), ensure_ascii=False, indent=2),
-        "```",
-    ])
+    lines.extend(
+        [
+            "## Strict Verify",
+            "",
+            "```json",
+            json.dumps(report.get("strict_verify", {}), ensure_ascii=False, indent=2),
+            "```",
+        ]
+    )
     return "\n".join(lines) + "\n"
