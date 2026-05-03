@@ -83,7 +83,8 @@
     }
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "mocha": "^11.7.5"
   },
   "scripts": {
     "compile": "tsc -p ./",
@@ -95,9 +96,12 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.75.0",
-    "@vscode/test-electron": "^2.3.0",
     "@vscode/test-cli": "^0.0.4",
+    "@vscode/test-electron": "^2.3.0",
     "typescript": "^5.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "serialize-javascript": ">=7.0.5"
+  }
 }
