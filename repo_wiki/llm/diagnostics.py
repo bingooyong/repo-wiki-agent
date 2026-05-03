@@ -113,25 +113,30 @@ def format_diagnostics_text(diagnostics: dict[str, Any]) -> str:
     Returns:
         Formatted text output
     """
+    # Create redacted copy for display
+    display_data = dict(diagnostics)
+    api_key_env = display_data.get("api_key_env", "")
+    display_data["api_key_env"] = "[REDACTED]" if api_key_env else ""
+    display_data["api_key_present"] = "Yes" if diagnostics.get("api_key_present") else "No"
     lines = [
-        f"LLM Configuration Diagnostics [{diagnostics['summary']}]",
+        f"LLM Configuration Diagnostics [{display_data['summary']}]",
         "",
-        f"  Provider: {diagnostics['provider']}",
-        f"  Model: {diagnostics['model']}",
-        f"  Base URL: {diagnostics['base_url'] or '(default)'}",
-        f"  API Key Env: {diagnostics['api_key_env']}",
-        f"  API Key Present: {'Yes' if diagnostics['api_key_present'] else 'No'}",
+        f"  Provider: {display_data['provider']}",
+        f"  Model: {display_data['model']}",
+        f"  Base URL: {display_data['base_url'] or '(default)'}",
+        f"  API Key Env: {display_data['api_key_env']}",
+        f"  API Key Present: {display_data['api_key_present']}",
         "",
         "  Settings:",
-        f"    Max Tokens: {diagnostics['max_tokens']}",
-        f"    Temperature: {diagnostics['temperature']}",
-        f"    Timeout: {diagnostics['timeout']}s",
-        f"    Max Retries: {diagnostics['max_retries']}",
+        f"    Max Tokens: {display_data['max_tokens']}",
+        f"    Temperature: {display_data['temperature']}",
+        f"    Timeout: {display_data['timeout']}s",
+        f"    Max Retries: {display_data['max_retries']}",
         "",
         "  Validations:",
     ]
 
-    for validation in diagnostics["validations"]:
+    for validation in display_data["validations"]:
         key = validation["key"]
         value = validation["value"]
         reason = validation["reason"]
@@ -147,17 +152,17 @@ def format_diagnostics_text(diagnostics: dict[str, Any]) -> str:
         [
             "",
             "  Capabilities:",
-            f"    Streaming: {diagnostics['capabilities']['supports_streaming']}",
-            f"    Functions: {diagnostics['capabilities']['supports_functions']}",
-            f"    Vision: {diagnostics['capabilities']['supports_vision']}",
-            f"    JSON Mode: {diagnostics['capabilities']['supports_json_mode']}",
-            f"    Max Context: {diagnostics['capabilities']['max_context_tokens']} tokens",
+            f"    Streaming: {display_data['capabilities']['supports_streaming']}",
+            f"    Functions: {display_data['capabilities']['supports_functions']}",
+            f"    Vision: {display_data['capabilities']['supports_vision']}",
+            f"    JSON Mode: {display_data['capabilities']['supports_json_mode']}",
+            f"    Max Context: {display_data['capabilities']['max_context_tokens']} tokens",
         ]
     )
 
-    if diagnostics["issues"]:
+    if display_data["issues"]:
         lines.extend(["", "  Issues:"])
-        for issue in diagnostics["issues"]:
+        for issue in display_data["issues"]:
             lines.append(f"    - {issue}")
 
     return "\n".join(lines)

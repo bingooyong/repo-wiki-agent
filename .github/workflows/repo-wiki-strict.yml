@@ -13,6 +13,7 @@ env:
 jobs:
   verify-and-compare:
     runs-on: ubuntu-latest
+    permissions: read-all
     steps:
       - name: Checkout
         uses: actions/checkout@v4
