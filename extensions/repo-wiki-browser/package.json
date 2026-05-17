@@ -95,7 +95,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^18.0.0",
-    "@types/vscode": "^1.75.0",
+    "@types/vscode": "^1.120.0",
     "@vscode/test-cli": "^0.0.4",
     "@vscode/test-electron": "^2.3.0",
     "typescript": "^5.0.0"
