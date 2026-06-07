@@ -83,7 +83,7 @@
     }
   },
   "dependencies": {
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^4.2.0",
     "mocha": "^11.7.5"
   },
   "scripts": {
