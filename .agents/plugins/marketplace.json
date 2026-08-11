@@ -1,0 +1,12 @@
+{
+  "name": "repo-wiki-local",
+  "interface": {"displayName": "Repo Wiki Local"},
+  "plugins": [
+    {
+      "name": "repo-wiki",
+      "source": {"source": "path", "path": "./plugins/repo-wiki"},
+      "policy": {"installation": "AVAILABLE", "authentication": "NONE"},
+      "category": "Developer Tools"
+    }
+  ]
+}
