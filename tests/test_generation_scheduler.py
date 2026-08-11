@@ -384,6 +384,35 @@ class TestGenerationScheduler:
         assert final_run is not None
         assert final_run.state == RunState.COMPLETED
 
+    def test_run_pages_persists_result_hashes(self, scheduler_setup):
+        """Scheduler should checkpoint result input/output hashes on success."""
+        scheduler, state_machine, _ = scheduler_setup
+        run = state_machine.create_run(profile="test", total_pages=1)
+        state_machine.add_page(run.run_id, "p1", "module", "docs/modules/p1.md", input_hash="old")
+
+        mock_generate = AsyncMock(
+            return_value=MagicMock(
+                prompt_tokens=10,
+                completion_tokens=10,
+                input_hash="input-current",
+                output_hash="output-current",
+            )
+        )
+        completed, failed, errors = scheduler.run_pages_sync(
+            run_id=run.run_id,
+            provider="openai",
+            model="gpt-4o-mini",
+            generate_fn=mock_generate,
+        )
+
+        assert completed == 1
+        assert failed == 0
+        assert errors == []
+        page = state_machine.get_page_state(run.run_id, "p1")
+        assert page is not None
+        assert page.input_hash == "input-current"
+        assert page.output_hash == "output-current"
+
 
 class TestCreateScheduler:
     """Tests for create_scheduler factory."""

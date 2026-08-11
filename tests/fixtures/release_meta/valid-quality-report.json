@@ -1,0 +1,10 @@
+{
+  "schema_version": "repo_agent.quality_report/1.0",
+  "summary": {
+    "profile": "qoder-like",
+    "grade": "PASS",
+    "strict_mode": true
+  },
+  "metrics": { "checks_total": 10, "checks_pass": 10 },
+  "parity_summary": { "overall_score": 0.9 }
+}

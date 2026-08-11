@@ -126,7 +126,7 @@ graph TD
         result = render_mermaid_safely(content)
         assert '<div class="mermaid">' in result
         assert "graph TD" in result
-        assert "A --> B" in result
+        assert "A --&gt; B" in result
 
     def test_multiple_mermaid_blocks(self):
         """Multiple Mermaid blocks should all be preserved."""

@@ -121,6 +121,19 @@ class APIFlowDiagramGenerator:
             return None
 
         diagram_plan = diagrams[0]
+        rendered_plan: DiagramPlan | None = None
+        for plan in diagrams:
+            rendered = self._renderer.render_diagram(plan)
+            is_valid, _ = validate_mermaid_syntax(rendered, plan.diagram_type)
+            if is_valid:
+                plan.rendered_diagram = rendered
+                rendered_plan = plan
+                break
+            plan.rendered_diagram = None
+
+        if rendered_plan is None:
+            return None
+        diagram_plan = rendered_plan
 
         # Collect evidence from endpoints
         flow_evidence = self._collect_flow_evidence(endpoints)
@@ -133,17 +146,6 @@ class APIFlowDiagramGenerator:
             diagram_plan=diagram_plan,
             evidence=flow_evidence,
         )
-
-        # Render the diagram
-        rendered = self._renderer.render_diagram(diagram_plan)
-
-        # Validate syntax
-        is_valid, error_msg = validate_mermaid_syntax(rendered, diagram_plan.diagram_type)
-
-        if is_valid:
-            diagram_plan.rendered_diagram = rendered
-        else:
-            diagram_plan.rendered_diagram = None
 
         return flow_diagram
 

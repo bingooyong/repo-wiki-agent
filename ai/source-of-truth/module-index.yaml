@@ -1,0 +1,273 @@
+modules:
+  - name: repo_wiki
+    path: repo_wiki
+    kind: python-package
+    domain: cli-core
+    responsibility: Typer CLI entry point, configuration loading, orchestration facade, and public repo-wiki command surface.
+    entry_points:
+      - repo_wiki/cli.py
+    commands:
+      - init
+      - index
+      - update
+      - sync
+      - search
+      - graph
+      - generate
+      - verify
+      - compare
+      - release-publish
+      - eval-layout-report
+      - cost-estimate
+      - config
+    depends_on:
+      - repo_wiki.orchestration
+      - repo_wiki.verifier
+      - repo_wiki.viewer
+    depended_by:
+      - tests
+      - extensions/repo-wiki-browser
+    doc_path: docs/03-module-map.md
+
+  - name: repo_wiki.orchestration
+    path: repo_wiki/orchestration
+    kind: python-package
+    domain: generation-and-release
+    responsibility: Generate qoder-like eval runs, write manifests, diagnose eval layouts, select latest runs, and publish READY releases.
+    key_files:
+      - repo_wiki/orchestration/service.py
+      - repo_wiki/orchestration/eval_layout.py
+      - repo_wiki/orchestration/latest_run_selector.py
+      - repo_wiki/orchestration/release_publisher.py
+      - repo_wiki/orchestration/readiness_schema.py
+      - repo_wiki/orchestration/release_meta_schema.py
+    public_symbols:
+      - module: repo_wiki.orchestration.release_publisher
+        symbols:
+          - name: ReleasePublishError
+            kind: class
+          - name: resolve_publish_run_dir
+            kind: function
+          - name: diagnose_eval_run_layouts
+            kind: function
+          - name: publish_ready_run
+            kind: function
+      - module: repo_wiki.orchestration.latest_run_selector
+        symbols:
+          - name: discover_runs
+            kind: function
+          - name: select_run
+            kind: function
+      - module: repo_wiki.orchestration.readiness_schema
+        symbols:
+          - name: evaluate_replacement_readiness_v2
+            kind: function
+      - module: repo_wiki.orchestration.release_meta_schema
+        symbols:
+          - name: RepoAgentNavigationDocument
+            kind: class
+          - name: RepoAgentPageRegistryDocument
+            kind: class
+          - name: RepoAgentMetaReleaseDocument
+            kind: class
+          - name: is_valid_repo_agent_schema_version
+            kind: function
+          - name: validate_repowiki_metadata
+            kind: function
+          - name: validate_navigation
+            kind: function
+          - name: validate_page_registry
+            kind: function
+          - name: validate_source_inventory
+            kind: function
+          - name: validate_docs_inventory
+            kind: function
+          - name: validate_service_registry
+            kind: function
+          - name: validate_api_inventory
+            kind: function
+          - name: validate_data_model_inventory
+            kind: function
+          - name: validate_evidence_index
+            kind: function
+          - name: validate_diagram_index
+            kind: function
+          - name: validate_quality_report
+            kind: function
+          - name: validate_meta_release
+            kind: function
+          - name: meta_basename
+            kind: function
+          - name: validate_meta_file
+            kind: function
+    release_symbols:
+      - .repo-agent-eval/runs/<run-id>/manifest.json
+      - .repo-agent-eval/runs/<run-id>/repowiki/zh/content
+      - .repo-agent-eval/repowiki/zh/manifest.json
+      - release_status: READY
+      - readiness: READY
+      - readiness_state: READY
+      - navigation_tree
+    depends_on:
+      - repo_wiki.verifier
+    depended_by:
+      - repo_wiki
+      - repo_wiki.viewer
+      - extensions/repo-wiki-browser
+      - tests
+    doc_path: docs/plans/display-and-wiki-generation-optimization-roadmap.md
+
+  - name: repo_wiki.verifier
+    path: repo_wiki/verifier
+    kind: python-package
+    domain: quality-gates
+    responsibility: Strict qoder-like verification, path comparison, baseline registry, parity metrics, and readiness evidence.
+    key_files:
+      - repo_wiki/verifier/qoder_strict_verifier.py
+      - repo_wiki/verifier/qoder_comparator_paths.py
+      - repo_wiki/verifier/qoder_baseline_registry.py
+      - repo_wiki/verifier/manual_review_matrix.py
+    commands:
+      - repo-wiki verify --profile qoder-like --ci
+      - repo-wiki compare --target <target-content-dir> --baseline <qoder-baseline-dir> --output <report-dir> --ci
+    depends_on:
+      - repo_wiki.orchestration
+    depended_by:
+      - repo_wiki
+      - tests
+    doc_path: docs/04-api-contracts.md
+
+  - name: repo_wiki.viewer
+    path: repo_wiki/viewer
+    kind: python-package
+    domain: ready-release-viewing
+    responsibility: Static viewer and release viewer configuration for fixed READY release manifests.
+    key_files:
+      - repo_wiki/viewer/static_viewer.py
+    public_symbols:
+      - module: repo_wiki.viewer.static_viewer
+        symbols:
+          - name: get_mermaid_script
+            kind: function
+          - name: render_mermaid_safely
+            kind: function
+          - name: inject_mermaid_support
+            kind: function
+          - name: extract_headings
+            kind: function
+          - name: make_anchor
+            kind: function
+          - name: inject_anchors
+            kind: function
+          - name: build_toc_html
+            kind: function
+          - name: build_nav_tree_from_manifest
+            kind: function
+          - name: get_nav_type_from_path
+            kind: function
+          - name: get_label_from_path
+            kind: function
+          - name: build_tree_html
+            kind: function
+          - name: get_tree_icon
+            kind: function
+          - name: build_viewer_html
+            kind: function
+          - name: render_markdown_to_html
+            kind: function
+          - name: create_viewer_for_directory
+            kind: function
+          - name: create_viewer_for_workspace_release
+            kind: function
+    release_symbols:
+      - .repo-agent-eval/repowiki/zh/manifest.json
+      - release_status=READY
+      - readiness_state=READY
+      - readiness=READY
+      - navigation_tree
+    depends_on:
+      - repo_wiki.orchestration
+    depended_by:
+      - extensions/repo-wiki-browser
+      - tests
+    doc_path: docs/00-overview.md
+
+  - name: extensions/repo-wiki-browser
+    path: extensions/repo-wiki-browser
+    kind: vscode-extension
+    language: typescript
+    domain: editor-integration
+    responsibility: VS Code/Cursor sidebar and viewer for published READY repo-wiki releases plus terminal command shortcuts.
+    entry_points:
+      - extensions/repo-wiki-browser/src/extension.ts
+      - extensions/repo-wiki-browser/package.json
+    extension_commands:
+      - repoWikiBrowser.openViewer
+      - repoWikiBrowser.refreshTree
+      - repoWikiBrowser.runVerify
+      - repoWikiBrowser.updateWiki
+      - repoWikiBrowser.syncWiki
+    activation_events:
+      - onView:repoWikiBrowser.sidebar
+      - onCommand:repoWikiBrowser.openViewer
+      - onCommand:repoWikiBrowser.refreshTree
+      - onCommand:repoWikiBrowser.runVerify
+      - onCommand:repoWikiBrowser.updateWiki
+      - onCommand:repoWikiBrowser.syncWiki
+      - onCommand:repoWikiBrowser.openPage
+    release_contract:
+      reads_only: .repo-agent-eval/repowiki/zh/manifest.json
+      requires_ready_status: true
+      ready_fields:
+        - release_status
+        - readiness_state
+        - readiness
+      navigation_field: navigation_tree
+    release_symbols:
+      - .repo-agent-eval/repowiki/zh/manifest.json
+      - release_status=READY
+      - readiness_state=READY
+      - readiness=READY
+      - navigation_tree
+    depends_on:
+      - repo_wiki.viewer
+      - repo_wiki.orchestration
+    depended_by: []
+    doc_path: docs/operations/vscode-extension-manual-llm-configuration.md
+
+  - name: ai/source-of-truth
+    path: ai/source-of-truth
+    kind: structured-contracts
+    domain: source-of-truth
+    responsibility: Curated YAML contracts for repository map, module index, task catalog, API index, and data model index.
+    exports:
+      - ai/source-of-truth/repo-map.yaml
+      - ai/source-of-truth/module-index.yaml
+      - ai/source-of-truth/task-catalog.yaml
+    depends_on:
+      - repo_wiki
+      - extensions/repo-wiki-browser
+    depended_by:
+      - repo_wiki
+      - tests
+    doc_path: docs/01-architecture.md
+
+  - name: tests
+    path: tests
+    kind: test-suite
+    domain: verification
+    responsibility: Python unit and contract tests for CLI behavior, generation layouts, release contracts, verifier gates, and extension packaging.
+    key_files:
+      - tests/test_cli_qoder_like.py
+      - tests/test_eval_layout.py
+      - tests/test_release_meta_schema.py
+      - tests/test_extension_repo_wiki_browser_packaging.py
+      - tests/test_source_of_truth_contract.py
+    depends_on:
+      - repo_wiki
+      - repo_wiki.orchestration
+      - repo_wiki.verifier
+      - repo_wiki.viewer
+      - extensions/repo-wiki-browser
+    depended_by: []
+    doc_path: docs/03-module-map.md

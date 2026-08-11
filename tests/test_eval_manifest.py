@@ -56,6 +56,14 @@ def test_qoder_like_manifest_references_materialized_content(tmp_path):
     assert "target_revision_source" in manifest
     assert "wiki_revision_source" in manifest
     assert manifest["stale_detection"]["strategy"] == "git-or-hash"
+    assert manifest["readiness_state"] in {"READY", "NOT_READY", "REVIEW_ONLY"}
+    assert "readiness_reasons" in manifest
+    assert "report_paths" in manifest
+    assert manifest["candidate_repowiki_zh_root"].endswith("/repowiki/zh")
+    assert manifest["candidate_content_root"].endswith("/repowiki/zh/content")
+    assert manifest["candidate_meta_root"].endswith("/repowiki/zh/meta")
+    # Existing qoder-like content path remains usable; readiness contract tracks candidate runs path separately.
+    assert manifest["readiness_state"] != "READY"
 
     for page in manifest["page_registry"]:
         assert (content_root / page["path"]).exists()

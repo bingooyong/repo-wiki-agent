@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
+import json
 
+import pytest
+from typer.testing import CliRunner
+
+from repo_wiki.cli import app
 from repo_wiki.llm import LLMProviderConfig
 from repo_wiki.llm.diagnostics import (
     create_provider_from_config,
@@ -11,6 +15,105 @@ from repo_wiki.llm.diagnostics import (
     format_diagnostics_text,
     run_llm_diagnostics,
 )
+
+runner = CliRunner()
+
+_LLM_ENV_KEYS = (
+    "LLM_PROVIDER",
+    "LLM_MODEL",
+    "LLM_BASE_URL",
+    "LLM_API_KEY_ENV",
+    "LLM_MAX_TOKENS",
+    "LLM_TEMPERATURE",
+    "LLM_TIMEOUT",
+    "LLM_MAX_RETRIES",
+    "OPENAI_API_KEY",
+    "MINIMAX_API_KEY",
+    "APP_LLM_MINIMAXI_API_KEY",
+    "APP_LLM_MINIMAXI_BASE_URL",
+    "APP_LLM_MINIMAXI_MODEL",
+    "APP_LLM_MINIMAX_API_KEY",
+    "APP_LLM_MINIMAX_BASE_URL",
+    "APP_LLM_MINIMAX_MODEL",
+)
+
+
+def _clear_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in _LLM_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
+def _ignore_repo_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _raise_no_config(*_args: object, **_kwargs: object) -> None:
+        raise FileNotFoundError("ignore repo config for env-only CLI test")
+
+    monkeypatch.setattr("repo_wiki.cli.load_config", _raise_no_config)
+
+
+def _fake_secret() -> str:
+    return "sk-" + "repo" + "wiki" + "test" + "token" + "abcdef123456"
+
+
+class TestConfigCommandCI:
+    """Regression tests for machine-readable CLI config diagnostics."""
+
+    def test_ci_outputs_parseable_json_on_missing_key_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`repo-wiki config --ci` must stay parseable even when it exits nonzero."""
+        _clear_llm_env(monkeypatch)
+        _ignore_repo_config(monkeypatch)
+        missing_env = "REPO_WIKI_TEST_MISSING_LLM_KEY"
+        raw_secret = _fake_secret()
+
+        result = runner.invoke(
+            app,
+            [
+                "config",
+                "--ci",
+                "--provider",
+                "openai",
+                "--model",
+                "gpt-test-model",
+                "--api-key-env",
+                missing_env,
+            ],
+        )
+
+        assert result.exit_code == 1
+        diagnostics = json.loads(result.output)
+        assert diagnostics["summary"] == "FAIL"
+        assert diagnostics["api_key_present"] is False
+        assert "api_key_env: MISSING_API_KEY" in diagnostics["issues"]
+        assert missing_env not in result.output
+        assert raw_secret not in result.output
+
+    def test_ci_accepts_extension_style_env_only_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """VS Code can pass non-secret config in env and keep the secret in its named env var."""
+        _clear_llm_env(monkeypatch)
+        _ignore_repo_config(monkeypatch)
+        key_env = "REPO_WIKI_TEST_EXTENSION_LLM_KEY"
+        raw_secret = _fake_secret()
+        monkeypatch.setenv("LLM_PROVIDER", "openai")
+        monkeypatch.setenv("LLM_MODEL", "gpt-extension-test")
+        monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test/v1")
+        monkeypatch.setenv("LLM_API_KEY_ENV", key_env)
+        monkeypatch.setenv(key_env, raw_secret)
+
+        result = runner.invoke(app, ["config", "--ci"])
+
+        assert result.exit_code == 0
+        diagnostics = json.loads(result.output)
+        assert diagnostics["summary"] == "OK"
+        assert diagnostics["api_key_present"] is True
+        assert diagnostics["provider"] == "openai"
+        assert diagnostics["model"] == "gpt-extension-test"
+        assert diagnostics["base_url"] == "https://llm.example.test/v1"
+        assert diagnostics["api_key_env"] == "[REDACTED]"
+        assert key_env not in result.output
+        assert raw_secret not in result.output
 
 
 class TestRunLLMDiagnostics:

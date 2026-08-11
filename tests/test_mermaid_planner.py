@@ -250,8 +250,36 @@ class TestMermaidPlanner:
         )
 
         assert len(diagrams) >= 1
-        diagram = diagrams[0]
-        assert diagram.diagram_type == MermaidDiagramType.SEQUENCE_DIAGRAM
+        diagram_types = {d.diagram_type for d in diagrams}
+        assert MermaidDiagramType.SEQUENCE_DIAGRAM in diagram_types
+        assert MermaidDiagramType.FLOWCHART in diagram_types
+
+    def test_plan_api_diagram_includes_list_detail_count_parameter_flows(self):
+        """API 合同必须覆盖 list/detail/count/parameter 检索流。"""
+        planner = create_planner()
+        context = {
+            "endpoints": [
+                {"path": "/endpoints", "method": "GET", "service": "inventory-service"},
+                {"path": "/endpoints/{id}", "method": "GET", "service": "inventory-service"},
+                {"path": "/endpoints/count", "method": "GET", "service": "inventory-service"},
+                {
+                    "path": "/endpoints/{id}/parameters",
+                    "method": "GET",
+                    "service": "inventory-service",
+                },
+            ]
+        }
+        diagrams = planner.plan_diagram_for_page(
+            "inventory-service-api-reference", "api", None, context
+        )
+        sequence = next(
+            d for d in diagrams if d.diagram_type == MermaidDiagramType.SEQUENCE_DIAGRAM
+        )
+        text = " ".join(msg for _, _, msg in sequence.sequence_messages).lower()
+        assert "list flow" in text
+        assert "detail flow" in text
+        assert "count flow" in text
+        assert "parameter flow" in text
 
     def test_plan_data_model_diagram(self):
         """Test planning a data model ER diagram."""
@@ -311,6 +339,48 @@ class TestMermaidPlanner:
         diagram = diagrams[0]
         assert len(diagram.evidence_spans) >= 1
         assert diagram.evidence_spans[0].file_path == "src/auth.py"
+
+    def test_plan_api_adds_er_diagram_when_relationship_evidence_exists(self):
+        """有关系证据时，API 规划应追加 ER 图。"""
+        planner = create_planner()
+        span_a = EvidenceSpanRecord(
+            digest="e1",
+            file_path="services/inventory-service/entity/ApiEndpointEntity.java",
+            line_start=1,
+            line_end=20,
+            language="java",
+            symbol="ApiEndpointEntity",
+            span_text="relationship foreign key references ApiParameterEntity",
+        )
+        span_b = EvidenceSpanRecord(
+            digest="e2",
+            file_path="services/inventory-service/entity/ApiParameterEntity.java",
+            line_start=1,
+            line_end=20,
+            language="java",
+            symbol="ApiParameterEntity",
+            span_text="relationship belongs to ApiEndpointEntity",
+        )
+        binding = PageEvidenceBinding(
+            page_id="inventory-service-api-reference",
+            doc_type="api",
+            candidates=[
+                EvidenceCandidate(1, span_a, 1.0, ["relationship"], 0),
+                EvidenceCandidate(2, span_b, 1.0, ["relationship"], 1),
+            ],
+        )
+        diagrams = planner.plan_diagram_for_page(
+            "inventory-service-api-reference",
+            "api",
+            binding,
+            {
+                "endpoints": [
+                    {"path": "/endpoints", "method": "GET", "service": "inventory-service"}
+                ]
+            },
+        )
+        diagram_types = {d.diagram_type for d in diagrams}
+        assert MermaidDiagramType.ER_DIAGRAM in diagram_types
 
 
 class TestMermaidRenderer:

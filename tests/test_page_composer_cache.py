@@ -16,12 +16,14 @@ from pathlib import Path
 
 import pytest
 
+from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 from repo_wiki.generator.composer import (
     ComposerContext,
     ComposerInput,
 )
 from repo_wiki.generator.composer_cache import (
+    CachedComposerMixin,
     ComposerCache,
     ComposerCacheStats,
     compute_composer_input_hash,
@@ -36,6 +38,7 @@ from repo_wiki.generator.composer_cache import (
     format_cache_stats,
 )
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
+from repo_wiki.orchestration.service import RepoWikiService
 from repo_wiki.planner.schema import (
     GenerationMode,
     SourceRequirement,
@@ -677,6 +680,75 @@ class TestComposerCache:
         assert record.output_markdown == "# Updated"
         assert record.tokens_used == 150
 
+    def test_stats_exposes_skipped_and_regenerated_observations(self, cache: ComposerCache):
+        """Cache stats should expose page-level skip/regeneration observations."""
+        cache.record_skipped_page()
+        cache.record_regenerated_page()
+        cache.get("missing", "hash")
+        cache.put(
+            page_id="page1",
+            input_hash="hash1",
+            output_markdown="# Page 1",
+            tokens_used=100,
+        )
+        assert cache.get("page1", "hash1") is not None
+
+        stats = cache.stats()
+        assert stats.cache_hits == 1
+        assert stats.cache_misses == 1
+        assert stats.skipped_pages == 1
+        assert stats.regenerated_pages == 1
+
+    def test_qoder_like_service_records_real_cache_hit_and_store_observations(self, tmp_path: Path):
+        """Service qoder-like cache helpers should expose skip/regeneration counters."""
+        cfg = RepoWikiConfig()
+        cfg.project.root = str(tmp_path)
+        service = RepoWikiService(cfg)
+        cache = ComposerCache(tmp_path / "composer.sqlite3")
+
+        service._store_composer_cache_page(
+            cache,
+            page_id="page1",
+            input_hash="hash1",
+            output_markdown="# Page 1",
+            tokens_used=40,
+            model_name="mock-gpt",
+            doc_type="overview",
+            cost_usd=0.0,
+        )
+        cached = service._observe_composer_cache_hit(cache, "page1", "hash1")
+
+        assert cached is not None
+        assert cached.output_markdown == "# Page 1"
+        stats = cache.stats()
+        assert stats.cache_hits == 1
+        assert stats.cache_misses == 0
+        assert stats.skipped_pages == 1
+        assert stats.regenerated_pages == 1
+
+    def test_cached_composer_mixin_records_real_hit_miss_and_store_observations(
+        self, cache: ComposerCache
+    ):
+        """Production cache helpers should update skip/regeneration counters."""
+
+        class DummyCachedComposer(CachedComposerMixin):
+            pass
+
+        composer = DummyCachedComposer(cache=cache)
+
+        miss_markdown, miss_tokens = composer._check_cache("page1", "hash1")
+        assert (miss_markdown, miss_tokens) == (None, 0)
+        composer._store_cache("page1", "hash1", "# Page 1", 40)
+        hit_markdown, hit_tokens = composer._check_cache("page1", "hash1")
+
+        assert hit_markdown == "# Page 1"
+        assert hit_tokens == 40
+        stats = cache.stats()
+        assert stats.cache_hits == 1
+        assert stats.cache_misses == 1
+        assert stats.skipped_pages == 1
+        assert stats.regenerated_pages == 1
+
 
 class TestCreateComposerCache:
     """Tests for create_composer_cache factory."""
@@ -714,6 +786,8 @@ class TestFormatCacheStats:
         assert "Hit rate: 80.0%" in formatted
         assert "Tokens saved: 5000" in formatted
         assert "$0.025000" in formatted or "$0.025" in formatted
+        assert "Skipped pages: 0" in formatted
+        assert "Regenerated pages: 0" in formatted
 
 
 if __name__ == "__main__":

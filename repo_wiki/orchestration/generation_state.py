@@ -660,6 +660,7 @@ class GenerationStateMachine:
         run_id: str,
         doc_slug: str,
         output_hash: str | None = None,
+        input_hash: str | None = None,
     ) -> PageGenerationState | None:
         """Mark a page as completed.
 
@@ -667,6 +668,7 @@ class GenerationStateMachine:
             run_id: Parent run ID
             doc_slug: Document slug
             output_hash: Hash of generated output
+            input_hash: Hash of generation inputs to checkpoint
 
         Returns:
             Updated PageGenerationState or None if not found
@@ -677,10 +679,12 @@ class GenerationStateMachine:
             conn.execute(
                 """
                 UPDATE page_generation_states
-                SET state = ?, completed_at = ?, output_hash = ?
+                SET state = ?, completed_at = ?,
+                    output_hash = COALESCE(?, output_hash),
+                    input_hash = COALESCE(?, input_hash)
                 WHERE run_id = ? AND doc_slug = ?
                 """,
-                (PageState.COMPLETED.value, now, output_hash, run_id, doc_slug),
+                (PageState.COMPLETED.value, now, output_hash, input_hash, run_id, doc_slug),
             )
             conn.commit()
             return self.get_page_state(run_id, doc_slug)
@@ -772,6 +776,7 @@ class GenerationStateMachine:
         run_id: str,
         doc_slug: str,
         reason: str | None = None,
+        input_hash: str | None = None,
     ) -> PageGenerationState | None:
         """Reset page to pending so scheduler can regenerate it.
 
@@ -783,10 +788,10 @@ class GenerationStateMachine:
                 """
                 UPDATE page_generation_states
                 SET state = ?, error_message = ?, started_at = NULL, completed_at = NULL,
-                    output_hash = NULL
+                    output_hash = NULL, input_hash = COALESCE(?, input_hash)
                 WHERE run_id = ? AND doc_slug = ?
                 """,
-                (PageState.PENDING.value, reason, run_id, doc_slug),
+                (PageState.PENDING.value, reason, input_hash, run_id, doc_slug),
             )
             conn.commit()
             return self.get_page_state(run_id, doc_slug)

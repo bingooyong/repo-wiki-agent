@@ -1,0 +1,81 @@
+repository:
+  name: repo-agent
+  root_path: .
+  primary_language: python
+  secondary_languages:
+    - typescript
+    - markdown
+  package_manager: uv
+  framework: typer-cli
+  description: Local-first repo-wiki CLI with a VS Code/Cursor browser extension for READY wiki releases.
+  entry_points:
+    - repo_wiki/cli.py
+    - repo_wiki/orchestration/service.py
+    - extensions/repo-wiki-browser/src/extension.ts
+  key_directories:
+    - repo_wiki
+    - extensions/repo-wiki-browser
+    - tests
+    - ai/source-of-truth
+    - docs
+    - templates
+    - scripts
+  source_of_truth_status: curated-current
+
+commands:
+  config: repo-wiki config --ci
+  init: repo-wiki init
+  index: repo-wiki index
+  update: repo-wiki update
+  sync: repo-wiki sync
+  search: repo-wiki search <query>
+  graph: repo-wiki graph <module>
+  generate_qoder_like: repo-wiki generate --profile qoder-like --output .repo-agent-eval
+  verify_qoder_like: repo-wiki verify --profile qoder-like --ci --output .repo-agent-eval
+  compare_qoder_like: repo-wiki compare --target <target-content-dir> --baseline <qoder-baseline-dir> --output <report-dir> --ci
+  release_publish: repo-wiki release-publish --output .repo-agent-eval
+  eval_layout_report: repo-wiki eval-layout-report --output .repo-agent-eval
+  cost_estimate: repo-wiki cost-estimate
+
+release_contract:
+  run_profile: qoder-like
+  run_root: .repo-agent-eval/runs/<run-id>
+  run_content_root: .repo-agent-eval/runs/<run-id>/repowiki/zh/content
+  ready_release_root: .repo-agent-eval/repowiki/zh
+  ready_manifest: .repo-agent-eval/repowiki/zh/manifest.json
+  ready_meta_root: .repo-agent-eval/repowiki/zh/meta
+  ready_symbols:
+    - release_status: READY
+    - readiness: READY
+    - readiness_state: READY
+    - navigation_tree
+  publisher: repo_wiki/orchestration/release_publisher.py
+  viewer: repo_wiki/viewer/static_viewer.py
+  extension_reader: extensions/repo-wiki-browser/src/extension.ts
+
+extension_contract:
+  package: extensions/repo-wiki-browser/package.json
+  source: extensions/repo-wiki-browser/src/extension.ts
+  activation_events:
+    - onView:repoWikiBrowser.sidebar
+    - onCommand:repoWikiBrowser.openViewer
+    - onCommand:repoWikiBrowser.refreshTree
+    - onCommand:repoWikiBrowser.runVerify
+    - onCommand:repoWikiBrowser.updateWiki
+    - onCommand:repoWikiBrowser.syncWiki
+    - onCommand:repoWikiBrowser.openPage
+  commands:
+    - repoWikiBrowser.openViewer
+    - repoWikiBrowser.refreshTree
+    - repoWikiBrowser.runVerify
+    - repoWikiBrowser.updateWiki
+    - repoWikiBrowser.syncWiki
+  default_manifest: .repo-agent-eval/repowiki/zh/manifest.json
+  behavior:
+    - Reads only the fixed READY release manifest by default.
+    - Uses manifest navigation_tree for sidebar/page navigation.
+    - Sends the configured terminal command for wiki generation/update.
+
+stats:
+  module_count: 7
+  source: curated from current CLI, package metadata, release publisher, viewer, and extension contracts

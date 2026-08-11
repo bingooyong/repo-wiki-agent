@@ -1,0 +1,12 @@
+{
+  "schema_version": "repo_agent.navigation/1.0",
+  "generated_at": "2026-05-05T12:00:00Z",
+  "navigation_tree": [
+    {
+      "type": "category",
+      "node_id": "cat-overview",
+      "label": "项目概述",
+      "children": []
+    }
+  ]
+}

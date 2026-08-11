@@ -32,9 +32,9 @@ class TestServiceSubtopicPlanner:
     def sample_identity(self):
         """Sample repository identity."""
         return RepositoryIdentity(
-            name="AI_API_Atlas",
-            display_name="AI API Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            display_name="Reference Repository",
+            root_path="/test/reference-repo",
             language="python",
             framework="fastapi",
         )
@@ -388,9 +388,9 @@ class TestManifestNavigationIntegration:
     def sample_identity(self):
         """Sample repository identity."""
         return RepositoryIdentity(
-            name="AI_API_Atlas",
-            display_name="AI API Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            display_name="Reference Repository",
+            root_path="/test/reference-repo",
             language="python",
             framework="fastapi",
         )

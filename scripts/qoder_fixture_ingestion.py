@@ -46,11 +46,14 @@ class FixtureStatus(Enum):
 class IngestionError(Enum):
     MISSING_REQUIRED_FIELD = "MISSING_REQUIRED_FIELD"
     INVALID_FIELD_TYPE = "INVALID_FIELD_TYPE"
+    INVALID_FIELD_VALUE = "INVALID_FIELD_VALUE"
     MISSING_REQUIRED_FILE = "MISSING_REQUIRED_FILE"
     INCONSISTENT_STRUCTURE = "INCONSISTENT_STRUCTURE"
     INTEGRITY_HASH_MISMATCH = "INTEGRITY_HASH_MISMATCH"
     SCHEMA_VERSION_MISMATCH = "SCHEMA_VERSION_MISMATCH"
     UNSUPPORTED_SCHEMA_VERSION = "UNSUPPORTED_SCHEMA_VERSION"
+    UNSUPPORTED_CONTRACT_VERSION = "UNSUPPORTED_CONTRACT_VERSION"
+    MISSING_PROVENANCE = "MISSING_PROVENANCE"
     MALFORMED = "MALFORMED"
 
 
@@ -88,12 +91,32 @@ SUPPORTED_SCHEMA_VERSIONS = ["1.0", "1.1"]
 # Current schema version
 CURRENT_SCHEMA_VERSION = "1.0"
 
+# Explicit manifest contract emitted by this ingestion tool. This is separate
+# from external fixture metadata schema versions so older fixture_metadata.json
+# files remain loadable.
+FIXTURE_MANIFEST_SCHEMA_VERSION = "qoder.fixture_manifest/1.1"
+FIXTURE_PROVENANCE_CONTRACT_VERSION = "qoder.fixture_provenance/1.1"
+FIXTURE_HASH_ALGORITHM = "qoder.fixture_hash/2"
+SUPPORTED_PROVENANCE_CONTRACT_VERSIONS = [FIXTURE_PROVENANCE_CONTRACT_VERSION]
+
+REQUIRED_PROVENANCE_FIELDS = [
+    "schema_version",
+    "contract_version",
+    "source",
+    "generator",
+    "generated_at",
+    "fixture_hash",
+]
+
 # Freshness thresholds (in days)
-FRESSHNESS_THRESHOLDS = {
+FRESHNESS_THRESHOLDS = {
     "strict": 7,  # 7 days for strict profile
     "transitional": 30,  # 30 days for transitional profile
     "pilot": 90,  # 90 days for pilot profile
 }
+
+# Backward-compatible alias for the historical typo.
+FRESSHNESS_THRESHOLDS = FRESHNESS_THRESHOLDS
 
 # Confidence score thresholds (0.0 - 1.0)
 CONFIDENCE_THRESHOLDS = {
@@ -104,11 +127,94 @@ CONFIDENCE_THRESHOLDS = {
 }
 
 # Maximum acceptable age for fixtures by profile (days)
-MAX_FIXTURE_AGE = {
-    "strict": 7,
-    "transitional": 30,
-    "pilot": 90,
-}
+MAX_FIXTURE_AGE = FRESHNESS_THRESHOLDS
+
+
+def _is_non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_missing_string(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and value.strip().lower() in {"", "unknown"})
+
+
+def _normalized_metadata_string(*values: Any, default: str = "unknown") -> str:
+    for value in values:
+        if _is_non_empty_string(value):
+            return value.strip()
+    return default
+
+
+def _parse_generated_at(value: Any) -> datetime | None:
+    if not _is_non_empty_string(value):
+        return None
+
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+
+    try:
+        generated_at = datetime.fromisoformat(normalized)
+        if generated_at.tzinfo is None or generated_at.utcoffset() is None:
+            return None
+        return generated_at.astimezone(UTC)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_fixture_provenance_issues(
+    *,
+    schema_version: Any,
+    contract_version: Any,
+    source: Any,
+    generator: Any,
+    generated_at: Any,
+    fixture_hash: Any,
+    sample_count: int,
+) -> list[str]:
+    """Return stable gate reasons for missing or invalid fixture provenance."""
+    issues: list[str] = []
+
+    if _is_missing_string(schema_version):
+        issues.append("Missing fixture metadata schema_version")
+    elif not _is_non_empty_string(schema_version):
+        issues.append("Invalid fixture metadata schema_version type")
+    elif schema_version.strip() not in SUPPORTED_SCHEMA_VERSIONS:
+        issues.append(f"Unsupported fixture metadata schema_version '{schema_version}'")
+
+    if _is_missing_string(contract_version):
+        issues.append("Missing fixture provenance contract_version")
+    elif not _is_non_empty_string(contract_version):
+        issues.append("Invalid fixture provenance contract_version type")
+    elif contract_version.strip() not in SUPPORTED_PROVENANCE_CONTRACT_VERSIONS:
+        issues.append(f"Unsupported fixture provenance contract_version '{contract_version}'")
+
+    for field_name, value in (("source", source), ("generator", generator)):
+        if _is_missing_string(value):
+            issues.append(f"Missing fixture {field_name} provenance")
+        elif not _is_non_empty_string(value):
+            issues.append(f"Invalid fixture {field_name} provenance type")
+
+    if _is_missing_string(generated_at):
+        issues.append("Missing fixture generated_at provenance")
+    elif not _is_non_empty_string(generated_at):
+        issues.append("Invalid fixture generated_at provenance type")
+    elif _parse_generated_at(generated_at) is None:
+        issues.append("Unparseable fixture generated_at provenance")
+
+    if _is_missing_string(fixture_hash):
+        issues.append("Missing stable fixture_hash")
+    elif not _is_non_empty_string(fixture_hash):
+        issues.append("Invalid stable fixture_hash type")
+    elif len(fixture_hash) != 64 or any(
+        character not in "0123456789abcdef" for character in fixture_hash
+    ):
+        issues.append("Invalid stable fixture_hash value")
+
+    if sample_count <= 0:
+        issues.append("Missing fixture markdown samples")
+
+    return issues
 
 
 @dataclass
@@ -139,9 +245,12 @@ class FixtureIntegrity:
     structure_hash: str
     file_count: int
     total_chars: int
+    fixture_hash: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "hash_algorithm": FIXTURE_HASH_ALGORITHM,
+            "fixture_hash": self.fixture_hash,
             "content_hash": self.content_hash,
             "structure_hash": self.structure_hash,
             "file_count": self.file_count,
@@ -158,6 +267,10 @@ class FixtureMetadata:
     repository_type: str
     generated_at: str
     generator_version: str
+    contract_version: str = "unknown"
+    source: str = ""
+    declared_fixture_hash: str = ""
+    declared_hash_algorithm: str = ""
     language: str = "unknown"
     complexity_score: float = 0.0
     size_category: str = "medium"  # small, medium, large, xlarge
@@ -170,10 +283,22 @@ class FixtureMetadata:
             "repository_type": self.repository_type,
             "generated_at": self.generated_at,
             "generator_version": self.generator_version,
+            "contract_version": self.contract_version,
+            "source": self.source,
+            "generator": self.generator_version,
+            "fixture_hash": self.declared_fixture_hash or None,
+            "hash_algorithm": self.declared_hash_algorithm or None,
             "language": self.language,
             "complexity_score": self.complexity_score,
             "size_category": self.size_category,
             "custom_fields": self.custom_fields,
+            "provenance": {
+                "schema_version": self.schema_version,
+                "contract_version": self.contract_version,
+                "source": self.source,
+                "generator": self.generator_version,
+                "generated_at": self.generated_at,
+            },
         }
 
 
@@ -188,12 +313,21 @@ class FixtureManifest:
     normalized_path: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        gating_issues = self.gating_issues()
         return {
+            "schema_version": FIXTURE_MANIFEST_SCHEMA_VERSION,
+            "contract_version": FIXTURE_PROVENANCE_CONTRACT_VERSION,
+            "fixture_hash": self.integrity.fixture_hash,
+            "provenance": self.provenance_to_dict(),
             "metadata": self.metadata.to_dict(),
             "integrity": self.integrity.to_dict(),
             "status": self.status.value,
             "diagnostics": [d.to_dict() for d in self.diagnostics],
             "normalized_path": self.normalized_path,
+            "gating": {
+                "eligible": not gating_issues,
+                "non_gating_reasons": gating_issues,
+            },
         }
 
     def is_valid(self) -> bool:
@@ -201,6 +335,61 @@ class FixtureManifest:
 
     def is_usable(self) -> bool:
         return self.status in (FixtureStatus.VALID, FixtureStatus.PARTIAL)
+
+    def provenance_to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.metadata.schema_version,
+            "contract_version": self.metadata.contract_version,
+            "source": self.metadata.source,
+            "repository_name": self.metadata.repository_name,
+            "repository_type": self.metadata.repository_type,
+            "generator": self.metadata.generator_version,
+            "generated_at": self.metadata.generated_at,
+            "fixture_hash": self.integrity.fixture_hash,
+            "hash_algorithm": FIXTURE_HASH_ALGORITHM,
+            "metadata_fixture_hash": self.metadata.declared_fixture_hash or None,
+            "metadata_hash_algorithm": self.metadata.declared_hash_algorithm or None,
+            "hash_mismatch": bool(
+                self.metadata.declared_fixture_hash
+                and self.metadata.declared_fixture_hash != self.integrity.fixture_hash
+            ),
+        }
+
+    def provenance_issues(self) -> list[str]:
+        issues = get_fixture_provenance_issues(
+            schema_version=self.metadata.schema_version,
+            contract_version=self.metadata.contract_version,
+            source=self.metadata.source,
+            generator=self.metadata.generator_version,
+            generated_at=self.metadata.generated_at,
+            fixture_hash=self.integrity.fixture_hash,
+            sample_count=self.integrity.file_count,
+        )
+        if (
+            self.metadata.declared_fixture_hash
+            and self.metadata.declared_fixture_hash != self.integrity.fixture_hash
+        ):
+            issues.append("Fixture metadata fixture_hash does not match computed hash")
+        if (
+            self.metadata.declared_hash_algorithm
+            and self.metadata.declared_hash_algorithm != FIXTURE_HASH_ALGORITHM
+        ):
+            issues.append(
+                f"Unsupported fixture hash_algorithm '{self.metadata.declared_hash_algorithm}'"
+            )
+        return issues
+
+    def has_required_provenance(self) -> bool:
+        return not self.provenance_issues()
+
+    def gating_issues(self) -> list[str]:
+        issues = list(self.provenance_issues())
+        if self.status == FixtureStatus.INVALID:
+            issues.append("Fixture status is INVALID")
+        for diagnostic in self.diagnostics:
+            if diagnostic.severity == "ERROR" and diagnostic.field_path.startswith("metadata."):
+                issues.append(diagnostic.message)
+        return list(dict.fromkeys(issues))
 
 
 class FixtureSchemaValidator:
@@ -253,8 +442,21 @@ class FixtureSchemaValidator:
             )
             return False
 
-        # Check required fields
-        for field_name in REQUIRED_METADATA_FIELDS:
+        if not isinstance(metadata, dict):
+            self.diagnostics.append(
+                DiagnosticMessage(
+                    error=IngestionError.MALFORMED,
+                    field_path="fixture_metadata.json",
+                    message="fixture_metadata.json must contain a JSON object",
+                    severity="ERROR",
+                )
+            )
+            return False
+
+        # Repository identity remains structurally required. Provenance fields
+        # are warning-only when absent for legacy import compatibility, but
+        # present invalid values are errors.
+        for field_name in ("repository_name", "repository_type"):
             if field_name not in metadata:
                 self.diagnostics.append(
                     DiagnosticMessage(
@@ -264,11 +466,51 @@ class FixtureSchemaValidator:
                         severity="ERROR",
                     )
                 )
+            elif not isinstance(metadata[field_name], str) or not metadata[field_name].strip():
+                self.diagnostics.append(
+                    DiagnosticMessage(
+                        error=IngestionError.INVALID_FIELD_TYPE,
+                        field_path=f"metadata.{field_name}",
+                        message=f"Required field '{field_name}' must be a non-empty string",
+                        severity="ERROR",
+                    )
+                )
 
-        # Check schema version
-        if "schema_version" in metadata:
+        def add_missing_provenance(field_path: str, field_name: str) -> None:
+            self.diagnostics.append(
+                DiagnosticMessage(
+                    error=IngestionError.MISSING_PROVENANCE,
+                    field_path=field_path,
+                    message=(
+                        f"Fixture {field_name} provenance is missing; fixture can ingest, "
+                        "but release gates reject it and benchmarks mark it non-gating"
+                    ),
+                    severity="WARNING",
+                    context={
+                        "required_for_gate": True,
+                        "contract_version": FIXTURE_PROVENANCE_CONTRACT_VERSION,
+                        "required_provenance_fields": REQUIRED_PROVENANCE_FIELDS,
+                    },
+                )
+            )
+
+        def add_invalid_string(field_path: str, field_name: str) -> None:
+            self.diagnostics.append(
+                DiagnosticMessage(
+                    error=IngestionError.INVALID_FIELD_TYPE,
+                    field_path=field_path,
+                    message=f"Fixture {field_name} must be a non-empty string",
+                    severity="ERROR",
+                )
+            )
+
+        if "schema_version" not in metadata:
+            add_missing_provenance("metadata.schema_version", "schema_version")
+        elif not _is_non_empty_string(metadata["schema_version"]):
+            add_invalid_string("metadata.schema_version", "schema_version")
+        else:
             schema_version = metadata["schema_version"]
-            if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+            if schema_version.strip() not in SUPPORTED_SCHEMA_VERSIONS:
                 self.diagnostics.append(
                     DiagnosticMessage(
                         error=IngestionError.UNSUPPORTED_SCHEMA_VERSION,
@@ -278,7 +520,97 @@ class FixtureSchemaValidator:
                         context={"supported_versions": SUPPORTED_SCHEMA_VERSIONS},
                     )
                 )
-                return False
+
+        if "contract_version" not in metadata:
+            add_missing_provenance("metadata.contract_version", "contract_version")
+        elif not _is_non_empty_string(metadata["contract_version"]):
+            add_invalid_string("metadata.contract_version", "contract_version")
+        elif metadata["contract_version"].strip() not in SUPPORTED_PROVENANCE_CONTRACT_VERSIONS:
+            self.diagnostics.append(
+                DiagnosticMessage(
+                    error=IngestionError.UNSUPPORTED_CONTRACT_VERSION,
+                    field_path="metadata.contract_version",
+                    message=(
+                        f"Provenance contract version '{metadata['contract_version']}' is not "
+                        f"supported. Supported: {SUPPORTED_PROVENANCE_CONTRACT_VERSIONS}"
+                    ),
+                    severity="ERROR",
+                    context={"supported_versions": SUPPORTED_PROVENANCE_CONTRACT_VERSIONS},
+                )
+            )
+
+        custom_fields = metadata.get("custom_fields", {})
+        source_candidates: list[tuple[str, Any]] = []
+        if "source" in metadata:
+            source_candidates.append(("metadata.source", metadata["source"]))
+        if "fixture_source" in metadata:
+            source_candidates.append(("metadata.fixture_source", metadata["fixture_source"]))
+        if isinstance(custom_fields, dict) and "source" in custom_fields:
+            source_candidates.append(("metadata.custom_fields.source", custom_fields["source"]))
+
+        if not source_candidates:
+            add_missing_provenance("metadata.source", "source")
+        else:
+            for field_path, value in source_candidates:
+                if not _is_non_empty_string(value):
+                    add_invalid_string(field_path, "source")
+
+        generator_candidates = [
+            (f"metadata.{field_name}", metadata[field_name])
+            for field_name in ("generator", "generator_version")
+            if field_name in metadata
+        ]
+        if not generator_candidates:
+            add_missing_provenance("metadata.generator", "generator")
+        else:
+            for field_path, value in generator_candidates:
+                if not _is_non_empty_string(value):
+                    add_invalid_string(field_path, "generator")
+
+        if "generated_at" not in metadata:
+            add_missing_provenance("metadata.generated_at", "generated_at")
+        elif not _is_non_empty_string(metadata["generated_at"]):
+            add_invalid_string("metadata.generated_at", "generated_at")
+        elif _parse_generated_at(metadata["generated_at"]) is None:
+            self.diagnostics.append(
+                DiagnosticMessage(
+                    error=IngestionError.INVALID_FIELD_VALUE,
+                    field_path="metadata.generated_at",
+                    message="Fixture generated_at must be a timezone-aware ISO timestamp",
+                    severity="ERROR",
+                )
+            )
+
+        if "fixture_hash" in metadata:
+            declared_hash = metadata["fixture_hash"]
+            if not _is_non_empty_string(declared_hash):
+                add_invalid_string("metadata.fixture_hash", "fixture_hash")
+            elif len(declared_hash.strip()) != 64 or any(
+                character not in "0123456789abcdef" for character in declared_hash.strip().lower()
+            ):
+                self.diagnostics.append(
+                    DiagnosticMessage(
+                        error=IngestionError.INVALID_FIELD_VALUE,
+                        field_path="metadata.fixture_hash",
+                        message="Fixture fixture_hash must be a 64-character SHA-256 hex digest",
+                        severity="ERROR",
+                    )
+                )
+
+        if "hash_algorithm" in metadata:
+            hash_algorithm = metadata["hash_algorithm"]
+            if not _is_non_empty_string(hash_algorithm):
+                add_invalid_string("metadata.hash_algorithm", "hash_algorithm")
+            elif hash_algorithm.strip() != FIXTURE_HASH_ALGORITHM:
+                self.diagnostics.append(
+                    DiagnosticMessage(
+                        error=IngestionError.INVALID_FIELD_VALUE,
+                        field_path="metadata.hash_algorithm",
+                        message=f"Unsupported fixture hash_algorithm '{hash_algorithm}'",
+                        severity="ERROR",
+                        context={"supported_algorithm": FIXTURE_HASH_ALGORITHM},
+                    )
+                )
 
         return len([d for d in self.diagnostics if d.severity == "ERROR"]) == 0
 
@@ -342,34 +674,76 @@ class FixtureSchemaValidator:
 class FixtureIntegrityChecker:
     """Computes integrity hashes for fixture content."""
 
+    CONTENT_HASH_DOMAIN = b"qoder.fixture.content/2"
+    STRUCTURE_HASH_DOMAIN = b"qoder.fixture.structure/2"
+    FIXTURE_HASH_DOMAIN = b"qoder.fixture.integrity/2"
+
+    @staticmethod
+    def _update_frame(hasher: Any, payload: bytes) -> None:
+        """Hash one unambiguous length-prefixed byte frame."""
+        hasher.update(len(payload).to_bytes(8, byteorder="big", signed=False))
+        hasher.update(payload)
+
+    @staticmethod
+    def _relative_posix(path: Path, fixture_root: Path) -> bytes:
+        return path.relative_to(fixture_root).as_posix().encode("utf-8")
+
+    @staticmethod
+    def _sorted_fixture_files(fixture_root: Path) -> list[Path]:
+        return sorted(
+            (path for path in fixture_root.rglob("*") if path.is_file()),
+            key=lambda path: path.relative_to(fixture_root).as_posix(),
+        )
+
     @staticmethod
     def compute_content_hash(fixture_root: Path) -> str:
-        """Compute SHA256 hash of all markdown content."""
+        """Hash relative POSIX paths and framed markdown bytes."""
         hasher = hashlib.sha256()
-        content_files = sorted(fixture_root.rglob("*.md"))
+        hasher.update(FixtureIntegrityChecker.CONTENT_HASH_DOMAIN)
+        content_files = [
+            path
+            for path in FixtureIntegrityChecker._sorted_fixture_files(fixture_root)
+            if path.suffix.lower() == ".md"
+        ]
 
         for file_path in content_files:
             try:
-                content = file_path.read_text(encoding="utf-8")
-                hasher.update(content.encode("utf-8"))
-            except (PermissionError, UnicodeDecodeError, IsADirectoryError):
+                content = file_path.read_bytes()
+                FixtureIntegrityChecker._update_frame(
+                    hasher,
+                    FixtureIntegrityChecker._relative_posix(file_path, fixture_root),
+                )
+                FixtureIntegrityChecker._update_frame(hasher, content)
+            except OSError:
                 continue
 
         return hasher.hexdigest()
 
     @staticmethod
     def compute_structure_hash(fixture_root: Path) -> str:
-        """Compute hash of directory structure."""
+        """Hash framed relative POSIX paths for every fixture file."""
         hasher = hashlib.sha256()
-        dirs = sorted(fixture_root.rglob("*"))
-        structure = []
+        hasher.update(FixtureIntegrityChecker.STRUCTURE_HASH_DOMAIN)
+        files = FixtureIntegrityChecker._sorted_fixture_files(fixture_root)
 
-        for path in dirs:
-            if path.is_file():
-                rel_path = path.relative_to(fixture_root)
-                structure.append(f"FILE:{rel_path}")
+        for path in files:
+            FixtureIntegrityChecker._update_frame(hasher, b"FILE")
+            FixtureIntegrityChecker._update_frame(
+                hasher,
+                FixtureIntegrityChecker._relative_posix(path, fixture_root),
+            )
 
-        hasher.update("\n".join(structure).encode("utf-8"))
+        return hasher.hexdigest()
+
+    @staticmethod
+    def compute_fixture_hash(content_hash: str, structure_hash: str) -> str:
+        """Compute a stable fixture-level hash from content and structure."""
+        hasher = hashlib.sha256()
+        hasher.update(FixtureIntegrityChecker.FIXTURE_HASH_DOMAIN)
+        FixtureIntegrityChecker._update_frame(hasher, b"content_hash")
+        FixtureIntegrityChecker._update_frame(hasher, content_hash.encode("ascii"))
+        FixtureIntegrityChecker._update_frame(hasher, b"structure_hash")
+        FixtureIntegrityChecker._update_frame(hasher, structure_hash.encode("ascii"))
         return hasher.hexdigest()
 
     @staticmethod
@@ -377,19 +751,24 @@ class FixtureIntegrityChecker:
         """Compute complete integrity information."""
         content_hash = FixtureIntegrityChecker.compute_content_hash(fixture_root)
         structure_hash = FixtureIntegrityChecker.compute_structure_hash(fixture_root)
+        fixture_hash = FixtureIntegrityChecker.compute_fixture_hash(content_hash, structure_hash)
 
-        file_count = 0
+        markdown_files = [
+            path
+            for path in FixtureIntegrityChecker._sorted_fixture_files(fixture_root)
+            if path.suffix.lower() == ".md"
+        ]
+        file_count = len(markdown_files)
         total_chars = 0
 
-        for md_file in fixture_root.rglob("*.md"):
-            if md_file.is_file():
-                file_count += 1
-                try:
-                    total_chars += len(md_file.read_text(encoding="utf-8"))
-                except (PermissionError, UnicodeDecodeError):
-                    continue
+        for md_file in markdown_files:
+            try:
+                total_chars += len(md_file.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
 
         return FixtureIntegrity(
+            fixture_hash=fixture_hash,
             content_hash=content_hash,
             structure_hash=structure_hash,
             file_count=file_count,
@@ -449,19 +828,13 @@ class FreshnessValidator:
     """Validates fixture freshness based on generation timestamp."""
 
     @staticmethod
-    def compute_age_days(generated_at: str) -> int:
+    def compute_age_days(generated_at: Any) -> int:
         """Compute age of fixture in days from ISO timestamp."""
-        try:
-            # Parse ISO format timestamp
-            if "Z" in generated_at:
-                generated_dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-            else:
-                generated_dt = datetime.fromisoformat(generated_at)
-            now = datetime.now(UTC)
-            age = (now - generated_dt).days
-            return max(0, age)  # Non-negative
-        except (ValueError, TypeError):
-            return 999  # Unparseable dates treated as stale
+        generated_dt = _parse_generated_at(generated_at)
+        if generated_dt is None:
+            return 999
+        age = (datetime.now(UTC) - generated_dt).days
+        return max(0, age)
 
     @staticmethod
     def get_freshness_status(
@@ -583,19 +956,23 @@ class ConfidenceScorer:
             manifest.metadata.generated_at, profile
         )
 
-        rejection_reasons = []
+        rejection_reasons: list[str] = []
 
-        # Check status
-        if manifest.status == FixtureStatus.INVALID:
-            rejection_reasons.append("Fixture status is INVALID")
+        def reject(reason: str) -> None:
+            if reason not in rejection_reasons:
+                rejection_reasons.append(reason)
+
+        # Manifest and release consumers share one eligibility reason set.
+        for issue in manifest.gating_issues():
+            reject(issue)
 
         # Check freshness
         if not freshness_usable:
-            rejection_reasons.append(f"Fixture is critically stale ({age_days} days old)")
+            reject(f"Fixture is critically stale ({age_days} days old)")
 
         # Check confidence
         if confidence_level == "unacceptable":
-            rejection_reasons.append(f"Confidence score {confidence_score:.2f} is unacceptable")
+            reject(f"Confidence score {confidence_score:.2f} is unacceptable")
 
         # Profile-specific minimum confidence thresholds
         min_confidence = {
@@ -605,7 +982,7 @@ class ConfidenceScorer:
         }.get(profile, 0.70)
 
         if confidence_score < min_confidence:
-            rejection_reasons.append(
+            reject(
                 f"Confidence score {confidence_score:.2f} below {profile} threshold {min_confidence}"
             )
 
@@ -641,18 +1018,31 @@ class FixtureIngestion:
         # Load metadata if available
         metadata = self._load_metadata()
 
+        if (
+            metadata.declared_fixture_hash
+            and metadata.declared_fixture_hash != integrity.fixture_hash
+        ):
+            diagnostics.append(
+                DiagnosticMessage(
+                    error=IngestionError.INTEGRITY_HASH_MISMATCH,
+                    field_path="metadata.fixture_hash",
+                    message="Fixture metadata fixture_hash does not match computed hash",
+                    severity="ERROR",
+                    context={
+                        "declared": metadata.declared_fixture_hash,
+                        "computed": integrity.fixture_hash,
+                    },
+                )
+            )
+
         # Normalize paths
         normalized = PathNormalizer.normalize(self.fixture_root)
 
         # Determine status
+        has_errors = any(diagnostic.severity == "ERROR" for diagnostic in diagnostics)
         if is_valid and not diagnostics:
             status = FixtureStatus.VALID
-        elif (
-            is_valid
-            and any(d.severity == "WARNING" for d in diagnostics)
-            or diagnostics
-            and all(d.severity == "WARNING" for d in diagnostics)
-        ):
+        elif not has_errors and diagnostics:
             status = FixtureStatus.PARTIAL
         else:
             status = FixtureStatus.INVALID
@@ -683,19 +1073,41 @@ class FixtureIngestion:
         try:
             with open(metadata_path, encoding="utf-8") as f:
                 data = json.load(f)
+            if not isinstance(data, dict):
+                raise TypeError("fixture metadata must be a JSON object")
+            custom_fields = data.get("custom_fields", {})
+            if not isinstance(custom_fields, dict):
+                custom_fields = {}
+            source = _normalized_metadata_string(
+                data.get("source"),
+                data.get("fixture_source"),
+                custom_fields.get("source"),
+            )
+            generator = _normalized_metadata_string(
+                data.get("generator"),
+                data.get("generator_version"),
+            )
 
             return FixtureMetadata(
-                schema_version=data.get("schema_version", "unknown"),
+                schema_version=_normalized_metadata_string(data.get("schema_version")),
                 repository_name=data.get("repository_name", "unknown"),
                 repository_type=data.get("repository_type", "unknown"),
-                generated_at=data.get("generated_at", "unknown"),
-                generator_version=data.get("generator_version", "unknown"),
+                generated_at=_normalized_metadata_string(data.get("generated_at")),
+                generator_version=generator,
+                contract_version=_normalized_metadata_string(data.get("contract_version")),
+                source=source,
+                declared_fixture_hash=_normalized_metadata_string(
+                    data.get("fixture_hash"), default=""
+                ).lower(),
+                declared_hash_algorithm=_normalized_metadata_string(
+                    data.get("hash_algorithm"), default=""
+                ),
                 language=data.get("language", "unknown"),
                 complexity_score=data.get("complexity_score", 0.0),
                 size_category=data.get("size_category", "medium"),
-                custom_fields=data.get("custom_fields", {}),
+                custom_fields=custom_fields,
             )
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, OSError, TypeError, UnicodeDecodeError):
             return FixtureMetadata(
                 schema_version="unknown",
                 repository_name="unknown",
@@ -712,6 +1124,16 @@ class FixtureIngestion:
             f"**Fixture Root:** `{self.fixture_root}`",
             f"**Status:** {manifest.status.value}",
             f"**Schema Version:** {manifest.metadata.schema_version}",
+            f"**Fixture Hash:** `{manifest.integrity.fixture_hash}`",
+            "",
+            "---",
+            "",
+            "## Provenance",
+            "",
+            f"- **Source:** `{manifest.metadata.source or 'MISSING'}`",
+            f"- **Generator:** `{manifest.metadata.generator_version}`",
+            f"- **Generated At:** `{manifest.metadata.generated_at}`",
+            f"- **Gating Eligible:** {'NO' if manifest.gating_issues() else 'YES'}",
             "",
             "---",
             "",
@@ -761,17 +1183,22 @@ def create_fixture_metadata(
     repository_name: str,
     repository_type: str,
     generator_version: str,
+    source: str = "",
     language: str = "unknown",
     complexity_score: float = 0.0,
     size_category: str = "medium",
 ) -> dict[str, Any]:
     """Helper to create a fixture_metadata.json file."""
+    source = source or repository_name
     return {
         "schema_version": CURRENT_SCHEMA_VERSION,
+        "contract_version": FIXTURE_PROVENANCE_CONTRACT_VERSION,
         "repository_name": repository_name,
         "repository_type": repository_type,
         "generated_at": datetime.now(UTC).isoformat(),
         "generator_version": generator_version,
+        "generator": generator_version,
+        "source": source,
         "language": language,
         "complexity_score": complexity_score,
         "size_category": size_category,

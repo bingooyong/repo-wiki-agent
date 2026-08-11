@@ -144,6 +144,7 @@ class FailureRecoveryManager:
 
         failed_pages: list[FailedPageRecord] = []
         for evidence in self.evidence_recorder.get_failures_for_run(run_id):
+            page_state = self.state_machine.get_page_state(run_id, evidence.doc_slug)
             failed_pages.append(
                 FailedPageRecord(
                     run_id=evidence.run_id,
@@ -155,11 +156,7 @@ class FailureRecoveryManager:
                     retry_command=evidence.retry_command
                     or self.generate_retry_command(evidence.run_id, evidence.doc_slug),
                     attempts=evidence.attempts,
-                    page_state=(
-                        self.state_machine.get_page_state(run_id, evidence.doc_slug).state.value
-                        if self.state_machine.get_page_state(run_id, evidence.doc_slug)
-                        else PageState.FAILED.value
-                    ),
+                    page_state=page_state.state.value if page_state else PageState.FAILED.value,
                     timestamp=evidence.timestamp,
                 )
             )

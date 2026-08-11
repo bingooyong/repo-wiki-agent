@@ -1,0 +1,12 @@
+{
+  "schema_version": "repo_agent.page_registry/1.0",
+  "generated_at": "2026-05-05T12:00:00Z",
+  "pages": [
+    {
+      "page_id": "00-overview",
+      "relative_path": "项目概述/00-overview.md",
+      "category": "项目概述",
+      "page_type": "project_overview"
+    }
+  ]
+}

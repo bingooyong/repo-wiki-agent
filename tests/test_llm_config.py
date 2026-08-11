@@ -128,6 +128,43 @@ class TestResolveLLMConfig:
         config, warnings = resolve_llm_config(config=config_dict, cli_overrides=cli_overrides)
         assert config.model == "gpt-4o-32k"
 
+    def test_resolve_app_minimax_env_aliases(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test non-typo APP_LLM_MINIMAX aliases resolve without dropping MINIMAXI support."""
+        for key in list(os.environ.keys()):
+            if any(k in key for k in ["LLM_", "ANTHROPIC", "MINIMAX", "OPENAI", "APP_LLM"]):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("APP_LLM_MINIMAX_API_KEY", "mini" + "max" + "-test" + "-key")
+        monkeypatch.setenv("APP_LLM_MINIMAX_BASE_URL", "https://api.example.test/v1")
+        monkeypatch.setenv("APP_LLM_MINIMAX_MODEL", "minimax-test-model")
+
+        config, _warnings = resolve_llm_config(config={})
+
+        assert config.provider == "minimax"
+        assert config.api_key_env == "APP_LLM_MINIMAX_API_KEY"
+        assert config.base_url == "https://api.example.test/v1"
+        assert config.model == "minimax-test-model"
+
+    def test_resolve_app_minimaxi_alias_still_wins_first(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Keep historical APP_LLM_MINIMAXI aliases intact when both spellings exist."""
+        for key in list(os.environ.keys()):
+            if any(k in key for k in ["LLM_", "ANTHROPIC", "MINIMAX", "OPENAI", "APP_LLM"]):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("APP_LLM_MINIMAXI_API_KEY", "legacy" + "-mini" + "max" + "-key")
+        monkeypatch.setenv("APP_LLM_MINIMAXI_BASE_URL", "https://legacy.example.test/v1")
+        monkeypatch.setenv("APP_LLM_MINIMAXI_MODEL", "legacy-minimax-test-model")
+        monkeypatch.setenv("APP_LLM_MINIMAX_API_KEY", "new" + "-mini" + "max" + "-key")
+        monkeypatch.setenv("APP_LLM_MINIMAX_BASE_URL", "https://new.example.test/v1")
+        monkeypatch.setenv("APP_LLM_MINIMAX_MODEL", "new-minimax-test-model")
+
+        config, _warnings = resolve_llm_config(config={})
+
+        assert config.provider == "minimax"
+        assert config.api_key_env == "APP_LLM_MINIMAXI_API_KEY"
+        assert config.base_url == "https://legacy.example.test/v1"
+        assert config.model == "legacy-minimax-test-model"
+
     def test_resolve_partial_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test partial overrides preserve other defaults."""
         # Clear ALL environment variables that affect LLM config
@@ -146,16 +183,18 @@ class TestRedactSecrets:
 
     def test_redact_api_key(self) -> None:
         """Test API key redaction."""
-        text = 'API_KEY="sk-1234567890abcdefghijklmnop"'
+        fake_api_key = "sk-" + "1234567890abcdefghijklmnop"
+        text = 'API_KEY="' + fake_api_key + '"'
         redacted = redact_secrets(text)
-        assert "sk-1234567890abcdefghijklmnop" not in redacted
+        assert fake_api_key not in redacted
         assert "[REDACTED]" in redacted
 
     def test_redact_bearer_token(self) -> None:
         """Test Bearer token redaction."""
-        text = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        fake_bearer_token = "eyJhbGciOiJIUzI1NiIs" + "InR5cCI6IkpXVCJ9"
+        text = "Authorization: Bearer " + fake_bearer_token + "..."
         redacted = redact_secrets(text)
-        assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in redacted
+        assert fake_bearer_token not in redacted
         assert "[REDACTED]" in redacted
 
     def test_redact_secret_key_value(self) -> None:

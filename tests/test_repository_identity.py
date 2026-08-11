@@ -97,18 +97,18 @@ Quick start guide here.
             "amazing" in identity.description.lower() or "project" in identity.description.lower()
         )
 
-    def test_ai_api_atlas_not_workspace(self, tmp_path: Path):
-        """Test that AI_API_Atlas project name is not 'workspace'."""
-        # Create a fake AI_API_Atlas project structure
+    def test_reference_repo_not_workspace(self, tmp_path: Path):
+        """Test that reference-repo project name is not 'workspace'."""
+        # Create a fake reference-repo project structure
         (tmp_path / "README.md").write_text(
-            "# AI API Atlas\n\nAn API documentation atlas.", encoding="utf-8"
+            "# Reference Repository\n\nAn API documentation reference.", encoding="utf-8"
         )
         (tmp_path / "repo_wiki").mkdir()
         (tmp_path / "tests").mkdir()
 
         identity = resolve_repository_identity(tmp_path)
         # The name should NOT be "workspace" - it should come from README/git/etc
-        assert identity.name != "workspace", "AI_API_Atlas should not resolve to 'workspace'"
+        assert identity.name != "workspace", "reference-repo should not resolve to 'workspace'"
 
 
 class TestLanguageDetection:
@@ -216,10 +216,10 @@ class TestHumanReadableName:
         assert _human_readable_name("my_project") == "My Project"
         assert _human_readable_name("awesome_tool") == "Awesome Tool"
 
-    def test_ai_api_atlas(self):
-        """Test AI_API_Atlas name conversion."""
-        result = _human_readable_name("AI_API_Atlas")
-        assert result == "AI API Atlas"
+    def test_reference_repo(self):
+        """Test reference-repo name conversion."""
+        result = _human_readable_name("reference-repo")
+        assert result == "Reference Repo"
 
     def test_single_word(self):
         """Test single word names."""

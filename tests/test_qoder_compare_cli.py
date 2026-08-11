@@ -3,33 +3,83 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from repo_wiki.cli import app
+from repo_wiki.cli import _read_composer_cache_summary, app
 
 runner = CliRunner()
 
 
-def test_compare_generates_markdown_and_json_reports(tmp_path: Path) -> None:
-    target = tmp_path / "target" / "content"
-    baseline = tmp_path / "baseline" / "content"
-    output = tmp_path / "reports"
+def test_read_composer_cache_summary_includes_skip_regeneration_counters(tmp_path: Path) -> None:
+    cache_path = tmp_path / "composer.sqlite3"
+    cache_path.touch()
+
+    class _FakeCache:
+        def __init__(self, _path: Path) -> None:
+            pass
+
+        def stats(self) -> SimpleNamespace:
+            return SimpleNamespace(
+                total_entries=1,
+                cache_hits=4,
+                cache_misses=5,
+                skipped_pages=3,
+                regenerated_pages=2,
+                total_tokens_saved=12,
+                total_cost_saved_usd=0.01,
+            )
+
+        def list_entries(self, limit: int) -> list[SimpleNamespace]:
+            assert limit == 10
+            return []
+
+    with patch("repo_wiki.generator.composer_cache.ComposerCache", _FakeCache):
+        summary = _read_composer_cache_summary(cache_path, limit=10)
+
+    assert summary["exists"] is True
+    assert summary["stats"]["skipped_pages"] == 3
+    assert summary["stats"]["regenerated_pages"] == 2
+
+
+def _make_qoder_compare_sandbox(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    """Build a minimal git repo with canonical `.qoder/repowiki/zh` and a qoder-like target content dir."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["git", "init"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+    zh = repo / ".qoder" / "repowiki" / "zh"
+    baseline_content = zh / "content"
+    baseline_content.mkdir(parents=True)
+    target = repo / ".repo-agent-eval" / "runs" / "run-1" / "repowiki" / "zh" / "content"
     target.mkdir(parents=True)
-    baseline.mkdir(parents=True)
+    output = tmp_path / "reports"
+    output.mkdir(parents=True)
+    return repo, target, zh, output
+
+
+def test_compare_generates_markdown_and_json_reports(tmp_path: Path) -> None:
+    _repo, target, zh, output = _make_qoder_compare_sandbox(tmp_path)
+    baseline_content = zh / "content"
 
     (target / "00-overview.md").write_text(
         "# 概述\n\n## 目录\n\n- 简介\n\n## 简介\n\n正文。\n\n<cite>src/main.py:1-2</cite>\n",
         encoding="utf-8",
     )
-    (baseline / "00-overview.md").write_text(
+    (baseline_content / "00-overview.md").write_text(
         "# 概述\n\n## 目录\n\n- 简介\n\n## 简介\n\n正文。\n\n<cite>src/main.py:1-2</cite>\n",
         encoding="utf-8",
     )
 
-    baseline_before = (baseline / "00-overview.md").read_text(encoding="utf-8")
+    baseline_before = (baseline_content / "00-overview.md").read_text(encoding="utf-8")
 
     class _FakeReport:
         def to_dict(self):
@@ -100,7 +150,7 @@ def test_compare_generates_markdown_and_json_reports(tmp_path: Path) -> None:
                 "--target",
                 str(target),
                 "--baseline",
-                str(baseline),
+                str(zh),
                 "--format",
                 "both",
                 "--output",
@@ -114,7 +164,7 @@ def test_compare_generates_markdown_and_json_reports(tmp_path: Path) -> None:
     payload = json.loads((output / "qoder-comparison-report.json").read_text(encoding="utf-8"))
     assert "metrics" in payload
     assert payload.get("baseline_read_only_verified") is True
-    assert (baseline / "00-overview.md").read_text(encoding="utf-8") == baseline_before
+    assert (baseline_content / "00-overview.md").read_text(encoding="utf-8") == baseline_before
 
 
 def test_verify_qoder_like_profile_exit_non_zero_on_not_ready(tmp_path: Path) -> None:
@@ -140,16 +190,13 @@ def test_verify_qoder_like_profile_exit_non_zero_on_not_ready(tmp_path: Path) ->
 
 
 def test_compare_fails_when_page_coverage_is_below_qoder_baseline(tmp_path: Path) -> None:
-    target = tmp_path / "target" / "content"
-    baseline = tmp_path / "baseline" / "content"
-    output = tmp_path / "reports"
-    target.mkdir(parents=True)
-    baseline.mkdir(parents=True)
+    _repo, target, zh, output = _make_qoder_compare_sandbox(tmp_path)
+    baseline_content = zh / "content"
 
     (target / "项目概述").mkdir()
     (target / "项目概述" / "项目概述.md").write_text("# 项目概述\n", encoding="utf-8")
     for i in range(5):
-        (baseline / f"page-{i}.md").write_text(f"# Page {i}\n", encoding="utf-8")
+        (baseline_content / f"page-{i}.md").write_text(f"# Page {i}\n", encoding="utf-8")
 
     class _FakeReport:
         def to_dict(self):
@@ -176,7 +223,7 @@ def test_compare_fails_when_page_coverage_is_below_qoder_baseline(tmp_path: Path
                 "--target",
                 str(target),
                 "--baseline",
-                str(baseline),
+                str(zh),
                 "--format",
                 "both",
                 "--output",
@@ -192,15 +239,12 @@ def test_compare_fails_when_page_coverage_is_below_qoder_baseline(tmp_path: Path
 
 
 def test_compare_fails_when_llm_generation_coverage_is_low(tmp_path: Path) -> None:
-    run = tmp_path / "run"
-    target = run / "content"
-    baseline = tmp_path / "baseline" / "content"
-    output = run / "reports"
-    target.mkdir(parents=True)
-    baseline.mkdir(parents=True)
+    _repo, target, zh, output = _make_qoder_compare_sandbox(tmp_path)
+    baseline_content = zh / "content"
+
     (target / "项目概述.md").write_text("# 项目概述\n", encoding="utf-8")
-    (baseline / "项目概述.md").write_text("# 项目概述\n", encoding="utf-8")
-    (run / "manifest.json").write_text(
+    (baseline_content / "项目概述.md").write_text("# 项目概述\n", encoding="utf-8")
+    (target.parent / "manifest.json").write_text(
         json.dumps(
             {
                 "generation": {
@@ -238,7 +282,7 @@ def test_compare_fails_when_llm_generation_coverage_is_low(tmp_path: Path) -> No
                 "--target",
                 str(target),
                 "--baseline",
-                str(baseline),
+                str(zh),
                 "--format",
                 "json",
                 "--output",

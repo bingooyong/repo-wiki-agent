@@ -111,8 +111,8 @@ class PageInvalidationEngine:
             return self._create_full_rebuild_invalidation(reason, changed_files, impacted_modules)
 
         # Find all pages that depend on changed files via nav graph
-        invalidated = set()
-        skipped = set()
+        invalidated: set[str] = set()
+        skipped: set[str] = set()
 
         for changed_file in changed_files + deleted_files + list(renamed_files.keys()):
             # Get doc_slugs that have this file in their affected_pages
@@ -160,7 +160,7 @@ class PageInvalidationEngine:
             canonical = section_slug
 
         # Find all docs that reference this section
-        invalidated = set()
+        invalidated: set[str] = set()
 
         # Section pages for this section
         invalidated.add(canonical)
@@ -282,7 +282,7 @@ class PageInvalidationEngine:
         reason: str = "section_registry_changed",
     ) -> InvalidationResult:
         """Invalidate pages when section registry is updated."""
-        invalidated = set()
+        invalidated: set[str] = set()
 
         if change_type == "added":
             # New section added - invalidate overview pages (they need to add link)
@@ -404,12 +404,12 @@ class PageInvalidationEngine:
             return modules
 
         # Fallback: simple module extraction from path
-        modules = set()
+        fallback_modules: set[str] = set()
         for file_path in files:
             parts = Path(file_path).parts
             if parts:
-                modules.add(parts[0])
-        return sorted(modules)
+                fallback_modules.add(parts[0])
+        return sorted(fallback_modules)
 
     def _needs_full_rebuild(
         self,
@@ -520,7 +520,7 @@ class PageInvalidationEngine:
         """
         # Build dependency graph
         in_degree = {slug: 0 for slug in doc_slugs}
-        dependents = {slug: [] for slug in doc_slugs}
+        dependents: dict[str, list[str]] = {slug: [] for slug in doc_slugs}
 
         for doc_slug in doc_slugs:
             node = self.runtime_store.get_nav_node(doc_slug)
@@ -647,9 +647,9 @@ class IncrementalRegenerationPlanner:
 
     def get_regeneration_summary(self, invalidation: InvalidationResult) -> dict[str, Any]:
         """Get a summary of the regeneration plan."""
-        tasks = self.plan_regeneration(invalidation)
+        tasks = self.invalidation_engine.plan_regeneration(invalidation)
 
-        by_priority = {1: [], 2: [], 3: []}
+        by_priority: dict[int, list[str]] = {1: [], 2: [], 3: []}
         for task in tasks:
             by_priority[task.priority].append(task.doc_slug)
 

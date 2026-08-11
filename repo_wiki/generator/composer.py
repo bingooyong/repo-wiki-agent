@@ -28,8 +28,7 @@ from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.models import ChatMessage, ChatRequest, ChatResponse, LLMProvider
 from repo_wiki.llm.providers import create_mock_provider
-from repo_wiki.planner.llm_planner import MockLLMProvider as PlannerMockLLM
-from repo_wiki.planner.schema import WikiPagePlan
+from repo_wiki.planner.schema import INVENTORY_SERVICE_API_PAGE_ID, WikiPagePlan
 from repo_wiki.prompts.contracts import (
     PagePromptContract,
     PagePromptType,
@@ -245,7 +244,7 @@ class LLMPageComposer:
 
     def __init__(
         self,
-        llm_provider: LLMProvider | PlannerMockLLM | None = None,
+        llm_provider: LLMProvider | None = None,
         llm_config: LLMProviderConfig | None = None,
         workspace_root: str | Path | None = None,
         use_real_provider_on_env: bool = True,
@@ -262,8 +261,8 @@ class LLMPageComposer:
 
     def _resolve_provider(
         self,
-        provided: LLMProvider | PlannerMockLLM | None,
-    ) -> LLMProvider | PlannerMockLLM:
+        provided: LLMProvider | None,
+    ) -> LLMProvider:
         """Resolve which LLM provider to use.
 
         Preference:
@@ -441,6 +440,14 @@ class LLMPageComposer:
         modules = context.get("modules") or "未指定"
         endpoints = context.get("endpoints") or "未指定"
         data_models = context.get("data_models") or "未指定"
+        api_quality_rules = ""
+        if page.category.value == "api_reference":
+            api_quality_rules = (
+                "\nAPI 页面附加要求：\n"
+                "- 正文必须 prose-first，禁止把端点清单作为主体。\n"
+                "- 端点表格只能放在附录且需限量（只列关键端点）。\n"
+                "- 每个关键结论必须配 `<cite>`；证据不足时必须显式写「待确认」。\n"
+            )
 
         return f"""请基于源码证据生成一篇中文 Repo Wiki Markdown 页面。
 
@@ -459,6 +466,7 @@ class LLMPageComposer:
 - 至少保留 3 个 `<cite>file:start-end</cite>` 引用。
 - 使用段落解释为主，列表只用于核心组件或检查项。
 - 如果证据不足，明确写”当前证据显示”，不要过度推断。
+{api_quality_rules}
 
 {self._build_low_confidence_guidance(input)}
 
@@ -530,7 +538,46 @@ class LLMPageComposer:
                 "- 保留所有 `<cite>` 引用，即使推断不确定\n"
             )
 
+        if input.page_plan.page_id == INVENTORY_SERVICE_API_PAGE_ID:
+            return (
+                "\n\n[硬约束] API台账服务 API 页面证据要求：\n"
+                "- 主要证据必须来自 inventory-service 本地实现（控制器/DTO/实体/仓储）。\n"
+                "- frontend 与 contract-service 仅作为相关集成证据，不能替代主证据。\n"
+                "- 若缺少 inventory-service 主证据，页面必须被拒绝而不是降级通过。\n"
+            )
+
         return ""
+
+    def _has_inventory_primary_evidence(self, input: ComposerInput) -> bool:
+        """Check that inventory API page has inventory-local primary evidence."""
+        binding = input.evidence_binding
+        if not binding or not binding.candidates:
+            return False
+
+        required_markers = {
+            "endpointscontroller",
+            "endpointdto",
+            "apiendpointentity",
+            "apiparameterentity",
+            "apiendpointrepository",
+            "apiparameterrepository",
+        }
+
+        for candidate in binding.candidates:
+            span = candidate.span
+            blob = (
+                f"{getattr(span, 'file_path', '')} "
+                f"{getattr(span, 'symbol', '')} "
+                f"{getattr(span, 'span_text', '')}"
+            ).lower()
+            if (
+                "inventory-service" in blob
+                or "inventory_service" in blob
+                or "api台账服务" in blob
+                or any(marker in blob for marker in required_markers)
+            ):
+                return True
+        return False
 
     async def _call_llm(self, prompt: str, title: str) -> ChatResponse:
         """Call LLM provider with prompt."""
@@ -630,6 +677,14 @@ class LLMPageComposer:
         # Skip this check for short content (may be from mock providers in tests)
         if len(content) > 150 and self._count_prose_chars(content) < 100:
             result.rejection_reason = "Insufficient prose content"
+
+        if (
+            input.page_plan.page_id == INVENTORY_SERVICE_API_PAGE_ID
+            and not self._has_inventory_primary_evidence(input)
+        ):
+            result.rejection_reason = (
+                "Missing inventory-service primary evidence for API台账服务 API page"
+            )
 
         # Detect low-confidence conditions
         uncertainty_reasons: list[str] = []
@@ -747,7 +802,7 @@ class ValidationResult:
 
 
 def create_composer(
-    provider: LLMProvider | PlannerMockLLM | None = None,
+    provider: LLMProvider | None = None,
     llm_config: LLMProviderConfig | None = None,
     workspace_root: str | Path | None = None,
 ) -> LLMPageComposer:
@@ -861,6 +916,7 @@ async def run_smoke_test(
             output_path="docs/test.md",
             source_requirements=SourceRequirement(),
             generation_mode=GenerationMode.LLM_ASSISTED,
+            parent=None,
         )
 
         context = ComposerContext(

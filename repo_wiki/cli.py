@@ -50,10 +50,13 @@ def search_command(
     top_k: int = typer.Option(10, "--top-k"),
     config: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    cfg = load_config(config)
-    service = RepoWikiService(cfg)
-    result = service.search(query=query, module=module, top_k=top_k)
+    del config  # G006 local-agent search is READY-bound and does not load config.
+    from repo_wiki.local_agent import build_search_contract
+
+    result, exit_code = build_search_contract(Path.cwd(), query=query, module=module, top_k=top_k)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if exit_code:
+        raise typer.Exit(code=exit_code)
 
 
 @app.command("graph")
@@ -61,10 +64,13 @@ def graph_command(
     module: str = typer.Argument(..., help="Module name"),
     config: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    cfg = load_config(config)
-    service = RepoWikiService(cfg)
-    result = service.graph(module)
+    del config  # G006 local-agent graph is READY-bound and does not load config.
+    from repo_wiki.local_agent import build_graph_contract
+
+    result, exit_code = build_graph_contract(Path.cwd(), module=module)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if exit_code:
+        raise typer.Exit(code=exit_code)
 
 
 @app.command("generate")
@@ -274,6 +280,289 @@ def improve_status_command(
     print(json.dumps(status_payload, ensure_ascii=False, indent=2))
 
 
+def _resolve_release_publish_run(output: Path, run: str | None) -> Path:
+    from repo_wiki.orchestration.latest_run_selector import select_run
+
+    root = output.resolve()
+    if run:
+        raw = Path(run)
+        if raw.is_absolute() or len(raw.parts) != 1:
+            candidate = raw if raw.is_absolute() else root / raw
+            resolved = candidate.resolve()
+            try:
+                resolved.relative_to(root)
+            except ValueError as exc:
+                raise typer.BadParameter(f"run_ref path escapes eval root: {run!r}") from exc
+            if not (resolved / "manifest.json").is_file():
+                raise typer.BadParameter(f"Run does not contain manifest.json: {resolved}")
+            return resolved
+    try:
+        return select_run(root, run_id=run).resolve()
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("release-publish")
+def release_publish_command(
+    output: Path = typer.Option(
+        Path(".repo-agent-eval"),
+        "--output",
+        file_okay=False,
+        resolve_path=True,
+        help="Eval output root containing qoder-like runs",
+    ),
+    run: str | None = typer.Option(
+        None,
+        "--run",
+        help="Explicit run id/directory to publish or inspect",
+    ),
+    inspect_only: bool = typer.Option(
+        False,
+        "--inspect-only",
+        help="Validate candidate run only; do not change current release",
+    ),
+    review_allowed_signers: Path | None = typer.Option(
+        None,
+        "--review-allowed-signers",
+        dir_okay=False,
+        resolve_path=True,
+        help="Trusted OpenSSH allowed-signers file outside the run for blind-review attestation",
+    ),
+) -> None:
+    """Publish READY run to fixed `.repo-agent-eval/repowiki/zh` release directory."""
+    from repo_wiki.orchestration.release_publisher import (
+        ReleasePublishError,
+        publish_ready_run,
+    )
+
+    eval_root = output.resolve()
+    try:
+        run_dir = _resolve_release_publish_run(eval_root, run)
+        result = publish_ready_run(
+            eval_root, run_dir, dry_run=inspect_only, review_allowed_signers=review_allowed_signers
+        )
+    except (ReleasePublishError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@app.command("quality-gate")
+def quality_gate_command(
+    output: Path = typer.Option(
+        Path(".repo-agent-eval"),
+        "--output",
+        file_okay=False,
+        resolve_path=True,
+        help="Eval output root containing qoder-like runs",
+    ),
+    run: str = typer.Option(..., "--run", help="Exact run id/directory to compile"),
+    qoder_comparison: Path = typer.Option(
+        Path("reports/qoder-comparison-report.json"),
+        "--qoder-comparison",
+        dir_okay=False,
+        help="Concrete Qoder comparison JSON artifact inside the run",
+    ),
+    blind_review_v3: Path = typer.Option(
+        Path("reports/blind-review-v3.json"),
+        "--blind-review-v3",
+        dir_okay=False,
+        help="Human blind-review-v3 matrix artifact inside the run",
+    ),
+    acceptance_fixture_registry: Path = typer.Option(
+        Path("reports/acceptance-fixture-registry.json"),
+        "--acceptance-fixture-registry",
+        dir_okay=False,
+        help="Acceptance fixture registry artifact inside the run",
+    ),
+    strict_verify: Path = typer.Option(
+        Path("reports/strict-verify-output.json"),
+        "--strict-verify",
+        dir_okay=False,
+        help="Canonical strict verify report inside the run",
+    ),
+    citation_evidence: Path | None = typer.Option(
+        None,
+        "--citation-evidence",
+        dir_okay=False,
+        help="Citation hard-gate evidence artifact; defaults to strict verify report",
+    ),
+    critical_false_fact_evidence: Path | None = typer.Option(
+        None,
+        "--critical-false-fact-evidence",
+        dir_okay=False,
+        help="Critical false-fact evidence artifact; defaults to strict verify report",
+    ),
+    quality_evidence: Path | None = typer.Option(
+        None,
+        "--quality-evidence",
+        dir_okay=False,
+        help="Quality hard-gate evidence artifact; defaults to strict verify report",
+    ),
+    conflict_evidence: Path | None = typer.Option(
+        None,
+        "--conflict-evidence",
+        dir_okay=False,
+        help="Conflict hard-gate evidence artifact; defaults to strict verify report",
+    ),
+    acceptance_artifact_root: Path | None = typer.Option(
+        None,
+        "--acceptance-artifact-root",
+        file_okay=False,
+        resolve_path=True,
+        help="Optional root for filesystem hash validation of acceptance baseline artifacts",
+    ),
+    blind_review_attestation: Path | None = typer.Option(
+        None,
+        "--blind-review-attestation",
+        dir_okay=False,
+        help="Detached blind-review attestation JSON inside the run",
+    ),
+    review_allowed_signers: Path | None = typer.Option(
+        None,
+        "--review-allowed-signers",
+        dir_okay=False,
+        resolve_path=True,
+        help="Trusted OpenSSH allowed-signers file outside the run for blind-review attestation",
+    ),
+) -> None:
+    """Compile reports/g005-quality-gates.json from real external evidence artifacts."""
+    from repo_wiki.orchestration.g005_quality_gate import (
+        G005Inputs,
+        G005QualityGateError,
+        atomic_write_json,
+        compile_g005_quality_gate,
+    )
+
+    try:
+        run_dir = _resolve_release_publish_run(output.resolve(), run)
+        inputs = G005Inputs(
+            run_dir=run_dir,
+            qoder_comparison=qoder_comparison,
+            blind_review_v3=blind_review_v3,
+            acceptance_fixture_registry=acceptance_fixture_registry,
+            strict_verify=strict_verify,
+            citation_hard_gate_evidence=citation_evidence,
+            critical_false_fact_evidence=critical_false_fact_evidence,
+            quality_hard_gate_evidence=quality_evidence,
+            conflict_hard_gate_evidence=conflict_evidence,
+            acceptance_artifact_root=acceptance_artifact_root,
+            blind_review_attestation=blind_review_attestation,
+            review_allowed_signers=review_allowed_signers,
+        )
+        compile_g005_quality_gate(inputs)
+        report_rel = "reports/g005-quality-gates.json"
+        report_path = run_dir / report_rel
+
+        manifest_path = run_dir / "manifest.json"
+        manifest = _read_json_file(manifest_path, {})
+        if isinstance(manifest, dict):
+            report_paths = manifest.get("report_paths")
+            if not isinstance(report_paths, dict):
+                report_paths = {}
+            report_paths["g005_quality_gates"] = report_rel
+            manifest["report_paths"] = report_paths
+            files = manifest.get("files")
+            if not isinstance(files, list):
+                files = []
+            if not any(isinstance(item, dict) and item.get("path") == report_rel for item in files):
+                files.append({"path": report_rel})
+            manifest["files"] = files
+            atomic_write_json(manifest_path, manifest)
+        bundle = compile_g005_quality_gate(inputs)
+        atomic_write_json(report_path, bundle)
+    except (G005QualityGateError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    print(
+        json.dumps(
+            {
+                "status": "PASS",
+                "run_id": bundle.get("run_id"),
+                "report_json": str(report_path),
+                "artifact_references": bundle.get("artifact_references", {}),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+@app.command("eval-layout-report")
+def eval_layout_report_command(
+    output: Path = typer.Option(
+        Path(".repo-agent-eval"),
+        "--output",
+        file_okay=False,
+        resolve_path=True,
+        help="Eval output root to scan for run layouts",
+    ),
+) -> None:
+    """Print canonical vs legacy content layout per run (diagnostic only, no migration)."""
+    from repo_wiki.orchestration.release_publisher import diagnose_eval_run_layouts
+
+    report = diagnose_eval_run_layouts(output.resolve())
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def _atomic_write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    from repo_wiki.orchestration.g005_quality_gate import atomic_write_json
+
+    atomic_write_json(path, payload)
+
+
+def _find_run_manifest_root(verify_root: Path) -> Path | None:
+    current = verify_root.resolve()
+    for candidate in [current, *current.parents]:
+        if (candidate / "manifest.json").is_file():
+            return candidate
+        if candidate.name == ".repo-agent-eval":
+            break
+    return None
+
+
+def _persist_qoder_strict_report(verify_root: Path, result: dict[str, Any]) -> Path | None:
+    run_root = _find_run_manifest_root(verify_root)
+    if run_root is None:
+        return None
+    report_rel = "reports/strict-verify-output.json"
+    report_path = run_root / report_rel
+    payload = dict(result)
+    payload["verify_root"] = str(verify_root)
+    payload["run_dir"] = str(run_root)
+    _atomic_write_json_file(report_path, payload)
+
+    manifest_path = run_root / "manifest.json"
+    manifest = _read_json_file(manifest_path, {})
+    if isinstance(manifest, dict):
+        report_paths = manifest.get("report_paths")
+        if not isinstance(report_paths, dict):
+            report_paths = {}
+        report_paths["strict_verify"] = report_rel
+        manifest["report_paths"] = report_paths
+        files = manifest.get("files")
+        if not isinstance(files, list):
+            files = []
+        if not any(isinstance(item, dict) and item.get("path") == report_rel for item in files):
+            files.append({"path": report_rel})
+        manifest["files"] = files
+        evidence = manifest.get("evidence")
+        if not isinstance(evidence, list):
+            evidence = []
+        if not any(isinstance(item, dict) and item.get("path") == report_rel for item in evidence):
+            evidence.append(
+                {
+                    "evidence_type": "report",
+                    "path": report_rel,
+                    "description": "Canonical qoder-like strict verification report",
+                    "created_at": payload.get("generated_at", ""),
+                }
+            )
+        manifest["evidence"] = evidence
+        _atomic_write_json_file(manifest_path, manifest)
+    return report_path
+
+
 @app.command("verify")
 def verify_command(
     profile: str = typer.Option(
@@ -295,6 +584,10 @@ def verify_command(
         verify_root = _resolve_verify_root(Path(cfg.project.root), output)
         result = verify_qoder_like(verify_root, ci=ci, strict=True)
         result["verify_root"] = str(verify_root)
+        if ci:
+            strict_report_path = _persist_qoder_strict_report(verify_root, result)
+            if strict_report_path is not None:
+                result["canonical_report_path"] = str(strict_report_path)
         if result.get("grade") != "PASS":
             result["status"] = "NOT_READY"
     else:
@@ -303,6 +596,118 @@ def verify_command(
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if ci and (result.get("grade") == "FAIL" or result.get("status") == "NOT_READY"):
         raise typer.Exit(code=1)
+
+
+@app.command("knowledge-plan-init")
+def knowledge_plan_init_command(
+    path: Path = typer.Option(
+        Path(".repo-wiki/knowledge-plan.yaml"),
+        "--path",
+        help="Knowledge plan file to create",
+    ),
+    repo_root: Path = typer.Option(Path("."), "--repo-root", file_okay=False),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing plan"),
+    json_output: bool = typer.Option(False, "--json", help="Print machine-readable output"),
+) -> None:
+    """Create a knowledge plan from cached KM data, or a minimal default."""
+    repo_root = repo_root.resolve()
+    plan_path = _resolve_plan_path(repo_root, path)
+    plan = _generate_knowledge_plan_for_repo(repo_root)
+    written = _write_knowledge_plan(plan, plan_path, force=force)
+    _print_knowledge_plan_result(
+        {"status": "created", "path": str(plan_path), "plan": written},
+        json_output=json_output,
+    )
+
+
+@app.command("knowledge-plan-generate")
+def knowledge_plan_generate_command(
+    path: Path = typer.Option(
+        Path(".repo-wiki/knowledge-plan.yaml"),
+        "--path",
+        help="Knowledge plan file to write",
+    ),
+    repo_root: Path = typer.Option(Path("."), "--repo-root", file_okay=False),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing plan"),
+    stdout: bool = typer.Option(False, "--stdout", help="Print generated plan without writing"),
+    json_output: bool = typer.Option(False, "--json", help="Print machine-readable write output"),
+) -> None:
+    """Regenerate a knowledge plan from cached KM data."""
+    repo_root = repo_root.resolve()
+    plan_path = _resolve_plan_path(repo_root, path)
+    plan = _generate_knowledge_plan_for_repo(repo_root)
+    if stdout:
+        from repo_wiki.knowledge_plan import dump_plan_yaml
+
+        print(dump_plan_yaml(plan), end="")
+        return
+    written = _write_knowledge_plan(plan, plan_path, force=force)
+    _print_knowledge_plan_result(
+        {"status": "written", "path": str(plan_path), "plan": written},
+        json_output=json_output,
+    )
+
+
+@app.command("knowledge-plan-validate")
+def knowledge_plan_validate_command(
+    path: Path = typer.Option(
+        Path(".repo-wiki/knowledge-plan.yaml"),
+        "--path",
+        dir_okay=False,
+        help="Knowledge plan file to validate",
+    ),
+    repo_root: Path = typer.Option(Path("."), "--repo-root", file_okay=False),
+    ci: bool = typer.Option(False, "--ci", help="Exit non-zero on error issues"),
+    json_output: bool = typer.Option(False, "--json", help="Print machine-readable output"),
+) -> None:
+    """Validate a knowledge plan and report issues."""
+    repo_root = repo_root.resolve()
+    plan_path = _resolve_plan_path(repo_root, path)
+    if not plan_path.exists():
+        raise typer.BadParameter(f"Knowledge plan does not exist: {plan_path}")
+    from repo_wiki.knowledge_plan import load_plan, validate_plan
+
+    issues = validate_plan(load_plan(plan_path))
+    result_dict = {
+        "valid": not any(issue.severity == "error" for issue in issues),
+        "issues": [issue.as_dict() for issue in issues],
+    }
+    _print_knowledge_plan_result(result_dict, json_output=json_output)
+    if ci and _knowledge_plan_has_errors(result_dict):
+        raise typer.Exit(code=1)
+
+
+@app.command("knowledge-plan-impact")
+def knowledge_plan_impact_command(
+    path: Path = typer.Option(
+        Path(".repo-wiki/knowledge-plan.yaml"),
+        "--path",
+        dir_okay=False,
+        help="Knowledge plan file to inspect",
+    ),
+    baseline: Path | None = typer.Option(
+        None,
+        "--baseline",
+        dir_okay=False,
+        help="Baseline plan path; when omitted, core may use current KM diff data",
+    ),
+    repo_root: Path = typer.Option(Path("."), "--repo-root", file_okay=False),
+    json_output: bool = typer.Option(False, "--json", help="Print machine-readable output"),
+) -> None:
+    """Report pages, templates, docs, domains, and directories impacted by plan changes."""
+    repo_root = repo_root.resolve()
+    plan_path = _resolve_plan_path(repo_root, path)
+    baseline_path = _resolve_plan_path(repo_root, baseline) if baseline is not None else None
+    if not plan_path.exists():
+        raise typer.BadParameter(f"Knowledge plan does not exist: {plan_path}")
+    if baseline_path is not None and not baseline_path.exists():
+        raise typer.BadParameter(f"Baseline knowledge plan does not exist: {baseline_path}")
+    from repo_wiki.knowledge_plan import analyze_impact, load_plan
+
+    current = load_plan(plan_path)
+    baseline_plan = load_plan(baseline_path) if baseline_path is not None else None
+    result_dict = analyze_impact(old_plan=baseline_plan, new_plan=current)
+    _print_knowledge_plan_result(result_dict, json_output=json_output)
 
 
 @app.command("compare")
@@ -316,12 +721,21 @@ def compare_command(
     ci: bool = typer.Option(False, "--ci", help="Exit non-zero when NOT_READY"),
 ) -> None:
     """Compare repo-agent output with qoder baseline and emit report artifacts."""
+    from repo_wiki.orchestration.readiness_schema import evaluate_replacement_readiness_v2
+    from repo_wiki.verifier.qoder_baseline_registry import (
+        baseline_unchanged,
+        register_single_qoder_baseline,
+    )
     from repo_wiki.verifier.qoder_comparator_paths import create_repaired_comparator
     from repo_wiki.verifier.qoder_parity_metrics import create_parity_report
     from repo_wiki.verifier.qoder_strict_verifier import verify_qoder_like
 
     requested_formats = _normalize_formats(format)
-    before_baseline_hash = _hash_tree(baseline)
+    try:
+        baseline_entry = register_single_qoder_baseline(target_root=target, baseline_root=baseline)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    baseline = baseline_entry.root
 
     comparator = create_repaired_comparator(target, baseline)
     path_result = comparator.compare()
@@ -341,6 +755,13 @@ def compare_command(
     report_json = {
         "target": str(target),
         "baseline": str(baseline),
+        "baseline_registry": {
+            "source": baseline_entry.source,
+            "root": str(baseline_entry.root),
+            "fingerprint": baseline_entry.fingerprint,
+            "file_count": baseline_entry.file_count,
+            "immutable": baseline_entry.immutable,
+        },
         "status": "READY",
         "strict_verify": strict_result,
         "path_comparison": path_result,
@@ -371,15 +792,15 @@ def compare_command(
         "parity_blocked": parity_dict.get("blocked", False),
     }
 
-    after_baseline_hash = _hash_tree(baseline)
-    baseline_untouched = before_baseline_hash == after_baseline_hash
+    baseline_untouched = baseline_unchanged(baseline_entry)
     report_json["baseline_read_only_verified"] = baseline_untouched
     readiness_failures = _compare_readiness_failures(report_json)
-
-    if strict_result.get("grade") != "PASS" or parity_dict.get("blocked") or readiness_failures:
-        report_json["status"] = "NOT_READY"
+    manual_review_result = _load_manual_review_result(target=target, output_dir=output)
+    comparison_status = "READY"
+    if parity_dict.get("blocked") or readiness_failures:
+        comparison_status = "NOT_READY"
     report_json["readiness_gates"] = {
-        "status": "PASS" if report_json["status"] == "READY" else "FAIL",
+        "status": "PASS" if comparison_status == "READY" else "FAIL",
         "failures": readiness_failures,
         "thresholds": {
             "page_count_ratio_vs_baseline": 0.80,
@@ -388,6 +809,19 @@ def compare_command(
             "baseline_read_only_verified": True,
         },
     }
+    report_json["manual_review"] = manual_review_result
+
+    replacement_readiness = evaluate_replacement_readiness_v2(
+        strict_verify=strict_result,
+        comparison_result={
+            "status": comparison_status,
+            "readiness_gates": report_json["readiness_gates"],
+        },
+        manual_review_result=manual_review_result,
+    )
+    report_json["replacement_readiness"] = replacement_readiness
+    report_json["status"] = replacement_readiness["readiness_state"]
+    report_json["readiness_reasons"] = replacement_readiness["readiness_reasons"]
 
     output.mkdir(parents=True, exist_ok=True)
     md_path = output / "qoder-comparison-report.md"
@@ -444,7 +878,7 @@ def config_command(
     All secrets are redacted in terminal and JSON outputs.
     """
     # Build overrides from CLI flags
-    cli_overrides = {}
+    cli_overrides: dict[str, Any] = {}
     if provider is not None:
         cli_overrides["provider"] = provider
     if model is not None:
@@ -509,6 +943,268 @@ def _run_with_service(
         raise typer.Exit(code=1)
 
 
+def _resolve_plan_path(repo_root: Path, path: Path) -> Path:
+    if path.is_absolute():
+        return path.resolve()
+    return (repo_root / path).resolve()
+
+
+def _refuse_existing_plan(path: Path, *, force: bool) -> None:
+    if path.exists() and not force:
+        raise typer.BadParameter(
+            f"Refusing to overwrite existing knowledge plan without --force: {path}"
+        )
+
+
+def _minimal_knowledge_model_v3() -> dict[str, Any]:
+    return {
+        "schema_version": "repo_agent.knowledge_model_v3/1.0",
+        "input_fingerprints": {},
+        "summary": {},
+        "records": {},
+    }
+
+
+def _load_knowledge_model_for_plan(repo_root: Path) -> dict[str, Any]:
+    from repo_wiki.scanner import load_knowledge_model_v3
+
+    model = load_knowledge_model_v3(repo_root)
+    if isinstance(model, dict):
+        return model
+    return _minimal_knowledge_model_v3()
+
+
+def _generate_knowledge_plan_for_repo(repo_root: Path) -> dict[str, Any]:
+    from repo_wiki.knowledge_plan import generate_plan
+
+    return generate_plan(_load_knowledge_model_for_plan(repo_root))
+
+
+def _write_knowledge_plan(plan: dict[str, Any], path: Path, *, force: bool) -> dict[str, Any]:
+    from repo_wiki.knowledge_plan import ManualEditConflictError, load_plan, write_plan
+
+    if path.exists() and not force:
+        try:
+            existing = load_plan(path)
+        except Exception as exc:
+            raise typer.BadParameter(
+                f"Refusing to overwrite existing knowledge plan without --force: {path}"
+            ) from exc
+        if not _is_managed_knowledge_plan(existing):
+            raise typer.BadParameter(
+                f"Refusing to overwrite existing knowledge plan without --force: {path}"
+            )
+
+    try:
+        return write_plan(plan, path, overwrite=force)
+    except ManualEditConflictError as exc:
+        raise typer.BadParameter(f"{exc} Use --force to overwrite.") from exc
+
+
+def _is_managed_knowledge_plan(plan: dict[str, Any]) -> bool:
+    generated = plan.get("generated")
+    return isinstance(generated, dict) and isinstance(generated.get("fingerprint"), str)
+
+
+def _knowledge_plan_call(action: str, **kwargs: Any) -> Any:
+    try:
+        import importlib
+
+        module = importlib.import_module("repo_wiki.knowledge_plan")
+    except ModuleNotFoundError as exc:
+        if exc.name != "repo_wiki.knowledge_plan":
+            raise
+        raise typer.BadParameter(
+            "repo_wiki.knowledge_plan is not available yet; run after the core package is present"
+        ) from exc
+
+    service_cls = getattr(module, "KnowledgePlanService", None)
+    if service_cls is not None:
+        service = _instantiate_knowledge_plan_service(service_cls, kwargs)
+        method = getattr(service, action, None) or getattr(
+            service, f"{action}_knowledge_plan", None
+        )
+        if method is not None:
+            return _invoke_knowledge_plan_callable(method, kwargs)
+
+    candidates = [
+        f"{action}_knowledge_plan",
+        f"knowledge_plan_{action}",
+        action,
+    ]
+    for name in candidates:
+        fn = getattr(module, name, None)
+        if fn is not None:
+            return _invoke_knowledge_plan_callable(fn, kwargs)
+    raise typer.BadParameter(
+        "repo_wiki.knowledge_plan does not expose an expected "
+        f"{action!r} API ({', '.join(candidates)} or KnowledgePlanService.{action})"
+    )
+
+
+def _instantiate_knowledge_plan_service(service_cls: Any, kwargs: dict[str, Any]) -> Any:
+    repo_root = kwargs.get("repo_root")
+    try:
+        return service_cls(repo_root=repo_root)
+    except TypeError:
+        try:
+            return service_cls(repo_root)
+        except TypeError:
+            return service_cls()
+
+
+def _invoke_knowledge_plan_callable(fn: Any, kwargs: dict[str, Any]) -> Any:
+    import inspect
+
+    signature = inspect.signature(fn)
+    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+        return fn(**kwargs)
+    accepted = {
+        name: value
+        for name, value in kwargs.items()
+        if name in signature.parameters
+        and signature.parameters[name].kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+    return fn(**accepted)
+
+
+def _write_knowledge_plan_result(result: Any, path: Path) -> None:
+    if _result_declares_written_path(result):
+        return
+    text = _extract_knowledge_plan_text(result)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _result_declares_written_path(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    return bool(result.get("path") or result.get("plan_path") or result.get("written_path"))
+
+
+def _extract_knowledge_plan_text(result: Any) -> str:
+    if isinstance(result, str):
+        return result
+    if isinstance(result, bytes):
+        return result.decode("utf-8")
+    if isinstance(result, dict):
+        for key in ("content", "yaml", "plan_yaml", "text"):
+            value = result.get(key)
+            if isinstance(value, str):
+                return value
+        plan = result.get("plan")
+        if isinstance(plan, str):
+            return plan
+        if plan is not None:
+            return _dump_knowledge_plan_yaml(plan)
+        return _dump_knowledge_plan_yaml(result)
+    if hasattr(result, "to_yaml"):
+        value = result.to_yaml()
+        if isinstance(value, str):
+            return value
+    if hasattr(result, "model_dump"):
+        return _dump_knowledge_plan_yaml(result.model_dump())
+    if hasattr(result, "dict"):
+        return _dump_knowledge_plan_yaml(result.dict())
+    return str(result)
+
+
+def _dump_knowledge_plan_yaml(value: Any) -> str:
+    import yaml
+
+    return yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
+
+
+def _ensure_dict_result(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        return result
+    if hasattr(result, "model_dump"):
+        dumped = result.model_dump()
+        if isinstance(dumped, dict):
+            return dumped
+    if hasattr(result, "dict"):
+        dumped = result.dict()
+        if isinstance(dumped, dict):
+            return dumped
+    return {"result": result}
+
+
+def _knowledge_plan_has_errors(result: dict[str, Any]) -> bool:
+    if result.get("valid") is False or result.get("status") in {"error", "failed", "invalid"}:
+        return True
+    issues = result.get("issues", [])
+    if not isinstance(issues, list):
+        return False
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        severity = str(issue.get("severity") or issue.get("level") or "").lower()
+        if severity == "error":
+            return True
+    return False
+
+
+def _print_knowledge_plan_result(result: dict[str, Any], *, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    for line in _format_knowledge_plan_human(result):
+        print(line)
+
+
+def _format_knowledge_plan_human(result: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    status = result.get("status") or ("valid" if result.get("valid") is True else None)
+    if status is not None:
+        lines.append(f"status: {status}")
+    if result.get("path"):
+        lines.append(f"path: {result['path']}")
+    issues = result.get("issues", [])
+    if isinstance(issues, list) and issues:
+        lines.append("issues:")
+        for issue in issues:
+            if isinstance(issue, dict):
+                severity = issue.get("severity") or issue.get("level") or "info"
+                code = issue.get("code") or issue.get("id") or "issue"
+                message = issue.get("message") or issue.get("detail") or ""
+                lines.append(f"- [{severity}] {code}: {message}")
+            else:
+                lines.append(f"- {issue}")
+    elif "issues" in result:
+        lines.append("issues: none")
+
+    impacted = result.get("impacted", result)
+    if isinstance(impacted, dict):
+        for key in ("directories", "pages", "templates", "domains", "docs"):
+            value = (
+                impacted.get(key)
+                or impacted.get(f"changed_{key}")
+                or impacted.get(f"impacted_{key}")
+            )
+            if value:
+                lines.append(f"{key}:")
+                for item in value if isinstance(value, list) else [value]:
+                    lines.append(f"- {item}")
+    if not lines:
+        lines.append(json.dumps(result, ensure_ascii=False, indent=2))
+    return lines
+
+
+def _jsonable_knowledge_result(result: Any) -> Any:
+    if isinstance(result, (str, int, float, bool)) or result is None:
+        return result
+    if isinstance(result, bytes):
+        return result.decode("utf-8", errors="replace")
+    if isinstance(result, dict):
+        return result
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+    if hasattr(result, "dict"):
+        return result.dict()
+    return str(result)
+
+
 class _temporary_env:
     def __init__(self, updates: dict[str, str]) -> None:
         self.updates = updates
@@ -533,38 +1229,30 @@ def _resolve_verify_root(project_root: Path, output: str | None) -> Path:
     raw = Path(output)
     if raw.exists():
         return raw.resolve()
-    # run-id mode
+    # run-id mode: nested qoder-like layout under .repo-agent-eval/runs/<id>/
+    nested = project_root / ".repo-agent-eval" / "runs" / output
+    if nested.exists():
+        return nested.resolve()
     candidate = project_root / ".repo-agent-eval" / output
     if candidate.exists():
         return candidate.resolve()
-    # allow content/run paths even if they do not exist yet
-    return candidate.resolve()
+    # Prefer nested contract path for new runs when neither exists yet
+    return nested.resolve()
 
 
 def _resolve_improve_run(output: Path, run: str | None) -> Path:
-    root = output.resolve()
-    if run:
-        raw = Path(run)
-        if raw.exists():
-            candidate = raw.resolve()
-        else:
-            candidate = (root / run).resolve()
-        if not (candidate / "manifest.json").exists():
-            raise typer.BadParameter(f"Run does not contain manifest.json: {candidate}")
-        return candidate
+    from repo_wiki.orchestration.latest_run_selector import select_run
 
-    candidates = (
-        [
-            path
-            for path in root.iterdir()
-            if path.is_dir() and not path.name.startswith(".") and (path / "manifest.json").exists()
-        ]
-        if root.exists()
-        else []
-    )
-    if not candidates:
-        raise typer.BadParameter(f"No eval runs with manifest.json found under: {root}")
-    return max(candidates, key=lambda p: (p / "manifest.json").stat().st_mtime).resolve()
+    root = output.resolve()
+    raw = Path(run).resolve() if run and Path(run).exists() else None
+    if raw:
+        if not (raw / "manifest.json").exists():
+            raise typer.BadParameter(f"Run does not contain manifest.json: {raw}")
+        return raw
+    try:
+        return select_run(root, run_id=run).resolve()
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _read_json_file(path: Path, default: Any) -> Any:
@@ -603,6 +1291,8 @@ def _read_composer_cache_summary(cache_path: Path, limit: int) -> dict[str, Any]
             "total_entries": stats.total_entries,
             "cache_hits": stats.cache_hits,
             "cache_misses": stats.cache_misses,
+            "skipped_pages": getattr(stats, "skipped_pages", 0),
+            "regenerated_pages": getattr(stats, "regenerated_pages", 0),
             "total_tokens_saved": stats.total_tokens_saved,
             "total_cost_saved_usd": stats.total_cost_saved_usd,
         },
@@ -755,6 +1445,28 @@ def _compare_readiness_failures(report: dict[str, Any]) -> list[dict[str, Any]]:
                 "message": "LLM-composed plus cached page coverage is below 80%",
                 "actual": llm_coverage,
                 "threshold": 0.80,
+            }
+        )
+
+    path_comparison = report.get("path_comparison", {})
+    required_counterpart_failures = path_comparison.get("required_counterpart_failures", [])
+    for failure in required_counterpart_failures:
+        if not isinstance(failure, dict):
+            continue
+        failure_type = failure.get("failure_type")
+        code = (
+            "QODER_REQUIRED_COUNTERPART_QUALITY_LOW"
+            if failure_type == "quality_low"
+            else "QODER_REQUIRED_COUNTERPART_MISSING"
+        )
+        failures.append(
+            {
+                "code": code,
+                "message": failure.get("message", "Missing required baseline counterpart page"),
+                "actual": failure.get("baseline_matches", []),
+                "threshold": failure.get("required_prefixes", []),
+                "rule_id": failure.get("rule_id"),
+                "pair_score": failure.get("pair_score"),
             }
         )
 
@@ -919,6 +1631,10 @@ def _render_compare_markdown(report: dict[str, Any]) -> str:
     llm = m.get("llm_generation_coverage", {})
     gates = report.get("readiness_gates", {})
     failures = gates.get("failures", []) if isinstance(gates, dict) else []
+    replacement = report.get("replacement_readiness", {})
+    readiness_reasons = report.get("readiness_reasons", [])
+    manual_review = report.get("manual_review", {})
+    manual_summary = manual_review.get("summary", {}) if isinstance(manual_review, dict) else {}
     lines = [
         "# Qoder Comparison Report",
         "",
@@ -963,6 +1679,24 @@ def _render_compare_markdown(report: dict[str, Any]) -> str:
         lines.extend(["No comparison gate failures.", ""])
     lines.extend(
         [
+            "## Replacement Readiness v2",
+            "",
+            f"- replacement_go: **{replacement.get('replacement_go')}**",
+            f"- strict_verify_pass: **{replacement.get('checks', {}).get('strict_verify_pass')}**",
+            f"- qoder_comparison_ready: **{replacement.get('checks', {}).get('qoder_comparison_ready')}**",
+            f"- manual_review_pass: **{replacement.get('checks', {}).get('manual_review_pass')}**",
+            f"- manual_review_status: `{manual_summary.get('status', 'MISSING')}`",
+        ]
+    )
+    if isinstance(readiness_reasons, list) and readiness_reasons:
+        lines.append("- readiness_reasons:")
+        for reason in readiness_reasons:
+            lines.append(f"  - `{reason}`")
+    else:
+        lines.append("- readiness_reasons: none")
+    lines.append("")
+    lines.extend(
+        [
             "## Strict Verify",
             "",
             "```json",
@@ -971,3 +1705,21 @@ def _render_compare_markdown(report: dict[str, Any]) -> str:
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+def _load_manual_review_result(target: Path, output_dir: Path) -> dict[str, Any] | None:
+    candidates = [
+        output_dir / "manual-review-matrix-v2.json",
+        target.parent / "reports" / "manual-review-matrix-v2.json",
+        target.parent / "manual-review-matrix-v2.json",
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None

@@ -63,7 +63,7 @@ try:
         'hard_gate_failures': v.get('summary', {}).get('hard_gate_failures', 0),
         'soft_gate_failures': v.get('summary', {}).get('soft_gate_failures', 0),
         'overall_score': c.get('summary', {}).get('overall_score', 0) if c else 0,
-        'pilot_repos': ['repo-agent', 'AI_API_Atlas']
+        'pilot_repos': ['repo-agent', 'reference-repo']
     }
     print(json.dumps(metrics, indent=2))
 except Exception as e:

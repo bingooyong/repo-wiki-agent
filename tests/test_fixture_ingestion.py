@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 from repo_wiki.generator.io import write_text
 from scripts.qoder_fixture_ingestion import (
     CURRENT_SCHEMA_VERSION,
+    FRESHNESS_THRESHOLDS,
+    FRESSHNESS_THRESHOLDS,
     REQUIRED_METADATA_FIELDS,
     REQUIRED_SECTIONS,
+    ConfidenceScorer,
     FixtureIngestion,
     FixtureIntegrityChecker,
     FixtureSchemaValidator,
@@ -96,6 +100,12 @@ Services work together.
 Content for {section}.
 """,
         )
+
+
+def _write_hash_tree(root: Path, files: dict[str, str]) -> None:
+    """Write a small markdown tree used by fixture hash regression tests."""
+    for relative_path, content in files.items():
+        write_text(root / relative_path, content)
 
 
 def _create_partial_fixture(root: Path) -> None:
@@ -217,15 +227,17 @@ class TestFixtureSchemaValidation:
             ]
             assert len(missing_file_diags) > 0
 
-    def test_missing_required_metadata_field_fails(self) -> None:
-        """Test that missing required metadata fields fail validation."""
+    def test_missing_required_core_metadata_field_fails(self) -> None:
+        """Test that missing non-provenance metadata still fails validation."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
 
-            # Metadata missing schema_version
+            # Metadata missing repository_name
             metadata = {
-                "repository_name": "test",
+                "schema_version": CURRENT_SCHEMA_VERSION,
+                "contract_version": "qoder.fixture_provenance/1.1",
                 "repository_type": "python",
+                "source": "test",
                 "generated_at": "2026-04-18T00:00:00Z",
                 "generator_version": "1.0.0",
             }
@@ -244,7 +256,7 @@ class TestFixtureSchemaValidation:
                 d
                 for d in diagnostics
                 if d.error == IngestionError.MISSING_REQUIRED_FIELD
-                and "schema_version" in d.field_path
+                and "repository_name" in d.field_path
             ]
             assert len(missing_field_diags) > 0
 
@@ -302,8 +314,171 @@ class TestFixtureIngestion:
 
             assert manifest.integrity.content_hash is not None
             assert manifest.integrity.structure_hash is not None
+            assert manifest.integrity.fixture_hash is not None
+            assert len(manifest.integrity.fixture_hash) == 64
             assert manifest.integrity.file_count > 0
             assert manifest.integrity.total_chars > 0
+
+    def test_manifest_exposes_explicit_provenance_contract(self) -> None:
+        """Test that manifests expose stable provenance and contract metadata."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _create_valid_fixture(root)
+
+            manifest = FixtureIngestion(root).ingest()
+            manifest_dict = manifest.to_dict()
+
+            assert manifest_dict["schema_version"] == "qoder.fixture_manifest/1.1"
+            assert manifest_dict["contract_version"] == "qoder.fixture_provenance/1.1"
+            assert manifest_dict["provenance"]["source"] == "test-repo"
+            assert manifest_dict["provenance"]["generator"] == "1.0.0"
+            assert manifest_dict["provenance"]["fixture_hash"] == manifest.integrity.fixture_hash
+            assert manifest_dict["provenance"]["hash_algorithm"] == "qoder.fixture_hash/2"
+            assert manifest_dict["integrity"]["hash_algorithm"] == "qoder.fixture_hash/2"
+            assert manifest_dict["gating"]["eligible"] is True
+
+    def test_legacy_metadata_without_source_ingests_but_gate_rejects(self) -> None:
+        """Old metadata remains usable for ingestion but not for gate contexts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _create_valid_fixture(root)
+            metadata_path = root / "fixture_metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata.pop("source", None)
+            metadata.pop("fixture_source", None)
+            metadata["generated_at"] = datetime.now(UTC).isoformat()
+            metadata_path.write_text(
+                json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+            manifest = FixtureIngestion(root).ingest()
+            decision = ConfidenceScorer.get_release_gate_decision(manifest, "pilot")
+
+            assert manifest.status == FixtureStatus.PARTIAL
+            assert manifest.is_usable() is True
+            assert any(d.error == IngestionError.MISSING_PROVENANCE for d in manifest.diagnostics)
+            assert decision["decision"] == "REJECTED"
+            assert any("source provenance" in reason for reason in decision["rejection_reasons"])
+
+    def test_legacy_metadata_missing_provenance_fields_ingests_partial(self) -> None:
+        """Missing legacy provenance fields warn on import and fail the release gate."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _create_valid_fixture(root)
+            metadata_path = root / "fixture_metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            for field_name in (
+                "schema_version",
+                "contract_version",
+                "source",
+                "generator",
+                "generator_version",
+                "generated_at",
+            ):
+                metadata.pop(field_name, None)
+            metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+            manifest = FixtureIngestion(root).ingest()
+            decision = ConfidenceScorer.get_release_gate_decision(manifest, "pilot")
+
+            assert manifest.status == FixtureStatus.PARTIAL
+            assert manifest.is_usable() is True
+            assert decision["decision"] == "REJECTED"
+            reasons = "\n".join(decision["rejection_reasons"])
+            assert "schema_version" in reasons
+            assert "contract_version" in reasons
+            assert "source provenance" in reasons
+            assert "generator provenance" in reasons
+            assert "generated_at provenance" in reasons
+
+    def test_invalid_provenance_values_are_rejected(self) -> None:
+        """Present-but-invalid provenance never satisfies the release gate."""
+        cases = (
+            ("source", ["not", "a", "string"], "source"),
+            ("generated_at", 123, "generated_at"),
+            ("generated_at", "not-a-timestamp", "generated_at"),
+            ("schema_version", {"invalid": True}, "schema_version"),
+            ("schema_version", "99.0", "schema_version"),
+            ("contract_version", 123, "contract_version"),
+            (
+                "contract_version",
+                "qoder.fixture_provenance/99.0",
+                "contract_version",
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index, (field_name, value, reason_fragment) in enumerate(cases):
+                case_root = root / str(index)
+                case_root.mkdir()
+                _create_valid_fixture(case_root)
+                metadata_path = case_root / "fixture_metadata.json"
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                metadata[field_name] = value
+                metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+                manifest = FixtureIngestion(case_root).ingest()
+                decision = ConfidenceScorer.get_release_gate_decision(manifest, "pilot")
+
+                assert manifest.status == FixtureStatus.INVALID, field_name
+                assert decision["decision"] == "REJECTED", field_name
+                assert any(reason_fragment in reason for reason in decision["rejection_reasons"]), (
+                    field_name
+                )
+
+    def test_invalid_generator_does_not_override_generator_version(self) -> None:
+        """A malformed generator alias is rejected without replacing a valid fallback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _create_valid_fixture(root)
+            metadata_path = root / "fixture_metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["generator"] = {"invalid": True}
+            metadata["generator_version"] = "generator-v1"
+            metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+            manifest = FixtureIngestion(root).ingest()
+            decision = ConfidenceScorer.get_release_gate_decision(manifest, "pilot")
+
+            assert manifest.metadata.generator_version == "generator-v1"
+            assert manifest.status == FixtureStatus.INVALID
+            assert decision["decision"] == "REJECTED"
+            assert manifest.to_dict()["gating"]["eligible"] is False
+            assert any(
+                "generator" in reason
+                for reason in manifest.to_dict()["gating"]["non_gating_reasons"]
+            )
+            assert any(
+                diagnostic.field_path == "metadata.generator"
+                and diagnostic.error == IngestionError.INVALID_FIELD_TYPE
+                for diagnostic in manifest.diagnostics
+            )
+
+    def test_declared_fixture_hash_mismatch_is_rejected(self) -> None:
+        """A metadata-declared hash must match the framed computed hash."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _create_valid_fixture(root)
+            metadata_path = root / "fixture_metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["fixture_hash"] = "0" * 64
+            metadata["hash_algorithm"] = "qoder.fixture_hash/2"
+            metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+            manifest = FixtureIngestion(root).ingest()
+            decision = ConfidenceScorer.get_release_gate_decision(manifest, "pilot")
+            manifest_dict = manifest.to_dict()
+
+            assert manifest.status == FixtureStatus.INVALID
+            assert manifest_dict["provenance"]["hash_mismatch"] is True
+            assert manifest_dict["gating"]["eligible"] is False
+            assert decision["decision"] == "REJECTED"
+            assert any("fixture_hash" in reason for reason in decision["rejection_reasons"])
+
+    def test_freshness_threshold_typo_alias_is_preserved(self) -> None:
+        """The corrected freshness constant keeps the old misspelled alias."""
+        assert FRESSHNESS_THRESHOLDS is FRESHNESS_THRESHOLDS
 
     def test_manifest_contains_diagnostics(self) -> None:
         """Test that manifest contains diagnostic messages."""
@@ -363,6 +538,62 @@ class TestFixtureIntegrityChecker:
 
             assert structure_hash is not None
             assert len(structure_hash) == 64  # SHA256 hex length
+
+    def test_fixture_hash_is_root_independent(self) -> None:
+        """Identical relative trees hash the same under different roots."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first"
+            second = root / "nested" / "second"
+            files = {
+                "docs/a.md": "alpha",
+                "docs/README.MD": "uppercase extension",
+                "docs/sections/project/index.md": "beta",
+            }
+            _write_hash_tree(first, files)
+            _write_hash_tree(second, files)
+
+            first_hash = FixtureIntegrityChecker.compute_integrity(first).fixture_hash
+            second_hash = FixtureIntegrityChecker.compute_integrity(second).fixture_hash
+
+            assert first_hash == second_hash
+            assert FixtureIntegrityChecker.compute_integrity(first).file_count == 3
+
+    def test_fixture_hash_changes_with_content_or_relative_path(self) -> None:
+        """Fixture hashes bind both bytes and relative POSIX paths."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original = root / "original"
+            content_changed = root / "content-changed"
+            path_changed = root / "path-changed"
+            _write_hash_tree(original, {"docs/a.md": "same"})
+            _write_hash_tree(content_changed, {"docs/a.md": "different"})
+            _write_hash_tree(path_changed, {"docs/renamed.md": "same"})
+
+            original_hash = FixtureIntegrityChecker.compute_integrity(original).fixture_hash
+
+            assert (
+                FixtureIntegrityChecker.compute_integrity(content_changed).fixture_hash
+                != original_hash
+            )
+            assert (
+                FixtureIntegrityChecker.compute_integrity(path_changed).fixture_hash
+                != original_hash
+            )
+
+    def test_content_hash_frames_file_boundaries(self) -> None:
+        """Different file boundaries cannot collide through raw concatenation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first"
+            second = root / "second"
+            _write_hash_tree(first, {"a.md": "ab", "b.md": "c"})
+            _write_hash_tree(second, {"a.md": "a", "b.md": "bc"})
+
+            assert "ab" + "c" == "a" + "bc"
+            assert FixtureIntegrityChecker.compute_content_hash(
+                first
+            ) != FixtureIntegrityChecker.compute_content_hash(second)
 
 
 class TestPathNormalizer:

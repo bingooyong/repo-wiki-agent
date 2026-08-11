@@ -9,7 +9,7 @@
 
 ## 项目背景 [必填]
 
-repo-wiki 是一个本地优先（local-first）的 CLI 工具，专为后端仓库设计，无需 `.qoder` 目录即可生成结构化 wiki 文档。项目核心目标是替代 Qoder Repo Wiki，通过 AI_API_Atlas 的 strict verify 验证（13/13 checks, grade PASS），达成 **GO** 决策。
+repo-wiki 是一个本地优先（local-first）的 CLI 工具，专为后端仓库设计，无需 `.qoder` 目录即可生成结构化 wiki 文档。项目核心目标是提供可复现的 Qoder-like 输出、严格质量门禁和稳定发布目录。
 
 ### 项目基本信息
 
@@ -18,7 +18,7 @@ repo-wiki 是一个本地优先（local-first）的 CLI 工具，专为后端仓
 | 项目名称 | repo-wiki |
 | 项目代号 | repo-agent-qoder-replacement |
 | 业务领域 | DevOps / Platform Engineering / Documentation Automation |
-| 目标上线时间 | 2026-05-02 (Phase 35 GO 已达成) |
+| 发布策略 | 通过公开 CI 与 strict verify 后发布 |
 
 ---
 
@@ -26,7 +26,7 @@ repo-wiki 是一个本地优先（local-first）的 CLI 工具，专为后端仓
 
 ### 核心目标
 
-1. **Qoder 替代能力：** 在 AI_API_Atlas 上通过 strict `repo-wiki verify --profile qoder-like --ci` 验证，达到 qoder 相同质量标准
+1. **Qoder-like 输出能力：** 通过 `repo-wiki verify --profile qoder-like --ci` 验证隔离候选产物
 2. **本地优先 Wiki 生成：** 为任意工程（无需 `.qoder` 目录）生成结构化 wiki 文档，输出到 `.repo-agent-eval/<run>/content/`
 3. **增量更新：** 基于 git diff 实现页面级失效和增量 regeneration
 4. **质量验证：** 内置 strict verify 门禁，包含 qoder-page-dumps、qoder-prose-density、qoder-stale-commit、qoder-content-empty、qoder-toc、qoder-citations、qoder-mermaid 等检查项
@@ -35,7 +35,7 @@ repo-wiki 是一个本地优先（local-first）的 CLI 工具，专为后端仓
 
 | 指标编号 | 指标名称 | 目标值 | 衡量方式 |
 |---------|---------|--------|---------|
-| KPI-001 | Strict Verify 通过率 | 100% (13/13 checks) | `repo-wiki verify --profile qoder-like --ci` |
+| KPI-001 | Strict Verify | 当前配置中的 blocking checks 全部通过 | `repo-wiki verify --profile qoder-like --ci` |
 | KPI-002 | 页面生成数量 | 80-220 页（可配置） | manifest.json page_count |
 | KPI-001 | 代理池支持 | OpenAI-compatible + Minimax | LLM provider abstraction |
 | KPI-004 | 增量更新粒度 | 页面级（page-level invalidation） | git diff hash comparison |
@@ -109,7 +109,7 @@ repo-wiki 是一个本地优先（local-first）的 CLI 工具，专为后端仓
 | 要求编号 | 要求项 | 目标指标 | 说明 |
 |---------|--------|---------|------|
 | NFR-007 | 命令可用性 | `uv run repo-wiki --help` 必须成功 | 部署验证 |
-| NFR-008 | 测试覆盖率 | Phase 28 后 1200+ tests pass | 回归防护 |
+| NFR-008 | 测试覆盖率 | 公开 CI 测试通过 | 回归防护 |
 
 ### 可扩展性要求
 
@@ -146,7 +146,7 @@ repo-wiki 是一个本地优先（local-first）的 CLI 工具，专为后端仓
 
 | 编号 | 待确认内容 | 影响文档 | 优先级 |
 |------|-----------|---------|--------|
-| TBC-001 | 跨仓库泛化性 | 目前仅 AI_API_Atlas 验证 GO，其他仓库需更多 pilot | 低 |
+| TBC-001 | 跨仓库泛化性 | 目前仅 reference-repo 验证 GO，其他仓库需更多 pilot | 低 |
 | TBC-002 | 成本基准数据 | 真实 Minimax 成本曲线尚未在多仓库验证 | 低 |
 
 ---
@@ -155,9 +155,9 @@ repo-wiki 是一个本地优先（local-first）的 CLI 工具，专为后端仓
 
 | 干系人角色 | 姓名/团队 | 职责 | 联系方式 |
 |-----------|----------|------|---------|
-| 项目负责人 | Agent_PlatformCore | 项目整体协调 | - |
-| 技术负责人 | Agent_IndexGraph / Agent_DocGen | 架构和实现 | - |
-| 产品负责人 | Agent_QualityRelease | GO/No-Go 决策，质量门禁 | - |
+| 项目负责人 | project-maintainers | 项目整体协调 | - |
+| 技术负责人 | indexing-maintainers / documentation-maintainers | 架构和实现 | - |
+| 产品负责人 | release-maintainers | GO/No-Go 决策，质量门禁 | - |
 
 ---
 
@@ -167,7 +167,5 @@ repo-wiki 是一个本地优先（local-first）的 CLI 工具，专为后端仓
 > 详见 [design.md](./design.md) 系统设计定义。
 > 详见 [tasks.md](./tasks.md) 交付任务定义。
 >
-> 原始项目信息：
-> - APM Memory Root: `.apm/Memory/Memory_Root.md`
-> - Implementation Plan: `.apm/Implementation_Plan.md`
-> - GO Decision: `docs/go-no-go-dossier.md`
+> 项目信息：
+> - Implementation plans: `docs/plans/`

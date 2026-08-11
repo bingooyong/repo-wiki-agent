@@ -3,14 +3,21 @@
 .env.local
 .env.*.local
 
-# Claude / APM
+# Local AI-agent configuration and programming-process artifacts
+.opencode/
+.codex/
 .claude/
 .apm/
 .agents/
+.cursor/
+.omx/
+.playwright-mcp/
+/CLAUDE.md
 
 # IDE and editors
 .vscode/
 .idea/
+node_modules/
 *.swp
 *.swo
 *~
@@ -39,24 +46,31 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
-tests/fixtures/
 
 # Untracked docs (user generated or containing local paths)
 docs/installation.md
 docs/getting-started.md
-docs/configuration.md
 docs/go-no-go-dossier.md
 docs/release-gate-policy.md
 docs/rollback-plan.md
 docs/00-overview.md
 docs/phases/
-ai/source-of-truth/
+docs/operations/run-inventory-cleanup-report.md
+# Keep curated contracts versioned while ignoring generated scanner artifacts.
+ai/source-of-truth/*
+!ai/source-of-truth/repo-map.yaml
+!ai/source-of-truth/task-catalog.yaml
+!ai/source-of-truth/module-index.yaml
+!ai/source-of-truth/api-index.yaml
+!ai/source-of-truth/data-models.yaml
+!ai/source-of-truth/task-catalog.generated.json
 
 # Build outputs
 .repo-agent-eval/
 .repo-wiki/
 .qoder/
 .tmp/
+docs/superpowers/plans/
 
 # Logs
 *.log

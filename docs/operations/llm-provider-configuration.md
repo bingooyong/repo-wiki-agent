@@ -106,7 +106,8 @@ For OpenAI, Azure OpenAI, or any OpenAI-compatible API:
 
 ```bash
 # OpenAI direct
-export OPENAI_API_KEY="sk-your-key-here"
+read -rsp "OpenAI API key: " OPENAI_API_KEY && echo
+export OPENAI_API_KEY
 export LLM_PROVIDER="openai"
 export LLM_MODEL="gpt-4o-mini"
 
@@ -131,7 +132,8 @@ llm:
 For Anthropic or Anthropic-compatible providers:
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-api03-your-key-here"
+read -rsp "Anthropic API key: " ANTHROPIC_API_KEY && echo
+export ANTHROPIC_API_KEY
 export LLM_PROVIDER="anthropic"
 export LLM_MODEL="claude-3-5-sonnet-20241022"
 ```

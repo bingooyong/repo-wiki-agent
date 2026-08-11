@@ -91,7 +91,8 @@ class LLMAssistedPlanner:
         all_pages = list(self.base_plan.pages) + new_pages
 
         # Rebuild navigation tree
-        planner = _RebuildPlanner(self.base_plan.repository_identity, all_pages)
+        identity = self.base_plan.repository_identity
+        planner = _RebuildPlanner(identity, all_pages)
         nav_tree = planner._build_navigation_tree()
 
         return WikiPlanManifest(
@@ -116,7 +117,10 @@ class LLMAssistedPlanner:
 
             context = self._build_category_context(category, pages)
             prompt = self._build_suggestion_prompt(category, context)
-            response = self.llm_provider.complete(prompt)
+            provider = self.llm_provider
+            if provider is None:
+                break
+            response = provider.complete(prompt)
 
             # Parse suggestions from response
             category_suggestions = self._parse_suggestions(response)
@@ -245,7 +249,7 @@ class _RebuildPlanner:
 
     def __init__(
         self,
-        identity: RepositoryIdentity,
+        identity: RepositoryIdentity | None,
         pages: list[WikiPagePlan],
     ) -> None:
         self.identity = identity
@@ -275,6 +279,8 @@ class _RebuildPlanner:
                 node_id=f"cat-{category.value}",
                 label=category.value,
                 node_type="category",
+                path=None,
+                icon=None,
                 sort_order=_CATEGORY_ORDER.get(category, 999),
             )
             category_nodes[category] = node
@@ -289,6 +295,7 @@ class _RebuildPlanner:
                 label=page.title,
                 node_type="page",
                 path=page.output_path,
+                icon=None,
                 sort_order=page.sort_order,
             )
 

@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
+
+from pathspec import PathSpec
 
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.core.contracts import (
@@ -23,12 +26,6 @@ from repo_wiki.core.security import (
     sanitize_text,
     should_scan,
 )
-
-try:
-    from pathspec import PathSpec
-except ImportError:  # pragma: no cover
-    PathSpec = None
-
 
 _CODE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".kt"}
 _MODEL_FILE_HINTS = ("model", "schema", "entity", "dto", "migration", "alembic")
@@ -116,6 +113,7 @@ class RepositoryScanner:
         self.root = Path(config.project.root).resolve()
         self._gitignore = self._load_gitignore()
         self.last_security_warnings: list[SecurityWarning] = []
+        self.last_scan_stats = RepositoryStats(total_files=0, scanned_files=0, skipped_files=0)
 
     def scan(self) -> RepositorySnapshot:
         scanned_files, stats = self._collect_files()
@@ -142,11 +140,24 @@ class RepositoryScanner:
             stats=stats,
         )
 
-    def _collect_files(self) -> tuple[list[ScannedFile], RepositoryStats]:
-        scanned: list[ScannedFile] = []
+    def iter_scanned_files(self) -> Iterator[ScannedFile]:
+        """Yield eligible files in deterministic scan order.
+
+        This is the streaming primitive used by batch/incremental callers: each
+        file is read, sanitized, yielded, then released by the scanner. The final
+        ``last_scan_stats`` value mirrors ``_collect_files()`` semantics.
+        """
+        self.last_security_warnings = []
         skipped = 0
         total = 0
+        scanned = 0
         max_bytes = self.config.security.max_file_size_kb * 1024
+
+        def remember_stats() -> None:
+            self.last_scan_stats = RepositoryStats(
+                total_files=total, scanned_files=scanned, skipped_files=skipped
+            )
+
         for dirpath, dirnames, filenames in os.walk(
             self.root, followlinks=self.config.scan.follow_symlinks
         ):
@@ -190,16 +201,30 @@ class RepositoryScanner:
                 text = raw.decode("utf-8", errors="ignore")
                 sanitized, warnings = sanitize_text(text, path=rel.as_posix())
                 self.last_security_warnings.extend(warnings)
-                scanned.append(ScannedFile(path=rel, text=sanitized))
-                if len(scanned) >= self.config.scan.max_file_count:
-                    stats = RepositoryStats(
-                        total_files=total, scanned_files=len(scanned), skipped_files=skipped
-                    )
-                    return scanned, stats
-        stats = RepositoryStats(
-            total_files=total, scanned_files=len(scanned), skipped_files=skipped
-        )
-        return scanned, stats
+                scanned += 1
+                remember_stats()
+                yield ScannedFile(path=rel, text=sanitized)
+                if scanned >= self.config.scan.max_file_count:
+                    remember_stats()
+                    return
+        remember_stats()
+
+    def iter_file_batches(self, batch_size: int = 100) -> Iterator[list[ScannedFile]]:
+        """Yield scanned files in deterministic batches."""
+        if batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+        batch: list[ScannedFile] = []
+        for scanned_file in self.iter_scanned_files():
+            batch.append(scanned_file)
+            if len(batch) >= batch_size:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
+
+    def _collect_files(self) -> tuple[list[ScannedFile], RepositoryStats]:
+        scanned = list(self.iter_scanned_files())
+        return scanned, self.last_scan_stats
 
     def _is_directory_pruned(self, rel_path: Path) -> bool:
         rel = rel_path.as_posix()
@@ -252,9 +277,7 @@ class RepositoryScanner:
                 return True
         return False
 
-    def _load_gitignore(self):
-        if PathSpec is None:
-            return None
+    def _load_gitignore(self) -> PathSpec | None:
         gitignore_path = self.root / ".gitignore"
         if not gitignore_path.exists():
             return None

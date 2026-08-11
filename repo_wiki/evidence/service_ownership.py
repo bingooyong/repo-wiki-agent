@@ -119,6 +119,98 @@ AI_SERVICE_PATTERNS = {
     "embedding": ["embedding", "embedder", "vectorize"],
 }
 
+# Inventory-service ownership signals for API台账服务 evidence resolution.
+INVENTORY_SERVICE_ALIASES = {
+    "inventory-service",
+    "inventory_service",
+    "inventory service",
+    "api台账服务",
+}
+
+INVENTORY_STRONG_SYMBOLS = {
+    "endpointscontroller",
+    "apiendpointentity",
+    "apiparameterentity",
+    "apiendpointrepository",
+    "apiparameterrepository",
+}
+
+INVENTORY_PATH_HINTS = [
+    "inventory-service",
+    "inventory_service",
+    "inventory/service",
+    "service/inventory",
+    "api/inventory",
+]
+
+INVENTORY_CONTROLLER_HINTS = [
+    "controller",
+    "controllers",
+    "endpoint",
+    "apiendpoint",
+]
+
+INVENTORY_REPOSITORY_HINTS = [
+    "repository",
+    "repositories",
+    "repo",
+]
+
+INVENTORY_ENTITY_HINTS = [
+    "entity",
+    "entities",
+    "apiendpointentity",
+    "apiparameterentity",
+]
+
+
+def is_inventory_service(service_name: str) -> bool:
+    normalized = service_name.lower().replace("_", " ").replace("-", " ").strip()
+    if service_name.lower() in INVENTORY_SERVICE_ALIASES:
+        return True
+    return normalized in {a.replace("-", " ").replace("_", " ") for a in INVENTORY_SERVICE_ALIASES}
+
+
+def _is_ai_service(service_name: str) -> bool:
+    return service_name.lower() == "ai-service"
+
+
+def _contains_ai_evidence(text: str, file_path: str = "") -> bool:
+    """Check for AI-service evidence with path context to reduce false positives.
+
+    Requires either an ai-service path hint OR a strong AI keyword cluster
+    (not just a single generic term like "embedding").
+    """
+    combined = f"{file_path} {text}".lower()
+
+    ai_service_path_markers = ["ai-service", "ai_service", "aiservice", "ai/service"]
+    has_ai_path = any(m in combined for m in ai_service_path_markers)
+
+    keyword_hits = 0
+    for patterns in AI_SERVICE_PATTERNS.values():
+        for pattern in patterns:
+            if pattern.lower() in combined:
+                keyword_hits += 1
+
+    if has_ai_path and keyword_hits >= 1:
+        return True
+    if keyword_hits >= 2:
+        return True
+    return False
+
+
+def _is_explicit_ai_integration_context(text: str) -> bool:
+    integration_markers = [
+        "ai integration",
+        "ai-integration",
+        "integration with ai-service",
+        "integrates with ai-service",
+        "调用 ai-service",
+        "集成 ai-service",
+    ]
+    return any(marker in text for marker in integration_markers)
+
+
 # Module path to domain mapping for common layouts
 DOMAIN_FROM_PATH = {
     "ai": "ai-services",
@@ -271,6 +363,58 @@ class ServiceOwnershipResolver:
                 rejection_reasons=rejection_reasons,
             )
 
+        combined_text = " ".join(
+            filter(None, [symbol or "", file_path or "", span_text or ""])
+        ).lower()
+
+        # Inventory-specific rejection: API台账服务 should not bind to ai-service evidence
+        # unless the context explicitly describes AI integration.
+        if is_inventory_service(self.service_name) and _contains_ai_evidence(
+            combined_text, file_path or ""
+        ):
+            if not _is_explicit_ai_integration_context(combined_text):
+                rejection_reasons.append(
+                    "API台账服务 evidence incorrectly points to ai-service context without explicit AI integration"
+                )
+                signals.append(
+                    OwnershipSignal(
+                        signal_type="inventory_ai_service_conflict",
+                        weight=1.0,
+                        score=0.0,
+                        reason="Found ai-service evidence without explicit integration context",
+                    )
+                )
+                return OwnershipConfidence(
+                    decision=OwnershipDecision.REJECTED,
+                    confidence=1.0,
+                    signals=signals,
+                    rejection_reasons=rejection_reasons,
+                )
+
+        # Inverse rejection: ai-service resolver must reject strong inventory-service evidence.
+        if _is_ai_service(self.service_name):
+            symbol_low = (symbol or "").lower()
+            if symbol_low in INVENTORY_STRONG_SYMBOLS or any(
+                hint in combined_text for hint in INVENTORY_PATH_HINTS
+            ):
+                rejection_reasons.append(
+                    "Evidence strongly indicates inventory-service ownership, not ai-service"
+                )
+                signals.append(
+                    OwnershipSignal(
+                        signal_type="inventory_service_conflict",
+                        weight=1.0,
+                        score=0.0,
+                        reason="Found inventory-service specific symbol/path hints",
+                    )
+                )
+                return OwnershipConfidence(
+                    decision=OwnershipDecision.REJECTED,
+                    confidence=1.0,
+                    signals=signals,
+                    rejection_reasons=rejection_reasons,
+                )
+
         # Score based on domain match
         domain_score = 0.0
         if evidence_domain and self.domain:
@@ -388,6 +532,85 @@ class ServiceOwnershipResolver:
                             reason=f"Path domain '{path_domain}' is a weak hint",
                         )
                     )
+
+        # Inventory-specific strong ownership signals.
+        if is_inventory_service(self.service_name):
+            symbol_lower = (symbol or "").lower()
+            file_path_lower = (file_path or "").lower()
+            span_text_lower = (span_text or "").lower()
+
+            if symbol_lower in INVENTORY_STRONG_SYMBOLS:
+                signals.append(
+                    OwnershipSignal(
+                        signal_type="inventory_strong_symbol",
+                        weight=0.7,
+                        score=1.0,
+                        reason=f"Strong inventory-service symbol '{symbol}' matched",
+                    )
+                )
+
+            if any(hint in file_path_lower for hint in INVENTORY_PATH_HINTS):
+                signals.append(
+                    OwnershipSignal(
+                        signal_type="inventory_service_directory",
+                        weight=0.6,
+                        score=1.0,
+                        reason="File path maps to inventory-service directory",
+                    )
+                )
+
+            if any(h in file_path_lower for h in INVENTORY_CONTROLLER_HINTS) and (
+                "endpoint" in file_path_lower or "api" in file_path_lower
+            ):
+                signals.append(
+                    OwnershipSignal(
+                        signal_type="inventory_controller_package",
+                        weight=0.45,
+                        score=0.9,
+                        reason="Controller package hints endpoint API ownership",
+                    )
+                )
+
+            if any(h in (symbol_lower + " " + span_text_lower) for h in INVENTORY_ENTITY_HINTS):
+                signals.append(
+                    OwnershipSignal(
+                        signal_type="inventory_entity_name",
+                        weight=0.45,
+                        score=0.9,
+                        reason="Entity naming indicates API inventory domain",
+                    )
+                )
+
+            if any(
+                h in (symbol_lower + " " + span_text_lower + " " + file_path_lower)
+                for h in INVENTORY_REPOSITORY_HINTS
+            ) and (
+                "apiendpoint" in (symbol_lower + " " + span_text_lower + " " + file_path_lower)
+                or "apiparameter" in (symbol_lower + " " + span_text_lower + " " + file_path_lower)
+            ):
+                signals.append(
+                    OwnershipSignal(
+                        signal_type="inventory_repository_name",
+                        weight=0.45,
+                        score=0.9,
+                        reason="Repository naming matches API inventory entities",
+                    )
+                )
+
+            readme_inventory_normalized = span_text_lower.replace("-", " ").replace("_", " ")
+            if (
+                "readme" in file_path_lower
+                and "api台账服务" in span_text_lower
+                and "inventory service" in readme_inventory_normalized
+            ):
+                signals.append(
+                    OwnershipSignal(
+                        signal_type="inventory_readme_service_mapping",
+                        weight=0.4,
+                        score=0.85,
+                        reason="README explicitly maps API台账服务 to inventory-service",
+                    )
+                )
 
         # Calculate weighted confidence
         total_weight = sum(s.weight for s in signals) if signals else 1.0

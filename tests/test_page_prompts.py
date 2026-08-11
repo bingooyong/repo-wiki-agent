@@ -390,6 +390,7 @@ class TestSecretRedaction:
 
     def test_redact_api_key_in_overview_context(self) -> None:
         """Test API keys are redacted in rendered prompts."""
+        fake_api_key = "sk-" + "1234567890abcdefghijklmnop"
         context = {
             "repository_name": "test-repo",
             "primary_language": "python",
@@ -398,7 +399,7 @@ class TestSecretRedaction:
             "endpoint_count": "20",
             "model_count": "10",
             "repository_root": "/test/repo",
-            "project_positioning": 'API_KEY="sk-1234567890abcdefghijklmnop"',
+            "project_positioning": 'API_KEY="' + fake_api_key + '"',
             "core_problem": "Test problem",
             "core_capabilities": "Test capabilities",
             "environment_requirements": "Test requirements",
@@ -408,11 +409,12 @@ class TestSecretRedaction:
         }
         rendered = render_prompt_fragment("overview", context)
         redacted = redact_secrets(rendered)
-        assert "sk-1234567890abcdefghijklmnop" not in redacted
+        assert fake_api_key not in redacted
         assert "[REDACTED]" in redacted
 
     def test_redact_bearer_token_in_context(self) -> None:
         """Test Bearer tokens are redacted in rendered prompts."""
+        fake_bearer_token = "eyJhbGciOiJIUzI1NiIs" + "InR5cCI6IkpXVCJ9"
         context = {
             "repository_name": "test-repo",
             "primary_language": "python",
@@ -421,7 +423,7 @@ class TestSecretRedaction:
             "endpoint_count": "20",
             "model_count": "10",
             "repository_root": "/test/repo",
-            "project_positioning": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "project_positioning": "Bearer " + fake_bearer_token + "...",
             "core_problem": "Test problem",
             "core_capabilities": "Test capabilities",
             "environment_requirements": "Test requirements",
@@ -431,7 +433,7 @@ class TestSecretRedaction:
         }
         rendered = render_prompt_fragment("overview", context)
         redacted = redact_secrets(rendered)
-        assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in redacted
+        assert fake_bearer_token not in redacted
 
 
 class TestContractEvidenceRequirements:

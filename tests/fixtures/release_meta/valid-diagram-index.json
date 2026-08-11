@@ -1,0 +1,12 @@
+{
+  "schema_version": "repo_agent.diagram_index/1.0",
+  "generated_at": "2026-05-05T12:00:00Z",
+  "diagrams": [
+    {
+      "diagram_id": "diagram-1",
+      "page_relative_path": "架构设计/01-architecture.md",
+      "kind": "mermaid",
+      "title": "Context"
+    }
+  ]
+}

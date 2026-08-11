@@ -3,7 +3,7 @@
 **Status:** Draft  
 **Updated:** 2026-05-03  
 **Scope:** repo-agent 通用 repo-wiki 生成体系  
-**Reference Fixture:** AI_API_Atlas `.qoder/repowiki/zh` 只作为目录接口和质量参照，不作为硬编码模板。
+**Reference Fixture:** reference-repo `.qoder/repowiki/zh` 只作为目录接口和质量参照，不作为硬编码模板。
 
 ## 1. Product Position
 
@@ -33,7 +33,7 @@ flowchart TD
 
 ## 2. Qoder Directory Interface Lessons
 
-AI_API_Atlas 的 Qoder 发布目录是：
+reference-repo 的 Qoder 发布目录是：
 
 ```text
 .qoder/repowiki/zh/

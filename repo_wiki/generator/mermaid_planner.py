@@ -366,9 +366,7 @@ class MermaidPlanner:
                 diagrams.append(diagram)
 
         elif page_type == "api":
-            diagram = self._plan_api_diagram(page_id, evidence_binding, context)
-            if diagram:
-                diagrams.append(diagram)
+            diagrams.extend(self.plan_api_diagrams(page_id, evidence_binding, context))
 
         elif page_type in ("data", "entity"):
             diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
@@ -475,32 +473,74 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        """Plan API sequence diagram."""
+        """Plan primary API sequence diagram (legacy single-plan entrypoint)."""
+        plans = self.plan_api_diagrams(page_id, evidence_binding, context)
+        return plans[0] if plans else None
+
+    def plan_api_diagrams(
+        self,
+        page_id: str,
+        evidence_binding: PageEvidenceBinding | None,
+        context: dict[str, Any],
+    ) -> list[DiagramPlan]:
+        """Plan API diagram contract:
+        1) endpoint lifecycle sequence diagram
+        2) service/controller/repository/entity flowchart
+        3) ER diagram when relationship evidence exists
+        """
+        plans: list[DiagramPlan] = []
+        sequence_plan = self._plan_api_sequence_diagram(page_id, evidence_binding, context)
+        if sequence_plan:
+            plans.append(sequence_plan)
+        relation_plan = self._plan_api_relationship_flowchart(page_id, evidence_binding, context)
+        if relation_plan:
+            plans.append(relation_plan)
+        er_plan = self._plan_api_er_diagram(page_id, evidence_binding, context)
+        if er_plan:
+            plans.append(er_plan)
+        return plans
+
+    def _plan_api_sequence_diagram(
+        self,
+        page_id: str,
+        evidence_binding: PageEvidenceBinding | None,
+        context: dict[str, Any],
+    ) -> DiagramPlan | None:
+        """Map endpoint list/detail/count/parameter retrieval flows into sequence diagram."""
         endpoints = context.get("endpoints", [])
 
-        # Extract participant names from endpoints
-        participants: list[str] = []
+        participants: list[str] = ["Client"]
         messages: list[tuple[str, str, str]] = []
+        participants_seen: set[str] = {"Client"}
 
-        # Group endpoints by service
-        seen_services: set[str] = set()
-        for endpoint in endpoints[:10]:  # Limit to 10
-            path = endpoint.get("path", "/unknown")
-            method = endpoint.get("method", "GET")
-            service = endpoint.get("service", "client")
+        def _add_participant(name: str) -> None:
+            normalized = name.strip() or "API"
+            if normalized not in participants_seen:
+                participants.append(normalized)
+                participants_seen.add(normalized)
 
-            if service not in seen_services:
-                participants.append(service)
-                seen_services.add(service)
+        _add_participant("Controller")
+        _add_participant("Repository")
 
-            # Create message: client -> service
-            if service != "client":
-                messages.append(("client", service, f"{method} {path}"))
+        for endpoint in endpoints[:16]:
+            path = str(endpoint.get("path", "/unknown"))
+            method = str(endpoint.get("method", "GET")).upper()
+            flow_name = f"{method} {path}"
+            path_lower = path.lower()
 
-        # If no endpoints, provide a generic client->API flow
-        if not participants:
-            participants = ["client", "API"]
-            messages.append(("client", "API", "request"))
+            if "count" in path_lower:
+                flow_tag = "count flow"
+            elif "param" in path_lower or "query" in path_lower:
+                flow_tag = "parameter flow"
+            elif path_lower.endswith("}") or "/{" in path_lower:
+                flow_tag = "detail flow"
+            else:
+                flow_tag = "list flow"
+
+            messages.append(("Client", "Controller", f"{flow_name} ({flow_tag})"))
+            messages.append(("Controller", "Repository", "query/read"))
+            messages.append(("Repository", "Controller", "result set"))
+            messages.append(("Controller", "Client", "response"))
 
         evidence_spans = []
         if evidence_binding:
@@ -508,13 +548,111 @@ class MermaidPlanner:
                 evidence_spans.append(candidate.span)
 
         return DiagramPlan(
-            diagram_id=f"{page_id}-api-sequence",
+            diagram_id=f"{page_id}-endpoint-lifecycle-sequence",
             diagram_type=MermaidDiagramType.SEQUENCE_DIAGRAM,
-            title="API Sequence",
-            description="API call flow and interactions",
+            title="Endpoint Lifecycle Sequence",
+            description="Endpoint list/detail/count/parameter retrieval flows",
             sequence_participants=participants,
             sequence_messages=messages,
             evidence_spans=evidence_spans,
+        )
+
+    def _plan_api_relationship_flowchart(
+        self,
+        page_id: str,
+        evidence_binding: PageEvidenceBinding | None,
+        context: dict[str, Any],
+    ) -> DiagramPlan | None:
+        """Map service/controller/repository/entity relationships into flowchart."""
+        nodes: list[DiagramNode] = [
+            DiagramNode(id="frontend", label="Frontend", shape="rectangle"),
+            DiagramNode(id="controller", label="Controller", shape="rectangle"),
+            DiagramNode(id="service", label="Service", shape="rectangle"),
+            DiagramNode(id="repository", label="Repository", shape="rectangle"),
+            DiagramNode(id="entity", label="Entity/DTO", shape="rectangle"),
+        ]
+        edges: list[DiagramEdge] = [
+            DiagramEdge(from_node="frontend", to_node="controller", label="API call"),
+            DiagramEdge(from_node="controller", to_node="service", label="orchestrate"),
+            DiagramEdge(from_node="service", to_node="repository", label="read/write"),
+            DiagramEdge(from_node="repository", to_node="entity", label="map"),
+            DiagramEdge(from_node="service", to_node="entity", label="DTO transform"),
+        ]
+
+        if evidence_binding:
+            for candidate in evidence_binding.candidates[:12]:
+                symbol = (candidate.span.symbol or "").lower()
+                if "controller" in symbol:
+                    edges.append(DiagramEdge("frontend", "controller", "request"))
+                elif "repositor" in symbol:
+                    edges.append(DiagramEdge("service", "repository", "persistence"))
+                elif "entity" in symbol or "dto" in symbol:
+                    edges.append(DiagramEdge("repository", "entity", "materialize"))
+
+        return DiagramPlan(
+            diagram_id=f"{page_id}-service-relationship-flow",
+            diagram_type=MermaidDiagramType.FLOWCHART,
+            title="Service Relationship Flow",
+            description="Service/controller/repository/entity relationship flow",
+            nodes=nodes,
+            edges=edges,
+            evidence_spans=[c.span for c in evidence_binding.candidates]
+            if evidence_binding
+            else [],
+        )
+
+    def _plan_api_er_diagram(
+        self,
+        page_id: str,
+        evidence_binding: PageEvidenceBinding | None,
+        context: dict[str, Any],
+    ) -> DiagramPlan | None:
+        """Map entity relationships into ER diagram when evidence supports them."""
+        if not evidence_binding:
+            return None
+
+        relationship_tokens = (
+            "relation",
+            "relationship",
+            "foreign",
+            "references",
+            "join",
+            "关联",
+            "关系",
+        )
+        entity_markers = ("entity", "dto", "model")
+
+        candidates = evidence_binding.candidates
+        has_relation_evidence = any(
+            any(token in (c.span.span_text or "").lower() for token in relationship_tokens)
+            for c in candidates
+        )
+        if not has_relation_evidence:
+            return None
+
+        er_entities: list[dict[str, Any]] = []
+        for candidate in candidates[:8]:
+            symbol = (candidate.span.symbol or "").strip()
+            symbol_lower = symbol.lower()
+            if symbol and any(marker in symbol_lower for marker in entity_markers):
+                er_entities.append(
+                    {
+                        "entity": symbol.replace(" ", "_"),
+                        "attributes": [],
+                        "primary_key": "id",
+                    }
+                )
+
+        if len(er_entities) < 2:
+            return None
+
+        return DiagramPlan(
+            diagram_id=f"{page_id}-entity-relationship-er",
+            diagram_type=MermaidDiagramType.ER_DIAGRAM,
+            title="Entity Relationship Diagram",
+            description="Entity relationships inferred from evidence",
+            er_entities=er_entities,
+            evidence_spans=[c.span for c in candidates],
         )
 
     def _plan_data_model_diagram(

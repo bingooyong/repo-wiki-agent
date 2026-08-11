@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from repo_wiki.orchestration.readiness_schema import evaluate_replacement_readiness_v2
 from repo_wiki.verifier.qoder_strict_verifier import (
     QoderLikeSeverityThreshold,
     QoderLikeVerifierService,
@@ -194,6 +195,16 @@ class TestReleaseGatePolicy:
 
         # Unknown codes should default to HARD (blocking)
         assert threshold.get_gate_type("UNKNOWN_CODE") == GateType.HARD
+
+    def test_replacement_go_requires_manual_review_and_comparison(self):
+        """Strict PASS cannot directly become replacement GO."""
+        result = evaluate_replacement_readiness_v2(
+            strict_verify={"grade": "PASS"},
+            comparison_result=None,
+            manual_review_result=None,
+        )
+        assert result["replacement_go"] is False
+        assert result["readiness_state"] == "NOT_READY"
 
     def test_soft_codes_become_hard_in_strict(self):
         """Test that soft codes become HARD in strict mode."""

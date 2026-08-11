@@ -86,14 +86,14 @@ class TestChineseTaxonomy:
         assert alt_profile == "qoder-english"
 
 
-class TestAIAPiAtlasTaxonomyFixture:
-    """Tests for AI_API_Atlas taxonomy planning assertions."""
+class TestReferenceRepoTaxonomyFixture:
+    """Tests for reference-repo taxonomy planning assertions."""
 
-    def test_ai_api_atlas_category_coverage(self):
-        """Test that AI_API_Atlas would have coverage across all categories."""
+    def test_reference_repo_category_coverage(self):
+        """Test that reference-repo would have coverage across all categories."""
         categories = [cat for cat in WikiTaxonomyCategory]
 
-        # AI_API_Atlas should have pages in each category
+        # reference-repo should have pages in each category
         expected_coverage = {
             WikiTaxonomyCategory.PROJECT_OVERVIEW: ["overview", "readme", "quickstart"],
             WikiTaxonomyCategory.ARCHITECTURE_DESIGN: ["architecture", "components", "data-flow"],

@@ -11,9 +11,11 @@ The viewer is designed to work with static local files without external service 
 
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 # =============================================================================
 # MERMAID RENDERING
@@ -34,13 +36,13 @@ def get_mermaid_script() -> str:
     else:
         script_src = MERMAID_CDN_URL
     return f"""
-<script src="{script_src}"></script>
+<script src="{html.escape(script_src, quote=True)}"></script>
 <script>
 mermaid.initialize({{
     startOnLoad: true,
     theme: 'default',
-    securityLevel: 'loose',
-    flowchart: {{ useMaxWidth: true, htmlLabels: true }},
+    securityLevel: 'strict',
+    flowchart: {{ useMaxWidth: true, htmlLabels: false }},
     sequenceDiagram: {{ useMaxWidth: true }}
 }});
 </script>
@@ -59,7 +61,7 @@ def render_mermaid_safely(content: str) -> str:
 
     def replace_mermaid_block(match: re.Match) -> str:
         diagram_code = match.group(1).strip()
-        return f'<div class="mermaid">\n{diagram_code}\n</div>'
+        return f'<div class="mermaid">\n{html.escape(diagram_code)}\n</div>'
 
     return MERMAID_BLOCK_PATTERN.sub(replace_mermaid_block, content)
 
@@ -159,9 +161,12 @@ def build_toc_html(headings: list[dict[str, Any]], min_level: int = 2) -> str:
             continue
 
         indent = (h["level"] - min_level) * 2
+        level = int(h["level"])
+        anchor = html.escape(str(h["anchor"]), quote=True)
+        text = html.escape(str(h["text"]))
         lines.append(
-            f'<a class="toc-level-{h["level"]}" href="#{h["anchor"]}" '
-            f'style="margin-left: {indent}em">{h["text"]}</a>'
+            f'<a class="toc-level-{level}" href="#{anchor}" '
+            f'style="margin-left: {indent}em">{text}</a>'
         )
 
     lines.append("</nav>")
@@ -369,8 +374,8 @@ def build_tree_html(nodes: list[dict[str, Any]], base_path: str = "") -> str:
     current_section = None
     for node in nodes:
         node_type = node.get("type", "other")
-        label = node.get("label", node.get("path", ""))
-        path = node.get("path", "")
+        label = html.escape(str(node.get("label", node.get("path", ""))))
+        path = str(node.get("path", ""))
 
         # Section header
         if node_type != current_section:
@@ -387,7 +392,9 @@ def build_tree_html(nodes: list[dict[str, Any]], base_path: str = "") -> str:
             current_section = node_type
 
         # Tree item
-        link = f"{base_path}{path}" if base_path else path
+        raw_link = f"{base_path}{path}" if base_path else path
+        link = _safe_url(raw_link, allow_mailto=False) or "#"
+        link = html.escape(link, quote=True)
         icon = get_tree_icon(node_type)
         lines.append(f'<a class="tree-item tree-{node_type}" href="{link}">{icon} {label}</a>')
 
@@ -543,8 +550,7 @@ def build_viewer_html(
     Returns:
         Complete HTML string
     """
-    # Process content
-    processed = inject_anchors(content)
+    processed = render_markdown_to_html(content, render_mermaid=include_mermaid)
 
     # Build navigation tree
     nav_html = build_tree_html(nav_nodes or []) if nav_nodes else ""
@@ -552,16 +558,14 @@ def build_viewer_html(
     # Build TOC
     toc_html = build_toc_html(toc or []) if toc else ""
 
-    # Apply Mermaid rendering
     if include_mermaid:
-        processed = render_mermaid_safely(processed)
         processed = inject_mermaid_support(processed)
 
-    html = f"""<!DOCTYPE html>
+    result_html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>{title}</title>
+    <title>{html.escape(title)}</title>
     {VIEWER_CSS}
 </head>
 <body>
@@ -575,17 +579,45 @@ def build_viewer_html(
 </body>
 </html>"""
 
-    return html
+    return result_html
 
 
-def render_markdown_to_html(markdown_content: str) -> str:
+def _safe_url(value: str, *, allow_mailto: bool = True) -> str | None:
+    """Return a browser-safe URL or None for executable/unsupported schemes."""
+    candidate = html.unescape(value).strip()
+    if not candidate:
+        return None
+    parsed = urlsplit(candidate)
+    allowed_schemes = {"http", "https"}
+    if allow_mailto:
+        allowed_schemes.add("mailto")
+    if parsed.scheme and parsed.scheme.lower() not in allowed_schemes:
+        return None
+    if not parsed.scheme and candidate.startswith("//"):
+        return None
+    return candidate
+
+
+def render_markdown_to_html(markdown_content: str, *, render_mermaid: bool = True) -> str:
     """Simple markdown to HTML conversion for static viewer.
 
     This handles the most common markdown elements. For full markdown
     rendering, a library like mistune or markdown2 would be needed.
     """
-    # Apply anchor injection first (works on markdown)
-    content = inject_anchors(markdown_content)
+    mermaid_blocks: list[str] = []
+
+    def stash_mermaid(match: re.Match) -> str:
+        token = f"@@REPO_WIKI_MERMAID_{len(mermaid_blocks)}@@"
+        diagram = match.group(1).strip()
+        mermaid_blocks.append(f'<div class="mermaid">\n{html.escape(diagram)}\n</div>')
+        return token
+
+    source = (
+        MERMAID_BLOCK_PATTERN.sub(stash_mermaid, markdown_content)
+        if render_mermaid
+        else markdown_content
+    )
+    content = inject_anchors(html.escape(source, quote=False))
 
     # Convert to HTML - basic transformation
     # Headers
@@ -608,11 +640,22 @@ def render_markdown_to_html(markdown_content: str) -> str:
     # Inline code
     content = re.sub(r"`([^`]+)`", r"<code>\1</code>", content)
 
-    # Links
-    content = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', content)
+    # Images must be converted before links because the image syntax contains link syntax.
+    def replace_image(match: re.Match) -> str:
+        url = _safe_url(match.group(2), allow_mailto=False)
+        if not url:
+            return match.group(1)
+        return f'<img src="{html.escape(url, quote=True)}" alt="{match.group(1)}">'
 
-    # Images
-    content = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", r'<img src="\2" alt="\1">', content)
+    content = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", replace_image, content)
+
+    def replace_link(match: re.Match) -> str:
+        url = _safe_url(match.group(2))
+        if not url:
+            return match.group(1)
+        return f'<a href="{html.escape(url, quote=True)}">{match.group(1)}</a>'
+
+    content = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", replace_link, content)
 
     # Blockquotes
     content = re.sub(r"^&gt; (.+)$", r"<blockquote>\1</blockquote>", content, flags=re.MULTILINE)
@@ -633,7 +676,10 @@ def render_markdown_to_html(markdown_content: str) -> str:
         else:
             processed_lines.append(line)
 
-    return "\n\n".join(processed_lines)
+    rendered = "\n\n".join(processed_lines)
+    for index, block in enumerate(mermaid_blocks):
+        rendered = rendered.replace(f"@@REPO_WIKI_MERMAID_{index}@@", block)
+    return rendered
 
 
 # =============================================================================
@@ -683,4 +729,78 @@ def create_viewer_for_directory(
         "root_dir": str(root_dir),
         "nav_nodes": nav_nodes,
         "manifest_path": str(manifest_path) if manifest_path else None,
+    }
+
+
+def _extract_nested_readiness(readiness: Any) -> str:
+    """Extract readiness_state string from a possibly-nested readiness field."""
+    if isinstance(readiness, str):
+        return readiness
+    if isinstance(readiness, dict):
+        return str(readiness.get("readiness_state") or readiness.get("status") or "")
+    return ""
+
+
+def create_viewer_for_workspace_release(workspace_root: Path) -> dict[str, Any]:
+    """Create viewer config from fixed release manifest only.
+
+    Default contract:
+    - manifest: `.repo-agent-eval/repowiki/zh/manifest.json`
+    - release must be READY (`release_status` or `readiness` equals READY)
+    - no fallback to runs/* or docs/*
+    """
+    import repo_wiki.generator.io as io
+
+    release_root = workspace_root / ".repo-agent-eval" / "repowiki" / "zh"
+    manifest_path = release_root / "manifest.json"
+    if not manifest_path.exists():
+        return {
+            "root_dir": str(release_root),
+            "nav_nodes": [],
+            "manifest_path": str(manifest_path),
+            "status": "NO_RELEASE",
+            "reason": "manifest_missing",
+        }
+
+    manifest_data = io.read_json(manifest_path, {})
+    if not isinstance(manifest_data, dict):
+        return {
+            "root_dir": str(release_root),
+            "nav_nodes": [],
+            "manifest_path": str(manifest_path),
+            "status": "NO_RELEASE",
+            "reason": "manifest_invalid",
+        }
+
+    status = str(
+        manifest_data.get("release_status")
+        or manifest_data.get("readiness_state")
+        or _extract_nested_readiness(manifest_data.get("readiness"))
+        or ""
+    ).upper()
+    if status != "READY":
+        return {
+            "root_dir": str(release_root),
+            "nav_nodes": [],
+            "manifest_path": str(manifest_path),
+            "status": "NO_RELEASE",
+            "reason": "release_not_ready",
+        }
+
+    nav_nodes = build_nav_tree_from_manifest(manifest_data)
+    if not nav_nodes:
+        return {
+            "root_dir": str(release_root),
+            "nav_nodes": [],
+            "manifest_path": str(manifest_path),
+            "status": "NO_RELEASE",
+            "reason": "navigation_tree_missing",
+        }
+
+    return {
+        "root_dir": str(release_root),
+        "nav_nodes": nav_nodes,
+        "manifest_path": str(manifest_path),
+        "status": "READY",
+        "reason": "",
     }

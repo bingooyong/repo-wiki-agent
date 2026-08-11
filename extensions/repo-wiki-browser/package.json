@@ -21,9 +21,20 @@
     "onCommand:repoWikiBrowser.runVerify",
     "onCommand:repoWikiBrowser.updateWiki",
     "onCommand:repoWikiBrowser.syncWiki",
-    "onCommand:repoWikiBrowser.openPage"
+    "onCommand:repoWikiBrowser.openPage",
+    "onCommand:repoWikiBrowser.openSourceCitation",
+    "onCommand:repoWikiBrowser.configureLlm",
+    "onCommand:repoWikiBrowser.setApiKey",
+    "onCommand:repoWikiBrowser.clearApiKey",
+    "onCommand:repoWikiBrowser.testLlmConfig"
   ],
   "main": "./out/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Browsing published Wiki files remains available. Commands, configuration tests, and API key injection require a trusted workspace."
+    }
+  },
   "contributes": {
     "commands": [
       {
@@ -49,6 +60,31 @@
       {
         "command": "repoWikiBrowser.syncWiki",
         "title": "Sync Wiki",
+        "category": "Repo Wiki"
+      },
+      {
+        "command": "repoWikiBrowser.openSourceCitation",
+        "title": "Open Source Citation",
+        "category": "Repo Wiki"
+      },
+      {
+        "command": "repoWikiBrowser.configureLlm",
+        "title": "Configure LLM Settings",
+        "category": "Repo Wiki"
+      },
+      {
+        "command": "repoWikiBrowser.setApiKey",
+        "title": "Set LLM API Key",
+        "category": "Repo Wiki"
+      },
+      {
+        "command": "repoWikiBrowser.clearApiKey",
+        "title": "Clear LLM API Key",
+        "category": "Repo Wiki"
+      },
+      {
+        "command": "repoWikiBrowser.testLlmConfig",
+        "title": "Test LLM Configuration",
         "category": "Repo Wiki"
       }
     ],
@@ -78,6 +114,37 @@
           "type": "string",
           "default": "uv run repo-wiki generate --profile qoder-like",
           "description": "Shell command sent to the integrated terminal for Update Wiki. Default expects `uv` on PATH and a workspace where `repo-wiki` resolves (e.g. via project pyproject). Override if you use pipx, conda, or `python -m repo_wiki`. The extension does not embed the Python CLI."
+        },
+        "repoWikiBrowser.llm.source": {
+          "type": "string",
+          "enum": [
+            "extension",
+            "yaml",
+            "environment"
+          ],
+          "default": "extension",
+          "description": "LLM configuration source for extension-launched commands: extension injects only non-empty visual settings, yaml preserves repo-wiki.yaml non-secret fields and may inject a stored key, environment injects no LLM overrides."
+        },
+        "repoWikiBrowser.llm.provider": {
+          "type": "string",
+          "default": "",
+          "description": "Optional LLM provider injected as LLM_PROVIDER only when repoWikiBrowser.llm.source is extension and this value is non-empty. Empty preserves YAML/shell/CLI defaults."
+        },
+        "repoWikiBrowser.llm.model": {
+          "type": "string",
+          "default": "",
+          "description": "Optional LLM model injected as LLM_MODEL only when repoWikiBrowser.llm.source is extension and this value is non-empty. Empty preserves YAML/shell/CLI defaults."
+        },
+        "repoWikiBrowser.llm.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional base URL injected as LLM_BASE_URL only when repoWikiBrowser.llm.source is extension and this value is non-empty."
+        },
+        "repoWikiBrowser.llm.apiKeyEnv": {
+          "type": "string",
+          "default": "REPO_WIKI_LLM_API_KEY",
+          "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "Environment variable name that repo-wiki CLI should read for the API key. Empty uses REPO_WIKI_LLM_API_KEY. The actual key is stored only in VS Code SecretStorage."
         }
       }
     }
@@ -90,7 +157,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
-    "test": "node ./out/test/runTest.js"
+    "test": "node --check ./out/extension.js"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -457,7 +457,7 @@ def _extract_markdown(file_path: Path, content: str) -> list[SourceSpan]:
 # Helper functions
 # ---------------------------------------------------------------------------
 
-_EXTRACTORS: dict[str, callable] = {
+_EXTRACTORS: dict[str, Callable[[Path, str], list[SourceSpan]]] = {
     "python": _extract_python,
     "java": _extract_java,
     "typescript": _extract_typescript,
@@ -467,7 +467,9 @@ _EXTRACTORS: dict[str, callable] = {
 }
 
 
-def _regex_finditer(pattern: str, text: str, flags: re.RegexFlag = 0) -> Iterator[re.Match]:
+def _regex_finditer(
+    pattern: str, text: str, flags: int | re.RegexFlag = 0
+) -> Iterator[re.Match[str]]:
     """Safely find regex matches, returning empty iterator on error."""
     try:
         return re.finditer(pattern, text, flags)

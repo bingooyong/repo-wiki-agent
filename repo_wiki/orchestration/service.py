@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import re
 import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from repo_wiki.adapter.service import AdapterService
 from repo_wiki.core.config import RepoWikiConfig
@@ -32,6 +33,11 @@ from repo_wiki.retrieval.service import RetrievalService
 from repo_wiki.scanner.artifacts import write_source_of_truth
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 from repo_wiki.verifier.service import VerifierService
+
+if TYPE_CHECKING:
+    from repo_wiki.evidence.ranking import PageEvidenceBinding
+    from repo_wiki.llm.config import LLMProviderConfig
+    from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 
 
 class RepoWikiService:
@@ -262,6 +268,10 @@ class RepoWikiService:
         Returns:
             Generation result with file counts and manifest path
         """
+        from repo_wiki.orchestration.content_layout_writer import (
+            build_navigation_tree,
+            compute_stable_slug,
+        )
         from repo_wiki.orchestration.eval_layout import (
             generate_manifest,
             get_eval_profile,
@@ -479,6 +489,49 @@ class RepoWikiService:
 
         info("stage manifest started")
         stage.start("manifest")
+        repowiki_meta_dir = output_dir / "repowiki" / "zh" / "meta"
+        reports_dir = output_dir / "reports"
+        repowiki_meta_dir.mkdir(parents=True, exist_ok=True)
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        navigation_json = repowiki_meta_dir / "navigation.json"
+        navigation_json.write_text(
+            json.dumps(
+                {
+                    "schema_version": "repo_agent.navigation/1.0",
+                    "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "navigation_tree": navigation_tree,
+                    "taxonomy_version": "qoder-like-zh/1.0",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        from repo_wiki.orchestration.quality_artifacts import (
+            write_generation_conflict_artifacts,
+            write_generation_quality_artifacts,
+        )
+
+        quality_artifact_paths = write_generation_quality_artifacts(
+            meta_dir=repowiki_meta_dir,
+            run_id=run_id,
+            profile_name=eval_profile.name,
+            content_dir=content_dir,
+            plan_pages=list(plan.pages),
+            written_files=written_content,
+            content_stats=content_stats,
+            composition_page_metadata=composition["page_metadata"],
+            failed_pages=composition["failed_pages"],
+            quality_warnings=composition["quality_warnings"],
+            llm_summary=composition["llm"],
+        )
+        conflict_artifact_paths = write_generation_conflict_artifacts(
+            config=self.config,
+            repo_root=self.root,
+            meta_dir=repowiki_meta_dir,
+            reports_dir=reports_dir,
+            persist_scanner_cache=False,
+        )
         manifest = generate_manifest(
             run_id=run_id,
             profile=eval_profile,
@@ -496,6 +549,8 @@ class RepoWikiService:
                 "cache_misses": composition["cache_misses"],
                 "llm": composition["llm"],
                 "isolated": True,
+                "quality_artifacts": quality_artifact_paths,
+                "conflict_artifacts": conflict_artifact_paths,
             },
             metadata={
                 "generation_mode": "isolated-qoder-like-llm-composer",
@@ -908,25 +963,28 @@ class RepoWikiService:
         from repo_wiki.evidence.ranking import (
             EvidenceCandidate,
             PageEvidenceBinding,
+            filter_ranked_candidates_by_ownership,
             rank_evidence_for_page,
         )
 
         bindings: dict[str, PageEvidenceBinding] = {}
         for page in plan.pages:
             candidates = rank_evidence_for_page(page, evidence_spans)
+            candidates = filter_ranked_candidates_by_ownership(page, candidates)
             if not candidates and evidence_spans:
                 fallback = []
                 for idx, span in enumerate(evidence_spans[:5]):
+                    evidence_id = getattr(span, "id", None)
                     fallback.append(
                         EvidenceCandidate(
-                            evidence_id=span.id if getattr(span, "id", None) is not None else idx,
+                            evidence_id=evidence_id if evidence_id is not None else idx,
                             span=span,
                             score=0.1,
                             match_signals=["fallback"],
                             citation_order=idx,
                         )
                     )
-                candidates = fallback
+                candidates = filter_ranked_candidates_by_ownership(page, fallback)
             bindings[page.page_id] = PageEvidenceBinding(
                 page_id=page.page_id,
                 doc_type=page.category.value,
@@ -986,6 +1044,7 @@ class RepoWikiService:
         )
 
         pages: list[tuple[str, str]] = []
+        page_metadata_by_idx: dict[int, dict[str, Any]] = {}
         failed_pages: list[dict[str, str]] = []
         cache_hits = 0
         cache_misses = 0
@@ -1074,7 +1133,7 @@ class RepoWikiService:
             )
             estimated_tokens += page.estimated_tokens or 1000
 
-            cached = cache.get(page.page_id, input_hash)
+            cached = self._observe_composer_cache_hit(cache, page.page_id, input_hash)
             if cached and cached.output_markdown:
                 cache_hits += 1
                 info(f"compose cache hit page_id={page.page_id} title={page.title}")
@@ -1082,9 +1141,21 @@ class RepoWikiService:
                     page=page,
                     markdown=cached.output_markdown,
                     binding=binding,
-                    add_mermaid=page_idx < target_mermaid_pages,
+                    add_mermaid=(
+                        page_idx < target_mermaid_pages
+                        or str(getattr(page, "category", "")).lower() == "api_reference"
+                    ),
+                    composition_context=context,
                 )
                 page_results[page_idx] = (page.output_path, cached_markdown)
+                page_metadata_by_idx[page_idx] = {
+                    "page_id": page.page_id,
+                    "source_path": page.output_path,
+                    "generation_mode": "llm",
+                    "quality_state": "PASS",
+                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                    "reasons": ["cache_hit"],
+                }
                 continue
 
             cache_misses += 1
@@ -1107,9 +1178,27 @@ class RepoWikiService:
                     page=page,
                     markdown=fallback,
                     binding=binding,
-                    add_mermaid=page_idx < target_mermaid_pages,
+                    add_mermaid=(
+                        page_idx < target_mermaid_pages
+                        or str(getattr(page, "category", "")).lower() == "api_reference"
+                    ),
+                    composition_context=context,
                 )
                 page_results[page_idx] = (page.output_path, enriched)
+                page_metadata_by_idx[page_idx] = {
+                    "page_id": page.page_id,
+                    "source_path": page.output_path,
+                    "generation_mode": "fallback",
+                    "quality_state": "DEGRADED",
+                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                    "reasons": [
+                        self._provider_disabled_reason(
+                            max_provider_failures=max_provider_failures,
+                            max_real_provider_calls=max_real_provider_calls,
+                            provider_attempt_count=provider_attempt_count,
+                        )
+                    ],
+                }
                 continue
 
             if (
@@ -1134,9 +1223,27 @@ class RepoWikiService:
                     page=page,
                     markdown=fallback,
                     binding=binding,
-                    add_mermaid=page_idx < target_mermaid_pages,
+                    add_mermaid=(
+                        page_idx < target_mermaid_pages
+                        or str(getattr(page, "category", "")).lower() == "api_reference"
+                    ),
+                    composition_context=context,
                 )
                 page_results[page_idx] = (page.output_path, enriched)
+                page_metadata_by_idx[page_idx] = {
+                    "page_id": page.page_id,
+                    "source_path": page.output_path,
+                    "generation_mode": "fallback",
+                    "quality_state": "DEGRADED",
+                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                    "reasons": [
+                        self._provider_disabled_reason(
+                            max_provider_failures=max_provider_failures,
+                            max_real_provider_calls=max_real_provider_calls,
+                            provider_attempt_count=provider_attempt_count,
+                        )
+                    ],
+                }
                 continue
 
             provider_attempt_count += 1
@@ -1178,9 +1285,21 @@ class RepoWikiService:
                     page=page,
                     markdown=fallback,
                     binding=binding,
-                    add_mermaid=page_idx < target_mermaid_pages,
+                    add_mermaid=(
+                        page_idx < target_mermaid_pages
+                        or str(getattr(page, "category", "")).lower() == "api_reference"
+                    ),
+                    composition_context=context,
                 )
                 page_results[page_idx] = (page.output_path, enriched)
+                page_metadata_by_idx[page_idx] = {
+                    "page_id": page.page_id,
+                    "source_path": page.output_path,
+                    "generation_mode": "fallback",
+                    "quality_state": "DEGRADED",
+                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                    "reasons": [str(result["reason"])],
+                }
                 continue
 
             output = result["output"]
@@ -1204,9 +1323,21 @@ class RepoWikiService:
                     page=page,
                     markdown=fallback,
                     binding=binding,
-                    add_mermaid=page_idx < target_mermaid_pages,
+                    add_mermaid=(
+                        page_idx < target_mermaid_pages
+                        or str(getattr(page, "category", "")).lower() == "api_reference"
+                    ),
+                    composition_context=context,
                 )
                 page_results[page_idx] = (page.output_path, enriched)
+                page_metadata_by_idx[page_idx] = {
+                    "page_id": page.page_id,
+                    "source_path": page.output_path,
+                    "generation_mode": "fallback",
+                    "quality_state": "DEGRADED",
+                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                    "reasons": [output.rejection_reason or "llm_output_rejected"],
+                }
                 continue
 
             provider_failure_count = 0
@@ -1223,9 +1354,14 @@ class RepoWikiService:
                 page=page,
                 markdown=output.markdown,
                 binding=binding,
-                add_mermaid=page_idx < target_mermaid_pages,
+                add_mermaid=(
+                    page_idx < target_mermaid_pages
+                    or str(getattr(page, "category", "")).lower() == "api_reference"
+                ),
+                composition_context=context,
             )
-            cache.put(
+            self._store_composer_cache_page(
+                cache,
                 page_id=page.page_id,
                 input_hash=job["input_hash"],
                 output_markdown=enriched,
@@ -1235,8 +1371,21 @@ class RepoWikiService:
                 cost_usd=estimate_cost_from_tokens(output.tokens_used, llm_config.model),
             )
             page_results[page_idx] = (page.output_path, enriched)
+            effective_mode = "llm" if llm_summary.get("mode") == "real" else "rule"
+            reasons = []
+            if llm_summary.get("mode") == "mock":
+                reasons.append(f"mock_llm:{llm_summary.get('mock_reason') or 'forced'}")
+            page_metadata_by_idx[page_idx] = {
+                "page_id": page.page_id,
+                "source_path": page.output_path,
+                "generation_mode": effective_mode,
+                "quality_state": "READY" if effective_mode == "llm" else "PASS",
+                "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                "reasons": reasons,
+            }
 
         pages = [page_results[idx] for idx in sorted(page_results)]
+        page_metadata = [page_metadata_by_idx[idx] for idx in sorted(page_metadata_by_idx)]
         provider_disabled_after_failures = provider_disabled_after_failures or (
             max_real_provider_calls is not None
             and provider_attempt_count >= max_real_provider_calls
@@ -1244,6 +1393,8 @@ class RepoWikiService:
 
         if hasattr(provider, "close"):
             await provider.close()
+
+        cache_stats = cache.stats()
 
         llm_summary.update(
             {
@@ -1264,6 +1415,8 @@ class RepoWikiService:
                 "priority_mode": priority_mode,
                 "cache_hits": cache_hits,
                 "cache_misses": cache_misses,
+                "skipped_pages": cache_stats.skipped_pages,
+                "regenerated_pages": cache_stats.regenerated_pages,
                 "composer_cache_path": str(cache_path),
                 "page_limit": page_limit,
                 "composed_page_count": len(pages),
@@ -1275,10 +1428,42 @@ class RepoWikiService:
             "pages": pages,
             "failed_pages": failed_pages,
             "quality_warnings": quality_warnings,
+            "page_metadata": page_metadata,
             "cache_hits": cache_hits,
             "cache_misses": cache_misses,
+            "skipped_pages": cache_stats.skipped_pages,
+            "regenerated_pages": cache_stats.regenerated_pages,
             "llm": llm_summary,
         }
+
+    def _observe_composer_cache_hit(self, cache: Any, page_id: str, input_hash: str) -> Any | None:
+        cached = cache.get(page_id, input_hash)
+        if cached and cached.output_markdown:
+            cache.record_skipped_page()
+        return cached
+
+    def _store_composer_cache_page(
+        self,
+        cache: Any,
+        *,
+        page_id: str,
+        input_hash: str,
+        output_markdown: str,
+        tokens_used: int,
+        model_name: str,
+        doc_type: str | None,
+        cost_usd: float,
+    ) -> None:
+        cache.put(
+            page_id=page_id,
+            input_hash=input_hash,
+            output_markdown=output_markdown,
+            tokens_used=tokens_used,
+            model_name=model_name,
+            doc_type=doc_type,
+            cost_usd=cost_usd,
+        )
+        cache.record_regenerated_page()
 
     def _fallback_markdown_for_failed_page(self, page: Any, binding: Any | None) -> str:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
@@ -1482,6 +1667,7 @@ class RepoWikiService:
         markdown: str,
         binding: Any | None,
         add_mermaid: bool,
+        composition_context: Any | None = None,
     ) -> str:
         from repo_wiki.evidence.citation_renderer import CitationRenderer
         from repo_wiki.planner.schema import WikiTaxonomyCategory
@@ -1511,35 +1697,21 @@ class RepoWikiService:
             or "api" in str(getattr(page, "title", "")).lower()
         )
         if is_api_like_page:
+            api_endpoints = self._evidence_backed_api_endpoints(page, composition_context)
+            content = self._strip_unsupported_generic_api_claims(content, api_endpoints)
+            if not api_endpoints:
+                content = self._ensure_unresolved_api_evidence_marker(content)
             if "## API 分组" not in content:
-                content += (
-                    "\n\n## API 分组\n\n"
-                    "按服务族聚合接口能力，优先说明业务语义、调用边界与版本策略，而非原始端点清单。"
-                    "本页把同一服务族下的 GET、POST、PUT、DELETE 与 PATCH 能力放在同一个上下文中解释，"
-                    "用于帮助读者理解查询、创建、更新、删除和局部修改之间的职责边界。"
-                    "\n\n- GET /resources：读取资源列表或健康状态。\n"
-                    "- POST /resources：创建资源或触发处理任务。\n"
-                    "- PUT /resources/{id}：整体更新资源。\n"
-                    "- PATCH /resources/{id}：局部更新资源。\n"
-                    "- DELETE /resources/{id}：删除资源或取消任务。\n"
+                content += "\n\n## API 分组\n\n" + self._build_truthful_api_group_section(
+                    api_endpoints
                 )
             if "## 调用约定" not in content:
-                content += (
-                    "\n\n## 调用约定\n\n"
-                    "统一描述认证方式、幂等约束、错误处理与重试策略，避免把接口文档退化为 endpoint dump。"
+                content += "\n\n## 调用约定\n\n" + self._build_truthful_calling_conventions(
+                    api_endpoints
                 )
             if "## Schema 摘要" not in content:
-                content += (
-                    "\n\n## Schema 摘要\n\n"
-                    "以下 schema 片段用于表达该 API 族的共同字段约定。实际字段以源码引用和 OpenAPI 定义为准，"
-                    "这里保留聚合视角，避免逐条复制所有端点。"
-                    "\n\n```json\n"
-                    "{\n"
-                    '  "request": {"method": "GET|POST|PUT|DELETE|PATCH", "auth": "Bearer token"},\n'
-                    '  "response": {"code": "string", "data": "object", "message": "string"},\n'
-                    '  "error": {"status": 400, "reason": "validation_or_business_error"}\n'
-                    "}\n"
-                    "```\n"
+                content += "\n\n## Schema 摘要\n\n" + self._build_truthful_api_schema_summary(
+                    api_endpoints
                 )
 
         if page.category == WikiTaxonomyCategory.DATA_MODELS:
@@ -1560,7 +1732,20 @@ class RepoWikiService:
                 )
 
         if add_mermaid and "```mermaid" not in content:
-            content += "\n\n## 架构图\n\n" + self._build_minimal_mermaid_block(page)
+            if is_api_like_page and not self._evidence_backed_api_endpoints(
+                page, composition_context
+            ):
+                rendered_blocks = []
+            else:
+                rendered_blocks = self._build_mermaid_blocks_from_planner(
+                    page=page,
+                    binding=binding,
+                    composition_context=composition_context,
+                )
+            if rendered_blocks:
+                content += "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
+            else:
+                content += "\n\n## 架构图\n\n" + self._build_minimal_mermaid_block(page)
 
         citation_renderer = CitationRenderer(workspace_root=self.root)
         cites: list[str] = []
@@ -1580,6 +1765,209 @@ class RepoWikiService:
 
         return content.strip() + "\n"
 
+    def _evidence_backed_api_endpoints(
+        self,
+        page: Any,
+        composition_context: Any | None,
+    ) -> list[dict[str, Any]]:
+        if composition_context is None:
+            return []
+
+        raw_endpoints = getattr(composition_context, "endpoints", []) or []
+        if not isinstance(raw_endpoints, list):
+            return []
+
+        required_paths = set(
+            getattr(getattr(page, "source_requirements", None), "endpoints", []) or []
+        )
+        normalized: list[dict[str, Any]] = []
+        for endpoint in raw_endpoints:
+            if not isinstance(endpoint, dict):
+                continue
+            method = str(endpoint.get("method") or "").upper().strip()
+            path = str(endpoint.get("path") or "").strip()
+            if not method or not path:
+                continue
+            if required_paths and path not in required_paths:
+                continue
+            normalized.append(endpoint)
+        return normalized[:25]
+
+    def _strip_unsupported_generic_api_claims(
+        self,
+        content: str,
+        endpoints: list[dict[str, Any]],
+    ) -> str:
+        evidence_pairs = {
+            (str(ep.get("method") or "").upper().strip(), str(ep.get("path") or "").strip())
+            for ep in endpoints
+        }
+        has_bearer_evidence = any(
+            str(ep.get("auth_type") or "").lower().strip() in {"bearer", "jwt", "oauth"}
+            or "bearer" in str(ep.get("auth") or "").lower()
+            for ep in endpoints
+        )
+
+        cleaned_lines: list[str] = []
+        generic_resource_line = re.compile(
+            r"^\s*-\s*(GET|POST|PUT|PATCH|DELETE)\s+(/resources(?:/\{id\})?)\s*[：:].*$",
+            re.IGNORECASE,
+        )
+        generic_auth_line = re.compile(r"^\s*-\s*认证\s*[：:].*Bearer Token\s*$", re.IGNORECASE)
+        for line in content.splitlines():
+            resource_match = generic_resource_line.match(line)
+            if resource_match:
+                method = resource_match.group(1).upper()
+                path = resource_match.group(2)
+                if (method, path) not in evidence_pairs:
+                    continue
+            if generic_auth_line.match(line) and not has_bearer_evidence:
+                cleaned_lines.append(
+                    "- 认证: <!-- repo-wiki:unresolved api-auth --> "
+                    "UNRESOLVED_API_AUTH（缺少认证证据，不能视为 Bearer Token 事实）"
+                )
+                continue
+            if not has_bearer_evidence:
+                line = line.replace('"auth": "Bearer token"', '"auth": "UNRESOLVED_API_AUTH"')
+            cleaned_lines.append(line)
+        return "\n".join(cleaned_lines).strip()
+
+    def _ensure_unresolved_api_evidence_marker(self, content: str) -> str:
+        if "UNRESOLVED_API_ENDPOINTS" in content:
+            return content
+        return (
+            content.rstrip()
+            + "\n\n## API 证据状态\n\n"
+            + "<!-- repo-wiki:unresolved api-endpoints -->\n"
+            + "UNRESOLVED_API_ENDPOINTS：未解析到证据支持的 API 端点；"
+            + "现有结构内容均不得视为已验证接口事实。"
+        )
+
+    def _build_truthful_api_group_section(self, endpoints: list[dict[str, Any]]) -> str:
+        if not endpoints:
+            return (
+                "<!-- repo-wiki:unresolved api-endpoints -->\n"
+                "UNRESOLVED_API_ENDPOINTS：未在证据上下文中解析到接口端点；本节仅为结构占位，"
+                "不得视为已验证 API 清单。"
+            )
+
+        lines = ["以下端点来自仓库扫描证据上下文：", ""]
+        for endpoint in endpoints:
+            method = str(endpoint.get("method") or "").upper().strip()
+            path = str(endpoint.get("path") or "").strip()
+            handler = str(endpoint.get("handler") or "").strip()
+            file_path = str(endpoint.get("file_path") or "").strip()
+            details = []
+            if handler:
+                details.append(f"handler `{handler}`")
+            if file_path:
+                line_number = endpoint.get("line_number") or endpoint.get("line_start")
+                location = f"`{file_path}`"
+                if line_number:
+                    location += f":{line_number}"
+                details.append(location)
+            suffix = f"（{'，'.join(details)}）" if details else ""
+            lines.append(f"- {method} {path}{suffix}")
+        return "\n".join(lines)
+
+    def _build_truthful_calling_conventions(self, endpoints: list[dict[str, Any]]) -> str:
+        if not endpoints:
+            return (
+                "<!-- repo-wiki:unresolved api-calling-conventions -->\n"
+                "UNRESOLVED_API_CALLING_CONVENTIONS：缺少端点、认证、幂等和错误处理证据；"
+                "本节不声明 Bearer、网关、重试或 CRUD 语义。"
+            )
+
+        methods = sorted(
+            {str(ep.get("method") or "").upper().strip() for ep in endpoints if ep.get("method")}
+        )
+        auth_values = sorted(
+            {
+                str(ep.get("auth_type") or ep.get("auth") or "").strip()
+                for ep in endpoints
+                if str(ep.get("auth_type") or ep.get("auth") or "").strip()
+                and str(ep.get("auth_type") or ep.get("auth") or "").strip().lower() != "unknown"
+            }
+        )
+        lines = [f"- HTTP 方法: {', '.join(methods)}" if methods else "- HTTP 方法: 未解析"]
+        if auth_values:
+            lines.append(f"- 认证: {', '.join(auth_values)}")
+        else:
+            lines.append(
+                "- 认证: <!-- repo-wiki:unresolved api-auth --> "
+                "UNRESOLVED_API_AUTH（证据中未声明认证方式）"
+            )
+        return "\n".join(lines)
+
+    def _build_truthful_api_schema_summary(self, endpoints: list[dict[str, Any]]) -> str:
+        if not endpoints:
+            return (
+                "<!-- repo-wiki:unresolved api-schema -->\n"
+                "UNRESOLVED_API_SCHEMA：缺少请求体、响应体或 OpenAPI/源码字段证据；"
+                "本节不合成通用 request/response/error schema。"
+            )
+
+        body_endpoints = [
+            ep
+            for ep in endpoints
+            if ep.get("request_body") or ep.get("response_type") or ep.get("error_codes")
+        ]
+        if not body_endpoints:
+            return (
+                "<!-- repo-wiki:unresolved api-schema -->\n"
+                "UNRESOLVED_API_SCHEMA：端点证据未提供请求体、响应体或错误码字段；"
+                "未生成通用 schema。"
+            )
+
+        lines = ["证据中可确认的 schema 相关元数据：", ""]
+        for endpoint in body_endpoints[:10]:
+            method = str(endpoint.get("method") or "").upper().strip()
+            path = str(endpoint.get("path") or "").strip()
+            attrs = []
+            if endpoint.get("request_body"):
+                attrs.append("request_body=true")
+            if endpoint.get("response_type"):
+                attrs.append(f"response_type={endpoint.get('response_type')}")
+            if endpoint.get("error_codes"):
+                attrs.append(f"error_codes={endpoint.get('error_codes')}")
+            lines.append(f"- {method} {path}: {', '.join(attrs)}")
+        return "\n".join(lines)
+
+    def _build_mermaid_blocks_from_planner(
+        self,
+        page: Any,
+        binding: Any | None,
+        composition_context: Any | None,
+    ) -> list[str]:
+        from repo_wiki.generator.composer import _category_to_doc_type
+        from repo_wiki.generator.mermaid_planner import create_planner, create_renderer
+
+        if composition_context is None:
+            return []
+
+        planner = create_planner(str(self.root))
+        renderer = create_renderer()
+        page_type = _category_to_doc_type(page.category)
+
+        context: dict[str, Any] = {
+            "modules": getattr(composition_context, "modules", []),
+            "endpoints": getattr(composition_context, "endpoints", []),
+            "data_models": getattr(composition_context, "models", []),
+            "commands": getattr(composition_context, "commands", {}),
+        }
+        plans = planner.plan_diagram_for_page(
+            page_id=page.page_id,
+            page_type=page_type,
+            evidence_binding=binding,
+            context=context,
+        )
+        rendered_blocks: list[str] = []
+        for plan in plans:
+            rendered, is_valid, _ = renderer.render_diagram_with_validation(plan)
+            if is_valid and rendered:
+                rendered_blocks.append(f"```mermaid\n{rendered}\n```")
+        return rendered_blocks
+
     def _extract_or_seed_h2_sections(self, page: Any, content: str) -> list[str]:
         headings = [m.group(1).strip() for m in self._HEADING_L2_PATTERN.finditer(content)]
         headings = [h for h in headings if h and h not in {"目录", "Table of Contents", "Contents"}]
@@ -1593,14 +1981,9 @@ class RepoWikiService:
         if page.category == WikiTaxonomyCategory.API_REFERENCE:
             return (
                 "```mermaid\n"
-                "sequenceDiagram\n"
-                "    participant Client as 调用方\n"
-                "    participant Gateway as API网关\n"
-                "    participant Service as 服务族\n"
-                "    Client->>Gateway: 发起请求\n"
-                "    Gateway->>Service: 路由并鉴权\n"
-                "    Service-->>Gateway: 返回结果\n"
-                "    Gateway-->>Client: 响应\n"
+                "flowchart TD\n"
+                '    A["UNRESOLVED_API_FLOW: 缺少可验证调用链证据"]\n'
+                '    A --> B["仅保留结构占位；不得视为已验证事实"]\n'
                 "```\n"
             )
         if page.category == WikiTaxonomyCategory.DATA_MODELS:

@@ -1,0 +1,55 @@
+{
+  "schema_version": "qoder_compatible_release_interface_summary/1.0",
+  "purpose": "Structural invariants for a Qoder-published Reference-style repowiki/zh layout (read-only compatibility fixture). Numeric counts are NOT stored here; discovery tests assert presence and shape only.",
+  "canonical_relative_roots": [".qoder/repowiki/zh"],
+  "required_paths_relative_to_zh_root": {
+    "directories": ["content", "meta"],
+    "files": ["meta/repowiki-metadata.json"]
+  },
+  "content_top_level": {
+    "expected_directories": [
+      "API参考",
+      "Python服务",
+      "开发指南",
+      "数据模型",
+      "架构设计",
+      "核心服务",
+      "项目概述"
+    ],
+    "expected_top_level_markdown_basenames_any": [
+      "快速开始.md",
+      "部署运维.md",
+      "故障排除与维护.md"
+    ],
+    "minimal_directory_intersection": [
+      "项目概述",
+      "架构设计",
+      "核心服务",
+      "API参考",
+      "数据模型"
+    ]
+  },
+  "content_markdown_conventions_observed_fixture": {
+    "cite_html_tag": "<cite>",
+    "mermaid_fence_marker": "```mermaid",
+    "toc_heading_marker": "## 目录"
+  },
+  "meta_repowiki_metadata": {
+    "required_top_level_keys": [
+      "code_snippets",
+      "knowledge_relations",
+      "source_files",
+      "wiki_catalogs",
+      "wiki_items",
+      "wiki_overview",
+      "wiki_readme",
+      "wiki_repo"
+    ],
+    "wiki_overview_expected_keys_any": ["id", "repo_id"],
+    "wiki_repo_expected_keys_any": ["name", "id"]
+  },
+  "read_only_fixture_policy": [
+    "Do not write, delete, or patch under /.qoder/repowiki/zh in fixture tests.",
+    "Tests MUST only read filesystem metadata and UTF-8 text for assertions."
+  ]
+}

@@ -85,14 +85,16 @@ class TestContentLayoutWriter:
         profile = get_eval_profile("qoder-like")
         writer = ContentLayoutWriter(profile, "run-123")
         assert writer.run_id == "run-123"
-        expected_dir = Path(".repo-agent-eval/run-123/content")
+        expected_dir = Path(".repo-agent-eval/runs/run-123/repowiki/zh/content")
         assert writer.content_dir == expected_dir
 
     def test_get_output_path_with_content_subdir(self):
         profile = get_eval_profile("qoder-like")
         writer = ContentLayoutWriter(profile, "run-123")
         output = writer.get_output_path("docs/00-overview.md")
-        assert output == Path(".repo-agent-eval/run-123/content/项目概述/项目概述.md")
+        assert output == Path(
+            ".repo-agent-eval/runs/run-123/repowiki/zh/content/项目概述/项目概述.md"
+        )
 
     def test_get_output_path_default_profile(self):
         profile = get_eval_profile("default")
@@ -380,7 +382,7 @@ class TestEvalProfileContentDir:
     def test_qoder_like_profile_content_dir(self):
         profile = get_eval_profile("qoder-like")
         content_dir = profile.get_content_dir("run-456")
-        assert content_dir == Path(".repo-agent-eval/run-456/content")
+        assert content_dir == Path(".repo-agent-eval/runs/run-456/repowiki/zh/content")
 
     def test_default_profile_content_dir(self):
         profile = get_eval_profile("default")

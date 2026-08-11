@@ -235,6 +235,52 @@ class TestGenerationStateMachine:
         assert "01-architecture" in pending_slugs
         assert "03-module-map" in pending_slugs
 
+    def test_completed_page_checkpoints_input_and_output_hashes(self, tmp_path):
+        """Completing a page should persist composer input and output hashes."""
+        sm = GenerationStateMachine(tmp_path / "test.db")
+        run = sm.create_run()
+        sm.add_page(
+            run.run_id,
+            "00-overview",
+            "overview",
+            "docs/00-overview.md",
+            input_hash="input-v1",
+        )
+
+        sm.start_page(run.run_id, "00-overview")
+        sm.complete_page(
+            run.run_id,
+            "00-overview",
+            output_hash="output-v1",
+            input_hash="input-v2",
+        )
+
+        page = sm.get_page_state(run.run_id, "00-overview")
+        assert page is not None
+        assert page.state == PageState.COMPLETED
+        assert page.input_hash == "input-v2"
+        assert page.output_hash == "output-v1"
+
+    def test_pending_pages_select_retryable_but_not_completed_or_failed(self, tmp_path):
+        """Resume queue should include retryable work while preserving terminal pages."""
+        sm = GenerationStateMachine(tmp_path / "test.db")
+        run = sm.create_run()
+        sm.add_page(run.run_id, "done", "module", "docs/done.md")
+        sm.add_page(run.run_id, "retry", "module", "docs/retry.md")
+        sm.add_page(run.run_id, "failed", "module", "docs/failed.md")
+
+        sm.complete_page(run.run_id, "done", output_hash="out", input_hash="in")
+        sm.fail_page(run.run_id, "retry", "transient", retryable=True)
+        for _ in range(3):
+            sm.fail_page(run.run_id, "failed", "permanent", retryable=False)
+
+        pending_slugs = {page.doc_slug for page in sm.get_pending_pages(run.run_id)}
+        assert pending_slugs == {"retry"}
+        done = sm.get_page_state(run.run_id, "done")
+        assert done is not None
+        assert done.input_hash == "in"
+        assert done.output_hash == "out"
+
     def test_list_runs(self, tmp_path):
         """Test listing runs."""
         sm = GenerationStateMachine(tmp_path / "test.db")

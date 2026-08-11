@@ -1,0 +1,9 @@
+{
+  "schema_version": "repo_agent.meta_release/1.0",
+  "release_status": "READY",
+  "release_id": "release-run-fixture",
+  "source_run_id": "run-fixture",
+  "published_at": "2026-05-05T12:00:00Z",
+  "manifest_path": "/tmp/.repo-agent-eval/repowiki/zh/manifest.json",
+  "target_git_commit": "abcdef0123456789"
+}

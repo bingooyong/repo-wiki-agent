@@ -1,7 +1,7 @@
 # Qoder Repo-Wiki SQLite 设计分析
 
 文档属性：设计分析  
-分析对象：`/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas/.repo-wiki/` 中 qoder 风格 repo-wiki 的 SQLite 使用方式  
+分析对象：`<reference-repo-root>/.repo-wiki/` 中 qoder 风格 repo-wiki 的 SQLite 使用方式
 分析目标：回答两个问题
 
 1. qoder 风格 repo-wiki 为什么大量使用 SQLite  
@@ -79,7 +79,7 @@
 
 ### 3.2 实际规模
 
-在当前 `AI_API_Atlas` 样本中，`state.sqlite3` 已经存入了真实运行数据：
+在当前 `reference-repo` 样本中，`state.sqlite3` 已经存入了真实运行数据：
 
 | 对象 | 数量 |
 |------|------|

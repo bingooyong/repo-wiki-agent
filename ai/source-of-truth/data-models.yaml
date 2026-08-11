@@ -1,0 +1,250 @@
+{
+  "models": [
+    {
+      "file_path": "extensions/repo-wiki-browser/src/extension.ts",
+      "module": "extensions/repo-wiki-browser",
+      "name": "GitStatus",
+      "type": "ts_interface"
+    },
+    {
+      "file_path": "extensions/repo-wiki-browser/src/extension.ts",
+      "module": "extensions/repo-wiki-browser",
+      "name": "LlmDisplayInfo",
+      "type": "ts_interface"
+    },
+    {
+      "file_path": "extensions/repo-wiki-browser/src/extension.ts",
+      "module": "extensions/repo-wiki-browser",
+      "name": "ManifestRunSummary",
+      "type": "ts_interface"
+    },
+    {
+      "file_path": "extensions/repo-wiki-browser/src/extension.ts",
+      "module": "extensions/repo-wiki-browser",
+      "name": "NavigationTreeNode",
+      "type": "ts_interface"
+    },
+    {
+      "file_path": "extensions/repo-wiki-browser/src/extension.ts",
+      "module": "extensions/repo-wiki-browser",
+      "name": "WikiFile",
+      "type": "ts_interface"
+    },
+    {
+      "file_path": "extensions/repo-wiki-browser/src/extension.ts",
+      "module": "extensions/repo-wiki-browser",
+      "name": "WikiGroup",
+      "type": "ts_interface"
+    },
+    {
+      "file_path": "extensions/repo-wiki-browser/src/extension.ts",
+      "module": "extensions/repo-wiki-browser",
+      "name": "WikiNodeType",
+      "type": "ts_type"
+    },
+    {
+      "file_path": "extensions/repo-wiki-browser/src/extension.ts",
+      "module": "extensions/repo-wiki-browser",
+      "name": "WikiSource",
+      "type": "ts_interface"
+    },
+    {
+      "file_path": "repo_wiki/core/runtime.py",
+      "module": "repo_wiki",
+      "name": "BootstrapResult",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/contracts.py",
+      "module": "repo_wiki",
+      "name": "DataModel",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/contracts.py",
+      "module": "repo_wiki",
+      "name": "Endpoint",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/llm/models.py",
+      "module": "repo_wiki",
+      "name": "ErrorCode",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/orchestration/eval_layout.py",
+      "module": "repo_wiki",
+      "name": "EvalManifest",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/orchestration/eval_layout.py",
+      "module": "repo_wiki",
+      "name": "EvalManifestEvidence",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/orchestration/eval_layout.py",
+      "module": "repo_wiki",
+      "name": "EvalManifestFile",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/orchestration/eval_layout.py",
+      "module": "repo_wiki",
+      "name": "EvalOutputProfile",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/planner/schema.py",
+      "module": "repo_wiki",
+      "name": "GenerationMode",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/contracts.py",
+      "module": "repo_wiki",
+      "name": "ImpactSet",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/config.py",
+      "module": "repo_wiki",
+      "name": "IndexConfig",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/llm/models.py",
+      "module": "repo_wiki",
+      "name": "LLMError",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/llm/models.py",
+      "module": "repo_wiki",
+      "name": "LLMProvider",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/llm/config.py",
+      "module": "repo_wiki",
+      "name": "LLMProviderConfig",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/config.py",
+      "module": "repo_wiki",
+      "name": "LlmConfig",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/contracts.py",
+      "module": "repo_wiki",
+      "name": "Module",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/planner/schema.py",
+      "module": "repo_wiki",
+      "name": "NavNode",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/llm/models.py",
+      "module": "repo_wiki",
+      "name": "NonRetryableError",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/config.py",
+      "module": "repo_wiki",
+      "name": "OutputConfig",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/config.py",
+      "module": "repo_wiki",
+      "name": "ProjectConfig",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/config.py",
+      "module": "repo_wiki",
+      "name": "RepoWikiConfig",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/planner/schema.py",
+      "module": "repo_wiki",
+      "name": "RepositoryIdentity",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/contracts.py",
+      "module": "repo_wiki",
+      "name": "RepositoryInfo",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/contracts.py",
+      "module": "repo_wiki",
+      "name": "RepositorySnapshot",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/contracts.py",
+      "module": "repo_wiki",
+      "name": "RepositoryStats",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/llm/models.py",
+      "module": "repo_wiki",
+      "name": "RetryableError",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/config.py",
+      "module": "repo_wiki",
+      "name": "ScanConfig",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/config.py",
+      "module": "repo_wiki",
+      "name": "SecurityConfig",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/planner/schema.py",
+      "module": "repo_wiki",
+      "name": "SourceRequirement",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/core/contracts.py",
+      "module": "repo_wiki",
+      "name": "VerifyResult",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/planner/schema.py",
+      "module": "repo_wiki",
+      "name": "WikiPagePlan",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/planner/schema.py",
+      "module": "repo_wiki",
+      "name": "WikiPlanManifest",
+      "type": "python_class"
+    },
+    {
+      "file_path": "repo_wiki/planner/schema.py",
+      "module": "repo_wiki",
+      "name": "WikiTaxonomyCategory",
+      "type": "python_class"
+    }
+  ]
+}

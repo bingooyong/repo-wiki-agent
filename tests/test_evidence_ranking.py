@@ -16,6 +16,7 @@ from repo_wiki.evidence.ranking import (
     _score_by_api_match,
     _score_by_data_model_match,
     _score_by_module_match,
+    filter_ranked_candidates_by_ownership,
     rank_evidence_for_page,
     score_evidence_for_page,
 )
@@ -383,6 +384,64 @@ class TestRankEvidenceForPage:
         ]
         candidates = rank_evidence_for_page(page, spans)
         assert len(candidates) <= MIN_CANDIDATES_PER_PAGE
+
+
+class TestOwnershipFilterIntegration:
+    """Integration tests for ownership filter in evidence binding."""
+
+    def test_inventory_page_filters_ai_service_evidence(self):
+        page = WikiPagePlan(
+            page_id="inventory-service-api-reference",
+            title="API台账服务 API",
+            category=WikiTaxonomyCategory.API_REFERENCE,
+            output_path="docs/pages/api/inventory-service-api-reference.md",
+            source_requirements=SourceRequirement(modules=["inventory-service"]),
+        )
+        ai_span = EvidenceSpanRecord(
+            digest="ai1",
+            file_path="services/ai-service/retrieval/vector_store.py",
+            line_start=1,
+            line_end=30,
+            language="python",
+            symbol="EmbeddingIndexer",
+            span_text="embedding retrieval model vector index",
+        )
+        inv_span = EvidenceSpanRecord(
+            digest="inv1",
+            file_path="services/inventory-service/controller/EndpointsController.java",
+            line_start=10,
+            line_end=70,
+            language="java",
+            symbol="EndpointsController",
+            span_text="class EndpointsController {}",
+        )
+        candidates = [
+            EvidenceCandidate(1, ai_span, 10.0, ["api_match"], 0),
+            EvidenceCandidate(2, inv_span, 9.0, ["api_match"], 1),
+        ]
+        filtered = filter_ranked_candidates_by_ownership(page, candidates)
+        assert len(filtered) == 1
+        assert "inventory-service" in filtered[0].span.file_path
+
+    def test_non_service_page_keeps_candidates_without_filtering(self):
+        page = WikiPagePlan(
+            page_id="api-overview",
+            title="API参考",
+            category=WikiTaxonomyCategory.API_REFERENCE,
+            output_path="docs/pages/api/overview.md",
+        )
+        span = EvidenceSpanRecord(
+            digest="x1",
+            file_path="src/any/path.py",
+            line_start=1,
+            line_end=10,
+            language="python",
+            symbol="AnySymbol",
+            span_text="noop",
+        )
+        candidates = [EvidenceCandidate(1, span, 1.0, ["keyword_overlap"], 0)]
+        filtered = filter_ranked_candidates_by_ownership(page, candidates)
+        assert len(filtered) == 1
 
 
 class TestEvidenceRanker:

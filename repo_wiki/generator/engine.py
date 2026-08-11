@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -311,7 +311,7 @@ class NarrativeBuilder:
         # Derive capabilities from actual module composition
         if self.modules:
             # Group by domain to derive capabilities
-            domain_modules = {}
+            domain_modules: dict[str, list[dict[str, Any]]] = {}
             for m in self.modules:
                 domain = m.get("domain", "unknown")
                 if domain not in domain_modules:
@@ -553,12 +553,13 @@ class APIEndpoint:
     runtime_role: str = "unknown"
     auth_required: bool = False
     auth_type: str = "none"
-    error_codes: list[int] = None
+    error_codes: list[int] = field(default_factory=list)
     request_body: bool = False
     response_type: str = "json"
     is_entry_point: bool = False
     entry_score: float = 0.0
     entry_reason: str = ""
+    exposure_pattern: str = "internal"
 
     def __post_init__(self):
         if self.error_codes is None:
@@ -796,7 +797,7 @@ class APIAggregator:
     def summarize_error_conventions(self) -> str:
         """Summarize error and status code conventions."""
         # Group error codes by pattern
-        common_codes = set()
+        common_codes: set[int] = set()
         for ep in self.api_endpoints:
             common_codes.update(ep.error_codes)
 
@@ -940,14 +941,14 @@ class DataModel:
     core_reason: str = ""
     dedup_key: str = ""  # For deduplicating ORM/DTO/builder representations
     migration_related: bool = False
-    ownership_modules: list[str] = None
+    ownership_modules: list[str] = field(default_factory=list)
     # Phase 26: Model classification for canonical resolver
     model_category: str = (
         "unknown"  # core_entity, dto, request_response, duplicated_projection, infrastructure
     )
     canonical_name: str = ""  # The canonical name this model resolves to
     is_canonical: bool = False  # Whether this is the canonical representation
-    projections: list[str] = None  # Other names this entity is known by
+    projections: list[str] = field(default_factory=list)  # Other names this entity is known by
 
     def __post_init__(self):
         if self.ownership_modules is None:
@@ -983,8 +984,8 @@ class DatabaseSchema:
 
     schema_name: str
     version: int | None = None
-    tables: list[str] = None
-    indexes: list[str] = None
+    tables: list[str] = field(default_factory=list)
+    indexes: list[str] = field(default_factory=list)
     migration_table: str | None = None
 
 
@@ -1607,7 +1608,7 @@ class CanonicalModelResolver:
         parts = ["## 规范模型解析结果\n"]
 
         # Count by category
-        category_counts = {}
+        category_counts: dict[str, int] = {}
         for c in self.canonical_models:
             category_counts[c.category] = category_counts.get(c.category, 0) + 1
 
@@ -2949,28 +2950,12 @@ class GenerationEngine:
         return files, hits, misses
 
     def _generate_task_catalog(self, snapshot: dict[str, Any]) -> tuple[str, bool]:
-        modules = [m.get("name", "unknown") for m in snapshot["module_index"].get("modules", [])]
-        commands = snapshot["repo_map"].get("commands", {}) or {}
-        tasks = [
-            {
-                "name": "init",
-                "description": "Full bootstrap workflow",
-                "commands": ["repo-wiki init"],
-            },
-            {
-                "name": "update",
-                "description": "Impacted module regeneration",
-                "commands": ["repo-wiki update"],
-            },
-            {
-                "name": "verify",
-                "description": "Governance checks",
-                "commands": ["repo-wiki verify", "repo-wiki verify --ci"],
-            },
-        ]
+        modules = self._task_catalog_module_references(snapshot)
+        commands = self._task_catalog_commands(snapshot)
+        tasks = self._task_catalog_tasks(commands)
         payload = {
             "tasks": tasks,
-            "module_references": sorted(str(x) for x in modules),
+            "module_references": modules,
             "commands": commands,
         }
         context = {"task_catalog_json": self._json_text(payload)}
@@ -2981,6 +2966,155 @@ class GenerationEngine:
         # Also keep a deterministic parseable export.
         write_json(self.root / "ai" / "source-of-truth" / "task-catalog.generated.json", payload)
         return TASK_CATALOG_CONTRACT.output_path, cached
+
+    def _task_catalog_module_references(self, snapshot: dict[str, Any]) -> list[str]:
+        excluded = {"tests", "node_modules", "fixtures", "fixture"}
+        modules: set[str] = set()
+        for module in snapshot["module_index"].get("modules", []) or []:
+            name = str(module.get("name", "")).strip()
+            path = str(module.get("path", "")).strip()
+            candidate = name or path
+            parts = Path(path or candidate).parts
+            if not candidate or candidate in excluded or any(part in excluded for part in parts):
+                continue
+            modules.add(candidate)
+        return sorted(modules)
+
+    def _task_catalog_commands(self, snapshot: dict[str, Any]) -> dict[str, str]:
+        commands = dict(snapshot["repo_map"].get("commands", {}) or {})
+        repo = snapshot["repo_map"].get("repository", {}) or {}
+        repo_name = str(repo.get("name", "")).lower()
+        entry_points = {str(item) for item in repo.get("entry_points", []) or []}
+        is_repo_wiki = (
+            repo_name in {"repo-agent", "repo-wiki"}
+            or "repo_wiki/cli.py" in entry_points
+            or (self.root / "repo_wiki" / "cli.py").exists()
+        )
+        if not is_repo_wiki:
+            return {k: v for k, v in sorted(commands.items()) if str(v).strip()}
+
+        canonical = {
+            "init": "repo-wiki init",
+            "index": "repo-wiki index",
+            "update": "repo-wiki update",
+            "sync": "repo-wiki sync",
+            "search": "repo-wiki search <query>",
+            "graph": "repo-wiki graph <module>",
+            "generate": "repo-wiki generate --profile qoder-like --output .repo-agent-eval",
+            "verify": "repo-wiki verify --profile qoder-like --ci --output .repo-agent-eval",
+            "compare": (
+                "repo-wiki compare --target <target-content-dir> "
+                "--baseline <qoder-baseline-dir> --output <report-dir> --ci"
+            ),
+            "improve": "repo-wiki improve --profile qoder-like --output .repo-agent-eval",
+            "improve_status": "repo-wiki improve-status --output .repo-agent-eval",
+            "release_publish": "repo-wiki release-publish --output .repo-agent-eval",
+            "eval_layout_report": "repo-wiki eval-layout-report --output .repo-agent-eval",
+            "cost_estimate": "repo-wiki cost-estimate",
+            "config": "repo-wiki config --ci",
+        }
+        extension_default = self._extension_generate_command_default()
+        if extension_default:
+            canonical["extension_update_default"] = extension_default
+        return canonical
+
+    def _extension_generate_command_default(self) -> str:
+        package_json_path = self.root / "extensions" / "repo-wiki-browser" / "package.json"
+        if not package_json_path.exists():
+            return ""
+        try:
+            import json
+
+            package_json = json.loads(package_json_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return ""
+        properties = (
+            package_json.get("contributes", {}).get("configuration", {}).get("properties", {})
+        )
+        default = properties.get("repoWikiBrowser.generateCommand", {}).get("default", "")
+        return str(default)
+
+    def _task_catalog_tasks(self, commands: dict[str, str]) -> list[dict[str, Any]]:
+        def command(name: str, fallback: str) -> str:
+            return commands.get(name, fallback)
+
+        return [
+            {
+                "name": "config-check",
+                "description": "Validate non-secret LLM and output configuration before generation.",
+                "commands": [command("config", "repo-wiki config --ci")],
+                "verifies": ["CLI configuration resolves without exposing API keys."],
+            },
+            {
+                "name": "generate-qoder-like",
+                "description": "Generate a qoder-like run under the isolated eval layout.",
+                "commands": [command("generate", "repo-wiki generate")],
+                "outputs": [
+                    ".repo-agent-eval/runs/<run-id>/manifest.json",
+                    ".repo-agent-eval/runs/<run-id>/repowiki/zh/content",
+                ],
+                "verifies": ["Run manifest records readiness fields and navigation_tree."],
+            },
+            {
+                "name": "verify-qoder-like",
+                "description": "Run strict qoder-like verification against a run or release candidate.",
+                "commands": [command("verify", "repo-wiki verify --ci")],
+                "verifies": ["PASS/READY run can proceed to compare and release checks."],
+            },
+            {
+                "name": "compare-qoder-baseline",
+                "description": "Compare generated content against a Qoder baseline and emit readiness evidence.",
+                "commands": [command("compare", "repo-wiki compare --ci")],
+                "outputs": ["qoder-comparison-report.json", "qoder-comparison-report.md"],
+                "verifies": ["Comparison status is READY before release publication."],
+            },
+            {
+                "name": "inspect-eval-layout",
+                "description": "Diagnose canonical versus legacy qoder-like run layouts before publishing.",
+                "commands": [command("eval_layout_report", "repo-wiki eval-layout-report")],
+                "verifies": ["Canonical content root is repowiki/zh/content under each run."],
+            },
+            {
+                "name": "publish-ready-release",
+                "description": (
+                    "Atomically publish a READY qoder-like run to the stable release path "
+                    "consumed by viewers and the extension."
+                ),
+                "commands": [command("release_publish", "repo-wiki release-publish")],
+                "outputs": [
+                    ".repo-agent-eval/repowiki/zh/manifest.json",
+                    ".repo-agent-eval/repowiki/zh/content",
+                    ".repo-agent-eval/repowiki/zh/meta/release.json",
+                    ".repo-agent-eval/release-history.json",
+                ],
+                "readiness_symbols": [
+                    "READY",
+                    "release_status",
+                    "readiness",
+                    "readiness_state",
+                    "navigation_tree",
+                ],
+                "verifies": [
+                    "Release manifest exposes release_status/readiness READY and navigation_tree."
+                ],
+            },
+            {
+                "name": "extension-browse-ready-release",
+                "description": "Browse the stable READY release from VS Code/Cursor.",
+                "commands": [
+                    "repoWikiBrowser.openViewer",
+                    "repoWikiBrowser.refreshTree",
+                    "repoWikiBrowser.runVerify",
+                    "repoWikiBrowser.updateWiki",
+                    "repoWikiBrowser.syncWiki",
+                ],
+                "inputs": [".repo-agent-eval/repowiki/zh/manifest.json"],
+                "verifies": [
+                    "Sidebar reads the fixed release manifest and does not fall back to run directories.",
+                    "Update Wiki sends the configured repoWikiBrowser.generateCommand in an integrated terminal.",
+                ],
+            },
+        ]
 
     def _render_with_cache(
         self, cache_key_prefix: str, template_path: str, context: dict[str, Any]

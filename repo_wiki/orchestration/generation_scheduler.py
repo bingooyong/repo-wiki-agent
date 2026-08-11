@@ -94,6 +94,7 @@ class PageJob:
     error_message: str | None = None
     estimated_cost: float = 0.0
     result: Any = None
+    input_hash: str | None = None
 
 
 # =============================================================================
@@ -298,7 +299,8 @@ class GenerationScheduler:
             Tuple of (completed_count, failed_count, errors)
         """
         # Create semaphore for concurrency control
-        self._semaphore = asyncio.Semaphore(self.config.max_concurrency)
+        semaphore = asyncio.Semaphore(self.config.max_concurrency)
+        self._semaphore = semaphore
         result_lock = asyncio.Lock()
 
         # Get pending pages
@@ -335,7 +337,7 @@ class GenerationScheduler:
                 return
 
             # Acquire concurrency slot
-            async with self._semaphore:
+            async with semaphore:
                 if self.is_cancelled():
                     return
 
@@ -349,6 +351,7 @@ class GenerationScheduler:
                     doc_type=page.doc_type,
                     doc_path=page.doc_path,
                     max_attempts=page.max_attempts,
+                    input_hash=page.input_hash,
                 )
 
                 # Execute with rate limiting and retry
@@ -357,7 +360,17 @@ class GenerationScheduler:
                 )
 
                 if success:
-                    self.state_machine.complete_page(run_id, page.doc_slug)
+                    output_hash = getattr(result, "output_hash", None)
+                    input_hash = getattr(result, "input_hash", None)
+                    planned_input_hash = (
+                        input_hash if isinstance(input_hash, str) else job.input_hash
+                    )
+                    self.state_machine.complete_page(
+                        run_id,
+                        page.doc_slug,
+                        output_hash=output_hash if isinstance(output_hash, str) else None,
+                        input_hash=planned_input_hash,
+                    )
                     # Record tokens if result contains token info
                     if hasattr(result, "prompt_tokens") and hasattr(result, "completion_tokens"):
                         self.cost_estimator.record_page_tokens(

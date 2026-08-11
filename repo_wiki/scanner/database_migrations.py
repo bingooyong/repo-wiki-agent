@@ -105,7 +105,8 @@ class DatabaseMigrationExtractor:
             for table in tables:
                 model_name = self._guess_canonical_model(table.name)
                 table.canonical_model_name = model_name
-                schema_evolution.table_to_model_links[table.name] = model_name
+                if model_name is not None:
+                    schema_evolution.table_to_model_links[table.name] = model_name
 
         # Deduplicate tables by name
         seen: dict[str, TableSchema] = {}

@@ -22,6 +22,7 @@ import sqlite3
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from repo_wiki.orchestration.generation_state import (
     GenerationStateMachine,
@@ -177,7 +178,7 @@ def get_directory_hashes(
     Returns:
         Dictionary mapping relative paths to hashes
     """
-    hashes = {}
+    hashes: dict[str, str] = {}
     # Handle both absolute paths and relative paths
     if Path(relative_to).is_absolute():
         base = Path(relative_to)
@@ -361,6 +362,7 @@ class GenerationAwareInvalidator:
                 PageState.PENDING,
                 PageState.COMPLETED,
                 PageState.RETRYABLE,
+                PageState.FAILED,
             ):
                 self.state_machine.reset_page_for_regeneration(
                     run_id, doc_slug, "Invalidated by git diff"
@@ -395,12 +397,14 @@ class GenerationAwareInvalidator:
 
         all_affected = set()
 
-        for changed_file in changes.changed_files:
+        for changed_file in changes.changed_files + changes.new_files:
             affected = self._map_file_to_pages(changed_file)
+            affected.extend(self._map_file_to_pages_via_evidence(changed_file))
             all_affected.update(affected)
 
         for deleted_file in changes.deleted_files:
             affected = self._map_file_to_pages(deleted_file)
+            affected.extend(self._map_file_to_pages_via_evidence(deleted_file))
             all_affected.update(affected)
 
         invalidated = []
@@ -412,6 +416,7 @@ class GenerationAwareInvalidator:
                 PageState.PENDING,
                 PageState.COMPLETED,
                 PageState.RETRYABLE,
+                PageState.FAILED,
             ):
                 self.state_machine.reset_page_for_regeneration(
                     run_id, doc_slug, "Invalidated by hash fallback"
@@ -421,6 +426,43 @@ class GenerationAwareInvalidator:
                 skipped.append(doc_slug)
 
         return invalidated, skipped
+
+    def invalidate_from_input_hashes(
+        self,
+        run_id: str,
+        current_input_hashes: dict[str, str],
+    ) -> tuple[list[str], list[str]]:
+        """Invalidate completed pages whose composer input hash changed.
+
+        This uses persisted page input hashes rather than filename heuristics, so
+        callers with composer/page input hashes can deterministically re-queue
+        only pages whose generation inputs changed.
+        """
+        changed_pages = self.state_machine.get_pages_needing_regeneration(
+            run_id, current_input_hashes
+        )
+        invalidated: list[str] = []
+        skipped: list[str] = []
+
+        for page in changed_pages:
+            page_state = self.state_machine.get_page_state(run_id, page.doc_slug)
+            if page_state and page_state.state in (
+                PageState.PENDING,
+                PageState.COMPLETED,
+                PageState.RETRYABLE,
+                PageState.FAILED,
+            ):
+                self.state_machine.reset_page_for_regeneration(
+                    run_id,
+                    page.doc_slug,
+                    "Invalidated by input hash change",
+                    input_hash=current_input_hashes[page.doc_slug],
+                )
+                invalidated.append(page.doc_slug)
+            else:
+                skipped.append(page.doc_slug)
+
+        return sorted(invalidated), sorted(skipped)
 
     def invalidate_with_git_or_hash_fallback(
         self,
@@ -531,6 +573,8 @@ class GenerationAwareInvalidator:
             "running_count": by_state.get("running", 0),
             "failed_count": by_state.get("failed", 0),
             "skipped_count": by_state.get("skipped", 0),
+            "retryable_count": by_state.get("retryable", 0),
+            "regeneration_queue_count": by_state.get("pending", 0) + by_state.get("retryable", 0),
         }
 
 

@@ -21,6 +21,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# Stable page IDs for pages with cross-module hard contracts.
+INVENTORY_SERVICE_API_PAGE_ID = "inventory-service-api-reference"
+
 
 class GenerationMode(str, Enum):
     RULE_FIRST = "rule-first"

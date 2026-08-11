@@ -1,0 +1,11 @@
+{
+  "schema_version": "repo_agent.service_registry/1.0",
+  "generated_at": "2026-05-05T12:00:00Z",
+  "services": [
+    {
+      "service_id": "api-gateway",
+      "display_name": "API Gateway",
+      "runtime_family": "backend"
+    }
+  ]
+}

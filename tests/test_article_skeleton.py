@@ -119,8 +119,12 @@ class TestHeadingContract:
         required = contract.get_required_sections()
         assert "目录" in required
         assert "简介" in required
+        assert "项目结构" in required
         assert "核心组件" in required
-        assert "详细分析" in required  # 端点详情
+        assert "架构总览" in required
+        assert "详细分析" in required
+        assert "依赖" in required
+        assert "结论" in required
 
     def test_get_optional_sections(self) -> None:
         """Test getting optional sections from contract."""
@@ -548,9 +552,19 @@ class TestSkeletonSnapshotTests:
         snapshot = generate_heading_snapshot(skeleton.render_skeleton_markdown())
         # Should contain API-specific sections
         assert "目录" in snapshot
-        assert "API 分组" in snapshot
-        assert "调用约定" in snapshot
-        assert "端点详情" in snapshot
+        assert "简介" in snapshot
+        assert "项目结构" in snapshot
+        assert "核心组件" in snapshot
+        assert "架构总览" in snapshot
+        assert "详细组件分析" in snapshot
+        assert "依赖关系分析" in snapshot
+        assert "结论" in snapshot
+
+    def test_api_skeleton_keeps_bounded_endpoint_appendix(self) -> None:
+        """API 骨架保留附录型端点清单，避免正文端点 dump。"""
+        skeleton = build_skeleton("api", title="API Reference")
+        headings = [section.heading_text for section in skeleton.headings]
+        assert "## 附录：端点清单（限量）" in headings
 
     def test_ops_skeleton_snapshot(self) -> None:
         """Test Ops skeleton matches expected snapshot."""

@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from repo_wiki.core.contracts import DataModel as SnapshotDataModel
 from repo_wiki.core.contracts import RepositorySnapshot
 from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.generator.composer import (
@@ -27,7 +28,7 @@ from repo_wiki.generator.composer import (
     build_composer_input,
     create_composer,
 )
-from repo_wiki.generator.engine import DataModel, DataModelAggregator, ModelCategory
+from repo_wiki.generator.engine import DataModelAggregator, ModelCategory
 from repo_wiki.llm.providers import MockLLMProvider
 from repo_wiki.planner.schema import WikiPagePlan
 
@@ -42,11 +43,11 @@ class ServiceDataModelInfo:
 
     service_name: str
     domain: str
-    models: list[DataModel] = field(default_factory=list)
-    core_entities: list[DataModel] = field(default_factory=list)
-    dtos: list[DataModel] = field(default_factory=list)
-    persistence_artifacts: list[DataModel] = field(default_factory=list)
-    infrastructure_models: list[DataModel] = field(default_factory=list)
+    models: list[SnapshotDataModel] = field(default_factory=list)
+    core_entities: list[SnapshotDataModel] = field(default_factory=list)
+    dtos: list[SnapshotDataModel] = field(default_factory=list)
+    persistence_artifacts: list[SnapshotDataModel] = field(default_factory=list)
+    infrastructure_models: list[SnapshotDataModel] = field(default_factory=list)
     ownership_modules: list[str] = field(default_factory=list)
     related_services: list[str] = field(default_factory=list)
 
@@ -275,7 +276,7 @@ class ServiceDataModelComposer:
             and page_plan.source_requirements.data_models
         ):
             model_names = set(page_plan.source_requirements.data_models)
-            all_models: list[DataModel] = []
+            all_models: list[SnapshotDataModel] = []
             for info in self._service_models.values():
                 for model in info.models:
                     if model.name in model_names:
@@ -503,7 +504,9 @@ class ServiceDataModelComposer:
         # Check for migration evidence
         if service_info.infrastructure_models:
             migration_models = [
-                m for m in service_info.infrastructure_models if m.migration_related
+                m
+                for m in service_info.infrastructure_models
+                if getattr(m, "migration_related", False)
             ]
             if migration_models:
                 parts.append(f"\n**迁移相关模型**: {', '.join([m.name for m in migration_models])}")
@@ -525,7 +528,7 @@ class ServiceDataModelComposer:
         parts = ["### Schema 变化\n"]
 
         # Group by module
-        by_module: dict[str, list[DataModel]] = {}
+        by_module: dict[str, list[SnapshotDataModel]] = {}
         for model in service_info.models:
             if model.module not in by_module:
                 by_module[model.module] = []

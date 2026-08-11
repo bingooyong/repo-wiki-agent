@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info:
+  title: Stub Reference API
+  version: "1.0"
+paths:
+  /v1/endpoints:
+    get:
+      summary: List endpoints
+  /v1/inventory/health:
+    get:
+      summary: Health

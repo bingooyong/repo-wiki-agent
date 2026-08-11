@@ -289,7 +289,7 @@ class ServiceSubtopicPlanner:
                 parent=parent_id,
                 source_requirements=source_reqs,
                 sort_order=base_sort + subtopic_offset,
-                tags=template["tags"] + [module.name],
+                tags=list(template["tags"]) + [module.name],
             )
             subtopic_offset += 1
 
@@ -364,6 +364,8 @@ class ServiceSubtopicPlanner:
                 node_id=f"cat-{category.value}",
                 label=category.value,
                 node_type="category",
+                path=None,
+                icon=None,
                 sort_order=self._category_order(category),
             )
 
@@ -385,6 +387,7 @@ class ServiceSubtopicPlanner:
                 label=page.title,
                 node_type="page",
                 path=page.output_path,
+                icon=None,
                 sort_order=page.sort_order,
             )
 

@@ -11,8 +11,8 @@ Handles API routes /users, /users.
 - `FakeVerifierService`
 - `InvalidType`
 - `MyClass`
-- `TestAIAPIAtlasParityRunner`
-- `TestAIAPiAtlasTaxonomyFixture`
+- `TestReferenceParityRunner`
+- `TestReferenceRepoTaxonomyFixture`
 - `TestAPIAggregatorInitialization`
 - `TestAPIFlowEvidence`
 - `TestAPIGrouping`
@@ -464,7 +464,7 @@ Handles API routes /users, /users.
 - `sample_skeleton`
 - `sample_snapshot`
 - `scheduler_setup`
-- `setup_atlas_structure`
+- `setup_reference_structure`
 - `setup_content`
 - `setup_qoder_like_structure`
 - `setup_repo_agent_eval_structure`
@@ -489,12 +489,12 @@ Handles API routes /users, /users.
 - `test_aggregator_extracts_module_metadata`
 - `test_aggregator_identifies_core_entities`
 - `test_aggregator_initializes_with_models`
-- `test_ai_api_atlas`
-- `test_ai_api_atlas_120_pages_with_llm`
-- `test_ai_api_atlas_category_coverage`
-- `test_ai_api_atlas_eighty_pages`
-- `test_ai_api_atlas_not_workspace`
-- `test_ai_api_atlas_readiness_assessed`
+- `test_reference_repo`
+- `test_reference_repo_120_pages_with_llm`
+- `test_reference_repo_category_coverage`
+- `test_reference_repo_eighty_pages`
+- `test_reference_repo_not_workspace`
+- `test_reference_repo_readiness_assessed`
 - `test_alias_only_mode`
 - `test_alias_resolution_evidence_in_details`
 - `test_alias_resolution_evidence_in_legacy_mode`
@@ -1658,7 +1658,7 @@ Handles API routes /users, /users.
 - `test_returns_none_for_unknown`
 - `test_root_inside_protected_rejected`
 - `test_root_overlapping_repo_wiki_rejected`
-- `test_run_atlas_parity`
+- `test_run_reference_parity`
 - `test_run_comparison`
 - `test_run_creation`
 - `test_run_pages_sync_no_pages`

@@ -74,10 +74,10 @@ SQLite/FTS5 (本地状态) + ChromaDB (向量检索) + 文件系统 (产物)
 
 | 指标 | 数值 |
 |------|------|
-| Strict Verify 通过率 | 13/13 checks (100%) |
+| Strict Verify | 当前配置中的 blocking checks 必须全部通过 |
 | 页面生成数量 | 80-220 页（可配置） |
 | LLM Provider 支持 | OpenAI-compatible, Minimax |
-| 测试覆盖率 | 1200+ tests |
+| 测试覆盖率 | 以公开 CI 结果为准 |
 | SQLite 查询延迟 | < 100ms (FTS5) |
 
 ---
@@ -86,7 +86,7 @@ SQLite/FTS5 (本地状态) + ChromaDB (向量检索) + 文件系统 (产物)
 
 | 场景 | 说明 |
 |------|------|
-| 替代 Qoder Repo Wiki | 在 AI_API_Atlas 上通过 strict verify (GO 决策) |
+| Qoder-like Wiki | 生成隔离候选并通过 strict verify 后发布 |
 | 仓库文档自动化 | 为任意工程生成结构化 wiki |
 | 增量文档更新 | 基于 git diff 只更新变更页面 |
 | 质量门禁 | CI/CD 集成 strict verify |

@@ -37,7 +37,7 @@ python scripts/qoder_baseline_comparison.py \
 ```bash
 python scripts/qoder_baseline_comparison.py \
     --target ./docs \
-    --baseline /Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas \
+    --baseline <reference-repo-root> \
     --output ./gap-report.json \
     --format json
 ```
@@ -47,7 +47,7 @@ python scripts/qoder_baseline_comparison.py \
 ```bash
 python scripts/qoder_baseline_comparison.py \
     --target ./docs \
-    --baseline /Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas \
+    --baseline <reference-repo-root> \
     --output ./gap-report.md \
     --format markdown
 ```
@@ -128,7 +128,7 @@ repo-wiki generate
 # 2. 运行基线比较
 python /path/to/repo-agent/scripts/qoder_baseline_comparison.py \
     --target ./docs \
-    --baseline /Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas \
+    --baseline <reference-repo-root> \
     --output ./qoder-gap-report.json
 
 # 3. 查看结果
@@ -189,7 +189,7 @@ repo-wiki verify --ci --target /path/to/output
 # 运行 qoder 基线比较
 python scripts/qoder_baseline_comparison.py \
     --target /path/to/output/docs \
-    --baseline /Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas \
+    --baseline <reference-repo-root> \
     --output /path/to/output/qoder-gap-report.json
 ```
 
@@ -209,7 +209,7 @@ python scripts/qoder_baseline_comparison.py \
 
 **"Baseline path does not exist"**
 - 确保 qoder 基线仓库路径正确
-- 基线仓库通常使用 `AI_API_Atlas`
+- 基线仓库通常使用 `reference-repo`
 
 **"Permission denied"**
 - 确保有读取目标路径的权限

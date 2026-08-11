@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from typing import Any
 
 from repo_wiki.core.contracts import RepositorySnapshot
 from repo_wiki.generator.io import ensure_dir, write_json
@@ -14,8 +15,8 @@ def build_graph_artifacts(root: Path, snapshot: RepositorySnapshot) -> dict:
     module_names = [m.name for m in snapshot.modules]
     by_name = {m.name: m for m in snapshot.modules}
 
-    nodes = {}
-    downstream = {name: [] for name in module_names}
+    nodes: dict[str, dict[str, Any]] = {}
+    downstream: dict[str, list[str]] = {name: [] for name in module_names}
     for module in snapshot.modules:
         nodes[module.name] = {
             "path": module.path,
@@ -32,7 +33,7 @@ def build_graph_artifacts(root: Path, snapshot: RepositorySnapshot) -> dict:
     for name, deps in downstream.items():
         nodes[name]["downstream"] = sorted(set(deps))
 
-    impact_cache = {}
+    impact_cache: dict[str, dict[str, Any]] = {}
     for name in module_names:
         depth2 = set()
         for d in nodes[name]["downstream"]:

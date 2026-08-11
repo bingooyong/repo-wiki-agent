@@ -1,0 +1,129 @@
+{
+  "commands": {
+    "compare": "repo-wiki compare --target <target-content-dir> --baseline <qoder-baseline-dir> --output <report-dir> --ci",
+    "config": "repo-wiki config --ci",
+    "cost_estimate": "repo-wiki cost-estimate",
+    "eval_layout_report": "repo-wiki eval-layout-report --output .repo-agent-eval",
+    "extension_update_default": "uv run repo-wiki generate --profile qoder-like",
+    "generate": "repo-wiki generate --profile qoder-like --output .repo-agent-eval",
+    "graph": "repo-wiki graph <module>",
+    "improve": "repo-wiki improve --profile qoder-like --output .repo-agent-eval",
+    "improve_status": "repo-wiki improve-status --output .repo-agent-eval",
+    "index": "repo-wiki index",
+    "init": "repo-wiki init",
+    "release_publish": "repo-wiki release-publish --output .repo-agent-eval",
+    "search": "repo-wiki search <query>",
+    "sync": "repo-wiki sync",
+    "update": "repo-wiki update",
+    "verify": "repo-wiki verify --profile qoder-like --ci --output .repo-agent-eval"
+  },
+  "module_references": [
+    "ai/source-of-truth",
+    "extensions/repo-wiki-browser",
+    "repo_wiki",
+    "repo_wiki.orchestration",
+    "repo_wiki.verifier",
+    "repo_wiki.viewer"
+  ],
+  "tasks": [
+    {
+      "commands": [
+        "repo-wiki config --ci"
+      ],
+      "description": "Validate non-secret LLM and output configuration before generation.",
+      "name": "config-check",
+      "verifies": [
+        "CLI configuration resolves without exposing API keys."
+      ]
+    },
+    {
+      "commands": [
+        "repo-wiki generate --profile qoder-like --output .repo-agent-eval"
+      ],
+      "description": "Generate a qoder-like run under the isolated eval layout.",
+      "name": "generate-qoder-like",
+      "outputs": [
+        ".repo-agent-eval/runs/<run-id>/manifest.json",
+        ".repo-agent-eval/runs/<run-id>/repowiki/zh/content"
+      ],
+      "verifies": [
+        "Run manifest records readiness fields and navigation_tree."
+      ]
+    },
+    {
+      "commands": [
+        "repo-wiki verify --profile qoder-like --ci --output .repo-agent-eval"
+      ],
+      "description": "Run strict qoder-like verification against a run or release candidate.",
+      "name": "verify-qoder-like",
+      "verifies": [
+        "PASS/READY run can proceed to compare and release checks."
+      ]
+    },
+    {
+      "commands": [
+        "repo-wiki compare --target <target-content-dir> --baseline <qoder-baseline-dir> --output <report-dir> --ci"
+      ],
+      "description": "Compare generated content against a Qoder baseline and emit readiness evidence.",
+      "name": "compare-qoder-baseline",
+      "outputs": [
+        "qoder-comparison-report.json",
+        "qoder-comparison-report.md"
+      ],
+      "verifies": [
+        "Comparison status is READY before release publication."
+      ]
+    },
+    {
+      "commands": [
+        "repo-wiki eval-layout-report --output .repo-agent-eval"
+      ],
+      "description": "Diagnose canonical versus legacy qoder-like run layouts before publishing.",
+      "name": "inspect-eval-layout",
+      "verifies": [
+        "Canonical content root is repowiki/zh/content under each run."
+      ]
+    },
+    {
+      "commands": [
+        "repo-wiki release-publish --output .repo-agent-eval"
+      ],
+      "description": "Atomically publish a READY qoder-like run to the stable release path consumed by viewers and the extension.",
+      "name": "publish-ready-release",
+      "outputs": [
+        ".repo-agent-eval/repowiki/zh/manifest.json",
+        ".repo-agent-eval/repowiki/zh/content",
+        ".repo-agent-eval/repowiki/zh/meta/release.json",
+        ".repo-agent-eval/release-history.json"
+      ],
+      "readiness_symbols": [
+        "READY",
+        "release_status",
+        "readiness",
+        "readiness_state",
+        "navigation_tree"
+      ],
+      "verifies": [
+        "Release manifest exposes release_status/readiness READY and navigation_tree."
+      ]
+    },
+    {
+      "commands": [
+        "repoWikiBrowser.openViewer",
+        "repoWikiBrowser.refreshTree",
+        "repoWikiBrowser.runVerify",
+        "repoWikiBrowser.updateWiki",
+        "repoWikiBrowser.syncWiki"
+      ],
+      "description": "Browse the stable READY release from VS Code/Cursor.",
+      "inputs": [
+        ".repo-agent-eval/repowiki/zh/manifest.json"
+      ],
+      "name": "extension-browse-ready-release",
+      "verifies": [
+        "Sidebar reads the fixed release manifest and does not fall back to run directories.",
+        "Update Wiki sends the configured repoWikiBrowser.generateCommand in an integrated terminal."
+      ]
+    }
+  ]
+}

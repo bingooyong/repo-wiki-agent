@@ -9,7 +9,7 @@ from typing import Any
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.core.security import should_scan
 from repo_wiki.generator.io import read_json, read_yamlish, write_json
-from repo_wiki.indexer.embeddings import build_embedding_provider
+from repo_wiki.indexer.embeddings import EmbeddingProvider, build_embedding_provider
 from repo_wiki.indexer.hashing import compute_file_hash, diff_hash_maps
 from repo_wiki.indexer.state_store import SQLiteStateStore
 from repo_wiki.indexer.vector_store import ChromaVectorStore
@@ -56,7 +56,17 @@ class RetrievalService:
         self.graph_root = root / ".repo-wiki" / "graph"
         self.store = SQLiteStateStore(self.index_root / "state.sqlite3")
         self.vector_store = ChromaVectorStore(self.index_root / "chroma")
-        self.embedder = build_embedding_provider("BAAI/bge-m3")
+        self._embedder: EmbeddingProvider | None = None
+
+    @property
+    def embedder(self) -> EmbeddingProvider:
+        if self._embedder is None:
+            self._embedder = build_embedding_provider("BAAI/bge-m3")
+        return self._embedder
+
+    @embedder.setter
+    def embedder(self, value: Any) -> None:
+        self._embedder = value
 
     def analyze_incremental_impact(self) -> IncrementalImpact:
         changes, source = self._detect_changes()
@@ -127,45 +137,45 @@ class RetrievalService:
                 "reasons": [f"fts5(bm25={item.bm25:.4f})"],
             }
 
-        for item in semantic_hits:
-            chunk_id = str(item.get("chunk_id"))
+        for semantic_hit in semantic_hits:
+            chunk_id = str(semantic_hit.get("chunk_id"))
             if chunk_id not in combined:
                 combined[chunk_id] = {
                     "chunk_id": chunk_id,
-                    "file_path": str(item.get("file_path", "")),
-                    "module_name": str(item.get("module_name", "")),
-                    "language": str(item.get("language", "")),
-                    "chunk_type": str(item.get("chunk_type", "")),
-                    "symbol_name": str(item.get("symbol_name", "")),
-                    "text": str(item.get("text", "")),
+                    "file_path": str(semantic_hit.get("file_path", "")),
+                    "module_name": str(semantic_hit.get("module_name", "")),
+                    "language": str(semantic_hit.get("language", "")),
+                    "chunk_type": str(semantic_hit.get("chunk_type", "")),
+                    "symbol_name": str(semantic_hit.get("symbol_name", "")),
+                    "text": str(semantic_hit.get("text", "")),
                     "lexical_score": 0.0,
                     "semantic_score": 0.0,
                     "graph_bonus": 0.0,
                     "reasons": [],
                 }
             combined[chunk_id]["semantic_score"] = max(
-                float(item.get("score", 0.0)),
+                float(semantic_hit.get("score", 0.0)),
                 float(combined[chunk_id]["semantic_score"]),
             )
             combined[chunk_id]["reasons"].append(
-                f"semantic(score={float(item.get('score', 0.0)):.4f})"
+                f"semantic(score={float(semantic_hit.get('score', 0.0)):.4f})"
             )
 
         if not module:
             neighbor_modules = self._expand_modules_from_candidates(list(combined.values())[:20])
             if neighbor_modules:
                 neighbor_chunks = self.store.list_chunks(module_names=neighbor_modules, limit=80)
-                for item in neighbor_chunks:
-                    chunk_id = str(item["chunk_id"])
+                for neighbor_chunk in neighbor_chunks:
+                    chunk_id = str(neighbor_chunk["chunk_id"])
                     if chunk_id not in combined:
                         combined[chunk_id] = {
                             "chunk_id": chunk_id,
-                            "file_path": str(item.get("file_path", "")),
-                            "module_name": str(item.get("module_name", "")),
-                            "language": str(item.get("language", "")),
-                            "chunk_type": str(item.get("chunk_type", "")),
-                            "symbol_name": str(item.get("symbol_name", "")),
-                            "text": str(item.get("text", "")),
+                            "file_path": str(neighbor_chunk.get("file_path", "")),
+                            "module_name": str(neighbor_chunk.get("module_name", "")),
+                            "language": str(neighbor_chunk.get("language", "")),
+                            "chunk_type": str(neighbor_chunk.get("chunk_type", "")),
+                            "symbol_name": str(neighbor_chunk.get("symbol_name", "")),
+                            "text": str(neighbor_chunk.get("text", "")),
                             "lexical_score": 0.0,
                             "semantic_score": 0.0,
                             "graph_bonus": 0.1,
@@ -177,34 +187,34 @@ class RetrievalService:
                         )
                         combined[chunk_id]["reasons"].append("graph-neighbor-expansion")
 
-        ranked = []
-        for item in combined.values():
-            lexical = float(item["lexical_score"])
-            semantic = float(item["semantic_score"])
-            graph_bonus = float(item["graph_bonus"])
+        ranked: list[dict[str, Any]] = []
+        for candidate in combined.values():
+            lexical = float(candidate["lexical_score"])
+            semantic = float(candidate["semantic_score"])
+            graph_bonus = float(candidate["graph_bonus"])
             score = 0.35 * lexical + 0.55 * semantic + graph_bonus
-            item["score"] = score
-            ranked.append(item)
+            candidate["score"] = score
+            ranked.append(candidate)
         ranked.sort(key=lambda x: (-float(x["score"]), str(x["chunk_id"])))
 
         results: list[dict[str, Any]] = []
         consumed = 0
-        for item in ranked:
-            text = str(item.get("text", ""))
+        for ranked_candidate in ranked:
+            text = str(ranked_candidate.get("text", ""))
             estimated_tokens = max(1, len(text) // 4)
             if results and consumed + estimated_tokens > token_budget:
                 continue
             consumed += estimated_tokens
             results.append(
                 {
-                    "chunk_id": item["chunk_id"],
-                    "file_path": item["file_path"],
-                    "module_name": item["module_name"],
-                    "language": item["language"],
-                    "chunk_type": item["chunk_type"],
-                    "symbol_name": item["symbol_name"],
-                    "score": round(float(item["score"]), 6),
-                    "reasons": sorted(set(item["reasons"])),
+                    "chunk_id": ranked_candidate["chunk_id"],
+                    "file_path": ranked_candidate["file_path"],
+                    "module_name": ranked_candidate["module_name"],
+                    "language": ranked_candidate["language"],
+                    "chunk_type": ranked_candidate["chunk_type"],
+                    "symbol_name": ranked_candidate["symbol_name"],
+                    "score": round(float(ranked_candidate["score"]), 6),
+                    "reasons": sorted(set(ranked_candidate["reasons"])),
                     "excerpt": text[:400],
                 }
             )
@@ -240,7 +250,7 @@ class RetrievalService:
         }
         for module_name in sorted(set(module_names)):
             own = self.store.list_chunks(module_names=[module_name], limit=8)
-            neighbors = set()
+            neighbors: set[str] = set()
             node = graph_modules.get(module_name, {}) if isinstance(graph_modules, dict) else {}
             if isinstance(node, dict):
                 neighbors.update(node.get("upstream", []) or [])
@@ -284,7 +294,7 @@ class RetrievalService:
         status = subprocess.run(status_cmd, capture_output=True, text=True)
         if status.returncode != 0:
             return None
-        changes = {
+        changes: dict[str, dict[str, str]] = {
             "added": {},
             "modified": {},
             "deleted": {},

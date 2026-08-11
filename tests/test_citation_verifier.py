@@ -474,6 +474,37 @@ The project solves the core problem.
     assert validity_check["status"] == "PASS"
 
 
+def test_inventory_api_primary_citations_smoke(tmp_path: Path) -> None:
+    """reference-repo风格 smoke：inventory-service 本地主证据引用应通过有效性检查。"""
+    _write_minimum_artifacts(tmp_path)
+    _create_sections_dir(tmp_path)
+
+    inv_dir = tmp_path / "services" / "inventory-service" / "controllers"
+    inv_dir.mkdir(parents=True, exist_ok=True)
+    write_text(
+        inv_dir / "EndpointsController.java",
+        "public class EndpointsController { public void list() {} }\n",
+    )
+    entity_dir = tmp_path / "services" / "inventory-service" / "entity"
+    entity_dir.mkdir(parents=True, exist_ok=True)
+    write_text(entity_dir / "ApiEndpointEntity.java", "public class ApiEndpointEntity {}\n")
+
+    write_text(
+        tmp_path / "docs/04-api-contracts.md",
+        """# API Contracts
+
+Inventory API page cites local primary evidence:
+<cite>services/inventory-service/controllers/EndpointsController.java:1</cite>
+<cite>services/inventory-service/entity/ApiEndpointEntity.java:1</cite>
+""",
+    )
+
+    result = VerifierService(tmp_path).verify(ci=True)
+    validity_check = next((c for c in result["checks"] if c["name"] == "citation-validity"), None)
+    assert validity_check is not None
+    assert validity_check["status"] == "PASS"
+
+
 # =============================================================================
 # Multiple Citations Tests
 # =============================================================================

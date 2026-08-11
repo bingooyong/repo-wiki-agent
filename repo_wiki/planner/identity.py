@@ -41,7 +41,7 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
             data = json.loads(package_json.read_text(encoding="utf-8"))
             if name := data.get("name"):
                 name_candidates.append((name, "package.json"))
-            if version := data.get("version"):
+            if data.get("version"):
                 pass  # handled below
         except (json.JSONDecodeError, OSError):
             pass
@@ -111,7 +111,8 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         best_source = "fallback"
 
     # Read description from package.json first (explicit metadata)
-    description = None
+    description: str | None = None
+    version: str | None = None
     if package_json.exists():
         try:
             data = json.loads(package_json.read_text(encoding="utf-8"))
@@ -138,29 +139,28 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
                 if description:
                     break
 
-        # Read version from various sources
-        version = None
-        for source in [package_json, pyproject, pom_xml]:
-            if source and source.exists():
-                content = source.read_text(encoding="utf-8", errors="ignore")
-                if source.suffix == ".json":
-                    try:
-                        data = json.loads(content)
-                        if v := data.get("version"):
-                            version = v
-                            break
-                    except json.JSONDecodeError:
-                        continue
-                elif source.name == "pyproject.toml":
-                    match = re.search(r'^\s*version\s*=\s*"([^"]+)"', content, re.MULTILINE)
-                    if match:
-                        version = match.group(1)
+    # Read version from various sources.
+    for metadata_path in [package_json, pyproject, pom_xml]:
+        if metadata_path.exists():
+            content = metadata_path.read_text(encoding="utf-8", errors="ignore")
+            if metadata_path.suffix == ".json":
+                try:
+                    data = json.loads(content)
+                    if v := data.get("version"):
+                        version = str(v)
                         break
-                elif source.name == "pom.xml":
-                    match = re.search(r"<version>([^<]+)</version>", content)
-                    if match and match.group(1) != "${project.version}":
-                        version = match.group(1)
-                        break
+                except json.JSONDecodeError:
+                    continue
+            elif metadata_path.name == "pyproject.toml":
+                match = re.search(r'^\s*version\s*=\s*"([^"]+)"', content, re.MULTILINE)
+                if match:
+                    version = match.group(1)
+                    break
+            elif metadata_path.name == "pom.xml":
+                match = re.search(r"<version>([^<]+)</version>", content)
+                if match and match.group(1) != "${project.version}":
+                    version = match.group(1)
+                    break
 
     return RepositoryIdentity(
         name=best_name,
@@ -181,7 +181,7 @@ def _human_readable_name(name: str) -> str:
 
     Examples:
         repo-wiki -> Repo Wiki
-        AI_API_Atlas -> AI API Atlas
+        reference-repo -> Reference Repo
         my-awesome-project -> My Awesome Project
     """
     # Replace hyphens, underscores, dots with spaces
@@ -219,6 +219,7 @@ def detect_language_and_framework(root: Path) -> tuple[str, str]:
         "gin": ["gin-gonic/gin"],
         "fiber": ["gofiber/fiber"],
     }
+    detected_framework = "unknown"
 
     for path in root.rglob("*"):
         if not path.is_file() or path.name.startswith("."):
@@ -239,13 +240,13 @@ def detect_language_and_framework(root: Path) -> tuple[str, str]:
         if path.name in {"package.json", "requirements.txt", "go.mod"}:
             content = path.read_text(encoding="utf-8", errors="ignore").lower()
             for framework, signals in framework_signals.items():
-                if any(signal in content for signal in signals):
-                    return language_counts, framework
+                if detected_framework == "unknown" and any(signal in content for signal in signals):
+                    detected_framework = framework
 
     language = "unknown"
     if language_counts:
-        language = max(language_counts, key=language_counts.get)
-    return language, "unknown"
+        language = max(language_counts, key=lambda name: language_counts[name])
+    return language, detected_framework
 
 
 def detect_package_manager(root: Path) -> str:

@@ -50,7 +50,7 @@ def diff_hash_maps(
     unchanged = {k: curr[k] for k in sorted(prev_keys & curr_keys) if prev[k] == curr[k]}
 
     # Pair newly-added and deleted files that share a hash as renames.
-    deleted_by_hash = {}
+    deleted_by_hash: dict[str, list[str]] = {}
     for path, file_hash in deleted.items():
         deleted_by_hash.setdefault(file_hash, []).append(path)
 

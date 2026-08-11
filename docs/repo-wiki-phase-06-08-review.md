@@ -30,40 +30,39 @@
 ### 1. Phase 06 只完成了 contract 的一半
 
 `DocumentLayer`、`SECTION_DEFINITIONS`、`PHASE_DEFINITIONS` 已经把输出层拆成 overview、section、module、phase 四层，这是正确方向。  
-但 `PHASE_DEFINITIONS` 只定义到 `phase-06-architecture`，并没有把已经进入实施计划的 `Phase 07`、`Phase 08` 纳入生成 contract，因此 contract 覆盖和计划本身不一致。【[contracts.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/generator/contracts.py:129)】【[contracts.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/generator/contracts.py:180)】
+但 `PHASE_DEFINITIONS` 只定义到 `phase-06-architecture`，并没有把已经进入实施计划的 `Phase 07`、`Phase 08` 纳入生成 contract，因此 contract 覆盖和计划本身不一致。【[contracts.py](<repo-root>/repo_wiki/generator/contracts.py:129)】【[contracts.py](<repo-root>/repo_wiki/generator/contracts.py:180)】
 
-更关键的是，生成引擎会在目标仓库执行时直接生成 `docs/phases/<phase>.md`。这意味着 repo-agent 自身的治理文档层被混入了被分析仓库的知识库输出层，边界不清晰。【[engine.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/generator/engine.py:116)】【[engine.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/generator/engine.py:1116)】
+更关键的是，生成引擎会在目标仓库执行时直接生成 `docs/phases/<phase>.md`。这意味着 repo-agent 自身的治理文档层被混入了被分析仓库的知识库输出层，边界不清晰。【[engine.py](<repo-root>/repo_wiki/generator/engine.py:116)】【[engine.py](<repo-root>/repo_wiki/generator/engine.py:1116)】
 
 ### 2. Phase 07 的“聚合”多数仍然是清单式改写
 
 模块地图已经具备域、服务族、运行时角色的组织骨架，这部分是 Phase 07 最接近目标的实现。  
-但 API 文档仍然按模块遍历所有 endpoint，`关键入口 API` 也直接枚举所有 endpoint；这不是真正的摘要或聚合，只是把原始清单换了位置。【[engine.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/generator/engine.py:529)】【[engine.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/generator/engine.py:591)】【[04-api-contracts.md.j2](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/templates/docs/04-api-contracts.md.j2:5)】
+但 API 文档仍然按模块遍历所有 endpoint，`关键入口 API` 也直接枚举所有 endpoint；这不是真正的摘要或聚合，只是把原始清单换了位置。【[engine.py](<repo-root>/repo_wiki/generator/engine.py:529)】【[engine.py](<repo-root>/repo_wiki/generator/engine.py:591)】【[04-api-contracts.md.j2](<repo-root>/templates/docs/04-api-contracts.md.j2:5)】
 
-Data Model 文档同样存在类似问题。当前实现只是把模型拆成 core/service 两类，再继续列出模型和文件路径；迁移策略也是模板化叙述，不是从目标仓库真实数据库结构和迁移机制中归纳出来的摘要。【[engine.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/generator/engine.py:624)】【[engine.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/generator/engine.py:686)】
+Data Model 文档同样存在类似问题。当前实现只是把模型拆成 core/service 两类，再继续列出模型和文件路径；迁移策略也是模板化叙述，不是从目标仓库真实数据库结构和迁移机制中归纳出来的摘要。【[engine.py](<repo-root>/repo_wiki/generator/engine.py:624)】【[engine.py](<repo-root>/repo_wiki/generator/engine.py:686)】
 
-Section 页也还停留在“专题索引页”而不是“专题文档页”。模板本身过于通用，默认结构仍是 `Section Content`、模块列表、API 端点、相关命令，缺少 qoder 风格那种以 prose 为主、以导航为骨架的专题页组织方式。【[section.md.j2](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/templates/docs/section.md.j2:1)】
+Section 页也还停留在“专题索引页”而不是“专题文档页”。模板本身过于通用，默认结构仍是 `Section Content`、模块列表、API 端点、相关命令，缺少 qoder 风格那种以 prose 为主、以导航为骨架的专题页组织方式。【[section.md.j2](<repo-root>/templates/docs/section.md.j2:1)】
 
 ### 3. 导航路径 contract 还不稳定，verify 也没有真正兜住
 
 `00-overview.md` 的阅读导航写成了 `../../docs/sections/...`。从 `docs/00-overview.md` 出发，这个相对路径是错误的。  
-`03-module-map.md`、`04-api-contracts.md` 等模板里也存在同类问题，把 `docs/` 再次写进了相对路径中。【[engine.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/generator/engine.py:243)】【[03-module-map.md.j2](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/templates/docs/03-module-map.md.j2:31)】【[04-api-contracts.md.j2](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/templates/docs/04-api-contracts.md.j2:41)】
+`03-module-map.md`、`04-api-contracts.md` 等模板里也存在同类问题，把 `docs/` 再次写进了相对路径中。【[engine.py](<repo-root>/repo_wiki/generator/engine.py:243)】【[03-module-map.md.j2](<repo-root>/templates/docs/03-module-map.md.j2:31)】【[04-api-contracts.md.j2](<repo-root>/templates/docs/04-api-contracts.md.j2:41)】
 
 与此同时，`VerifierService` 的导航校验只严格检查 section 页，而且 overview 页只做了“是否包含 `sections/` 字样”的软判断。更糟的是，section 页只要出现任意 `../`，就可能被当作存在 overview link。  
-这意味着当前 verify 能挡住“缺文件”，但还挡不住“路径写错”。【[service.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/verifier/service.py:716)】【[service.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/verifier/service.py:738)】【[service.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/repo_wiki/verifier/service.py:748)】
+这意味着当前 verify 能挡住“缺文件”，但还挡不住“路径写错”。【[service.py](<repo-root>/repo_wiki/verifier/service.py:716)】【[service.py](<repo-root>/repo_wiki/verifier/service.py:738)】【[service.py](<repo-root>/repo_wiki/verifier/service.py:748)】
 
 ### 4. Phase 08 的 baseline comparator 还不能直接承担“替代性判决”
 
 对比脚本已经定义了 6 个维度，这是正确方向。  
-但它仍然把 canonical section slug、overview heading、最小 prose 阈值直接硬编码成“qoder 基线”，而不是从真实 baseline 中提取“硬性结构项”和“参考质量项”。【[qoder_baseline_comparison.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/scripts/qoder_baseline_comparison.py:51)】【[qoder_baseline_comparison.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/scripts/qoder_baseline_comparison.py:57)】
+但它仍然把 canonical section slug、overview heading、最小 prose 阈值直接硬编码成“qoder 基线”，而不是从真实 baseline 中提取“硬性结构项”和“参考质量项”。【[qoder_baseline_comparison.py](<repo-root>/scripts/qoder_baseline_comparison.py:51)】【[qoder_baseline_comparison.py](<repo-root>/scripts/qoder_baseline_comparison.py:57)】
 
-更严重的是，目录结构评分只比较 `_get_docs_structure()` 返回字典的键集合。由于这个结构对象固定只有 `exists/subdirs/overview_files` 三个键，目录层级维度很容易被错误打满分，不能真实反映文档中心结构差异。【[qoder_baseline_comparison.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/scripts/qoder_baseline_comparison.py:271)】【[qoder_baseline_comparison.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/scripts/qoder_baseline_comparison.py:289)】
+更严重的是，目录结构评分只比较 `_get_docs_structure()` 返回字典的键集合。由于这个结构对象固定只有 `exists/subdirs/overview_files` 三个键，目录层级维度很容易被错误打满分，不能真实反映文档中心结构差异。【[qoder_baseline_comparison.py](<repo-root>/scripts/qoder_baseline_comparison.py:271)】【[qoder_baseline_comparison.py](<repo-root>/scripts/qoder_baseline_comparison.py:289)】
 
-heading coverage 也混入了 baseline 文件自己的 heading 结果，导致“目标没有、baseline 也没有”的情况才被记为缺失，这不适合作为稳定治理标准。【[qoder_baseline_comparison.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/scripts/qoder_baseline_comparison.py:400)】【[qoder_baseline_comparison.py](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/scripts/qoder_baseline_comparison.py:409)】
+heading coverage 也混入了 baseline 文件自己的 heading 结果，导致“目标没有、baseline 也没有”的情况才被记为缺失，这不适合作为稳定治理标准。【[qoder_baseline_comparison.py](<repo-root>/scripts/qoder_baseline_comparison.py:400)】【[qoder_baseline_comparison.py](<repo-root>/scripts/qoder_baseline_comparison.py:409)】
 
 ### 5. 当前验收报告可以说明“还不能替代”，但不能精确说明“差多少”
 
-`AI_API_Atlas` 的 readiness report 明确给出了 `verify --ci = FAIL`，并指出 overview、architecture、sections、API、Data Model 五类问题都未闭环，这个结论是可信的。  
-但报告中的 `49.3%` 只能作为粗信号，不能作为精确的产品完成度分数。【[AI_API_Atlas_Readiness_Report.md](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/docs/operations/AI_API_Atlas_Readiness_Report.md:9)】【[AI_API_Atlas_Readiness_Report.md](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/docs/operations/AI_API_Atlas_Readiness_Report.md:22)】【[AI_API_Atlas_Readiness_Report.md](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/docs/operations/AI_API_Atlas_Readiness_Report.md:60)】
+早期试点可以暴露 overview、architecture、sections、API 和 Data Model 等结构性缺口，但单次比较分数只能作为粗信号，不能作为精确的产品完成度结论。
 
 ## 关键评审意见
 
@@ -124,4 +123,4 @@ repo-agent 也应该沿这个方向规划，而不是把 SQLite 只看作 Phase 
 
 ## 评审后的下一步
 
-后续 Phase 规划已单独写入路线图文档，供继续拆 APM 任务使用：【[repo-wiki-phase-09-12-roadmap.md](/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent/docs/repo-wiki-phase-09-12-roadmap.md)】
+后续 Phase 规划已单独写入路线图文档，供继续拆 APM 任务使用：【[repo-wiki-phase-09-12-roadmap.md](<repo-root>/docs/repo-wiki-phase-09-12-roadmap.md)】

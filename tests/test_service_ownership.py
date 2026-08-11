@@ -241,6 +241,77 @@ class TestServiceOwnershipResolver:
         assert "signals" in d
         assert "rejection_reasons" in d
 
+    def test_inventory_service_accepts_strong_inventory_symbols(self):
+        """Inventory-service should strongly own API inventory symbols."""
+        resolver = ServiceOwnershipResolver(
+            service_name="inventory-service",
+            domain="core-platform",
+        )
+        confidence = resolver.resolve_ownership(
+            symbol="EndpointsController",
+            file_path="services/inventory-service/controllers/endpoints_controller.java",
+            span_text="public class EndpointsController {",
+        )
+        assert confidence.is_owned is True
+        signal_types = [s.signal_type for s in confidence.signals]
+        assert "inventory_strong_symbol" in signal_types
+
+    def test_inventory_service_accepts_entity_and_repository_patterns(self):
+        """Entity and repository naming should signal inventory-service ownership."""
+        resolver = ServiceOwnershipResolver(
+            service_name="API台账服务",
+            domain="core-platform",
+        )
+        confidence = resolver.resolve_ownership(
+            symbol="ApiEndpointRepository",
+            file_path="inventory-service/repository/api_endpoint_repository.java",
+            span_text="interface ApiEndpointRepository extends JpaRepository<ApiEndpointEntity, Long>",
+        )
+        assert confidence.is_owned is True
+        signal_types = [s.signal_type for s in confidence.signals]
+        assert "inventory_repository_name" in signal_types
+
+    def test_inventory_service_rejects_ai_service_evidence_without_integration_context(self):
+        """API台账服务 should reject ai-service evidence when no explicit integration exists."""
+        resolver = ServiceOwnershipResolver(
+            service_name="inventory-service",
+            domain="core-platform",
+        )
+        confidence = resolver.resolve_ownership(
+            symbol="EmbeddingGenerator",
+            file_path="services/ai-service/embedding/generator.py",
+            span_text="Generate embeddings for vector retrieval",
+        )
+        assert confidence.is_rejected is True
+        assert any("ai-service" in r.lower() for r in confidence.rejection_reasons)
+
+    def test_inventory_service_allows_ai_evidence_when_explicit_integration(self):
+        """API台账服务 can accept ai-service evidence only with explicit integration context."""
+        resolver = ServiceOwnershipResolver(
+            service_name="inventory-service",
+            domain="core-platform",
+        )
+        confidence = resolver.resolve_ownership(
+            symbol="InventoryAiIntegrationBridge",
+            file_path="services/inventory-service/integration/ai_bridge.py",
+            span_text="API台账服务 集成 ai-service for AI integration workflow",
+        )
+        assert confidence.is_rejected is False
+
+    def test_ai_service_rejects_strong_inventory_service_evidence(self):
+        """ai-service must reject strong inventory-service evidence."""
+        resolver = ServiceOwnershipResolver(
+            service_name="ai-service",
+            domain="ai-services",
+        )
+        confidence = resolver.resolve_ownership(
+            symbol="ApiParameterEntity",
+            file_path="services/inventory-service/entity/api_parameter_entity.java",
+            span_text="class ApiParameterEntity {}",
+        )
+        assert confidence.is_rejected is True
+        assert any("inventory-service" in r.lower() for r in confidence.rejection_reasons)
+
 
 class TestOwnershipVerifier:
     """Tests for the OwnershipVerifier class."""

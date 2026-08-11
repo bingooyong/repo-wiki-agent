@@ -160,7 +160,7 @@ class RuleFirstPlanner:
 
     def _humanize_service_title(self, name: str) -> str:
         known = {
-            "api-atlas-agent": "API采集Agent",
+            "api-reference-agent": "API采集Agent",
             "api-gateway": "API网关",
             "doc-parser-service": "文档解析服务",
             "tcsl-generator-service": "TCSL生成服务",
@@ -1226,6 +1226,8 @@ class RuleFirstPlanner:
                 node_id=f"cat-{category.value}",
                 label=category.value,
                 node_type="category",
+                path=None,
+                icon=None,
                 sort_order=_CATEGORY_ORDER.get(category, 999),
             )
             category_nodes[category] = node
@@ -1241,6 +1243,7 @@ class RuleFirstPlanner:
                 label=page.title,
                 node_type="page",
                 path=page.output_path,
+                icon=None,
                 sort_order=page.sort_order,
             )
 

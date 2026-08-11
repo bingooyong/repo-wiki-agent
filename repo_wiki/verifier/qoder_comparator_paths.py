@@ -12,6 +12,7 @@ Phase 29 - Task 29.2: Comparator path-model repair
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -58,11 +59,88 @@ QODER_TAXONOMY_CATEGORIES = [
 
 # Skip patterns for comparison (common noise patterns)
 DEFAULT_SKIP_PATTERNS = [
-    r"^docs/docs/",  # AI_API_Atlas has docs/docs which is not a section
+    r"^docs/docs/",  # reference-repo has docs/docs which is not a section
     r"^docs/sections/",  # Legacy section paths
     r"^\.git/",
     r"^node_modules/",
     r"^__pycache__/",
+]
+
+# Required counterpart rules for hard regression gaps discovered in fixtures.
+# These are path-model based and do not depend on repository-specific internals.
+REQUIRED_COUNTERPART_RULES = [
+    {
+        "rule_id": "inventory_service_api_topic",
+        "baseline_aliases": [
+            "api台账服务",
+            "inventory-service",
+            "inventory service",
+        ],
+        "required_target_prefixes": [
+            "API参考/核心服务API/",
+            "api/核心服务api/",
+        ],
+        "required_target_aliases": [
+            "api台账服务",
+            "inventory-service",
+            "inventory service",
+        ],
+        "message": (
+            "Missing required counterpart page for Inventory Service API under "
+            "API参考/核心服务API/."
+        ),
+        "owner_aliases": ["inventory-service", "inventory service", "api台账服务"],
+        "forbidden_owner_aliases": ["ai-service"],
+    },
+    {
+        "rule_id": "gitlab_mcp_api_topic",
+        "baseline_aliases": ["gitlab mcp", "gitlab-mcp"],
+        "required_target_prefixes": ["API参考/核心服务API/", "api/核心服务api/"],
+        "required_target_aliases": ["gitlab mcp", "gitlab-mcp"],
+        "message": "Missing required counterpart page for GitLab MCP API under API参考/核心服务API/.",
+        "owner_aliases": ["gitlab-mcp-service", "gitlab mcp", "gitlab"],
+        "forbidden_owner_aliases": ["ai-service"],
+    },
+    {
+        "rule_id": "jenkins_mcp_api_topic",
+        "baseline_aliases": ["jenkins mcp", "jenkins-mcp"],
+        "required_target_prefixes": ["API参考/核心服务API/", "api/核心服务api/"],
+        "required_target_aliases": ["jenkins mcp", "jenkins-mcp"],
+        "message": "Missing required counterpart page for Jenkins MCP API under API参考/核心服务API/.",
+        "owner_aliases": ["jenkins-mcp-service", "jenkins mcp", "jenkins"],
+        "forbidden_owner_aliases": ["ai-service"],
+    },
+    {
+        "rule_id": "knowledge_graph_api_topic",
+        "baseline_aliases": ["知识图谱服务", "knowledge graph", "knowledge-graph-service"],
+        "required_target_prefixes": ["API参考/核心服务API/", "api/核心服务api/"],
+        "required_target_aliases": ["知识图谱服务", "knowledge graph", "knowledge-graph-service"],
+        "message": "Missing required counterpart page for Knowledge Graph API under API参考/核心服务API/.",
+        "owner_aliases": ["knowledge-graph-service", "knowledge graph", "知识图谱"],
+        "forbidden_owner_aliases": ["ai-service"],
+    },
+    {
+        "rule_id": "security_audit_api_topic",
+        "baseline_aliases": ["安全审计服务", "security audit", "security-audit-service"],
+        "required_target_prefixes": ["API参考/核心服务API/", "api/核心服务api/"],
+        "required_target_aliases": ["安全审计服务", "security audit", "security-audit-service"],
+        "message": "Missing required counterpart page for Security Audit API under API参考/核心服务API/.",
+        "owner_aliases": ["security-audit-service", "security audit", "安全审计"],
+        "forbidden_owner_aliases": ["ai-service"],
+    },
+    {
+        "rule_id": "script_generation_api_topic",
+        "baseline_aliases": ["脚本生成服务", "script generation", "script-generator-service"],
+        "required_target_prefixes": ["API参考/核心服务API/", "api/核心服务api/"],
+        "required_target_aliases": [
+            "脚本生成服务",
+            "script generation",
+            "script-generator-service",
+        ],
+        "message": "Missing required counterpart page for Script Generation API under API参考/核心服务API/.",
+        "owner_aliases": ["script-generator-service", "script generation", "脚本生成"],
+        "forbidden_owner_aliases": ["ai-service"],
+    },
 ]
 
 
@@ -129,8 +207,9 @@ class PathModelRepair:
             path_str = path_str.replace(".qoder/repowiki/zh/", "")
             path_str = path_str.replace("content/", "")
 
-        # Remove leading .repo-agent-eval/<run>/content/ for repo-agent eval
+        # Remove leading eval content prefixes for repo-agent eval (nested runs layout first)
         elif model == PathModel.REPO_AGENT_EVAL:
+            path_str = re.sub(r"\.repo-agent-eval/runs/[^/]+/repowiki/zh/content/", "", path_str)
             path_str = re.sub(r"\.repo-agent-eval/[^/]+/content/", "", path_str)
 
         # Remove docs/ prefix for legacy
@@ -199,7 +278,7 @@ class PathModelRepair:
         self,
         target_root: Path,
         baseline_root: Path | None,
-    ) -> list[tuple[str, str | None, str | None]]:
+    ) -> list[tuple[str, bool, bool]]:
         """Build pairs of paths for comparison.
 
         Args:
@@ -267,7 +346,7 @@ class PathModelRepair:
                 # Compute normalized path
                 try:
                     rel_path = md_file.relative_to(content_dir)
-                    normalized = self.normalize_path(str(rel_path), model)
+                    normalized = self.normalize_path(rel_path, model)
 
                     if normalized and not self.should_skip_path(normalized):
                         files[normalized] = md_file
@@ -330,6 +409,9 @@ class PathModelRepair:
 class RepairedBaselineComparator:
     """Baseline comparator with repaired path model assumptions."""
 
+    REQUIRED_PAIR_MIN_SCORE = 0.60
+    CITE_PATH_PATTERN = re.compile(r"<cite>\s*([^<>:\n]+):[0-9]+(?:-[0-9]+)?", re.IGNORECASE)
+
     def __init__(
         self,
         target_root: Path,
@@ -360,6 +442,7 @@ class RepairedBaselineComparator:
             self.target_root,
             self.baseline_root,
         )
+        target_files = self.path_repair._collect_markdown_files(self.target_root, target_model)
 
         # Classify results
         in_both = []
@@ -374,6 +457,12 @@ class RepairedBaselineComparator:
             elif baseline_exists:
                 baseline_only.append(path)
 
+        required_failures = self._required_counterpart_failures(
+            target_paths=set(target_only) | set(in_both),
+            baseline_paths=set(baseline_only) | set(in_both),
+            target_file_map=target_files,
+        )
+
         return {
             "target_root": str(self.target_root),
             "baseline_root": str(self.baseline_root) if self.baseline_root else None,
@@ -383,7 +472,149 @@ class RepairedBaselineComparator:
             "target_only": target_only,
             "baseline_only": baseline_only,
             "symmetric_diff": len(target_only) + len(baseline_only),
+            "required_counterpart_failures": required_failures,
+            "required_counterpart_ok": len(required_failures) == 0,
         }
+
+    @staticmethod
+    def _path_contains_alias(path_lower: str, aliases: Sequence[str]) -> bool:
+        """Check if any alias appears as a path segment or sub-segment in path."""
+        for alias in aliases:
+            alias_low = alias.lower()
+            for segment in path_lower.split("/"):
+                if alias_low in segment:
+                    return True
+        return False
+
+    def _required_counterpart_failures(
+        self,
+        *,
+        target_paths: set[str],
+        baseline_paths: set[str],
+        target_file_map: dict[str, Path],
+    ) -> list[dict[str, Any]]:
+        """Evaluate hard required counterpart rules."""
+        failures: list[dict[str, Any]] = []
+        baseline_lower = {p: p.lower() for p in baseline_paths}
+        target_lower = {p: p.lower() for p in target_paths}
+
+        for rule in REQUIRED_COUNTERPART_RULES:
+            baseline_aliases = rule.get("baseline_aliases", [])
+            required_prefixes = rule.get("required_target_prefixes", [])
+            target_aliases = rule.get("required_target_aliases", [])
+            matched_baseline_paths = [
+                path
+                for path, low in baseline_lower.items()
+                if self._path_contains_alias(low, baseline_aliases)
+            ]
+            if not matched_baseline_paths:
+                continue
+
+            matched_target_paths: list[str] = []
+            for path, low in target_lower.items():
+                if not any(low.startswith(prefix.lower()) for prefix in required_prefixes):
+                    continue
+                if self._path_contains_alias(low, target_aliases):
+                    matched_target_paths.append(path)
+
+            if not matched_target_paths:
+                failures.append(
+                    {
+                        "rule_id": rule["rule_id"],
+                        "message": rule["message"],
+                        "baseline_matches": matched_baseline_paths,
+                        "required_prefixes": required_prefixes,
+                        "failure_type": "missing",
+                    }
+                )
+                continue
+
+            best_pair = self._evaluate_counterpart_pair_score(
+                matched_target_paths=matched_target_paths,
+                target_file_map=target_file_map,
+                owner_aliases=list(rule.get("owner_aliases", [])),
+                forbidden_owner_aliases=list(rule.get("forbidden_owner_aliases", [])),
+            )
+            if best_pair["score"] < self.REQUIRED_PAIR_MIN_SCORE:
+                failures.append(
+                    {
+                        "rule_id": rule["rule_id"],
+                        "message": (
+                            f"{rule['message']} Counterpart exists but ownership/citation "
+                            f"score is below threshold."
+                        ),
+                        "baseline_matches": matched_baseline_paths,
+                        "required_prefixes": required_prefixes,
+                        "failure_type": "quality_low",
+                        "pair_score": best_pair,
+                        "threshold": self.REQUIRED_PAIR_MIN_SCORE,
+                    }
+                )
+        return failures
+
+    @classmethod
+    def _extract_citation_paths(cls, content: str) -> list[str]:
+        return [path.strip().lower() for path in cls.CITE_PATH_PATTERN.findall(content)]
+
+    def _evaluate_counterpart_pair_score(
+        self,
+        *,
+        matched_target_paths: list[str],
+        target_file_map: dict[str, Path],
+        owner_aliases: list[str],
+        forbidden_owner_aliases: list[str],
+    ) -> dict[str, Any]:
+        """Score counterpart pages using ownership + citation locality dimensions."""
+        best: dict[str, Any] = {
+            "path": None,
+            "score": -1.0,
+            "citation_locality_score": 0.0,
+            "ownership_score": 0.0,
+            "citations": 0,
+            "owner_hits": 0,
+            "forbidden_hits": 0,
+        }
+        owner_aliases_low = [alias.lower() for alias in owner_aliases]
+        forbidden_aliases_low = [alias.lower() for alias in forbidden_owner_aliases]
+
+        for path in matched_target_paths:
+            target_file = target_file_map.get(path)
+            if target_file is None or not target_file.exists():
+                continue
+            try:
+                content = target_file.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            citation_paths = self._extract_citation_paths(content)
+            citation_count = len(citation_paths)
+            owner_hits = sum(
+                1
+                for citation in citation_paths
+                if self._path_contains_alias(citation, owner_aliases_low)
+            )
+            forbidden_hits = sum(
+                1
+                for citation in citation_paths
+                if self._path_contains_alias(citation, forbidden_aliases_low)
+            )
+            citation_locality_score = owner_hits / citation_count if citation_count > 0 else 0.0
+            ownership_score = (
+                max(0.0, 1.0 - (forbidden_hits / citation_count)) if citation_count > 0 else 0.0
+            )
+            score = round((0.7 * citation_locality_score) + (0.3 * ownership_score), 4)
+            if score > best["score"]:
+                best = {
+                    "path": path,
+                    "score": score,
+                    "citation_locality_score": round(citation_locality_score, 4),
+                    "ownership_score": round(ownership_score, 4),
+                    "citations": citation_count,
+                    "owner_hits": owner_hits,
+                    "forbidden_hits": forbidden_hits,
+                }
+        if best["score"] < 0:
+            best["score"] = 0.0
+        return best
 
 
 # =============================================================================

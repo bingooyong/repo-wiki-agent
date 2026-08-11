@@ -411,6 +411,29 @@ class TestFlowDiagramGeneration:
         flow_diagram = generator.generate_flow_diagram(page_plan)
         assert flow_diagram is None
 
+    def test_inventory_service_api_reference_can_produce_valid_mermaid_plan(self, sample_snapshot):
+        """Task 38.2 completion rule: API台账服务流必须能产出有效 Mermaid 计划。"""
+        generator = create_api_flow_diagram_generator(sample_snapshot)
+        page_plan = WikiPagePlan(
+            page_id="inventory-service-api-reference",
+            title="API台账服务 API",
+            category=WikiTaxonomyCategory.API_REFERENCE,
+            output_path="docs/pages/api/inventory-service-api-reference.md",
+            source_requirements=SourceRequirement(
+                endpoints=[
+                    "GET /health",
+                    "POST /api/auth/login",
+                    "POST /api/auth/logout",
+                ],
+                modules=["api", "auth"],
+            ),
+            generation_mode=GenerationMode.RULE_FIRST,
+            tags=["api", "inventory-service"],
+        )
+        flow_diagram = generator.generate_flow_diagram(page_plan)
+        assert flow_diagram is not None
+        assert flow_diagram.diagram_plan.rendered_diagram is not None
+
 
 # =============================================================================
 # TESTS FOR MULTIPLE DIAGRAM GENERATION

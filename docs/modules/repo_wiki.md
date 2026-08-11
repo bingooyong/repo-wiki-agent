@@ -7,7 +7,7 @@ Owner: `unknown`
 Handles API routes /path.
 
 ## Exports
-- `AIAPIAtlasParityRunner`
+- `ReferenceParityRunner`
 - `APIAggregator`
 - `APIEndpoint`
 - `APIEndpointGroup`
@@ -443,7 +443,7 @@ Handles API routes /path.
 - `_generation_engine`
 - `_generic_chunks`
 - `_get_affected_pages_for_file`
-- `_get_atlas_root`
+- `_get_reference_root`
 - `_get_authority_representation`
 - `_get_cache`
 - `_get_client`
@@ -807,7 +807,7 @@ Handles API routes /path.
 - `get`
 - `get_affected_pages`
 - `get_api_key_from_env`
-- `get_atlas_parity_report`
+- `get_reference_parity_report`
 - `get_auth_endpoints`
 - `get_canonical_by_category`
 - `get_canonical_slug`
@@ -1021,7 +1021,7 @@ Handles API routes /path.
 - `resolve_llm_config`
 - `resolve_repository_identity`
 - `resolve_section_alias`
-- `run_atlas_parity`
+- `run_reference_parity`
 - `run_comparison`
 - `run_llm_diagnostics`
 - `run_pages_sync`

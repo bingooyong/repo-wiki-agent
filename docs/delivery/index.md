@@ -81,16 +81,14 @@ docs/delivery/
 
 | 指标 | 状态 |
 |------|------|
-| Strict Verify | ✅ PASS (13/13 checks) |
-| GO 决策 | ✅ GO (2026-05-02) |
-| 测试覆盖 | 1200+ tests |
+| Strict Verify | 当前 blocking checks 全部通过后方可发布 |
+| 发布决策 | 由公开门禁结果决定 |
+| 测试覆盖 | 以公开 CI 结果为准 |
 | 文档完整性 | 14/14 docs |
 
 ---
 
 ## 参考信息
 
-- **GO 决策文档**：`docs/go-no-go-dossier.md`
-- **APM Memory Root**：`.apm/Memory/Memory_Root.md`
-- **Implementation Plan**：`.apm/Implementation_Plan.md`
+- **实施计划**：`docs/plans/`
 - **GitHub**：https://github.com/bingooyong/repo-agent

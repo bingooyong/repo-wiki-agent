@@ -1,7 +1,7 @@
 # Qoder 风格 Repo-Wiki 设计分析
 
 文档属性：设计分析  
-分析对象：`/Users/bingooyong/Code/01Code/github.com/bingooyong/AI_API_Atlas` 的 qoder 风格知识库输出  
+分析对象：`<reference-repo-root>` 的 qoder 风格知识库输出
 分析目标：总结 qoder 风格 `repo-wiki` 的存储结构、知识组织方式、文档中心规划原则，并作为后续 `repo-agent` 重构基线
 
 ## 1. 结论先行
@@ -92,7 +92,7 @@ ai/source-of-truth/
 
 ```text
 docs/
-├── ATLAS_平台文档中心/
+├── REFERENCE_平台文档中心/
 │   ├── 01_战略规划/
 │   ├── 02_平台总览/
 │   ├── 03_模块设计/
@@ -101,7 +101,7 @@ docs/
 │   └── 06_规范标准/
 ├── Audit/
 ├── agent-guides/
-├── api-atlas-agent/
+├── api-reference-agent/
 ├── operations/
 ├── onboarding/
 ├── sections/

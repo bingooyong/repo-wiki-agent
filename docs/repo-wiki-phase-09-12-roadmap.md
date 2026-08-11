@@ -87,7 +87,7 @@ flowchart LR
 
 - 分离“硬性结构失败”和“参考质量偏差”。
 - 让 baseline compare 比较真实结构和真实内容，不再用固定字符串代替 baseline。
-- 支持多个样例仓库，而不是只看 `AI_API_Atlas`。
+- 支持多个样例仓库，而不是只看 `reference-repo`。
 
 ### 建议任务
 
@@ -102,7 +102,7 @@ flowchart LR
 
 - compare 工具不再因为结构对象键名相同而给目录结构满分。
 - heading/section/prose 评分可明确区分“真实差距”和“baseline 特例”。
-- `AI_API_Atlas` 不再是唯一验收样本。
+- `reference-repo` 不再是唯一验收样本。
 - Manager 可以基于 readiness report 直接做 go/no-go 决策。
 
 ## Phase 12 - SQLite-First Local Knowledge Runtime

@@ -48,7 +48,7 @@ actions:
     behavior: BLOCK_WITH_REVIEW
     message: "SOFT gate failure detected. Blocking release pending review."
     requires_approval: true
-    approval_authority: Agent_QualityRelease
+    approval_authority: release-maintainers
 
   on_score_below_threshold:
     behavior: BLOCK_WITH_REVIEW
@@ -146,7 +146,7 @@ criteria:
   quality_score: >= 0.55
   pilot_repos:
     - repo-agent
-    - AI_API_Atlas
+    - reference-repo
   test_duration_days: 14        # 试点周期
 
 # 验证命令
@@ -294,7 +294,7 @@ quality_score: 0.85
 hard_gate_failures: []
 soft_gate_failures: []
 decision: GO
-authority: Agent_QualityRelease
+authority: release-maintainers
 evidence_bundle: .repo-agent-eval/strict-2026-04-25/
 ---
 ```

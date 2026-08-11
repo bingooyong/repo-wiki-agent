@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.core.contracts import RepositorySnapshot
-from repo_wiki.core.security import sanitize_text, should_scan
+from repo_wiki.core.security import sanitize_text
 from repo_wiki.generator.io import relpath, write_json
 from repo_wiki.indexer.chunking import chunk_source
 from repo_wiki.indexer.embeddings import build_embedding_provider
@@ -32,83 +35,89 @@ class SemanticIndexer:
         self.vector_store = ChromaVectorStore(self.index_root / "chroma")
 
     def rebuild(self, snapshot: RepositorySnapshot) -> IndexingResult:
+        started_at = time.perf_counter()
         module_by_path = {m.path: m.name for m in snapshot.modules}
         current_hash: dict[str, str] = {}
         chunk_count = 0
         changed_files: list[str] = []
+        total_candidates = 0
+        batches_processed = 0
+        batch_size = 250
 
         previous_hash = self.store.get_file_hash_map()
+        from repo_wiki.scanner.repository_scanner import RepositoryScanner
 
-        for path in sorted(self.root.rglob("*")):
-            if not path.is_file():
-                continue
-            if not should_scan(path, self.config, root=self.root):
-                continue
-            if path.suffix.lower() not in {".py", ".ts", ".tsx", ".js", ".jsx", ".go"}:
-                continue
-            relative = relpath(path, self.root)
-            file_hash = compute_file_hash(path)
-            current_hash[relative] = file_hash
-            if previous_hash.get(relative) == file_hash:
-                continue
-            changed_files.append(relative)
+        scanner = RepositoryScanner(self.config)
 
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            text, _warnings = sanitize_text(text, path=relative)
-            module_name = _module_name_for_file(relative, module_by_path)
-            language = _language_for_suffix(path.suffix.lower())
+        for batch in scanner.iter_file_batches(batch_size=batch_size):
+            batches_processed += 1
+            for scanned_file in batch:
+                path = self.root / scanned_file.path
+                if path.suffix.lower() not in {".py", ".ts", ".tsx", ".js", ".jsx", ".go"}:
+                    continue
+                total_candidates += 1
+                relative = relpath(path, self.root)
+                file_hash = compute_file_hash(path)
+                current_hash[relative] = file_hash
+                if previous_hash.get(relative) == file_hash:
+                    continue
+                changed_files.append(relative)
 
-            chunks = chunk_source(
-                text,
-                file_path=relative,
-                module_name=module_name,
-                language=language,
-                sanitize_text=lambda value: sanitize_text(value, path=relative)[0],
-            )
-            self.store.upsert_file(
-                path=relative,
-                module_name=module_name,
-                language=language,
-                content_hash=file_hash,
-                size_bytes=path.stat().st_size,
-                mtime=path.stat().st_mtime,
-            )
-            self.store.upsert_file_hash(relative, file_hash)
-            self.store.replace_chunks_for_file(relative, [c.to_record() for c in chunks])
-            symbols = [
-                {
-                    "name": c.symbol_name,
-                    "kind": c.chunk_type,
-                    "module_name": c.module_name,
-                    "line_start": c.line_start,
-                    "line_end": c.line_end,
-                    "signature": c.symbol_name,
-                }
-                for c in chunks
-                if c.chunk_type in {"function", "class"}
-            ]
-            self.store.replace_symbols_for_file(relative, symbols)
+                text = scanned_file.text
+                module_name = _module_name_for_file(relative, module_by_path)
+                language = _language_for_suffix(path.suffix.lower())
 
-            embeddings = self.embedder.embed([c.text for c in chunks])
-            entries = [
-                VectorEntry(
-                    chunk_id=chunk.chunk_id,
-                    embedding=embeddings[idx],
-                    metadata={
-                        "file_path": chunk.file_path,
-                        "module_name": chunk.module_name,
-                        "language": chunk.language,
-                        "chunk_type": chunk.chunk_type,
-                        "symbol_name": chunk.symbol_name,
-                        "line_start": chunk.line_start,
-                        "line_end": chunk.line_end,
-                        "text": chunk.text,
-                    },
+                chunks = chunk_source(
+                    text,
+                    file_path=relative,
+                    module_name=module_name,
+                    language=language,
+                    sanitize_text=lambda value: sanitize_text(value, path=relative)[0],
                 )
-                for idx, chunk in enumerate(chunks)
-            ]
-            self.vector_store.upsert(entries)
-            chunk_count += len(chunks)
+                self.store.upsert_file(
+                    path=relative,
+                    module_name=module_name,
+                    language=language,
+                    content_hash=file_hash,
+                    size_bytes=path.stat().st_size,
+                    mtime=path.stat().st_mtime,
+                )
+                self.store.upsert_file_hash(relative, file_hash)
+                self.store.replace_chunks_for_file(relative, [c.to_record() for c in chunks])
+                symbols = [
+                    {
+                        "name": c.symbol_name,
+                        "kind": c.chunk_type,
+                        "module_name": c.module_name,
+                        "line_start": c.line_start,
+                        "line_end": c.line_end,
+                        "signature": c.symbol_name,
+                    }
+                    for c in chunks
+                    if c.chunk_type in {"function", "class"}
+                ]
+                self.store.replace_symbols_for_file(relative, symbols)
+
+                embeddings = self.embedder.embed([c.text for c in chunks])
+                entries = [
+                    VectorEntry(
+                        chunk_id=chunk.chunk_id,
+                        embedding=embeddings[idx],
+                        metadata={
+                            "file_path": chunk.file_path,
+                            "module_name": chunk.module_name,
+                            "language": chunk.language,
+                            "chunk_type": chunk.chunk_type,
+                            "symbol_name": chunk.symbol_name,
+                            "line_start": chunk.line_start,
+                            "line_end": chunk.line_end,
+                            "text": chunk.text,
+                        },
+                    )
+                    for idx, chunk in enumerate(chunks)
+                ]
+                self.vector_store.upsert(entries)
+                chunk_count += len(chunks)
 
         hash_diff = diff_hash_maps(previous_hash, current_hash)
         deleted_files = sorted(hash_diff["deleted"].keys())
@@ -119,6 +128,15 @@ class SemanticIndexer:
 
         exported_paths = self.store.export_json_artifacts(self.index_root)
         exported = {name: str(path) for name, path in exported_paths.items()}
+        elapsed_seconds = round(time.perf_counter() - started_at, 6)
+        index_input_fingerprint = hashlib.sha256(
+            json.dumps(
+                {"files": sorted(current_hash.items())},
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("utf-8")
+        ).hexdigest()
         write_json(
             self.index_root / "indexing_summary.json",
             {
@@ -126,6 +144,21 @@ class SemanticIndexer:
                 "deleted_files": deleted_files,
                 "chunks_written": chunk_count,
                 "embedding_backend": getattr(self.embedder, "backend_name", "unknown"),
+                "total_candidates": total_candidates,
+                "changed_files_count": len(changed_files),
+                "deleted_files_count": len(deleted_files),
+                "batches_processed": batches_processed,
+                "batch_size": batch_size,
+                "elapsed_seconds": elapsed_seconds,
+                "index_input_fingerprint": index_input_fingerprint,
+                "checkpoint": {
+                    "total_candidates": total_candidates,
+                    "changed_files": len(changed_files),
+                    "deleted_files": len(deleted_files),
+                    "batches_processed": batches_processed,
+                    "elapsed_seconds": elapsed_seconds,
+                    "index_input_fingerprint": index_input_fingerprint,
+                },
             },
         )
         return IndexingResult(

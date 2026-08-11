@@ -26,13 +26,13 @@ failure_messages:
     HARD gate failure detected.
     Evidence: {evidence_bundle}/verify-result.json
     Required action: Fix structural issues before release.
-    Contact: Agent_QualityRelease for rollback.
+    Contact: release-maintainers for rollback.
 
   SOFT_GATE_FAIL: |
     SOFT gate failure detected.
     Evidence: {evidence_bundle}/compare-result.json
     Required action: Review quality issues before release.
-    Contact: Agent_QualityRelease for waiver.
+    Contact: release-maintainers for waiver.
 
   SCORE_BELOW_THRESHOLD: |
     Overall score below threshold (required: >= 0.85)

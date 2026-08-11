@@ -3,7 +3,7 @@
 **文档属性**: CI 模板配置
 **版本**: 1.0
 **日期**: 2026-04-25
-**Agent**: Agent_AdapterGovernance
+**Agent**: adapter-maintainers
 
 ## 1. 概述
 
@@ -197,7 +197,7 @@ on:
 env:
   PROFILE: pilot
   EVIDENCE_DIR: .repo-agent-eval/pilot-${{ github.run_id }}
-  PILOT_REPOS: "repo-agent,AI_API_Atlas"
+  PILOT_REPOS: "repo-agent,reference-repo"
 
 jobs:
   verify-and-compare:
@@ -253,7 +253,7 @@ metrics = {
     'hard_gate_failures': v.get('summary', {}).get('hard_gate_failures', 0),
     'soft_gate_failures': v.get('summary', {}).get('soft_gate_failures', 0),
     'overall_score': c.get('summary', {}).get('overall_score', 0),
-    'pilot_repos': ['repo-agent', 'AI_API_Atlas']
+    'pilot_repos': ['repo-agent', 'reference-repo']
 }
 print(json.dumps(metrics, indent=2))
 " > ${{ env.EVIDENCE_DIR }}/pilot-metrics.json
@@ -306,13 +306,13 @@ failure_messages:
     ❌ HARD gate failure detected.
     Evidence: {evidence_bundle}/verify-result.json
     Required action: Fix structural issues before release.
-    Contact: Agent_QualityRelease for rollback.
+    Contact: release-maintainers for rollback.
 
   SOFT_GATE_FAIL: |
     ⚠️ SOFT gate failure detected.
     Evidence: {evidence_bundle}/compare-result.json
     Required action: Review quality issues before release.
-    Contact: Agent_QualityRelease for waiver.
+    Contact: release-maintainers for waiver.
 
   SCORE_BELOW_THRESHOLD: |
     ❌ Overall score below threshold (required: >= 0.85)
@@ -401,7 +401,7 @@ pilot_config:
   test_duration_days: 14
   repos:
     - repo-agent
-    - AI_API_Atlas
+    - reference-repo
   collect_metrics: true
 
 failure_messages:
@@ -740,9 +740,9 @@ HARD gate failures detected:
   - STRUCT_NAVIGATION_BROKEN (Navigation links are broken)
 
 Required action: Fix structural issues before release.
-Contact: Agent_QualityRelease for rollback guidance.
+Contact: release-maintainers for rollback guidance.
 ```
 
 ## 8. 下一步
 
-Task 16.2 完成。Task 16.3 依赖 Task 16.2，将在 Atlas 和 benchmark 仓库执行最终试点。
+Task 16.2 完成。Task 16.3 依赖 Task 16.2，将在 Reference 和 benchmark 仓库执行最终试点。

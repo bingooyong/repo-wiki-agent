@@ -1,11 +1,15 @@
 """Tests for static repo-wiki viewer with tree navigation and Mermaid rendering."""
 
+import json
+from pathlib import Path
+
 from repo_wiki.viewer.static_viewer import (
     build_nav_tree_from_manifest,
     build_toc_html,
     build_tree_html,
     build_viewer_html,
     create_viewer_for_directory,
+    create_viewer_for_workspace_release,
     extract_headings,
     get_label_from_path,
     get_mermaid_script,
@@ -13,6 +17,7 @@ from repo_wiki.viewer.static_viewer import (
     inject_anchors,
     inject_mermaid_support,
     make_anchor,
+    render_markdown_to_html,
     render_mermaid_safely,
 )
 
@@ -164,6 +169,16 @@ sequenceDiagram
         assert "sequenceDiagram" in result
         assert "Alice" in result
 
+    def test_escapes_html_in_diagram_content(self):
+        content = """```mermaid
+graph TD
+    A["<script>alert('xss')</script>"] --> B
+```
+"""
+        result = render_mermaid_safely(content)
+        assert "<script>" not in result
+        assert "&lt;script&gt;" in result
+
 
 class TestInjectMermaidSupport:
     """Tests for Mermaid script injection."""
@@ -173,6 +188,8 @@ class TestInjectMermaidSupport:
         result = inject_mermaid_support(html)
         assert "mermaid@10" in result
         assert "mermaid.initialize" in result
+        assert "securityLevel: 'strict'" in result
+        assert "htmlLabels: false" in result
 
     def test_no_injection_without_mermaid(self):
         html = "<p>No diagrams here</p>"
@@ -347,6 +364,30 @@ graph TD
         html = build_viewer_html(content, toc=headings)
         assert "toc" in html
 
+    def test_viewer_escapes_raw_html_and_title(self):
+        html = build_viewer_html(
+            '<script>alert("content")</script>',
+            title='"><script>alert("title")</script>',
+        )
+        assert '<script>alert("content")</script>' not in html
+        assert '<script>alert("title")</script>' not in html
+        assert "&lt;script&gt;" in html
+
+
+class TestRenderMarkdownToHtmlSecurity:
+    def test_rejects_dangerous_link_and_image_schemes(self):
+        html = render_markdown_to_html(
+            "[click](javascript:alert(1))\n\n![x](data:text/html,<script>alert(1)</script>)"
+        )
+        assert "javascript:" not in html
+        assert "data:text/html" not in html
+        assert "<script>" not in html
+
+    def test_preserves_safe_relative_and_https_links(self):
+        html = render_markdown_to_html("[local](docs/page.md) [web](https://example.com/docs)")
+        assert 'href="docs/page.md"' in html
+        assert 'href="https://example.com/docs"' in html
+
 
 class TestCreateViewerForDirectory:
     """Tests for viewer creation from directory."""
@@ -355,6 +396,135 @@ class TestCreateViewerForDirectory:
         result = create_viewer_for_directory(tmp_path)
         assert result["root_dir"] == str(tmp_path)
         assert result["nav_nodes"] == []
+
+
+class TestWorkspaceReleaseViewer:
+    """Tests fixed release directory loading contract."""
+
+    def _write_release_manifest(self, tmp_path, manifest_json: str) -> None:
+        release_root = tmp_path / ".repo-agent-eval" / "repowiki" / "zh"
+        release_root.mkdir(parents=True, exist_ok=True)
+        (release_root / "manifest.json").write_text(manifest_json, encoding="utf-8")
+
+    def test_workspace_release_no_manifest_returns_no_release(self, tmp_path):
+        result = create_viewer_for_workspace_release(tmp_path)
+        assert result["status"] == "NO_RELEASE"
+        assert result["reason"] == "manifest_missing"
+        assert result["nav_nodes"] == []
+
+    def test_workspace_release_invalid_json_returns_no_release(self, tmp_path):
+        self._write_release_manifest(tmp_path, "not-valid-json{{{")
+        result = create_viewer_for_workspace_release(tmp_path)
+        assert result["status"] == "NO_RELEASE"
+
+    def test_workspace_release_manifest_is_list_returns_no_release(self, tmp_path):
+        self._write_release_manifest(tmp_path, '[{"release_status":"READY"}]')
+        result = create_viewer_for_workspace_release(tmp_path)
+        assert result["status"] == "NO_RELEASE"
+        assert result["reason"] == "manifest_invalid"
+
+    def test_workspace_release_requires_ready_status(self, tmp_path):
+        self._write_release_manifest(
+            tmp_path,
+            '{"release_status":"NOT_READY","navigation_tree":[{"type":"page","label":"x","path":"content/x.md"}]}',
+        )
+        result = create_viewer_for_workspace_release(tmp_path)
+        assert result["status"] == "NO_RELEASE"
+        assert result["reason"] == "release_not_ready"
+
+    def test_workspace_release_missing_navigation_tree(self, tmp_path):
+        self._write_release_manifest(tmp_path, '{"release_status":"READY"}')
+        result = create_viewer_for_workspace_release(tmp_path)
+        assert result["status"] == "NO_RELEASE"
+        assert result["reason"] == "navigation_tree_missing"
+
+    def test_workspace_release_empty_navigation_tree(self, tmp_path):
+        self._write_release_manifest(tmp_path, '{"release_status":"READY","navigation_tree":[]}')
+        result = create_viewer_for_workspace_release(tmp_path)
+        assert result["status"] == "NO_RELEASE"
+        assert result["reason"] == "navigation_tree_missing"
+
+    def test_workspace_release_reads_ready_navigation_tree(self, tmp_path):
+        self._write_release_manifest(
+            tmp_path,
+            '{"release_status":"READY","navigation_tree":[{"type":"category","label":"概览","children":[{"type":"page","label":"Overview","path":"content/00-overview.md"}]}]}',
+        )
+        result = create_viewer_for_workspace_release(tmp_path)
+        assert result["status"] == "READY"
+        assert result["reason"] == ""
+        assert result["nav_nodes"]
+
+    def test_workspace_release_reads_nested_readiness_state(self, tmp_path):
+        self._write_release_manifest(
+            tmp_path,
+            '{"readiness_state":"READY","navigation_tree":[{"type":"page","label":"x","path":"content/x.md"}]}',
+        )
+        result = create_viewer_for_workspace_release(tmp_path)
+        assert result["status"] == "READY"
+
+    def test_workspace_release_reads_nested_readiness_dict(self, tmp_path):
+        self._write_release_manifest(
+            tmp_path,
+            '{"readiness":{"readiness_state":"READY"},"navigation_tree":[{"type":"page","label":"x","path":"content/x.md"}]}',
+        )
+        result = create_viewer_for_workspace_release(tmp_path)
+        assert result["status"] == "READY"
+
+    def test_workspace_release_nested_readiness_dict_not_ready(self, tmp_path):
+        self._write_release_manifest(
+            tmp_path,
+            '{"readiness":{"readiness_state":"NOT_READY"},"navigation_tree":[{"type":"page","label":"x","path":"content/x.md"}]}',
+        )
+        result = create_viewer_for_workspace_release(tmp_path)
+        assert result["status"] == "NO_RELEASE"
+        assert result["reason"] == "release_not_ready"
+
+
+class TestReleaseContractEnforcement:
+    """Default viewer loads only `.repo-agent-eval/repowiki/zh/manifest.json` (no runs/* scan)."""
+
+    def test_workspace_release_ignores_run_tree_manifest_when_release_missing(self, tmp_path: Path):
+        ws = tmp_path / "workspace"
+        ws.mkdir(parents=True)
+        run_dir = ws / ".repo-agent-eval" / "runs" / "run-hot"
+        run_dir.mkdir(parents=True)
+        (run_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "readiness_state": "READY",
+                    "navigation_tree": [
+                        {"type": "page", "label": "RunOnlyPage", "path": "content/only-in-run.md"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        viewer = create_viewer_for_workspace_release(ws)
+        assert viewer["status"] == "NO_RELEASE"
+        assert viewer["reason"] == "manifest_missing"
+        assert viewer["nav_nodes"] == []
+
+    def test_create_viewer_for_directory_loads_explicit_run_manifest_diagnostic(
+        self, tmp_path: Path
+    ):
+        """Tooling/diagnostic entry: point at any directory + manifest_path (here: run zh root)."""
+        zh = tmp_path / "run-a" / "repowiki" / "zh"
+        zh.mkdir(parents=True)
+        manifest = zh / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "navigation_tree": [
+                        {"type": "page", "label": "DiagnosticPage", "path": "content/diag.md"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        viewer = create_viewer_for_directory(zh, manifest_path=manifest)
+        labels = [n.get("label") for n in viewer["nav_nodes"]]
+        assert "DiagnosticPage" in labels
+        assert str(manifest.resolve()) == Path(viewer["manifest_path"]).resolve().as_posix()
 
 
 class TestMermaidOfflineSupport:
@@ -457,5 +627,6 @@ graph TD
 """
         result = render_mermaid_safely(content)
         assert '<div class="mermaid">' in result
-        # The content should be preserved as-is in the div
         assert "alert" in result
+        assert "<script>" not in result
+        assert "&lt;script&gt;" in result

@@ -17,6 +17,8 @@ import asyncio
 
 import pytest
 
+from repo_wiki.core.config import RepoWikiConfig
+from repo_wiki.evidence.ranking import filter_ranked_candidates_by_ownership
 from repo_wiki.generator.composer import (
     CitationPreservationValidator,
     ComposerContext,
@@ -32,6 +34,7 @@ from repo_wiki.generator.composer import (
 )
 from repo_wiki.llm.providers import MockLLMProvider, create_mock_provider
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
+from repo_wiki.orchestration.service import RepoWikiService
 from repo_wiki.planner.schema import (
     GenerationMode,
     SourceRequirement,
@@ -393,6 +396,162 @@ class TestLLMPageComposer:
         if output.markdown:
             assert output.rejected is False
 
+    def test_inventory_binding_filters_wrong_service_before_composer(self):
+        """验证错误服务证据在进入 composer 前已被过滤。"""
+        from repo_wiki.evidence.ranking import EvidenceCandidate
+
+        page = WikiPagePlan(
+            page_id="inventory-service-api-reference",
+            title="API台账服务 API",
+            category=WikiTaxonomyCategory.API_REFERENCE,
+            output_path="docs/pages/api/inventory-service-api-reference.md",
+            source_requirements=SourceRequirement(modules=["inventory-service"]),
+        )
+        wrong_span = EvidenceSpanRecord(
+            digest="wrong1",
+            file_path="services/ai-service/llm/retriever.py",
+            line_start=1,
+            line_end=20,
+            language="python",
+            symbol="RetrieverService",
+            span_text="embedding vector retrieval model",
+        )
+        ok_span = EvidenceSpanRecord(
+            digest="ok1",
+            file_path="services/inventory-service/entity/ApiEndpointEntity.java",
+            line_start=1,
+            line_end=20,
+            language="java",
+            symbol="ApiEndpointEntity",
+            span_text="class ApiEndpointEntity {}",
+        )
+        filtered = filter_ranked_candidates_by_ownership(
+            page,
+            [
+                EvidenceCandidate(1, wrong_span, 3.0, ["api_match"], 0),
+                EvidenceCandidate(2, ok_span, 2.0, ["data_model_match"], 1),
+            ],
+        )
+        assert len(filtered) == 1
+        assert "inventory-service" in filtered[0].span.file_path
+
+    @pytest.mark.asyncio
+    async def test_inventory_api_page_rejects_without_inventory_primary_evidence(
+        self,
+        composer: LLMPageComposer,
+        sample_context: ComposerContext,
+    ):
+        """Inventory API page必须在无主证据时拒绝生成。"""
+        from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
+
+        page = WikiPagePlan(
+            page_id="inventory-service-api-reference",
+            title="API台账服务 API",
+            category=WikiTaxonomyCategory.API_REFERENCE,
+            output_path="docs/pages/api/inventory-service-api-reference.md",
+            source_requirements=SourceRequirement(
+                modules=["inventory-service", "contract-service", "frontend-app"],
+                endpoints=["GET /inventory/endpoints"],
+                data_models=["ApiEndpointEntity", "ApiParameterEntity"],
+            ),
+            generation_mode=GenerationMode.LLM_ASSISTED,
+        )
+
+        # Only integration evidence (contract + frontend), no inventory-local primary evidence.
+        span_contract = EvidenceSpanRecord(
+            digest="contract1",
+            file_path="services/contract-service/ContractController.java",
+            line_start=10,
+            line_end=30,
+            language="java",
+            symbol="ContractController",
+            span_text="class ContractController {}",
+        )
+        span_frontend = EvidenceSpanRecord(
+            digest="frontend1",
+            file_path="frontend/app/src/pages/inventory.tsx",
+            line_start=1,
+            line_end=20,
+            language="typescript",
+            symbol="InventoryPage",
+            span_text="function InventoryPage() {}",
+        )
+        binding = PageEvidenceBinding(
+            page_id=page.page_id,
+            doc_type="api",
+            candidates=[
+                EvidenceCandidate(
+                    evidence_id=1,
+                    span=span_contract,
+                    score=0.9,
+                    match_signals=["integration"],
+                    citation_order=0,
+                ),
+                EvidenceCandidate(
+                    evidence_id=2,
+                    span=span_frontend,
+                    score=0.8,
+                    match_signals=["integration"],
+                    citation_order=1,
+                ),
+            ],
+        )
+
+        input_data = build_composer_input(page, binding, sample_context)
+        output = await composer.compose_page(input_data)
+        assert output.rejected is True
+        assert output.rejection_reason is not None
+        assert "inventory-service primary evidence" in output.rejection_reason
+
+    @pytest.mark.asyncio
+    async def test_inventory_api_page_accepts_with_inventory_primary_evidence(
+        self,
+        composer: LLMPageComposer,
+        sample_context: ComposerContext,
+    ):
+        """Inventory API page在存在 inventory-service 主证据时允许通过。"""
+        from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
+
+        page = WikiPagePlan(
+            page_id="inventory-service-api-reference",
+            title="API台账服务 API",
+            category=WikiTaxonomyCategory.API_REFERENCE,
+            output_path="docs/pages/api/inventory-service-api-reference.md",
+            source_requirements=SourceRequirement(
+                modules=["inventory-service"],
+                endpoints=["GET /inventory/endpoints", "POST /inventory/endpoints"],
+                data_models=["ApiEndpointEntity", "ApiParameterEntity"],
+            ),
+            generation_mode=GenerationMode.LLM_ASSISTED,
+        )
+
+        span_inventory = EvidenceSpanRecord(
+            digest="inv1",
+            file_path="services/inventory-service/controllers/EndpointsController.java",
+            line_start=12,
+            line_end=64,
+            language="java",
+            symbol="EndpointsController",
+            span_text="class EndpointsController { EndpointDto list(); }",
+        )
+        binding = PageEvidenceBinding(
+            page_id=page.page_id,
+            doc_type="api",
+            candidates=[
+                EvidenceCandidate(
+                    evidence_id=1,
+                    span=span_inventory,
+                    score=1.0,
+                    match_signals=["ownership_confirmed"],
+                    citation_order=0,
+                ),
+            ],
+        )
+
+        input_data = build_composer_input(page, binding, sample_context)
+        output = await composer.compose_page(input_data)
+        assert output.rejected is False
+
 
 class TestBuildComposerInput:
     """Tests for build_composer_input factory function."""
@@ -462,6 +621,70 @@ class TestBuildComposerInput:
         assert input_data.page_plan.page_id == "test-page"
         assert input_data.evidence_binding is not None
         assert len(input_data.evidence_binding.candidates) == 1
+
+    @pytest.mark.parametrize(
+        "page_id,title",
+        [
+            ("inventory-service-api-reference", "API台账服务 API"),
+            ("contract-service-api-reference", "合约服务 API"),
+            ("ai-service-api-reference", "AI服务 API"),
+        ],
+    )
+    def test_api_qoder_like_skeleton_for_core_service_pages(self, page_id: str, title: str):
+        """核心服务 API 页面应可修复为 Qoder-like prose-first 骨架。"""
+        page = WikiPagePlan(
+            page_id=page_id,
+            title=title,
+            category=WikiTaxonomyCategory.API_REFERENCE,
+            output_path=f"docs/pages/api/{page_id}.md",
+        )
+        context = ComposerContext(
+            repository_name="test",
+            primary_language="java",
+            framework="spring-boot",
+            repository_root=".",
+        )
+        input_data = build_composer_input(page, None, context)
+        headings = [section.heading_text for section in input_data.skeleton.headings]
+        assert "## 简介" in headings
+        assert "## 项目结构" in headings
+        assert "## 核心组件" in headings
+        assert "## 架构总览" in headings
+        assert "## 详细组件分析" in headings
+        assert "## 依赖关系分析" in headings
+        assert "## 附录：端点清单（限量）" in headings
+
+    def test_pipeline_injects_mermaid_blocks_for_api_pages(self, tmp_path):
+        """组合管线应为 API 页面注入通过语法校验的 Mermaid 区块。"""
+        cfg = RepoWikiConfig()
+        cfg.project.root = str(tmp_path)
+        service = RepoWikiService(cfg)
+
+        page = WikiPagePlan(
+            page_id="inventory-service-api-reference",
+            title="API台账服务 API",
+            category=WikiTaxonomyCategory.API_REFERENCE,
+            output_path="docs/pages/api/inventory-service-api-reference.md",
+        )
+        context = ComposerContext(
+            repository_name="repo",
+            primary_language="java",
+            framework="spring",
+            repository_root=str(tmp_path),
+            endpoints=[
+                {"path": "/endpoints", "method": "GET", "service": "inventory-service"},
+                {"path": "/endpoints/count", "method": "GET", "service": "inventory-service"},
+            ],
+        )
+        markdown = service._enforce_qoder_page_contract(
+            page=page,
+            markdown="# API台账服务 API\n\n## 简介\n\n说明。",
+            binding=None,
+            add_mermaid=True,
+            composition_context=context,
+        )
+        assert "```mermaid" in markdown
+        assert ("sequenceDiagram" in markdown) or ("flowchart" in markdown)
 
 
 class TestLowConfidenceBehavior:

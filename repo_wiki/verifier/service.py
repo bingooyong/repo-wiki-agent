@@ -821,7 +821,7 @@ class VerifierService:
         """Check that docs/sections/** exists and contains required section pages.
 
         Uses SECTION_DEFINITIONS from contracts.py to support canonical slugs
-        and repository-specific aliases (e.g., Q01/S01 format from AI_API_Atlas).
+        and repository-specific aliases (e.g., Q01/S01 format from reference-repo).
 
         Required sections: project, architecture, services, data-model, api, operations, development, security
 

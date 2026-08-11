@@ -112,7 +112,9 @@ class EntityRelationshipComposer:
             provider=llm_provider,
             workspace_root=workspace_root,
         )
-        self._mermaid_planner = create_planner(workspace_root=workspace_root)
+        self._mermaid_planner = create_planner(
+            workspace_root=str(workspace_root) if workspace_root is not None else None
+        )
         self._mermaid_renderer = create_renderer()
         self._build_entity_info()
 
@@ -174,7 +176,9 @@ class EntityRelationshipComposer:
                 attributes=self._extract_attributes(canonical),
                 primary_key=self._infer_primary_key(canonical),
                 is_high_frequency=canonical.is_high_frequency,
-                projections=canonical.models[1:] if len(canonical.models) > 1 else [],
+                projections=[model.name for model in canonical.models[1:]]
+                if len(canonical.models) > 1
+                else [],
             )
 
             self._entities.append(entity_info)

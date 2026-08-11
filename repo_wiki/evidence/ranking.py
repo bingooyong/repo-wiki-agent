@@ -13,6 +13,7 @@ from typing import Any
 
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord, SQLiteRuntimeStore
 from repo_wiki.planner.schema import (
+    INVENTORY_SERVICE_API_PAGE_ID,
     WikiPagePlan,
     WikiPlanManifest,
     WikiTaxonomyCategory,
@@ -348,7 +349,7 @@ def rank_evidence_for_page(
     for rank, (score, _, span, signals) in enumerate(candidates[: MIN_CANDIDATES_PER_PAGE * 2]):
         results.append(
             EvidenceCandidate(
-                evidence_id=span.id if getattr(span, "id", None) is not None else 0,
+                evidence_id=int(getattr(span, "id", 0) or 0),
                 span=span,
                 score=score,
                 match_signals=signals,
@@ -357,6 +358,79 @@ def rank_evidence_for_page(
         )
 
     return results[:MIN_CANDIDATES_PER_PAGE]
+
+
+def _infer_service_name_from_page(page: WikiPagePlan) -> str | None:
+    """Infer target service name for ownership filtering."""
+    if page.page_id == INVENTORY_SERVICE_API_PAGE_ID:
+        return "inventory-service"
+    sr = page.source_requirements
+    if sr and sr.modules:
+        preferred = [m for m in sr.modules if "service" in m.lower()]
+        if preferred:
+            return preferred[0]
+        return sr.modules[0]
+    lowered = page.page_id.lower()
+    if "-service" in lowered:
+        idx = lowered.find("-service")
+        start = lowered.rfind("-", 0, idx)
+        token = lowered[start + 1 : idx + len("-service")]
+        if token:
+            return token
+    return None
+
+
+def filter_ranked_candidates_by_ownership(
+    page: WikiPagePlan,
+    candidates: list[EvidenceCandidate],
+) -> list[EvidenceCandidate]:
+    """Filter out ownership-rejected evidence while preserving ranking order."""
+    from repo_wiki.evidence.service_ownership import (
+        ServiceOwnershipResolver,
+        is_inventory_service,
+    )
+
+    service_name = _infer_service_name_from_page(page)
+    if not service_name:
+        return candidates
+
+    module_paths: list[str] = []
+    if page.source_requirements and page.source_requirements.modules:
+        module_paths = list(page.source_requirements.modules)
+    resolver = ServiceOwnershipResolver(
+        service_name=service_name,
+        module_paths=module_paths,
+    )
+
+    filtered: list[EvidenceCandidate] = []
+    for candidate in candidates:
+        span = candidate.span
+        confidence = resolver.resolve_ownership(
+            symbol=span.symbol,
+            file_path=span.file_path,
+            span_text=span.span_text,
+            evidence_domain=None,
+        )
+        if confidence.is_rejected:
+            continue
+        # Keep original score/order; append ownership signal for traceability.
+        extra_signals = list(candidate.match_signals)
+        if confidence.is_owned:
+            extra_signals.append("ownership_confirmed")
+        filtered.append(
+            EvidenceCandidate(
+                evidence_id=candidate.evidence_id,
+                span=candidate.span,
+                score=candidate.score,
+                match_signals=extra_signals,
+                citation_order=candidate.citation_order,
+            )
+        )
+
+    # Ensure inventory-service safety: do not accidentally keep AI-only bindings.
+    if is_inventory_service(service_name):
+        return filtered
+    return filtered
 
 
 class EvidenceRanker:

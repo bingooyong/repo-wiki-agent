@@ -1,0 +1,7 @@
+{
+  "name": "ts-express-fixture",
+  "dependencies": {
+    "express": "^4.19.0",
+    "axios": "^1.6.0"
+  }
+}

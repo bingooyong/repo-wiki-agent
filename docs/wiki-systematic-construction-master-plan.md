@@ -2,7 +2,7 @@
 
 **状态:** Draft  
 **适用范围:** repo AI agent 的通用 Wiki 生成能力，不绑定任何单一示例仓库  
-**示例夹具:** AI_API_Atlas 仅用于验证复杂多服务仓库场景  
+**示例夹具:** reference-repo 仅用于验证复杂多服务仓库场景
 **Source/Docs Plan:** `docs/wiki-source-code-and-docs-intelligence-plan.md` 定义 Phase 41-45 的源码与文档双路扫描、知识模型、发布接口和质量闭环。  
 **更新时间:** 2026-05-03  
 **产品目标:** 自动生成比 Qoder 更准确、更结构化、更可验证的代码仓库 Wiki。
@@ -457,13 +457,13 @@ Qoder baseline 用于评估，不用于硬编码生成。
 4. repo AI agent 可以生成 baseline 没有但仓库事实需要的页面。
 5. baseline 永远只读。
 
-## 12. AI_API_Atlas 的角色
+## 12. reference-repo 的角色
 
-AI_API_Atlas 只是复杂仓库验收夹具。它覆盖多语言、多服务、前端、MCP、API、数据模型、安全和运维场景，适合作为压力测试。
+reference-repo 只是复杂仓库验收夹具。它覆盖多语言、多服务、前端、MCP、API、数据模型、安全和运维场景，适合作为压力测试。
 
 它暴露的问题应转化为通用产品能力：
 
-| Atlas 暴露的问题 | 通用产品能力 |
+| Reference 暴露的问题 | 通用产品能力 |
 |---|---|
 | `.repo-agent-eval` 多 run 混乱 | release publisher 和固定 release 目录 |
 | Qoder 只有一份 baseline | baseline registry |

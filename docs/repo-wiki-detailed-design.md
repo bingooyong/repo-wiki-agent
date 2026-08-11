@@ -2,7 +2,7 @@
 
 文档属性：详细设计说明书  
 适用阶段：MVP 第一阶段  
-设计基线：`docs/mvp.md`、`docs/repo-wiki-generator-plan-v2.md`、`.apm/Implementation_Plan.md`
+设计基线：`docs/mvp.md`、`docs/repo-wiki-generator-plan-v2.md`、`docs/plans/`
 
 ## 1. 文档目标
 
@@ -14,7 +14,7 @@
 - `init`、`update`、`search`、`verify` 等核心命令如何执行
 - 哪些设计属于 MVP，哪些明确后置
 
-本文档面向研发实现，不再重复产品立项内容。凡与需求文档冲突之处，以 `docs/mvp.md` 的范围冻结和 `.apm/Implementation_Plan.md` 的执行顺序为准。
+本文档面向研发实现，不再重复产品立项内容。凡与需求文档冲突之处，以 `docs/mvp.md` 的范围冻结和 `docs/plans/` 中的当前实施计划为准。
 
 ## 2. 设计范围
 

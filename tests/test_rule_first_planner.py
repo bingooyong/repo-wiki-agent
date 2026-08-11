@@ -25,9 +25,9 @@ class TestRuleFirstPlanner:
     def sample_identity(self):
         """Sample repository identity."""
         return RepositoryIdentity(
-            name="AI_API_Atlas",
-            display_name="AI API Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            display_name="Reference Repository",
+            root_path="/test/reference-repo",
             language="python",
             framework="fastapi",
         )
@@ -126,8 +126,8 @@ class TestRuleFirstPlanner:
         ]
 
         repository = RepositoryInfo(
-            name="AI_API_Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            root_path="/test/reference-repo",
             language="python",
             framework="fastapi",
             package_manager="pip",
@@ -160,7 +160,7 @@ class TestRuleFirstPlanner:
 
         assert manifest.page_count() > 0
         assert manifest.repository_identity is not None
-        assert manifest.repository_identity.name == "AI_API_Atlas"
+        assert manifest.repository_identity.name == "reference-repo"
 
     def test_plan_has_overview_pages(self, sample_identity, sample_snapshot):
         """Test plan includes overview pages."""
@@ -243,12 +243,12 @@ class TestRuleFirstPlanner:
         if parent_page:
             assert parent_page.parent is None or manifest.page_by_id(parent_page.parent) is not None
 
-    def test_ai_api_atlas_eighty_pages(self, sample_identity, sample_snapshot):
-        """Test AI_API_Atlas rule-only plan has at least 80 pages."""
+    def test_reference_repo_eighty_pages(self, sample_identity, sample_snapshot):
+        """Test reference-repo rule-only plan has at least 80 pages."""
         planner = RuleFirstPlanner(sample_identity, sample_snapshot)
         manifest = planner.generate()
 
-        # AI_API_Atlas should have substantial documentation
+        # reference-repo should have substantial documentation
         # With 3 modules, 3 endpoints, 3 data models, should generate 80+ pages
         assert manifest.page_count() >= 80, (
             f"Expected at least 80 pages, got {manifest.page_count()}"

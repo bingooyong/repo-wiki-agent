@@ -9,6 +9,54 @@ on:
 permissions: read-all
 
 jobs:
+  stage0-contract-gate:
+    name: Stage 0 contract gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Run minimum fixture and contract regressions
+        run: |
+          pytest -q \
+            tests/test_qoder_like_profile.py \
+            tests/test_fixture_ingestion.py \
+            tests/test_benchmark_matrix.py \
+            tests/test_large_repo_fixture.py \
+            tests/test_large_repo_benchmark.py \
+            tests/test_cli_config_doctor.py \
+            tests/test_llm_config.py \
+            tests/test_eval_manifest.py \
+            tests/test_release_meta_schema.py \
+            tests/test_cli_qoder_like.py \
+            tests/test_secret_sentinel_artifacts.py \
+            tests/test_source_of_truth_contract.py \
+            tests/test_stage0_ci_contract.py
+
+      - name: Validate CLI configuration contract
+        env:
+          REPO_WIKI_CI_API_KEY: ci-config-placeholder
+        run: >-
+          python -m repo_wiki.main config --ci
+          --provider openai
+          --model ci-contract
+          --api-key-env REPO_WIKI_CI_API_KEY
+
+      - name: Scan tracked artifacts for secret-shaped literals
+        run: >-
+          python scripts/secret_sentinel_scan.py
+          README.md docs .github repo_wiki scripts
+
   test:
     runs-on: ubuntu-latest
     strategy:

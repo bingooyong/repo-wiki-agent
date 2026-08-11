@@ -39,7 +39,7 @@ TAXONOMY_ORDER: list[str] = [
 
 
 SERVICE_TITLE_OVERRIDES: dict[str, str] = {
-    "api-atlas-agent": "API采集Agent",
+    "api-reference-agent": "API采集Agent",
     "api-gateway": "API网关",
     "api-gateway-1": "API网关",
     "doc-parser-service": "文档解析服务",
@@ -428,9 +428,9 @@ def _canonical_title(source_path: str, markdown: str | None = None) -> str:
         return title
 
     if markdown:
-        title = _extract_title_from_markdown(markdown)
-        if title:
-            return title
+        markdown_title = _extract_title_from_markdown(markdown)
+        if markdown_title:
+            return markdown_title
 
     return _title_from_path(source_path)
 
@@ -717,6 +717,7 @@ class ContentLayoutWriter:
             "files_written": 0,
             "bytes_written": 0,
             "by_category": {},
+            "path_mappings": [],
         }
         used_paths: set[str] = set()
 
@@ -741,6 +742,9 @@ class ContentLayoutWriter:
             output_file.parent.mkdir(parents=True, exist_ok=True)
             output_file.write_text(markdown, encoding="utf-8")
             written.append(str(relative_path))
+            stats["path_mappings"].append(
+                {"source_path": file_path, "relative_path": str(relative_path)}
+            )
 
             stats["files_written"] += 1
             stats["bytes_written"] += output_file.stat().st_size
@@ -771,6 +775,7 @@ class ContentLayoutWriter:
             "files_written": 0,
             "bytes_written": 0,
             "by_category": {},
+            "path_mappings": [],
         }
         used_paths: set[str] = set()
 
@@ -789,6 +794,9 @@ class ContentLayoutWriter:
             output_file.parent.mkdir(parents=True, exist_ok=True)
             output_file.write_text(markdown, encoding="utf-8")
             written.append(str(relative_path))
+            stats["path_mappings"].append(
+                {"source_path": source_path, "relative_path": str(relative_path)}
+            )
 
             stats["files_written"] += 1
             stats["bytes_written"] += output_file.stat().st_size

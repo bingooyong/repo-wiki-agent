@@ -2,7 +2,7 @@
 
 Validates that data models are planned by topic (entity relationships,
 database architecture, migration strategy) rather than raw model count.
-Generates at least 10 AI_API_Atlas data model planned pages.
+Generates at least 10 reference-repo data model planned pages.
 """
 
 from __future__ import annotations
@@ -35,9 +35,9 @@ class TestDataModelTopicPlanner:
     def sample_identity(self):
         """Sample repository identity."""
         return RepositoryIdentity(
-            name="AI_API_Atlas",
-            display_name="AI API Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            display_name="Reference Repository",
+            root_path="/test/reference-repo",
             language="python",
             framework="fastapi",
         )
@@ -189,8 +189,8 @@ class TestDataModelTopicPlanner:
         ]
 
         repository = RepositoryInfo(
-            name="AI_API_Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            root_path="/test/reference-repo",
             language="python",
             framework="fastapi",
             package_manager="pip",
@@ -223,7 +223,7 @@ class TestDataModelTopicPlanner:
 
         assert manifest.page_count() > 0
         assert manifest.repository_identity is not None
-        assert manifest.repository_identity.name == "AI_API_Atlas"
+        assert manifest.repository_identity.name == "reference-repo"
 
     def test_at_least_ten_data_model_pages(self, sample_identity, sample_snapshot):
         """Test that at least 10 data model pages are generated."""
@@ -557,9 +557,9 @@ class TestDataModelTopicPlannerDuplicateDetection:
     def sample_identity(self):
         """Sample repository identity."""
         return RepositoryIdentity(
-            name="AI_API_Atlas",
-            display_name="AI API Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            display_name="Reference Repository",
+            root_path="/test/reference-repo",
             language="python",
             framework="fastapi",
         )
@@ -600,8 +600,8 @@ class TestDataModelTopicPlannerDuplicateDetection:
         ]
 
         repository = RepositoryInfo(
-            name="AI_API_Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            root_path="/test/reference-repo",
             language="python",
             framework="fastapi",
             package_manager="pip",

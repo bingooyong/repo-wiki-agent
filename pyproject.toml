@@ -40,6 +40,7 @@ exclude = ["tests*", "scripts*", "ci*", "docs*", "templates*", "extensions*", "a
 [tool.pytest.ini_options]
 addopts = "-q"
 pythonpath = ["."]
+norecursedirs = ["tests/fixtures"]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]

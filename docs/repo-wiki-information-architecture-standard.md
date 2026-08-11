@@ -220,7 +220,7 @@ API 页必须按服务族、调用场景、认证和错误约定聚合。默认�
 
 ## Qoder 对照结论
 
-AI_API_Atlas 的 Qoder Repo Wiki 体现了三个关键能力：
+reference-repo 的 Qoder Repo Wiki 体现了三个关键能力：
 
 - 顶层分类稳定：项目概述、架构设计、核心服务、Python服务、数据模型、API参考、开发指南、安全合规、故障排除与维护等。
 - 专题层级明确：API 按核心服务 API、Python 服务 API、认证授权、错误处理分组；数据模型按核心数据模型、服务数据模型、数据库架构分组。

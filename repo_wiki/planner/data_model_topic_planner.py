@@ -5,7 +5,7 @@ migration strategy) to create coherent data model reference pages.
 
 This planner extends the RuleFirstPlanner to provide data-model-specific planning
 with entity deduplication and ER relationship awareness, generating at least
-10 AI_API_Atlas data model planned pages.
+10 reference-repo data model planned pages.
 """
 
 from __future__ import annotations
@@ -564,6 +564,8 @@ class DataModelTopicPlanner:
             node_id="cat-data-models",
             label="数据模型",
             node_type="category",
+            path=None,
+            icon=None,
             sort_order=5,
         )
 
@@ -575,6 +577,7 @@ class DataModelTopicPlanner:
                 label=page.title,
                 node_type="page",
                 path=page.output_path,
+                icon=None,
                 sort_order=page.sort_order,
             )
 
@@ -586,6 +589,7 @@ class DataModelTopicPlanner:
                     label=child.title,
                     node_type="page",
                     path=child.output_path,
+                    icon=None,
                     sort_order=child.sort_order,
                 )
                 page_node.children.append(child_node)

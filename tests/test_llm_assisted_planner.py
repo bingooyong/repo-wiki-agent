@@ -228,17 +228,17 @@ class TestLLMPlannerIntegration:
 class TestLLMPlannerPageCount:
     """Tests for page count requirements."""
 
-    def test_ai_api_atlas_120_pages_with_llm(self):
-        """Test AI_API_Atlas with LLM has 120+ planned pages.
+    def test_reference_repo_120_pages_with_llm(self):
+        """Test reference-repo with LLM has 120+ planned pages.
 
         This test verifies the target of 120 pages when LLM is enabled.
         Since we use MockLLMProvider here, we verify the mechanism works.
         """
-        # Create a larger base plan to simulate AI_API_Atlas
+        # Create a larger base plan to simulate reference-repo
         identity = RepositoryIdentity(
-            name="AI_API_Atlas",
-            display_name="AI API Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            display_name="Reference Repository",
+            root_path="/test/reference-repo",
         )
 
         # Create a base plan with many pages (simulating a rich repo)

@@ -120,8 +120,8 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(
 ### 4.1 repo-map.yaml
 
 ```yaml
-repo_id: "ai-api-atlas"
-name: "AI_API_Atlas"
+repo_id: "reference-repo"
+name: "reference-repo"
 language: "Python"
 framework: "FastAPI"
 module_count: 12

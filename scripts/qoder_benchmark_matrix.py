@@ -141,6 +141,18 @@ DEFAULT_THRESHOLDS = {
     "description": "Default thresholds (fallback)",
 }
 
+BENCHMARK_MATRIX_SCHEMA_VERSION = "qoder.benchmark_matrix/1.1"
+BENCHMARK_CONTRACT_VERSION = "qoder.benchmark_contract/1.1"
+MIN_GATING_SAMPLE_COUNT = 2
+
+
+def profile_id(
+    language: str | Language, size: RepositorySize, complexity: RepositoryComplexity
+) -> str:
+    """Stable identifier for a threshold profile."""
+    language_value = language.value if isinstance(language, Language) else language
+    return f"{language_value}:{size.value}:{complexity.value}"
+
 
 @dataclass
 class RepositoryMetadata:
@@ -180,9 +192,17 @@ class BenchmarkResult:
     thresholds: dict[str, float]
     passed_thresholds: bool
     drift_from_baseline: float = 0.0
+    threshold_profile_id: str = ""
+    threshold_profile_sample_count: int = 0
+    threshold_profile_observed_sample_count: int = 0
+    gating_status: str = "gating"
+    non_gating_reasons: list[str] = field(default_factory=list)
+    provenance: dict[str, Any] = field(default_factory=dict)
+    drift_evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": BENCHMARK_CONTRACT_VERSION,
             "repository": self.repository.to_dict(),
             "overall_score": round(self.overall_score, 3),
             "structural_score": round(self.structural_score, 3),
@@ -193,6 +213,16 @@ class BenchmarkResult:
             "thresholds": self.thresholds,
             "passed_thresholds": self.passed_thresholds,
             "drift_from_baseline": round(self.drift_from_baseline, 3),
+            "threshold_profile": {
+                "id": self.threshold_profile_id,
+                "sample_count": self.threshold_profile_sample_count,
+                "observed_sample_count": self.threshold_profile_observed_sample_count,
+                "min_gating_sample_count": MIN_GATING_SAMPLE_COUNT,
+            },
+            "gating_status": self.gating_status,
+            "non_gating_reasons": self.non_gating_reasons,
+            "provenance": self.provenance,
+            "drift_evidence": self.drift_evidence,
         }
 
 
@@ -208,10 +238,16 @@ class ThresholdProfile:
     quality_threshold: float
     description: str
     sample_count: int = 0
+    observed_sample_count: int = 0
     calibration_data: dict[str, Any] = field(default_factory=dict)
+    gating_status: str = "non_gating"
+    non_gating_reasons: list[str] = field(default_factory=list)
+    drift_evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "id": profile_id(self.language, self.size, self.complexity),
+            "schema_version": BENCHMARK_CONTRACT_VERSION,
             "language": self.language,
             "size": self.size.value,
             "complexity": self.complexity.value,
@@ -220,6 +256,11 @@ class ThresholdProfile:
             "quality_threshold": self.quality_threshold,
             "description": self.description,
             "sample_count": self.sample_count,
+            "observed_sample_count": self.observed_sample_count,
+            "min_gating_sample_count": MIN_GATING_SAMPLE_COUNT,
+            "gating_status": self.gating_status,
+            "non_gating_reasons": self.non_gating_reasons,
+            "drift_evidence": self.drift_evidence,
             "calibration_data": self.calibration_data,
         }
 
@@ -233,6 +274,7 @@ class ScoreDriftAnalysis:
     affected_dimensions: list[str]
     normalization_suggested: bool
     normalization_factor: float = 1.0
+    evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -241,6 +283,7 @@ class ScoreDriftAnalysis:
             "affected_dimensions": self.affected_dimensions,
             "normalization_suggested": self.normalization_suggested,
             "normalization_factor": round(self.normalization_factor, 3),
+            "evidence": self.evidence,
         }
 
 
@@ -380,6 +423,11 @@ class ScoreDriftDetector:
                 drift_magnitude=0.0,
                 affected_dimensions=[],
                 normalization_suggested=False,
+                evidence={
+                    "sample_count": len(results),
+                    "reason": "fewer than two benchmark samples",
+                    "overall_scores": [round(r.overall_score, 3) for r in results],
+                },
             )
 
         # Calculate overall score trend
@@ -428,6 +476,14 @@ class ScoreDriftDetector:
             normalization_factor=ThresholdProfileGenerator.suggest_normalization(results)
             if normalization_suggested
             else 1.0,
+            evidence={
+                "sample_count": len(results),
+                "overall_scores": [round(score, 3) for score in overall_scores],
+                "first_half_average": round(first_half_avg, 3),
+                "second_half_average": round(second_half_avg, 3),
+                "drift_threshold": 0.1,
+                "stability_threshold": 0.05,
+            },
         )
 
 
@@ -438,6 +494,168 @@ class BenchmarkMatrix:
         self.baseline_path = baseline_path
         self.results: list[BenchmarkResult] = []
         self.generated_at = datetime.now(UTC).isoformat()
+        self.baseline_provenance = self._load_fixture_provenance(baseline_path)
+
+    @staticmethod
+    def _load_fixture_provenance(fixture_path: Path) -> dict[str, Any]:
+        """Load stable provenance for a benchmark fixture/repository sample."""
+        from scripts.qoder_fixture_ingestion import (
+            FIXTURE_HASH_ALGORITHM,
+            FIXTURE_MANIFEST_SCHEMA_VERSION,
+            FIXTURE_PROVENANCE_CONTRACT_VERSION,
+            FixtureIntegrityChecker,
+            get_fixture_provenance_issues,
+        )
+
+        metadata_path = fixture_path / "fixture_metadata.json"
+        metadata: dict[str, Any] = {}
+        metadata_present = metadata_path.exists()
+        metadata_error = ""
+        if metadata_present:
+            try:
+                loaded = json.loads(metadata_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    metadata = loaded
+                else:
+                    metadata_error = "fixture_metadata.json must contain a JSON object"
+            except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+                metadata_error = "fixture_metadata.json could not be parsed"
+
+        custom_fields = metadata.get("custom_fields", {})
+        if not isinstance(custom_fields, dict):
+            custom_fields = {}
+
+        def valid_string(value: Any) -> bool:
+            return isinstance(value, str) and bool(value.strip())
+
+        def missing_string(value: Any) -> bool:
+            return value is None or (
+                isinstance(value, str) and value.strip().lower() in {"", "unknown"}
+            )
+
+        def select_value(candidates: list[tuple[str, Any]]) -> Any:
+            for _, value in candidates:
+                if valid_string(value):
+                    return value.strip()
+            return candidates[0][1] if candidates else None
+
+        source_candidates = [
+            (field_name, metadata[field_name])
+            for field_name in ("source", "fixture_source")
+            if field_name in metadata
+        ]
+        if "source" in custom_fields:
+            source_candidates.append(("custom_fields.source", custom_fields["source"]))
+        generator_candidates = [
+            (field_name, metadata[field_name])
+            for field_name in ("generator", "generator_version")
+            if field_name in metadata
+        ]
+
+        source_value = select_value(source_candidates)
+        generator_value = select_value(generator_candidates)
+        schema_version = metadata.get("schema_version")
+        contract_version = metadata.get("contract_version")
+        generated_at = metadata.get("generated_at")
+
+        invalid = []
+        if metadata_error:
+            invalid.append(metadata_error)
+        for field_name, value in (*source_candidates, *generator_candidates):
+            if not valid_string(value):
+                invalid.append(f"metadata.{field_name} must be a non-empty string")
+
+        integrity = FixtureIntegrityChecker.compute_integrity(fixture_path)
+        metadata_hash_value = metadata.get("fixture_hash")
+        metadata_hash = (
+            metadata_hash_value.strip().lower() if valid_string(metadata_hash_value) else None
+        )
+        if "fixture_hash" in metadata and metadata_hash is None:
+            invalid.append("metadata.fixture_hash must be a non-empty string")
+        elif metadata_hash and (
+            len(metadata_hash) != 64
+            or any(character not in "0123456789abcdef" for character in metadata_hash)
+        ):
+            invalid.append("metadata.fixture_hash must be a 64-character SHA-256 hex digest")
+
+        metadata_hash_algorithm_value = metadata.get("hash_algorithm")
+        metadata_hash_algorithm = (
+            metadata_hash_algorithm_value.strip()
+            if valid_string(metadata_hash_algorithm_value)
+            else None
+        )
+        if "hash_algorithm" in metadata and metadata_hash_algorithm is None:
+            invalid.append("metadata.hash_algorithm must be a non-empty string")
+        elif metadata_hash_algorithm and metadata_hash_algorithm != FIXTURE_HASH_ALGORITHM:
+            invalid.append(f"Unsupported fixture hash_algorithm '{metadata_hash_algorithm}'")
+
+        missing = []
+        if not metadata_present:
+            missing.append("fixture_metadata.json")
+        if missing_string(schema_version):
+            missing.append("schema_version")
+        if missing_string(contract_version):
+            missing.append("contract_version")
+        if missing_string(source_value):
+            missing.append("source")
+        if missing_string(generator_value):
+            missing.append("generator")
+        if missing_string(generated_at):
+            missing.append("generated_at")
+        if integrity.file_count <= 0:
+            missing.append("markdown_samples")
+
+        hash_mismatch = bool(metadata_hash and metadata_hash != integrity.fixture_hash)
+        provenance_issues = get_fixture_provenance_issues(
+            schema_version=schema_version,
+            contract_version=contract_version,
+            source=source_value,
+            generator=generator_value,
+            generated_at=generated_at,
+            fixture_hash=integrity.fixture_hash,
+            sample_count=integrity.file_count,
+        )
+        for issue in invalid:
+            if issue not in provenance_issues:
+                provenance_issues.append(issue)
+        invalid = [issue for issue in provenance_issues if not issue.startswith("Missing ")]
+
+        return {
+            "schema_version": FIXTURE_MANIFEST_SCHEMA_VERSION,
+            "contract_version": FIXTURE_PROVENANCE_CONTRACT_VERSION,
+            "path": str(fixture_path),
+            "metadata_present": metadata_present,
+            "metadata_schema_version": schema_version.strip()
+            if valid_string(schema_version)
+            else "unknown",
+            "metadata_contract_version": contract_version.strip()
+            if valid_string(contract_version)
+            else "unknown",
+            "source": source_value.strip() if valid_string(source_value) else "unknown",
+            "generator": generator_value.strip() if valid_string(generator_value) else "unknown",
+            "generated_at": generated_at.strip() if valid_string(generated_at) else "unknown",
+            "fixture_hash": integrity.fixture_hash,
+            "hash_algorithm": FIXTURE_HASH_ALGORITHM,
+            "metadata_fixture_hash": metadata_hash,
+            "metadata_hash_algorithm": metadata_hash_algorithm,
+            "fixture_hash_source": "metadata+computed" if metadata_hash else "computed",
+            "hash_mismatch": hash_mismatch,
+            "sample_count": integrity.file_count,
+            "missing_required_provenance": missing,
+            "invalid_required_provenance": invalid,
+            "provenance_issues": provenance_issues,
+            "gating_eligible": not provenance_issues and not hash_mismatch,
+        }
+
+    @staticmethod
+    def _profile_key(
+        result: BenchmarkResult,
+    ) -> tuple[Language, RepositorySize, RepositoryComplexity]:
+        return (result.repository.language, result.repository.size, result.repository.complexity)
+
+    @staticmethod
+    def _profile_id_for_metadata(metadata: RepositoryMetadata) -> str:
+        return profile_id(metadata.language, metadata.size, metadata.complexity)
 
     def add_repository(self, repo_path: Path, name: str = "") -> BenchmarkResult:
         """Benchmark a single repository and add to matrix."""
@@ -464,11 +682,23 @@ class BenchmarkMatrix:
         profile = ThresholdProfileGenerator.get_profile(
             metadata.language, metadata.size, metadata.complexity
         )
+        profile_identifier = self._profile_id_for_metadata(metadata)
 
         # Extract dimension scores
         dimension_scores = {}
         for dim in report.dimensions:
             dimension_scores[dim.dimension] = dim.score
+
+        sample_provenance = self._load_fixture_provenance(repo_path)
+        non_gating_reasons = []
+        for scope, provenance in (
+            ("baseline", self.baseline_provenance),
+            ("sample", sample_provenance),
+        ):
+            for missing in provenance["missing_required_provenance"]:
+                non_gating_reasons.append(f"{scope} missing required provenance: {missing}")
+            if provenance["hash_mismatch"]:
+                non_gating_reasons.append(f"{scope} fixture_hash does not match computed hash")
 
         # Create result
         result = BenchmarkResult(
@@ -489,48 +719,245 @@ class BenchmarkMatrix:
                 and report.summary["structural_score"] >= profile.structural_threshold
                 and report.summary["quality_score"] >= profile.quality_threshold
             ),
+            threshold_profile_id=profile_identifier,
+            provenance={
+                "baseline": self.baseline_provenance,
+                "sample": sample_provenance,
+            },
+            non_gating_reasons=non_gating_reasons,
         )
 
         self.results.append(result)
+        self._refresh_contract_statuses()
         return result
 
     def analyze_drift(self) -> ScoreDriftAnalysis:
         """Analyze score drift across all results."""
         return ScoreDriftDetector.analyze(self.results)
 
+    @staticmethod
+    def _deduplicate_reasons(reasons: list[str]) -> list[str]:
+        return list(dict.fromkeys(reasons))
+
+    @classmethod
+    def _provenance_non_gating_reasons(cls, scope: str, provenance: dict[str, Any]) -> list[str]:
+        reasons: list[str] = []
+        for missing in provenance.get("missing_required_provenance", []):
+            reasons.append(f"{scope} missing required provenance: {missing}")
+        for issue in provenance.get("provenance_issues", []):
+            if not issue.startswith("Missing "):
+                reasons.append(f"{scope} invalid provenance: {issue}")
+        if provenance.get("hash_mismatch"):
+            reasons.append(f"{scope} fixture_hash does not match computed hash")
+        return cls._deduplicate_reasons(reasons)
+
+    @staticmethod
+    def _build_drift_evidence(
+        observed_results: list[BenchmarkResult],
+        gating_results: list[BenchmarkResult],
+        gating_status: str,
+        non_gating_reasons: list[str],
+    ) -> dict[str, Any]:
+        observed_analysis = ScoreDriftDetector.analyze(observed_results).to_dict()
+        gating_analysis = ScoreDriftDetector.analyze(gating_results).to_dict()
+        selected = gating_analysis if gating_status == "gating" else observed_analysis
+        drift_evidence = dict(selected)
+        drift_evidence["evidence"] = {
+            **selected.get("evidence", {}),
+            "evidence_scope": "gating" if gating_status == "gating" else "observed_diagnostic",
+            "observed_sample_count": len(observed_results),
+            "gating_sample_count": len(gating_results),
+        }
+        drift_evidence.update(
+            {
+                "gating_status": gating_status,
+                "non_gating_reasons": non_gating_reasons,
+                "diagnostic_only": gating_status != "gating",
+                "observed_analysis": observed_analysis,
+                "gating_analysis": gating_analysis if gating_status == "gating" else None,
+            }
+        )
+        return drift_evidence
+
+    def _profile_contracts(
+        self,
+    ) -> dict[tuple[Language, RepositorySize, RepositoryComplexity], dict[str, Any]]:
+        grouped_results: dict[
+            tuple[Language, RepositorySize, RepositoryComplexity], list[BenchmarkResult]
+        ] = {}
+        for result in self.results:
+            grouped_results.setdefault(self._profile_key(result), []).append(result)
+
+        contracts = {}
+        baseline_reasons = self._provenance_non_gating_reasons("baseline", self.baseline_provenance)
+        for key, results in grouped_results.items():
+            reasons = list(baseline_reasons)
+            eligible_results = []
+            fixture_hash_counts: dict[str, int] = {}
+
+            for result in results:
+                sample = result.provenance.get("sample", {})
+                sample_reasons = self._provenance_non_gating_reasons(
+                    f"sample {result.repository.name}", sample
+                )
+                reasons.extend(sample_reasons)
+                if not sample_reasons and sample.get("gating_eligible"):
+                    eligible_results.append(result)
+                    fixture_hash = sample["fixture_hash"]
+                    fixture_hash_counts[fixture_hash] = fixture_hash_counts.get(fixture_hash, 0) + 1
+
+            independent_results = []
+            seen_hashes = set()
+            for result in eligible_results:
+                fixture_hash = result.provenance["sample"]["fixture_hash"]
+                if fixture_hash not in seen_hashes:
+                    independent_results.append(result)
+                    seen_hashes.add(fixture_hash)
+
+            duplicate_hashes = sorted(
+                fixture_hash for fixture_hash, count in fixture_hash_counts.items() if count > 1
+            )
+            for fixture_hash in duplicate_hashes:
+                reasons.append(
+                    "threshold profile duplicate fixture_hash "
+                    f"{fixture_hash} observed {fixture_hash_counts[fixture_hash]} times"
+                )
+
+            sample_count = len(independent_results)
+            if sample_count < MIN_GATING_SAMPLE_COUNT:
+                reasons.append(
+                    f"threshold profile sample_count {sample_count} below minimum "
+                    f"{MIN_GATING_SAMPLE_COUNT}"
+                )
+
+            reasons = self._deduplicate_reasons(reasons)
+            gating_status = "non_gating" if reasons else "gating"
+            contracts[key] = {
+                "results": results,
+                "observed_sample_count": len(results),
+                "provenance_qualified_sample_count": len(eligible_results),
+                "sample_count": sample_count,
+                "independent_results": independent_results,
+                "duplicate_fixture_hashes": duplicate_hashes,
+                "duplicate_sample_count": len(eligible_results) - sample_count,
+                "gating_status": gating_status,
+                "non_gating_reasons": reasons,
+                "drift_evidence": self._build_drift_evidence(
+                    results,
+                    independent_results,
+                    gating_status,
+                    reasons,
+                ),
+            }
+
+        return contracts
+
+    def _refresh_contract_statuses(
+        self,
+    ) -> dict[tuple[Language, RepositorySize, RepositoryComplexity], dict[str, Any]]:
+        """Update sample counts, drift evidence, and gating status for all results."""
+        contracts = self._profile_contracts()
+
+        for contract in contracts.values():
+            for result in contract["results"]:
+                result_reasons = []
+                for scope in ("baseline", "sample"):
+                    result_reasons.extend(
+                        self._provenance_non_gating_reasons(scope, result.provenance.get(scope, {}))
+                    )
+                result_reasons.extend(contract["non_gating_reasons"])
+
+                result.threshold_profile_sample_count = contract["sample_count"]
+                result.threshold_profile_observed_sample_count = contract["observed_sample_count"]
+                result.drift_evidence = contract["drift_evidence"]
+                result.non_gating_reasons = self._deduplicate_reasons(result_reasons)
+                result.gating_status = "non_gating" if result.non_gating_reasons else "gating"
+                scores_pass = (
+                    result.overall_score >= result.thresholds["overall"]
+                    and result.structural_score >= result.thresholds["structural"]
+                    and result.quality_score >= result.thresholds["quality"]
+                )
+                result.passed_thresholds = scores_pass and result.gating_status == "gating"
+
+        return contracts
+
+    def _matrix_contract_status(
+        self,
+        contracts: dict[tuple[Language, RepositorySize, RepositoryComplexity], dict[str, Any]],
+    ) -> tuple[str, list[str]]:
+        reasons = self._provenance_non_gating_reasons("baseline", self.baseline_provenance)
+        if not self.results:
+            reasons.append("benchmark matrix has no observed samples")
+
+        baseline_reasons = set(reasons)
+        for key, contract in contracts.items():
+            profile_identifier = profile_id(*key)
+            for reason in contract["non_gating_reasons"]:
+                if reason not in baseline_reasons:
+                    reasons.append(f"threshold profile {profile_identifier}: {reason}")
+
+        reasons = self._deduplicate_reasons(reasons)
+        return ("non_gating" if reasons else "gating", reasons)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert matrix to dictionary for JSON export."""
-        drift_analysis = self.analyze_drift()
+        contracts = self._refresh_contract_statuses()
+        gating_status, non_gating_reasons = self._matrix_contract_status(contracts)
+        gating_results = [
+            result for contract in contracts.values() for result in contract["independent_results"]
+        ]
+        drift_analysis = self._build_drift_evidence(
+            self.results,
+            gating_results,
+            gating_status,
+            non_gating_reasons,
+        )
 
         return {
+            "schema_version": BENCHMARK_MATRIX_SCHEMA_VERSION,
+            "contract_version": BENCHMARK_CONTRACT_VERSION,
             "generated_at": self.generated_at,
             "baseline": str(self.baseline_path),
+            "baseline_provenance": self.baseline_provenance,
             "repository_count": len(self.results),
+            "gating_status": gating_status,
+            "non_gating_reasons": non_gating_reasons,
             "results": [r.to_dict() for r in self.results],
-            "drift_analysis": drift_analysis.to_dict(),
-            "threshold_profiles": self._get_unique_profiles(),
+            "drift_analysis": drift_analysis,
+            "threshold_profiles": self._get_unique_profiles(contracts),
         }
 
-    def _get_unique_profiles(self) -> list[dict[str, Any]]:
+    def _get_unique_profiles(
+        self,
+        contracts: dict[tuple[Language, RepositorySize, RepositoryComplexity], dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         """Get unique threshold profiles used in this matrix."""
-        profiles_seen = set()
         profiles = []
 
-        for result in self.results:
-            key = (result.repository.language, result.repository.size, result.repository.complexity)
-            if key not in profiles_seen:
-                profiles_seen.add(key)
-                profile = ThresholdProfileGenerator.get_profile(
-                    result.repository.language,
-                    result.repository.size,
-                    result.repository.complexity,
-                )
-                profiles.append(profile.to_dict())
+        for key, contract in contracts.items():
+            language, size, complexity = key
+            profile = ThresholdProfileGenerator.get_profile(language, size, complexity)
+            profile.sample_count = contract["sample_count"]
+            profile.observed_sample_count = contract["observed_sample_count"]
+            profile.gating_status = contract["gating_status"]
+            profile.non_gating_reasons = contract["non_gating_reasons"]
+            profile.drift_evidence = contract["drift_evidence"]
+            profile.calibration_data = {
+                "sample_count": contract["sample_count"],
+                "observed_sample_count": contract["observed_sample_count"],
+                "provenance_qualified_sample_count": contract["provenance_qualified_sample_count"],
+                "duplicate_sample_count": contract["duplicate_sample_count"],
+                "duplicate_fixture_hashes": contract["duplicate_fixture_hashes"],
+                "min_gating_sample_count": MIN_GATING_SAMPLE_COUNT,
+                "profile_id": profile_id(language, size, complexity),
+            }
+            profiles.append(profile.to_dict())
 
         return profiles
 
     def to_markdown(self) -> str:
         """Generate markdown report of the benchmark matrix."""
+        self._refresh_contract_statuses()
         drift_analysis = self.analyze_drift()
 
         lines = [
@@ -559,7 +986,11 @@ class BenchmarkMatrix:
             lines.append("")
             for result in results:
                 profile = result.thresholds
-                status = "PASS" if result.passed_thresholds else "FAIL"
+                status = (
+                    "NON-GATING"
+                    if result.gating_status == "non_gating"
+                    else ("PASS" if result.passed_thresholds else "FAIL")
+                )
                 lines.append(
                     f"- **{result.repository.name}**: "
                     f"Overall {result.overall_score:.1%} (threshold: {profile['overall']:.1%}) "

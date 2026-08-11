@@ -89,7 +89,7 @@ class EvalOutputProfile(BaseModel):
         """Get the run directory for this profile.
 
         If create_subdirs is True and run_id is provided, creates:
-            .repo-agent-eval/<run_id>/
+            <root>/<run_id>/ (e.g. .repo-agent-eval/<run_id>/ or .repo-agent-eval/runs/<run_id>/)
         Otherwise returns the root directory.
         """
         if self.create_subdirs and run_id:
@@ -100,7 +100,7 @@ class EvalOutputProfile(BaseModel):
         """Get the content directory for this profile.
 
         For qoder-like profile with content_subdir, returns:
-            .repo-agent-eval/<run_id>/content/
+            .repo-agent-eval/runs/<run_id>/repowiki/zh/content/
         """
         base = self.get_run_dir(run_id)
         if self.content_subdir:
@@ -149,7 +149,10 @@ EVAL_PROFILES: dict[str, EvalOutputProfile] = {
     "ci": EvalOutputProfile(name="ci", root=".repo-agent-eval-ci", create_subdirs=False),
     "local": EvalOutputProfile(name="local", root="eval-output", create_subdirs=True),
     "qoder-like": EvalOutputProfile(
-        name="qoder-like", root=".repo-agent-eval", create_subdirs=True, content_subdir="content"
+        name="qoder-like",
+        root=".repo-agent-eval/runs",
+        create_subdirs=True,
+        content_subdir="repowiki/zh/content",
     ),
 }
 
@@ -194,7 +197,7 @@ class EvalManifest(BaseModel):
     describes all generated artifacts for human and tool consumption.
     """
 
-    version: str = Field(default="1.0", description="Manifest schema version")
+    version: str = Field(default="1.1", description="Manifest schema version")
     run_id: str = Field(description="Unique run identifier")
     generated_at: str = Field(description="ISO timestamp of manifest creation")
     profile: str = Field(description="Eval profile name used")
@@ -227,6 +230,36 @@ class EvalManifest(BaseModel):
     stale_detection: dict[str, Any] = Field(
         default_factory=dict,
         description="Stale detection metadata derived from revision comparison",
+    )
+    git_fresh: bool = Field(
+        default=True,
+        description="Whether manifest git metadata indicates fresh (not stale) generation",
+    )
+
+    # Readiness contract (Phase 36)
+    readiness_state: str = Field(
+        default="REVIEW_ONLY",
+        description="Readiness state: READY, NOT_READY, REVIEW_ONLY",
+    )
+    readiness_reasons: list[str] = Field(
+        default_factory=list,
+        description="Deterministic reasons for non-READY state",
+    )
+    report_paths: dict[str, str] = Field(
+        default_factory=dict,
+        description="Named report artifacts used by readiness checks",
+    )
+    candidate_repowiki_zh_root: str | None = Field(
+        default=None,
+        description="Candidate run root for repowiki zh contract",
+    )
+    candidate_content_root: str | None = Field(
+        default=None,
+        description="Candidate content root under repowiki/zh/content",
+    )
+    candidate_meta_root: str | None = Field(
+        default=None,
+        description="Candidate meta root under repowiki/zh/meta",
     )
 
     # Directory structure
@@ -375,9 +408,39 @@ def generate_manifest(
             target_git_commit and wiki_git_commit and target_git_commit != wiki_git_commit
         ),
     }
+    git_fresh = not stale_detection["is_stale"]
+
+    candidate_repowiki_zh_root = (
+        Path(target_repo) / ".repo-agent-eval" / "runs" / run_id / "repowiki" / "zh"
+    )
+    candidate_content_root = candidate_repowiki_zh_root / "content"
+    candidate_meta_root = candidate_repowiki_zh_root / "meta"
+
+    report_paths: dict[str, str] = {}
+    for evidence_item in evidence:
+        if evidence_item.evidence_type == "report":
+            report_name = Path(evidence_item.path).name or f"report-{len(report_paths) + 1}"
+            report_paths[report_name] = evidence_item.path
+
+    readiness_reasons: list[str] = []
+    if target_dirty:
+        readiness_reasons.append("target_dirty=true")
+    if not git_fresh:
+        readiness_reasons.append("git_not_fresh")
+    if not candidate_content_root.exists():
+        readiness_reasons.append("missing_candidate_content_root")
+    if not candidate_meta_root.exists():
+        readiness_reasons.append("missing_candidate_meta_root")
+
+    if target_dirty or not git_fresh:
+        readiness_state = "NOT_READY"
+    elif readiness_reasons:
+        readiness_state = "REVIEW_ONLY"
+    else:
+        readiness_state = "READY"
 
     return EvalManifest(
-        version="1.0",
+        version="1.1",
         run_id=run_id,
         generated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         profile=profile.name,
@@ -391,6 +454,13 @@ def generate_manifest(
         target_revision_source=target_revision_source,
         wiki_revision_source=wiki_revision_source,
         stale_detection=stale_detection,
+        git_fresh=git_fresh,
+        readiness_state=readiness_state,
+        readiness_reasons=readiness_reasons,
+        report_paths=report_paths,
+        candidate_repowiki_zh_root=str(candidate_repowiki_zh_root),
+        candidate_content_root=str(candidate_content_root),
+        candidate_meta_root=str(candidate_meta_root),
         content_root=content_root,
         runtime_root=runtime_root,
         navigation_tree=navigation_tree or [],

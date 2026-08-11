@@ -330,6 +330,173 @@ class TestGenerationAwareInvalidator:
         )
         assert "service-a" in invalidated
 
+    def test_hash_change_maps_to_specific_page_via_evidence_not_filename(self, invalidator_setup):
+        """Evidence source map should invalidate only the page using a changed source."""
+        invalidator, state_machine = invalidator_setup
+        run = state_machine.create_run(profile="test", total_pages=2)
+        state_machine.add_page(run.run_id, "auth-page", "module", "docs/modules/auth.md")
+        state_machine.add_page(run.run_id, "billing-page", "module", "docs/modules/billing.md")
+        state_machine.complete_page(
+            run.run_id, "auth-page", input_hash="auth-in", output_hash="auth-out"
+        )
+        state_machine.complete_page(
+            run.run_id, "billing-page", input_hash="billing-in", output_hash="billing-out"
+        )
+
+        runtime_db = invalidator.root / ".repo-wiki" / "index" / "runtime.sqlite3"
+        runtime_db.parent.mkdir(parents=True, exist_ok=True)
+        import sqlite3
+
+        with sqlite3.connect(runtime_db) as conn:
+            conn.execute("CREATE TABLE evidence_span (id INTEGER PRIMARY KEY, file_path TEXT)")
+            conn.execute("CREATE TABLE page_source_map (evidence_id INTEGER, doc_slug TEXT)")
+            conn.executemany(
+                "INSERT INTO evidence_span(id, file_path) VALUES (?, ?)",
+                [
+                    (1, "src/internal/auth_handler.py"),
+                    (2, "src/internal/billing_handler.py"),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO page_source_map(evidence_id, doc_slug) VALUES (?, ?)",
+                [(1, "auth-page"), (2, "billing-page")],
+            )
+            conn.commit()
+
+        invalidated, skipped = invalidator.invalidate_from_hash_comparison(
+            run_id=run.run_id,
+            baseline_hashes={
+                "src/internal/auth_handler.py": "old-auth",
+                "src/internal/billing_handler.py": "same-billing",
+            },
+            current_hashes={
+                "src/internal/auth_handler.py": "new-auth",
+                "src/internal/billing_handler.py": "same-billing",
+            },
+        )
+
+        assert invalidated == ["auth-page"]
+        assert skipped == []
+        assert state_machine.get_page_state(run.run_id, "auth-page").state == PageState.PENDING
+        billing = state_machine.get_page_state(run.run_id, "billing-page")
+        assert billing is not None
+        assert billing.state == PageState.COMPLETED
+        assert billing.input_hash == "billing-in"
+        assert billing.output_hash == "billing-out"
+
+    def test_failed_page_can_be_requeued_by_source_invalidation(self, invalidator_setup):
+        """A failed page should be selectable for explicit source-driven regeneration."""
+        invalidator, state_machine = invalidator_setup
+        run = state_machine.create_run(profile="test", total_pages=1)
+        state_machine.add_page(run.run_id, "auth-page", "module", "docs/modules/auth.md")
+        state_machine.fail_page(run.run_id, "auth-page", "permanent", retryable=False)
+        assert state_machine.get_page_state(run.run_id, "auth-page").state == PageState.FAILED
+
+        runtime_db = invalidator.root / ".repo-wiki" / "index" / "runtime.sqlite3"
+        runtime_db.parent.mkdir(parents=True, exist_ok=True)
+        import sqlite3
+
+        with sqlite3.connect(runtime_db) as conn:
+            conn.execute("CREATE TABLE evidence_span (id INTEGER PRIMARY KEY, file_path TEXT)")
+            conn.execute("CREATE TABLE page_source_map (evidence_id INTEGER, doc_slug TEXT)")
+            conn.execute(
+                "INSERT INTO evidence_span(id, file_path) VALUES (1, ?)",
+                ("src/internal/auth_handler.py",),
+            )
+            conn.execute(
+                "INSERT INTO page_source_map(evidence_id, doc_slug) VALUES (1, ?)",
+                ("auth-page",),
+            )
+            conn.commit()
+
+        invalidated, skipped = invalidator.invalidate_from_hash_comparison(
+            run_id=run.run_id,
+            baseline_hashes={"src/internal/auth_handler.py": "old"},
+            current_hashes={"src/internal/auth_handler.py": "new"},
+        )
+
+        assert invalidated == ["auth-page"]
+        assert skipped == []
+        assert state_machine.get_page_state(run.run_id, "auth-page").state == PageState.PENDING
+
+    def test_input_hash_invalidation_requeues_only_changed_completed_pages(self, invalidator_setup):
+        """Composer input hashes should drive deterministic page-level invalidation."""
+        invalidator, state_machine = invalidator_setup
+        run = state_machine.create_run(profile="test", total_pages=2)
+        state_machine.add_page(run.run_id, "changed", "module", "docs/changed.md", input_hash="v1")
+        state_machine.add_page(
+            run.run_id, "unchanged", "module", "docs/unchanged.md", input_hash="same"
+        )
+        state_machine.complete_page(run.run_id, "changed", output_hash="out-a")
+        state_machine.complete_page(run.run_id, "unchanged", output_hash="out-b")
+
+        invalidated, skipped = invalidator.invalidate_from_input_hashes(
+            run.run_id,
+            {"changed": "v2", "unchanged": "same"},
+        )
+
+        assert invalidated == ["changed"]
+        assert skipped == []
+        assert state_machine.get_page_state(run.run_id, "changed").state == PageState.PENDING
+        unchanged = state_machine.get_page_state(run.run_id, "unchanged")
+        assert unchanged is not None
+        assert unchanged.state == PageState.COMPLETED
+        assert unchanged.output_hash == "out-b"
+
+        summary = invalidator.get_page_impact_summary(run.run_id)
+        assert summary["regeneration_queue_count"] == 1
+        assert summary["completed_count"] == 1
+
+    def test_input_hash_invalidation_is_idempotent_after_scheduler_result_without_hash(
+        self, invalidator_setup
+    ):
+        """Scheduler should persist planned input hash when result omits it."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from repo_wiki.orchestration.cost_estimator import BudgetGate, GenerationCostEstimator
+        from repo_wiki.orchestration.generation_scheduler import (
+            GenerationScheduler,
+            SchedulerConfig,
+        )
+
+        invalidator, state_machine = invalidator_setup
+        run = state_machine.create_run(profile="test", total_pages=1)
+        state_machine.add_page(run.run_id, "changed", "module", "docs/changed.md", input_hash="v1")
+        state_machine.complete_page(run.run_id, "changed", output_hash="out-v1")
+
+        invalidated, skipped = invalidator.invalidate_from_input_hashes(
+            run.run_id, {"changed": "v2"}
+        )
+        assert invalidated == ["changed"]
+        assert skipped == []
+
+        scheduler = GenerationScheduler(
+            state_machine,
+            GenerationCostEstimator(invalidator.root / "costs.sqlite3"),
+            BudgetGate(GenerationCostEstimator(invalidator.root / "costs.sqlite3")),
+            SchedulerConfig(max_concurrency=1, max_retries=1),
+        )
+        mock_generate = AsyncMock(
+            return_value=MagicMock(prompt_tokens=1, completion_tokens=1, output_hash="out-v2")
+        )
+        completed, failed, errors = scheduler.run_pages_sync(
+            run_id=run.run_id,
+            provider="openai",
+            model="gpt-4o-mini",
+            generate_fn=mock_generate,
+        )
+        assert (completed, failed, errors) == (1, 0, [])
+        completed_page = state_machine.get_page_state(run.run_id, "changed")
+        assert completed_page is not None
+        assert completed_page.input_hash == "v2"
+
+        second_invalidated, second_skipped = invalidator.invalidate_from_input_hashes(
+            run.run_id, {"changed": "v2"}
+        )
+        assert second_invalidated == []
+        assert second_skipped == []
+        assert state_machine.get_page_state(run.run_id, "changed").state == PageState.COMPLETED
+
 
 class TestCreateGenerationInvalidator:
     """Tests for create_generation_invalidator factory."""

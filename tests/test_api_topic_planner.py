@@ -34,9 +34,9 @@ class TestAPITopicPlanner:
     def sample_identity(self):
         """Sample repository identity."""
         return RepositoryIdentity(
-            name="AI_API_Atlas",
-            display_name="AI API Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            display_name="Reference Repository",
+            root_path="/test/reference-repo",
             language="python",
             framework="fastapi",
         )
@@ -100,6 +100,48 @@ class TestAPITopicPlanner:
                 doc_path="docs/modules/health.md",
                 domain="operations",
                 service_family="api-server",
+            ),
+            Module(
+                name="inventory-service",
+                path="services/inventory-service",
+                responsibility="API台账服务，管理端点清单与参数台账",
+                exports=["EndpointsController", "ApiEndpointRepository"],
+                depends_on=["contract-service"],
+                depended_by=["frontend-app"],
+                interfaces=["GET /inventory/endpoints", "POST /inventory/endpoints"],
+                data_models=["ApiEndpointEntity", "ApiParameterEntity"],
+                owner="team-core",
+                doc_path="docs/modules/inventory-service.md",
+                domain="core-platform",
+                service_family="api-server",
+            ),
+            Module(
+                name="contract-service",
+                path="services/contract-service",
+                responsibility="契约管理与合同校验",
+                exports=["ContractController"],
+                depends_on=[],
+                depended_by=["inventory-service"],
+                interfaces=["GET /contracts/{id}"],
+                data_models=["ContractEntity"],
+                owner="team-core",
+                doc_path="docs/modules/contract-service.md",
+                domain="core-platform",
+                service_family="api-server",
+            ),
+            Module(
+                name="frontend-app",
+                path="frontend/app",
+                responsibility="前端应用",
+                exports=["InventoryPage"],
+                depends_on=["inventory-service"],
+                depended_by=[],
+                interfaces=["GET /inventory/endpoints"],
+                data_models=[],
+                owner="team-frontend",
+                doc_path="docs/modules/frontend-app.md",
+                domain="frontend",
+                service_family="typescript-frontend",
             ),
         ]
 
@@ -261,6 +303,41 @@ class TestAPITopicPlanner:
                 line_number=75,
                 line_end=95,
             ),
+            # Inventory service endpoints
+            Endpoint(
+                method="GET",
+                path="/inventory/endpoints",
+                module="inventory-service",
+                handler="listEndpoints",
+                file_path="services/inventory-service/controllers/EndpointsController.java",
+                service_family="api-server",
+                domain="core-platform",
+                runtime_role="api-server",
+                auth_type="bearer",
+                auth_required=True,
+                request_body=False,
+                response_type="json",
+                error_codes=[401, 500],
+                line_number=12,
+                line_end=32,
+            ),
+            Endpoint(
+                method="POST",
+                path="/inventory/endpoints",
+                module="inventory-service",
+                handler="createEndpoint",
+                file_path="services/inventory-service/controllers/EndpointsController.java",
+                service_family="api-server",
+                domain="core-platform",
+                runtime_role="api-server",
+                auth_type="bearer",
+                auth_required=True,
+                request_body=True,
+                response_type="json",
+                error_codes=[400, 401, 500],
+                line_number=34,
+                line_end=68,
+            ),
         ]
 
         data_models = [
@@ -288,11 +365,23 @@ class TestAPITopicPlanner:
                 module="auth_service",
                 file_path="repo_wiki/auth/service.py",
             ),
+            DataModel(
+                name="ApiEndpointEntity",
+                type="java_class",
+                module="inventory-service",
+                file_path="services/inventory-service/entity/ApiEndpointEntity.java",
+            ),
+            DataModel(
+                name="ApiParameterEntity",
+                type="java_class",
+                module="inventory-service",
+                file_path="services/inventory-service/entity/ApiParameterEntity.java",
+            ),
         ]
 
         repository = RepositoryInfo(
-            name="AI_API_Atlas",
-            root_path="/test/ai-api-atlas",
+            name="reference-repo",
+            root_path="/test/reference-repo",
             language="python",
             framework="fastapi",
             package_manager="pip",
@@ -325,7 +414,7 @@ class TestAPITopicPlanner:
 
         assert manifest.page_count() > 0
         assert manifest.repository_identity is not None
-        assert manifest.repository_identity.name == "AI_API_Atlas"
+        assert manifest.repository_identity.name == "reference-repo"
 
     def test_at_least_fifteen_api_pages(self, sample_identity, sample_snapshot):
         """Test that at least 15 API pages are generated."""
@@ -447,6 +536,30 @@ class TestAPITopicPlanner:
         assert manifest.page_count() >= 15
         api_pages = manifest.pages_by_category(WikiTaxonomyCategory.API_REFERENCE)
         assert len(api_pages) >= 15
+
+    def test_inventory_service_has_dedicated_core_service_api_page(
+        self, sample_identity, sample_snapshot
+    ):
+        """API台账服务必须生成专属核心服务 API 页面。"""
+        manifest = plan_api_topics(sample_identity, sample_snapshot)
+
+        dedicated = next(
+            (p for p in manifest.pages if p.page_id == "inventory-service-api-reference"),
+            None,
+        )
+        assert dedicated is not None
+        assert dedicated.title == "API台账服务 API"
+        assert dedicated.parent in {"api-core-service-api", "api-reference"}
+        assert dedicated.output_path.startswith("docs/pages/api/")
+        assert "core-service-api" in dedicated.tags
+
+        req = dedicated.source_requirements
+        assert any("inventory-service" in m for m in req.modules)
+        assert any("/inventory/endpoints" in ep for ep in req.endpoints)
+        assert any(dm in {"ApiEndpointEntity", "ApiParameterEntity"} for dm in req.data_models)
+        assert any("EndpointsController" in f for f in req.files)
+        assert any("frontend-app" in m for m in req.modules)
+        assert any("contract-service" in m for m in req.modules)
 
 
 class TestAPITopicPlannerEdgeCases:

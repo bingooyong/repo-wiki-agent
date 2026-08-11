@@ -137,13 +137,16 @@ API_HEADING_CONTRACT = HeadingContract(
     page_type="api",
     sections=(
         HeadingSection("目录", "## 目录", 2, required=True, min_prose_chars=30),
-        HeadingSection("简介", "## API 分组", 2, required=True, min_prose_chars=50),
-        HeadingSection("核心组件", "## 调用约定", 2, required=True, min_prose_chars=80),
-        HeadingSection("详细分析", "## 端点详情", 2, required=True, min_prose_chars=100),
-        HeadingSection("依赖", "## 认证", 2, required=False, min_prose_chars=50),
-        HeadingSection("性能", "## 错误处理", 2, required=False, min_prose_chars=50),
-        HeadingSection("排障", "## 排障", 2, required=False, min_prose_chars=30),
-        HeadingSection("附录", "## 附录", 2, required=False, min_prose_chars=0),
+        HeadingSection("简介", "## 简介", 2, required=True, min_prose_chars=100),
+        HeadingSection("项目结构", "## 项目结构", 2, required=True, min_prose_chars=80),
+        HeadingSection("核心组件", "## 核心组件", 2, required=True, min_prose_chars=100),
+        HeadingSection("架构总览", "## 架构总览", 2, required=True, min_prose_chars=100),
+        HeadingSection("详细分析", "## 详细组件分析", 2, required=True, min_prose_chars=140),
+        HeadingSection("依赖", "## 依赖关系分析", 2, required=True, min_prose_chars=90),
+        HeadingSection("性能", "## 性能考量", 2, required=False, min_prose_chars=70),
+        HeadingSection("排障", "## 故障排查指南", 2, required=False, min_prose_chars=70),
+        HeadingSection("结论", "## 结论", 2, required=True, min_prose_chars=60),
+        HeadingSection("附录", "## 附录：端点清单（限量）", 2, required=False, min_prose_chars=0),
     ),
     toc_required=True,
     toc_depth=2,
@@ -406,6 +409,9 @@ class SkeletonBuilder:
         # Performance and troubleshooting sections are relevant if
         # there are performance-sensitive or error-prone components
         if section_key in ("性能", "排障"):
+            return True
+        # API pages should keep bounded endpoint appendix as repair surface
+        if self.page_type == "api" and section_key == "附录":
             return True
 
         return False

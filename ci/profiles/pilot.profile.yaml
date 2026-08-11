@@ -25,7 +25,7 @@ pilot_config:
   test_duration_days: 14
   repos:
     - repo-agent
-    - AI_API_Atlas
+    - reference-repo
   collect_metrics: true
 
 failure_messages:

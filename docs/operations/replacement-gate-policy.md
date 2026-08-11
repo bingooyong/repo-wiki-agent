@@ -3,7 +3,7 @@
 **文档属性**: 运营策略
 **版本**: 1.0
 **日期**: 2026-04-25
-**Agent**: Agent_QualityRelease
+**Agent**: release-maintainers
 
 ## 1. 背景
 
@@ -138,8 +138,8 @@ visual_evidence:
 
 | 决策者 | 权限范围 |
 |--------|----------|
-| Agent_QualityRelease | 批准/拒绝 PILOT 阶段 |
-| Agent_AdapterGovernance | CI profile 配置变更 |
+| release-maintainers | 批准/拒绝 PILOT 阶段 |
+| adapter-maintainers | CI profile 配置变更 |
 | Manager Agent | 全量回滚决策 |
 | Human User | 最终回滚确认 |
 
@@ -246,7 +246,7 @@ criteria:
   hard_gate_failures: <= 1
   soft_gate_failures: <= 5
   overall_score: >= 0.60
-  pilot_repos: [repo-agent, AI_API_Atlas]
+  pilot_repos: [repo-agent, reference-repo]
 actions:
   on_fail: LOG_AND_CONTINUE
   on_warn: LOG_AND_CONTINUE
@@ -285,7 +285,7 @@ decision:
   hard_gates: [list of failures]
   soft_gates: [list of warnings]
   decision: GO|NO-GO|REVIEW
-  authority: Agent_QualityRelease|Manager
+  authority: release-maintainers|Manager
   evidence_bundle: /path/to/evidence/
 ---
 ```
@@ -347,7 +347,6 @@ if not result["compatible"]:
 | `docs/operations/replacement-gate-policy.md` | 本文档 - 门禁策略和回滚预案 |
 | `docs/operations/rollback-playbook.md` | 独立回滚执行手册 |
 | `docs/operations/policy-profiles.yaml` | 三种 profile 配置 |
-| `.apm/Memory/Phase_16/.../Task_16_1_...` | Memory Log |
 
 ## 9. 与之前阶段的关系
 

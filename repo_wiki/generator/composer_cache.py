@@ -73,6 +73,8 @@ class ComposerCacheStats:
     cache_misses: int
     total_tokens_saved: int
     total_cost_saved_usd: float
+    skipped_pages: int = 0
+    regenerated_pages: int = 0
 
 
 # =============================================================================
@@ -312,7 +314,7 @@ class ComposerCache:
         self.sqlite_path = Path(sqlite_path)
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
-        self._stats = {"hits": 0, "misses": 0}
+        self._stats = {"hits": 0, "misses": 0, "skipped": 0, "regenerated": 0}
 
     def _init_db(self) -> None:
         """Initialize cache database schema."""
@@ -514,7 +516,7 @@ class ComposerCache:
         try:
             conn.execute("DELETE FROM composer_cache")
             conn.commit()
-            self._stats = {"hits": 0, "misses": 0}
+            self._stats = {"hits": 0, "misses": 0, "skipped": 0, "regenerated": 0}
         finally:
             conn.close()
 
@@ -541,9 +543,19 @@ class ComposerCache:
                 cache_misses=self._stats["misses"],
                 total_tokens_saved=total_tokens,
                 total_cost_saved_usd=total_cost,
+                skipped_pages=self._stats["skipped"],
+                regenerated_pages=self._stats["regenerated"],
             )
         finally:
             conn.close()
+
+    def record_skipped_page(self) -> None:
+        """Record that a page was skipped because a cache entry was reusable."""
+        self._stats["skipped"] += 1
+
+    def record_regenerated_page(self) -> None:
+        """Record that a page was regenerated after a cache miss/invalidation."""
+        self._stats["regenerated"] += 1
 
     def list_entries(
         self,
@@ -666,6 +678,7 @@ class CachedComposerMixin:
         """
         self._cache = cache
         self._cache_enabled = cache_enabled
+        self._cache_regeneration_observed: set[tuple[str, str]] = set()
 
     def _get_cache(self) -> ComposerCache | None:
         """Get the cache instance."""
@@ -688,7 +701,13 @@ class CachedComposerMixin:
         if cache is None:
             return None, 0
 
-        return cache.get_for_page(page_id, input_hash)
+        markdown, tokens = cache.get_for_page(page_id, input_hash)
+        if markdown is not None:
+            cache.record_skipped_page()
+        else:
+            cache.record_regenerated_page()
+            self._cache_regeneration_observed.add((page_id, input_hash))
+        return markdown, tokens
 
     def _store_cache(
         self,
@@ -703,6 +722,11 @@ class CachedComposerMixin:
         cache = self._get_cache()
         if cache is None:
             return
+
+        cache_key = (page_id, input_hash)
+        if cache_key not in self._cache_regeneration_observed:
+            cache.record_regenerated_page()
+            self._cache_regeneration_observed.add(cache_key)
 
         cache.put(
             page_id=page_id,
@@ -739,7 +763,9 @@ def format_cache_stats(stats: ComposerCacheStats) -> str:
   Cache misses: {stats.cache_misses}
   Hit rate: {hit_rate:.1f}%
   Tokens saved: {stats.total_tokens_saved}
-  Cost saved: ${stats.total_cost_saved_usd:.6f}"""
+  Cost saved: ${stats.total_cost_saved_usd:.6f}
+  Skipped pages: {stats.skipped_pages}
+  Regenerated pages: {stats.regenerated_pages}"""
 
 
 def compare_input_hashes(

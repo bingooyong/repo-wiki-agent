@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 
 class DocumentLayer(Enum):
@@ -171,7 +172,7 @@ CORE_DOCUMENT_CONTRACTS: tuple[DocumentContract, ...] = (
 #   - Template path: docs/section.md.j2
 #
 # ALIAS SUPPORT:
-#   Some repositories (like AI_API_Atlas) use Q01/S01 prefixed section names.
+#   Some repositories (like reference-repo) use Q01/S01 prefixed section names.
 #   The alias system allows canonical section slugs to coexist with
 #   repository-specific topical layers. Aliases are transparent - generation
 #   always uses canonical slugs, but validation recognizes aliases.
@@ -232,7 +233,7 @@ def get_section_by_slug(slug: str) -> SectionDefinition | None:
     """Find a section definition by canonical slug or alias.
 
     This enables the registry to recognize Q01/S01 formatted sections
-    from repositories like AI_API_Atlas while maintaining canonical naming.
+    from repositories like reference-repo while maintaining canonical naming.
     """
     s = slug.strip().lower()
     for section in SECTION_DEFINITIONS:
@@ -1140,25 +1141,27 @@ def get_output_manifest() -> dict[str, Any]:
     Returns:
         Dictionary with layer policies, descriptions, and boundary rules.
     """
-    manifest = {
-        "governance_layers": [],
-        "target_output_layers": [],
-        "boundary_rules": [
-            "Phase layer docs (docs/phases/) MUST NOT be generated for target repos",
-            "Target repos should only receive OVERVIEW, SECTION, MODULE layers",
-            "Governance docs live in repo-agent's own .apm/Memory and docs/phases/",
-            "Generation tasks MUST check layer policy before writing outputs",
-        ],
-    }
+    governance_layers: list[dict[str, str]] = []
+    target_output_layers: list[dict[str, str]] = []
+    boundary_rules = [
+        "Phase layer docs (docs/phases/) MUST NOT be generated for target repos",
+        "Target repos should only receive OVERVIEW, SECTION, MODULE layers",
+        "Governance docs live in repo-agent's own .apm/Memory and docs/phases/",
+        "Generation tasks MUST check layer policy before writing outputs",
+    ]
 
     for layer, policy, description in OUTPUT_LAYER_MANIFEST:
         entry = {"layer": layer.value, "policy": policy.value, "description": description}
         if policy == OutputLayerPolicy.GOVERNANCE_ONLY:
-            manifest["governance_layers"].append(entry)
+            governance_layers.append(entry)
         else:
-            manifest["target_output_layers"].append(entry)
+            target_output_layers.append(entry)
 
-    return manifest
+    return {
+        "governance_layers": governance_layers,
+        "target_output_layers": target_output_layers,
+        "boundary_rules": boundary_rules,
+    }
 
 
 def validate_output_boundary(output_path: str, layer: DocumentLayer) -> tuple[bool, str]:

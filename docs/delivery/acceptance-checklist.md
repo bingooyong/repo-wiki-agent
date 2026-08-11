@@ -12,9 +12,8 @@
 | 属性 | 内容 |
 |------|------|
 | 项目名称 | repo-wiki MVP |
-| 替代目标 | Qoder Repo Wiki (Atlas) |
-| GO 决策日期 | 2026-05-02 |
-| 验证基准 | AI_API_Atlas strict verify (13/13 PASS) |
+| 输出目标 | Qoder-like repository Wiki |
+| 发布依据 | 公开 CI、strict verify 和 release gate |
 
 ---
 
@@ -52,7 +51,7 @@
 ### 2.5 Strict Verify
 
 - [x] **13 项检查**：qoder-page-dumps, qoder-prose-density, qoder-stale-commit, qoder-content-empty, qoder-toc, qoder-citations, qoder-mermaid, qoder-api-aggregation, qoder-dm-aggregation, qoder-citation-relevance, qoder-dirty-worktree, qoder-broken-links, qoder-page-count
-- [x] **Grade PASS**：13/13 checks
+- [x] **发布阻断**：任一 blocking check 失败时禁止发布
 - [x] **Exit code 0**：CI 友好
 
 ---
@@ -61,17 +60,13 @@
 
 ### 3.1 测试覆盖率
 
-- [x] Phase 28 后 1200+ tests pass
-- [x] 各 Phase 回归测试通过
+- [x] 公开 CI 回归测试通过后方可发布
 
-### 3.2 GO 决策验证
+### 3.2 发布门禁验证
 
-- [x] AI_API_Atlas strict verify PASS
-- [x] QODER_PAGE_DUMP: PASS (3 pages rewritten)
-- [x] QODER_CONTENT_EMPTY: PASS (SQLite path normalization)
-- [x] QODER_PROSE_TOO_LOW: PASS (2 pages repaired)
-- [x] QODER_STALE_GIT_COMMIT: PASS
-- [x] QODER_DIRTY_WORKTREE: PASS (new gate)
+- [x] Strict verify 结果写入候选 run 报告
+- [x] 内容完整性、引用、Mermaid、提交新鲜度和工作树状态均有门禁
+- [x] 只有 READY manifest 可发布到稳定目录
 
 ---
 
@@ -135,5 +130,3 @@
 ## 7. 参考文档
 
 > 详见 [project-overview.md](./project-overview.md) 项目概览。
-> 详见 [go-no-go-dossier.md](./go-no-go-dossier.md) GO 决策文档。
-> 详见 APM Memory Root: `.apm/Memory/Memory_Root.md`

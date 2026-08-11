@@ -296,6 +296,8 @@ def load_plan_from_sqlite(root: Path) -> WikiPlanManifest | None:
             node_id=node_data["doc_slug"],
             label=node_data.get("title", node_data["doc_slug"]),
             node_type=node_data.get("doc_type", "page"),
+            path=None,
+            icon=None,
             sort_order=0,
         )
         nav_nodes[node.node_id] = node

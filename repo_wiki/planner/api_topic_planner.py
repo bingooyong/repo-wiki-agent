@@ -10,7 +10,9 @@ with service family awareness, generating at least 15 planned API pages.
 from __future__ import annotations
 
 from repo_wiki.core.contracts import Endpoint, RepositorySnapshot
+from repo_wiki.evidence.service_ownership import is_inventory_service
 from repo_wiki.planner.schema import (
+    INVENTORY_SERVICE_API_PAGE_ID,
     GenerationMode,
     NavNode,
     RepositoryIdentity,
@@ -117,6 +119,9 @@ class APITopicPlanner:
 
         # Generate individual endpoint pages grouped by topic
         self._generate_topic_grouped_endpoints()
+
+        # Generate dedicated core-service API page for inventory-service coverage.
+        self._generate_inventory_service_api_page()
 
         # Build navigation tree
         nav_tree = self._build_navigation_tree()
@@ -352,6 +357,93 @@ class APITopicPlanner:
 
             sort_order += 10
 
+    def _generate_inventory_service_api_page(self) -> None:
+        """Generate dedicated API page plan for API台账服务 when evidence exists."""
+        inventory_modules = [
+            m
+            for m in self.snapshot.modules
+            if is_inventory_service(m.name)
+            or "inventory" in m.path.lower()
+            or "api台账服务" in m.responsibility.lower()
+        ]
+        if not inventory_modules:
+            return
+
+        inventory_module_names = {m.name for m in inventory_modules}
+        inventory_endpoints = [
+            e
+            for e in self.snapshot.endpoints
+            if e.module in inventory_module_names
+            or "inventory" in e.path.lower()
+            or "inventory" in e.file_path.lower()
+        ]
+        inventory_models = [
+            dm
+            for dm in self.snapshot.data_models
+            if dm.module in inventory_module_names
+            or "apiendpoint" in dm.name.lower()
+            or "apiparameter" in dm.name.lower()
+            or "inventory" in dm.file_path.lower()
+        ]
+
+        related_contract_modules = [
+            m
+            for m in self.snapshot.modules
+            if "contract-service" in m.name.lower()
+            or (
+                "contract" in m.name.lower()
+                and (
+                    any(dep in inventory_module_names for dep in m.depends_on)
+                    or any(m.name in inv.depends_on for inv in inventory_modules)
+                )
+            )
+        ]
+        related_frontend_modules = [
+            m
+            for m in self.snapshot.modules
+            if m.domain == "frontend"
+            and (
+                any(dep in inventory_module_names for dep in m.depends_on)
+                or any("inventory" in itf.lower() for itf in m.interfaces)
+            )
+        ]
+
+        parent_id = "api-core-service-api"
+        if not any(p.page_id == parent_id for p in self.pages):
+            parent_id = "api-reference"
+
+        self._add_page(
+            page_id=self._make_page_id(INVENTORY_SERVICE_API_PAGE_ID),
+            title="API台账服务 API",
+            category=WikiTaxonomyCategory.API_REFERENCE,
+            parent=parent_id,
+            source_requirements=SourceRequirement(
+                modules=sorted(
+                    inventory_module_names
+                    | {m.name for m in related_frontend_modules}
+                    | {m.name for m in related_contract_modules}
+                ),
+                endpoints=sorted({f"{e.method} {e.path}" for e in inventory_endpoints}),
+                data_models=sorted({dm.name for dm in inventory_models}),
+                files=sorted(
+                    {
+                        *(e.file_path for e in inventory_endpoints if e.file_path),
+                        *(dm.file_path for dm in inventory_models if dm.file_path),
+                        *(m.doc_path for m in inventory_modules if m.doc_path),
+                        *(m.doc_path for m in related_frontend_modules if m.doc_path),
+                        *(m.doc_path for m in related_contract_modules if m.doc_path),
+                    }
+                ),
+            ),
+            sort_order=195,
+            tags=[
+                "api",
+                "core-service-api",
+                "inventory-service",
+                "ownership-scoped",
+            ],
+        )
+
     def _topic_title(self, topic: str) -> str:
         """Get human-readable title for topic."""
         titles = {
@@ -373,6 +465,8 @@ class APITopicPlanner:
             node_id="cat-api",
             label="API参考",
             node_type="category",
+            path=None,
+            icon=None,
             sort_order=6,
         )
 
@@ -384,6 +478,7 @@ class APITopicPlanner:
                 label=page.title,
                 node_type="page",
                 path=page.output_path,
+                icon=None,
                 sort_order=page.sort_order,
             )
 
@@ -395,6 +490,7 @@ class APITopicPlanner:
                     label=child.title,
                     node_type="page",
                     path=child.output_path,
+                    icon=None,
                     sort_order=child.sort_order,
                 )
                 page_node.children.append(child_node)

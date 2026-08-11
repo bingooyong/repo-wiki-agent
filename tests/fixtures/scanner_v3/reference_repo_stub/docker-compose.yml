@@ -1,0 +1,10 @@
+version: "3.9"
+services:
+  inventory-service:
+    build: ./services/inventory-service
+    ports:
+      - "8081:8081"
+  ai-service:
+    build: ./services/ai-service
+    ports:
+      - "8090:8090"

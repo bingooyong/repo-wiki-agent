@@ -7,6 +7,62 @@ from typing import Any
 from repo_wiki.core.contracts import RepositorySnapshot
 from repo_wiki.generator.io import ensure_dir, write_yamlish
 
+_EXCLUDED_SOURCE_OF_TRUTH_PATH_PARTS = {
+    "node_modules",
+    "tests",
+    "fixtures",
+    "fixture",
+    "__pycache__",
+}
+
+_PARSER_PSEUDO_FACT_FILES = {
+    "repo_wiki/scanner/repository_scanner.py",
+    "repo_wiki/scanner/database_migrations.py",
+}
+
+
+def _source_fact_path(value: Any) -> str:
+    if hasattr(value, "file_path"):
+        return str(value.file_path or "")
+    if isinstance(value, dict):
+        return str(value.get("file_path") or value.get("path") or "")
+    return ""
+
+
+def _has_excluded_source_path(path: str) -> bool:
+    parts = Path(path).parts
+    return any(part in _EXCLUDED_SOURCE_OF_TRUTH_PATH_PARTS for part in parts)
+
+
+def _is_parser_pseudo_fact(path: str) -> bool:
+    return path in _PARSER_PSEUDO_FACT_FILES
+
+
+def should_emit_source_fact(value: Any) -> bool:
+    """Return whether an extracted endpoint/model is safe for source-of-truth output.
+
+    Scanner regexes intentionally scan source text broadly. For repository-level
+    source-of-truth artifacts, suppress facts extracted from test fixtures, vendored
+    dependencies, and parser implementation examples so generated API/model indexes
+    describe the product surface rather than the scanner's own test corpus.
+    """
+    path = _source_fact_path(value)
+    if not path:
+        return True
+    if _has_excluded_source_path(path):
+        return False
+    if _is_parser_pseudo_fact(path):
+        return False
+    return True
+
+
+def _filtered_endpoints(snapshot: RepositorySnapshot) -> list[Any]:
+    return [endpoint for endpoint in snapshot.endpoints if should_emit_source_fact(endpoint)]
+
+
+def _filtered_data_models(snapshot: RepositorySnapshot) -> list[Any]:
+    return [model for model in snapshot.data_models if should_emit_source_fact(model)]
+
 
 def write_source_of_truth(root: Path, snapshot: RepositorySnapshot) -> dict[str, Path]:
     _validate_snapshot(snapshot)
@@ -72,7 +128,7 @@ def write_source_of_truth(root: Path, snapshot: RepositorySnapshot) -> dict[str,
                 "line_number": endpoint.line_number,
                 "line_end": endpoint.line_end,
             }
-            for endpoint in snapshot.endpoints
+            for endpoint in _filtered_endpoints(snapshot)
         ]
     }
 
@@ -84,7 +140,7 @@ def write_source_of_truth(root: Path, snapshot: RepositorySnapshot) -> dict[str,
                 "module": model.module,
                 "file_path": model.file_path,
             }
-            for model in snapshot.data_models
+            for model in _filtered_data_models(snapshot)
         ]
     }
 

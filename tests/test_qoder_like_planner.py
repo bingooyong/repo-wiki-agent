@@ -4,7 +4,7 @@ Validates module hierarchy planning with:
 - Target directory depth of 4 with non-empty topic pages
 - Qoder path common count toward 80
 - Repo-agent page count within 90%-120% of Qoder page count
-- Hierarchy fixture tests and AI_API_Atlas path comparison evidence
+- Hierarchy fixture tests and reference-repo path comparison evidence
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ class TestQoderPathCommonCount:
 
     @pytest.fixture
     def qoder_baseline_paths(self):
-        """Qoder-like baseline path structure (from AI_API_Atlas)."""
+        """Qoder-like baseline path structure (from reference-repo)."""
         return [
             # 项目概述 (Project Overview)
             "docs/pages/overview/00-overview.md",
@@ -162,7 +162,7 @@ class TestQoderPathCommonCount:
 
     def test_qoder_path_count_target_80(self, qoder_baseline_paths):
         """Test that Qoder path count approaches 80."""
-        # Current AI_API_Atlas has about 34 paths, target is 80
+        # Current reference-repo has about 34 paths, target is 80
         # This tests the growth trajectory
         current_count = len(qoder_baseline_paths)
         target = 80
@@ -362,16 +362,16 @@ class TestHierarchyFixtureTests:
         assert len(written_titles) == len(set(written_titles)), "Duplicate titles found"
 
 
-class TestAIAPIAtlasPathComparisonEvidence:
-    """Tests for AI_API_Atlas path comparison with repo-agent."""
+class TestReferenceRepoPathComparisonEvidence:
+    """Tests for reference-repo path comparison with repo-agent."""
 
     @pytest.fixture
-    def ai_api_atlas_structure(self, tmp_path):
-        """Create AI_API_Atlas-like structure for comparison."""
+    def reference_repo_structure(self, tmp_path):
+        """Create reference-repo-like structure for comparison."""
         content_dir = tmp_path / ".qoder" / "repowiki" / "zh" / "content"
         content_dir.mkdir(parents=True)
 
-        # Create AI_API_Atlas sections
+        # Create reference-repo sections
         sections = [
             "项目概述",
             "架构设计",
@@ -404,7 +404,7 @@ class TestAIAPIAtlasPathComparisonEvidence:
         content_dir = tmp_path / ".repo-agent-eval" / "run-001" / "content"
         content_dir.mkdir(parents=True)
 
-        # Create repo-agent sections (subset of AI_API_Atlas)
+        # Create repo-agent sections (subset of reference-repo)
         sections = [
             "项目概述",
             "架构设计",
@@ -421,8 +421,8 @@ class TestAIAPIAtlasPathComparisonEvidence:
 
         return content_dir
 
-    def test_path_model_detection(self, ai_api_atlas_structure, repo_agent_eval_structure):
-        """Test path model detection for AI_API_Atlas vs repo-agent."""
+    def test_path_model_detection(self, reference_repo_structure, repo_agent_eval_structure):
+        """Test path model detection for reference-repo vs repo-agent."""
         from repo_wiki.verifier.qoder_comparator_paths import (
             PathModel,
             PathModelRepair,
@@ -430,9 +430,11 @@ class TestAIAPIAtlasPathComparisonEvidence:
 
         repair = PathModelRepair()
 
-        # AI_API_Atlas structure should be detected as QODER_LIKE
-        detected = repair.detect_path_model(ai_api_atlas_structure)
-        assert detected == PathModel.QODER_LIKE, "AI_API_Atlas structure not detected as QODER_LIKE"
+        # reference-repo structure should be detected as QODER_LIKE
+        detected = repair.detect_path_model(reference_repo_structure)
+        assert detected == PathModel.QODER_LIKE, (
+            "reference-repo structure not detected as QODER_LIKE"
+        )
 
         # repo-agent eval structure should be detected as REPO_AGENT_EVAL
         detected = repair.detect_path_model(repo_agent_eval_structure)
@@ -440,7 +442,9 @@ class TestAIAPIAtlasPathComparisonEvidence:
             "repo-agent eval structure not detected as REPO_AGENT_EVAL"
         )
 
-    def test_path_normalization_comparison(self, ai_api_atlas_structure, repo_agent_eval_structure):
+    def test_path_normalization_comparison(
+        self, reference_repo_structure, repo_agent_eval_structure
+    ):
         """Test path normalization for comparison."""
         from repo_wiki.verifier.qoder_comparator_paths import (
             PathModel,
@@ -449,8 +453,8 @@ class TestAIAPIAtlasPathComparisonEvidence:
 
         repair = PathModelRepair()
 
-        # Normalize AI_API_Atlas path
-        qoder_path = ai_api_atlas_structure / "项目概述" / "index.md"
+        # Normalize reference-repo path
+        qoder_path = reference_repo_structure / "项目概述" / "index.md"
         normalized_qoder = repair.normalize_path(qoder_path, PathModel.QODER_LIKE)
 
         # Normalize repo-agent path
@@ -478,13 +482,13 @@ class TestAIAPIAtlasPathComparisonEvidence:
                 f"Category {expected_category} not in QODER_TAXONOMY_CATEGORIES"
             )
 
-    def test_comparison_result_structure(self, ai_api_atlas_structure, repo_agent_eval_structure):
+    def test_comparison_result_structure(self, reference_repo_structure, repo_agent_eval_structure):
         """Test comparison result structure contains expected fields."""
         from repo_wiki.verifier.qoder_comparator_paths import create_repaired_comparator
 
         comparator = create_repaired_comparator(
             repo_agent_eval_structure,
-            ai_api_atlas_structure,
+            reference_repo_structure,
         )
         result = comparator.compare()
 

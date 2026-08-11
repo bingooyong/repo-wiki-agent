@@ -77,7 +77,8 @@ class TestDocsExamplesValidation:
     def test_config_diagnostic_shows_redacted(self, monkeypatch):
         """Test that diagnostic output redacts API keys."""
         # Set env BEFORE importing modules
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret-key-123456789")
+        fake_api_key = "sk-" + "test-secret-key-123456789"
+        monkeypatch.setenv("OPENAI_API_KEY", fake_api_key)
 
         # Import AFTER env is set
         from repo_wiki.llm import LLMProviderConfig
@@ -88,7 +89,7 @@ class TestDocsExamplesValidation:
         text = format_diagnostics_text(result)
 
         # Should not contain actual key
-        assert "sk-test-secret-key-123456789" not in text
+        assert fake_api_key not in text
         assert "[REDACTED]" in text or "REDACTED" in text
 
     def test_config_resolution_priority(self, monkeypatch):

@@ -279,7 +279,7 @@ class ParityTrendStore:
                     full_json,
                 ),
             )
-            run_row_id = int(cur.lastrowid)
+            run_row_id = int(cur.lastrowid or 0)
 
             for m in report.metrics:
                 cur.execute(

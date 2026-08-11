@@ -86,14 +86,14 @@ class TestEvalProfilesRegistry:
     def test_get_qoder_like_profile(self):
         profile = get_eval_profile("qoder-like")
         assert profile.name == "qoder-like"
-        assert profile.root == ".repo-agent-eval"
+        assert profile.root == ".repo-agent-eval/runs"
         assert profile.create_subdirs is True
-        assert profile.content_subdir == "content"
+        assert profile.content_subdir == "repowiki/zh/content"
 
     def test_qoder_like_content_dir(self):
         profile = get_eval_profile("qoder-like")
         content_dir = profile.get_content_dir("run-123")
-        assert content_dir == Path(".repo-agent-eval/run-123/content")
+        assert content_dir == Path(".repo-agent-eval/runs/run-123/repowiki/zh/content")
 
     def test_get_unknown_returns_default(self):
         profile = get_eval_profile("nonexistent")
@@ -145,7 +145,7 @@ class TestEvalManifest:
             target_repo="/path/to/repo",
             eval_root="/path/to/repo/.repo-agent-eval/run-001",
         )
-        assert manifest.version == "1.0"
+        assert manifest.version == "1.1"
         assert manifest.run_id == "run-001"
         assert len(manifest.files) == 0
         assert len(manifest.evidence) == 0
@@ -406,3 +406,73 @@ class TestIntegration:
         # Invalid paths
         assert profile.validate_path_safety("/etc/passwd")[0] is False
         assert profile.validate_path_safety("../../../root.txt")[0] is False
+
+
+class TestEvalRunLayoutDiagnostics:
+    """Migration diagnostics: canonical vs legacy flat ``content/`` (report-only)."""
+
+    def test_diagnose_canonical_layout(self, tmp_path: Path) -> None:
+        from repo_wiki.orchestration.release_publisher import diagnose_eval_run_layouts
+
+        eval_root = tmp_path / ".repo-agent-eval"
+        run_dir = eval_root / "runs" / "run-a"
+        run_dir.mkdir(parents=True)
+        canonical = run_dir / "repowiki" / "zh" / "content"
+        canonical.mkdir(parents=True)
+        (run_dir / "manifest.json").write_text(
+            json.dumps({"run_id": "run-a", "readiness_state": "READY"}), encoding="utf-8"
+        )
+
+        report = diagnose_eval_run_layouts(eval_root)
+        assert len(report["runs"]) == 1
+        row = report["runs"][0]
+        assert row["layout"] == "canonical"
+        assert row["canonical_content"] is True
+        assert row["legacy_flat_content"] is False
+
+    def test_diagnose_legacy_flat_content_layout(self, tmp_path: Path) -> None:
+        from repo_wiki.orchestration.release_publisher import diagnose_eval_run_layouts
+
+        eval_root = tmp_path / ".repo-agent-eval"
+        run_dir = eval_root / "runs" / "run-old"
+        run_dir.mkdir(parents=True)
+        (run_dir / "content").mkdir()
+        (run_dir / "manifest.json").write_text(json.dumps({"run_id": "run-old"}), encoding="utf-8")
+
+        report = diagnose_eval_run_layouts(eval_root)
+        row = report["runs"][0]
+        assert row["layout"] == "legacy"
+        assert row["canonical_content"] is False
+        assert row["legacy_flat_content"] is True
+
+    def test_diagnose_mixed_layout(self, tmp_path: Path) -> None:
+        from repo_wiki.orchestration.release_publisher import diagnose_eval_run_layouts
+
+        eval_root = tmp_path / ".repo-agent-eval"
+        run_dir = eval_root / "runs" / "run-mix"
+        run_dir.mkdir(parents=True)
+        (run_dir / "content").mkdir()
+        (run_dir / "repowiki" / "zh" / "content").mkdir(parents=True)
+        (run_dir / "manifest.json").write_text(json.dumps({"run_id": "run-mix"}), encoding="utf-8")
+
+        report = diagnose_eval_run_layouts(eval_root)
+        row = report["runs"][0]
+        assert row["layout"] == "mixed"
+        assert row["canonical_content"] is True
+        assert row["legacy_flat_content"] is True
+
+    def test_diagnose_neither_layout(self, tmp_path: Path) -> None:
+        from repo_wiki.orchestration.release_publisher import diagnose_eval_run_layouts
+
+        eval_root = tmp_path / ".repo-agent-eval"
+        run_dir = eval_root / "runs" / "run-empty"
+        run_dir.mkdir(parents=True)
+        (run_dir / "manifest.json").write_text(
+            json.dumps({"run_id": "run-empty"}), encoding="utf-8"
+        )
+
+        report = diagnose_eval_run_layouts(eval_root)
+        row = report["runs"][0]
+        assert row["layout"] == "neither"
+        assert row["canonical_content"] is False
+        assert row["legacy_flat_content"] is False

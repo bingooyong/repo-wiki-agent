@@ -1269,7 +1269,7 @@ class SQLiteRuntimeStore:
                     record.created_at or _now_iso(),
                 ),
             )
-            return cursor.lastrowid
+            return int(cursor.lastrowid or 0)
 
     def list_symbol_references(
         self,
@@ -1469,7 +1469,7 @@ class SQLiteRuntimeStore:
         if docs_path.exists():
             docs_data = json.loads(docs_path.read_text(encoding="utf-8"))
             for doc in docs_data:
-                record = DocHierarchyRecord(
+                doc_record = DocHierarchyRecord(
                     doc_type=doc["doc_type"],
                     doc_slug=doc["doc_slug"],
                     doc_path=doc["doc_path"],
@@ -1482,7 +1482,7 @@ class SQLiteRuntimeStore:
                     generated_at=doc.get("generated_at"),
                     updated_at=doc.get("updated_at"),
                 )
-                self.upsert_doc_hierarchy(record)
+                self.upsert_doc_hierarchy(doc_record)
                 count += 1
 
         # Rebuild section registry
@@ -1490,7 +1490,7 @@ class SQLiteRuntimeStore:
         if sections_path.exists():
             sections_data = json.loads(sections_path.read_text(encoding="utf-8"))
             for section in sections_data:
-                record = SectionRegistryRecord(
+                section_record = SectionRegistryRecord(
                     canonical_slug=section["canonical_slug"],
                     title=section["title"],
                     description=section.get("description"),
@@ -1498,7 +1498,7 @@ class SQLiteRuntimeStore:
                     sort_order=section.get("sort_order", 0),
                     is_active=section.get("is_active", True),
                 )
-                self.register_section(record)
+                self.register_section(section_record)
                 count += 1
 
         # Rebuild nav graph
