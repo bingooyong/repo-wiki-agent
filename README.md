@@ -101,6 +101,52 @@ repo-wiki release-publish --output .repo-agent-eval
 
 如果只生成 run 目录但未执行 `release-publish`，插件可能看不到可浏览 Wiki。
 
+## Codex 插件
+
+仓库包含 skills-only 的 `repo-wiki` Codex 插件。它复用当前 Python 环境中的
+`repo_wiki.main`，不会安装依赖、修改 shell profile，或保存 API Key。v1 不包含
+MCP server。
+
+完成上面的 CLI 安装后，在仓库根目录将本地 marketplace 加入 Codex。命令输出会显示
+marketplace 名称；在第二条命令中使用该名称：
+
+```bash
+codex plugin marketplace add <repo-root>
+codex plugin add repo-wiki@<marketplace-name>
+```
+
+在新的 Codex conversation 中使用 `repo-wiki`、`repo-wiki-generate`、
+`repo-wiki-maintain` 或 `repo-wiki-verify` skill。生成或改进 run 只会止步于验证成功的
+candidate；只有提供完整 G005 质量证据、通过 inspect，并明确确认同一 run ID 后，才会
+替换本地 READY release。
+
+开发插件更新时，先更新 cachebuster，再升级或重新安装 marketplace/plugin，刷新 Codex，
+并在新的 conversation 中完成 smoke test：
+
+```bash
+python ~/.codex/skills/.system/plugin-creator/scripts/update_plugin_cachebuster.py \
+  plugins/repo-wiki
+codex plugin marketplace add <repo-root>
+codex plugin add repo-wiki@<marketplace-name>
+```
+
+本地发布前运行官方 package validator，并在可用时运行隔离 Codex smoke test。没有本地
+Codex binary 时，smoke test 会明确跳过；该安装检查仍是人工验证缺口。
+
+```bash
+python ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/repo-wiki
+python scripts/smoke_codex_plugin.py
+```
+
+移除插件不会删除已生成的 Wiki 或 READY release：
+
+```bash
+codex plugin remove repo-wiki@<marketplace-name>
+```
+
+随后可选择保留 marketplace 供后续安装，或通过 Codex 的 marketplace removal 命令移除它。
+READY replacement 的回滚仍由现有 atomic publisher 的 backup/restore 行为负责。
+
 ## CLI 命令
 
 | 命令 | 说明 |

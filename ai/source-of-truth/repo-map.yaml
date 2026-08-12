@@ -12,6 +12,7 @@ repository:
     - repo_wiki/cli.py
     - repo_wiki/orchestration/service.py
     - extensions/repo-wiki-browser/src/extension.ts
+    - plugins/repo-wiki/scripts/workflow.py
   key_directories:
     - repo_wiki
     - extensions/repo-wiki-browser
@@ -20,7 +21,17 @@ repository:
     - docs
     - templates
     - scripts
+    - plugins/repo-wiki
   source_of_truth_status: curated-current
+
+codex_plugin_contract:
+  package: plugins/repo-wiki
+  manifest: plugins/repo-wiki/.codex-plugin/plugin.json
+  runner: plugins/repo-wiki/scripts/workflow.py
+  marketplace: .agents/plugins/marketplace.json
+  interface: skills-only
+  mcp_server: false
+  executable: sys.executable -m repo_wiki.main
 
 commands:
   config: repo-wiki config --ci
