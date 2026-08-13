@@ -1785,19 +1785,26 @@ class RepoWikiService:
         if not isinstance(raw_endpoints, list):
             return []
 
-        required_paths = set(
-            getattr(getattr(page, "source_requirements", None), "endpoints", []) or []
-        )
+        required_keys = {
+            str(item).upper().strip()
+            for item in getattr(getattr(page, "source_requirements", None), "endpoints", []) or []
+        }
         normalized: list[dict[str, Any]] = []
         for endpoint in raw_endpoints:
             if not isinstance(endpoint, dict):
                 continue
             method = str(endpoint.get("method") or "").upper().strip()
-            path = str(endpoint.get("path") or "").strip()
-            if not method or not path:
+            path = str(endpoint.get("path") or "").strip() or "/"
+            if not method:
                 continue
-            if required_paths and path not in required_paths:
-                continue
+            if required_keys:
+                endpoint_keys = {
+                    path.upper(),
+                    f"{method} {path}".upper(),
+                    f"{method} {str(endpoint.get('path') or '').strip()}".upper(),
+                }
+                if endpoint_keys.isdisjoint(required_keys):
+                    continue
             normalized.append(endpoint)
         return normalized[:25]
 

@@ -810,3 +810,78 @@ class TestEmptyEndpointState:
         assert "`/health`" in table
         assert "[模块文档](modules/api.md)" in table
         assert "[测试模块](modules/tests.md)" in table
+
+    def test_relative_product_router_paths_do_not_use_empty_state(self, tmp_path: Path):
+        """Relative FastAPI router paths are still a product HTTP inventory."""
+        endpoints = [
+            {
+                "method": "POST",
+                "path": "/login",
+                "module": "authentication",
+                "handler": "login",
+                "file_path": "app/api/routes/authentication.py",
+            },
+            {
+                "method": "GET",
+                "path": "/feed",
+                "module": "articles",
+                "handler": "get_articles_feed",
+                "file_path": "app/api/routes/articles_common.py",
+            },
+            {
+                "method": "GET",
+                "path": "/{slug}",
+                "module": "articles",
+                "handler": "get_article",
+                "file_path": "app/api/routes/articles.py",
+            },
+        ]
+        modules = [
+            {
+                "name": "authentication",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            },
+            {
+                "name": "articles",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            },
+        ]
+
+        aggregator = APIAggregator(endpoints=endpoints, modules=modules)
+        table = aggregator.build_api_groups_table()
+        detail = aggregator.build_api_groups_detail()
+
+        assert table != APIAggregator.NO_HTTP_API_MESSAGE
+        assert "UNRESOLVED_API_ENDPOINTS" not in table
+        assert "UNRESOLVED_API_ENDPOINTS" not in detail
+        assert APIAggregator.NO_HTTP_API_MESSAGE not in table
+        assert APIAggregator.NO_HTTP_API_MESSAGE not in detail
+
+        engine = GenerationEngine(tmp_path, template_root=tmp_path)
+        context = engine._build_core_context(
+            {
+                "repo_map": {"repository": {"name": "conduit"}, "commands": {}},
+                "module_index": {"modules": modules},
+                "api_index": {"endpoints": endpoints},
+                "data_models": {"models": []},
+                "graph": {"modules": {}},
+            }
+        )
+        rendered = "\n".join(
+            str(context.get(key, ""))
+            for key in (
+                "endpoint_index_table",
+                "api_groups_table",
+                "api_groups_detail",
+                "authentication_patterns",
+                "error_status_behavior",
+            )
+        )
+        assert APIAggregator.NO_HTTP_API_MESSAGE not in rendered
+        assert "UNRESOLVED_API_ENDPOINTS" not in rendered
+        assert "`/login`" in context["endpoint_index_table"]
+        assert "`/{slug}`" in context["endpoint_index_table"]
