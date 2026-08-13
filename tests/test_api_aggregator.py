@@ -692,3 +692,69 @@ class TestNoEndpointDump:
         is_valid, reason = validate_api_contract_grouped(aggregated_content)
         # This should pass because it has proper structure
         assert is_valid or "service/API grouping" in reason
+
+
+_FORBIDDEN_HTTP_PATHS = ("/health", "/webhook", "/items", "/ready", "/status", "/path")
+
+
+class TestEmptyEndpointState:
+    """Empty api-index must not invent HTTP contracts."""
+
+    def test_empty_build_api_groups_table_has_no_fake_inventory(self):
+        aggregator = APIAggregator(endpoints=[], modules=[])
+        table = aggregator.build_api_groups_table()
+
+        assert "| 服务族/域 |" not in table
+        assert "未扫描到 HTTP API" in table
+        for path in _FORBIDDEN_HTTP_PATHS:
+            assert path not in table
+
+    def test_empty_build_api_groups_detail_has_no_fake_inventory(self):
+        aggregator = APIAggregator(endpoints=[], modules=[])
+        detail = aggregator.build_api_groups_detail()
+
+        assert "python-backend/core-platform" not in detail
+        assert "端点数量**: 10" not in detail
+        for path in _FORBIDDEN_HTTP_PATHS:
+            assert path not in detail
+        assert "未扫描到 HTTP API" in detail or "暂无 API" in detail
+
+    def test_empty_summarize_auth_conventions_is_inapplicable(self):
+        aggregator = APIAggregator(endpoints=[], modules=[])
+        summary = aggregator.summarize_auth_conventions()
+
+        assert "Bearer" not in summary
+        assert "不适用" in summary or "未扫描到 HTTP API" in summary
+
+    def test_empty_summarize_error_conventions_has_no_status_table(self):
+        aggregator = APIAggregator(endpoints=[], modules=[])
+        summary = aggregator.summarize_error_conventions()
+
+        assert "| 401 |" not in summary
+        assert "不适用" in summary or "未扫描到 HTTP API" in summary
+
+    def test_nonempty_health_fixture_still_builds_group_table(self):
+        endpoints = [
+            {
+                "method": "GET",
+                "path": "/health",
+                "module": "api",
+                "handler": "health",
+                "file_path": "api/main.py",
+            }
+        ]
+        modules = [
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
+        ]
+
+        aggregator = APIAggregator(endpoints=endpoints, modules=modules)
+        table = aggregator.build_api_groups_table()
+
+        assert "| 服务族/域 |" in table
+        assert "python-backend" in table
+        assert "/health" not in table or "1" in table
