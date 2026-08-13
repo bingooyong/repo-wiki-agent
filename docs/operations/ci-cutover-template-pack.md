@@ -716,7 +716,7 @@ print(f'grade: {v[\"grade\"]}')
 
 ```bash
 # 运行本地 CI 模拟
-cd repo-agent
+cd repo-wiki-agent
 ./ci/scripts/decision.sh --profile strict \
   --verify verify-result.json \
   --compare compare-result.json \

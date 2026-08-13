@@ -23,8 +23,8 @@ repo-wiki 是本地优先的 wiki 生成工具，适用于需要自动化文档�
 ### 2.1 安装
 
 ```bash
-git clone https://github.com/bingooyong/repo-agent.git
-cd repo-agent
+git clone https://github.com/bingooyong/repo-wiki-agent.git
+cd repo-wiki-agent
 uv venv .venv && source .venv/bin/activate
 uv pip install -e .
 ```

@@ -14,7 +14,7 @@ This guide covers installation procedures for repo-wiki and the VS Code extensio
 
 | 名称 | 含义 |
 |------|------|
-| **repo-agent** | GitHub 上的**源代码仓库**（本仓库），内含 Python 包、文档、`extensions/repo-wiki-browser` 插件源码等。 |
+| **repo-wiki-agent** | GitHub 上的**源代码仓库**（本仓库），内含 Python 包、文档、`extensions/repo-wiki-browser` 插件源码等。 |
 | **repo-wiki** | **命令行工具名**，也是 PyPI 包名（`pip install repo-wiki`，若已发布）。你在终端里输入的是 `repo-wiki …`。 |
 | **Repo Wiki Browser** | **VS Code / Cursor 插件**，只负责侧栏浏览与把命令发到集成终端；**不包含** Python 与 `repo-wiki` 本体，需本机单独安装。 |
 
@@ -25,8 +25,8 @@ This guide covers installation procedures for repo-wiki and the VS Code extensio
 **方式 A：从本仓库安装（开发 / 贡献者常用）**
 
 ```bash
-git clone https://github.com/bingooyong/repo-agent.git
-cd repo-agent
+git clone https://github.com/bingooyong/repo-wiki-agent.git
+cd repo-wiki-agent
 # 需要 Python ≥ 3.11；建议使用 uv：https://docs.astral.sh/uv/
 uv pip install -e .
 # 或：pip install -e .
@@ -63,7 +63,7 @@ uv run repo-wiki config
 
 ### 3. 在目标仓库里生成 Wiki 目录与文件
 
-以下命令都在**要被文档化的那个代码仓库根目录**执行（例如你的业务项目），而不是只在 `repo-agent` 克隆目录里演示——除非你就是在给 **repo-agent 自己**生成 Wiki。
+以下命令都在**要被文档化的那个代码仓库根目录**执行（例如你的业务项目），而不是只在 `repo-wiki-agent` 克隆目录里演示——除非你就是在给 **repo-wiki-agent 自己**生成 Wiki。
 
 推荐流程：
 
@@ -156,8 +156,8 @@ pip install repo-wiki
 
 ```bash
 # Clone the repository
-git clone https://github.com/bingooyong/repo-agent.git
-cd repo-agent
+git clone https://github.com/bingooyong/repo-wiki-agent.git
+cd repo-wiki-agent
 
 # Install with uv
 uv pip install -e .

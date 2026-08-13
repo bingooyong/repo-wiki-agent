@@ -97,7 +97,7 @@ SQLite/FTS5 (本地状态) + ChromaDB (向量检索) + 文件系统 (产物)
 
 ```bash
 # 安装
-cd repo-agent && uv venv .venv && source .venv/bin/activate && uv pip install -e .
+cd repo-wiki-agent && uv venv .venv && source .venv/bin/activate && uv pip install -e .
 
 # 配置 LLM
 export MINIMAX_API_KEY="your_key_here"  # 或编辑 repo-wiki.yaml

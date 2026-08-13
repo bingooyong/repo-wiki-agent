@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKIP_DIR_NAMES = {"node_modules", ".git", "repo_wiki.egg-info"}
-STALE_CLONE = "github.com/bingooyong/repo-agent"
+STALE_CLONE = "github.com/bingooyong/" + "repo-agent"
 EVAL_PATH = ".repo-agent-eval/repowiki/zh/manifest.json"
 
 

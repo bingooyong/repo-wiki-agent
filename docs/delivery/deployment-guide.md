@@ -34,8 +34,8 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/bingooyong/repo-agent.git
-cd repo-agent
+git clone https://github.com/bingooyong/repo-wiki-agent.git
+cd repo-wiki-agent
 
 # 2. 创建虚拟环境
 uv venv .venv
