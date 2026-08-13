@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.resources
 import json
 import math
+import os
 import re
 import sqlite3
 import time
@@ -38,6 +40,12 @@ if TYPE_CHECKING:
     from repo_wiki.evidence.ranking import PageEvidenceBinding
     from repo_wiki.llm.config import LLMProviderConfig
     from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
+
+
+def _packaged_template_root() -> Path:
+    """Templates shipped with the installed repo_wiki package (not site-packages/templates)."""
+    resource = importlib.resources.files("repo_wiki").joinpath("templates")
+    return Path(str(resource))
 
 
 class RepoWikiService:
@@ -2227,8 +2235,6 @@ class RepoWikiService:
 
     def _resolve_llm_page_timeout(self, config: Any) -> float:
         """Bound a single real-provider page call so a bad endpoint cannot empty a run."""
-        import os
-
         raw = os.environ.get("REPO_WIKI_LLM_PAGE_TIMEOUT_SECONDS")
         if raw:
             try:
@@ -2238,7 +2244,8 @@ class RepoWikiService:
             return max(1.0, value)
 
         configured_timeout = float(getattr(config, "timeout", 60.0) or 60.0)
-        return max(1.0, min(configured_timeout, 20.0))
+        # 20s was too low for reasoning models (e.g. MiniMax-M3); keep a 300s ceiling.
+        return max(1.0, min(configured_timeout, 300.0))
 
     def _resolve_llm_max_failures(self) -> int:
         """Limit repeated provider failures before falling back for the rest of the run."""
@@ -2442,8 +2449,7 @@ class RepoWikiService:
         target_templates = self.root / "templates"
         if target_templates.exists():
             return target_templates
-        repo_templates = Path(__file__).resolve().parents[2] / "templates"
-        return repo_templates
+        return _packaged_template_root()
 
     def _sync_runtime_store(self) -> dict[str, Any]:
         """Sync document hierarchy, section registry, and nav graph to runtime sqlite.

@@ -301,11 +301,35 @@ def _specificity(text: str) -> float:
     return min(score, 1.0)
 
 
+_PLAUSIBLE_REL_PATH = re.compile(r"^[A-Za-z0-9_./\\-]+$")
+
+
+def _is_plausible_rel_path(value: str) -> bool:
+    """Return True when value looks like a relative filesystem path, not prose."""
+    if not value or len(value) > 255:
+        return False
+    if "\0" in value or "\n" in value or "\r" in value:
+        return False
+    if not _PLAUSIBLE_REL_PATH.fullmatch(value):
+        return False
+    return "/" in value or "\\" in value or "." in value
+
+
+def _repo_path_exists(repo_root: Path, rel: str) -> bool:
+    """exists() for a claim path; OSError (ENAMETOOLONG, EINVAL) is not a file."""
+    if not _is_plausible_rel_path(rel):
+        return False
+    try:
+        return (repo_root / rel).exists()
+    except OSError:
+        return False
+
+
 def _extract_claims(text: str) -> tuple[set[str], set[str]]:
     service_like: set[str] = set()
     path_like: set[str] = set()
     for m in re.findall(r"`([^`]+)`", text):
-        if "/" in m or "." in m:
+        if _is_plausible_rel_path(m):
             path_like.add(m.lower())
         for token in re.findall(r"[A-Za-z_][A-Za-z0-9_-]{2,}", m):
             service_like.add(token.lower())
@@ -313,7 +337,8 @@ def _extract_claims(text: str) -> tuple[set[str], set[str]]:
         if token.lower().endswith(("service", "api", "model", "router")):
             service_like.add(token.lower())
     for p in re.findall(r"\b(?:src|app|repo_wiki|docs|tests)/[A-Za-z0-9_./-]+\b", text):
-        path_like.add(p.lower())
+        if _is_plausible_rel_path(p):
+            path_like.add(p.lower())
     return service_like, path_like
 
 
@@ -485,7 +510,11 @@ class DocumentationScanner:
             claim_names, claim_paths = _extract_claims(text)
 
             stale_refs = sorted(
-                [p for p in claim_paths if p not in paths and not (self.repo_root / p).exists()]
+                [
+                    p
+                    for p in claim_paths
+                    if p not in paths and not _repo_path_exists(self.repo_root, p)
+                ]
             )
             conflicting_claims = sorted(
                 [
