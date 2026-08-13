@@ -7,8 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.scanner.artifacts import is_product_source_path, path_role_for
-
 from .cache import GenerationCache
 from .cites import select_primary_cite
 from .context import ContextBuilder
@@ -42,6 +40,18 @@ from .contracts import (
 )
 from .io import ensure_dir, read_yamlish, stable_hash, write_json, write_text
 from .templates import TemplateRenderer
+
+
+def _path_role_helpers() -> tuple[Any, Any]:
+    """Load product-path filters after this module finishes importing.
+
+    Importing ``repo_wiki.scanner.artifacts`` at module top executes
+    ``scanner/__init__.py`` → ``docs_scanner`` → ``orchestration`` →
+    ``service`` → this module, which raises a circular ImportError.
+    """
+    from repo_wiki.scanner.artifacts import is_product_source_path, path_role_for
+
+    return is_product_source_path, path_role_for
 
 
 @dataclass(frozen=True)
@@ -139,6 +149,7 @@ class NarrativeBuilder:
         return "application"
 
     def _product_modules(self) -> list[dict[str, Any]]:
+        path_role_for = _path_role_helpers()[1]
         product: list[dict[str, Any]] = []
         for module in self.modules:
             path = str(module.get("path") or module.get("name") or "")
@@ -326,6 +337,7 @@ class NarrativeBuilder:
                 capabilities.append("命令行工具和自动化脚本")
 
         # Derive capabilities from endpoints
+        is_product_source_path = _path_role_helpers()[0]
         product_endpoints = [
             endpoint
             for endpoint in self.endpoints
