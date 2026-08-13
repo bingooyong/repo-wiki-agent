@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from repo_wiki.generator.cites import select_primary_cite
-from repo_wiki.generator.io import write_text
+from repo_wiki.generator.engine import GenerationEngine, NarrativeBuilder
+from repo_wiki.generator.io import write_json, write_text
 from repo_wiki.generator.templates import TemplateRenderer
 from repo_wiki.verifier.service import VerifierService
 from tests.test_verifier import _write_minimum_with_sections
@@ -275,3 +276,93 @@ def test_rendered_init_overview_passes_list_and_citation(tmp_path: Path) -> None
     citation_check = _named_check(result, "citation-coverage")
     assert overview_check["status"] == "PASS"
     assert citation_check["status"] == "PASS"
+
+
+def test_select_primary_cite_reads_engine_snapshot_and_absolute_paths(tmp_path: Path) -> None:
+    source = tmp_path / "pkg" / "main.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def main():\n    return 0\n", encoding="utf-8")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "notes.txt").write_text("not source\n", encoding="utf-8")
+    (empty / "subdir").mkdir()
+    nested_dir = tmp_path / "web"
+    nested_dir.mkdir()
+    (nested_dir / "app.ts").write_text("export {}\n", encoding="utf-8")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+    outside.write_text("escaped = True\n", encoding="utf-8")
+    (nested_dir / "escape.py").symlink_to(outside)
+
+    engine_snapshot = {
+        "repo_map": {"repository": {"entry_points": [" ", str(source.resolve())]}},
+        "module_index": {"modules": [{"name": "pkg", "path": ""}]},
+    }
+    assert select_primary_cite(tmp_path, engine_snapshot) == "<cite>pkg/main.py:1</cite>"
+
+    string_module = {
+        "repository": {"entry_points": ["/etc/hosts", str(empty)]},
+        "modules": ["web"],
+    }
+    assert select_primary_cite(tmp_path, string_module) == "<cite>web/app.ts:1</cite>"
+    assert select_primary_cite(tmp_path, {"repo_map": "invalid"}) == ""
+    assert select_primary_cite(tmp_path, {"repo_map": {"repository": None}}) == ""
+    assert select_primary_cite(tmp_path, {"module_index": "invalid"}) == ""
+    assert select_primary_cite(tmp_path, {"module_index": {"modules": {}}}) == ""
+
+
+def test_build_core_context_feeds_primary_cite_from_target_repo(tmp_path: Path) -> None:
+    source = tmp_path / "pkg" / "main.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def main():\n    return 0\n", encoding="utf-8")
+    write_json(
+        tmp_path / "ai/source-of-truth/repo-map.yaml",
+        {
+            "repository": {
+                "name": "demo",
+                "primary_language": "python",
+                "entry_points": ["pkg/main.py"],
+            },
+            "commands": {},
+        },
+    )
+    write_json(
+        tmp_path / "ai/source-of-truth/module-index.yaml",
+        {"modules": [{"name": "pkg", "path": "pkg"}]},
+    )
+    write_json(tmp_path / "ai/source-of-truth/api-index.yaml", {"endpoints": []})
+    write_json(tmp_path / "ai/source-of-truth/data-models.yaml", {"models": []})
+
+    templates = Path(__file__).resolve().parents[1] / "templates"
+    engine = GenerationEngine(tmp_path, template_root=templates)
+    context = engine._build_core_context(engine._load_snapshot())
+    assert context["primary_cite"] == "<cite>pkg/main.py:1</cite>"
+    assert not str(context["core_capabilities"]).lstrip().startswith("- ")
+
+
+def test_capabilities_as_prose_rewrites_bullet_wall() -> None:
+    builder = NarrativeBuilder(
+        repo_name="demo",
+        primary_language="python",
+        framework="typer",
+        modules=[],
+        endpoints=[],
+        models=[],
+        commands={},
+    )
+    rewritten = builder._capabilities_as_prose("- scan\n- index\n- generate\n- verify\n")
+    assert not rewritten.lstrip().startswith("- ")
+    assert "扫描" in rewritten
+    assert "校验" in rewritten
+    assert builder._capabilities_as_prose("   \n") == rewritten
+    assert builder._capabilities_as_prose("already prose") == "already prose"
+    empty_caps = NarrativeBuilder(
+        repo_name="demo",
+        primary_language="unknown",
+        framework="unknown",
+        modules=[],
+        endpoints=[],
+        models=[],
+        commands={},
+    ).build_core_capabilities()
+    assert "基础的代码分析" in empty_caps
+    assert not empty_caps.lstrip().startswith("- ")
