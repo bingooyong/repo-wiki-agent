@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 def _packaged_template_root() -> Path:
     """Templates shipped with the installed repo_wiki package (not site-packages/templates)."""
     resource = importlib.resources.files("repo_wiki").joinpath("templates")
-    return Path(os.fspath(resource))
+    return Path(str(resource))
 
 
 class RepoWikiService:
