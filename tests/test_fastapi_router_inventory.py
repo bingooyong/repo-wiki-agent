@@ -184,3 +184,247 @@ app.include_router(router, prefix="/articles")
     assert delete_eps
     assert all(endpoint.method == "DELETE" for endpoint in delete_eps)
     assert any(endpoint.path.endswith("/{slug}") for endpoint in delete_eps)
+
+
+def test_imported_router_alias_literal_prefix_is_joined(tmp_path: Path) -> None:
+    """`from auth import router as auth_router` must still join prefix=/users."""
+    (tmp_path / "auth.py").write_text(
+        """
+from fastapi import APIRouter
+
+router = APIRouter()
+
+
+@router.post("/login")
+def login():
+    return {"token": "x"}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "api.py").write_text(
+        """
+from fastapi import APIRouter
+
+from auth import router as auth_router
+
+api_router = APIRouter()
+api_router.include_router(auth_router, prefix="/users")
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "main.py").write_text(
+        """
+from fastapi import FastAPI
+
+from api import api_router
+
+app = FastAPI()
+app.include_router(api_router)
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+
+    snapshot = _scan(tmp_path)
+    pairs = {(endpoint.method, endpoint.path) for endpoint in snapshot.endpoints}
+
+    assert ("POST", "/users/login") in pairs
+    assert ("POST", "/login") not in pairs
+
+
+def test_factory_get_application_still_joins_literal_prefixes(tmp_path: Path) -> None:
+    """FastAPI() inside get_application() must not drop include_router prefixes."""
+    (tmp_path / "auth.py").write_text(
+        """
+from fastapi import APIRouter
+
+router = APIRouter()
+
+
+@router.post("/login")
+def login():
+    return {"token": "x"}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "api.py").write_text(
+        """
+from fastapi import APIRouter
+
+from auth import router as auth_router
+
+api_router = APIRouter()
+api_router.include_router(auth_router, prefix="/users")
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "main.py").write_text(
+        """
+from fastapi import FastAPI
+
+from api import api_router
+
+
+def get_application():
+    application = FastAPI()
+    application.include_router(api_router, prefix="/api")
+    return application
+
+
+app = get_application()
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+
+    snapshot = _scan(tmp_path)
+    pairs = {(endpoint.method, endpoint.path) for endpoint in snapshot.endpoints}
+
+    assert ("POST", "/api/users/login") in pairs or ("POST", "/users/login") in pairs
+    assert ("POST", "/login") not in pairs
+
+
+def test_non_literal_settings_api_prefix_keeps_literal_router_prefixes(
+    tmp_path: Path,
+) -> None:
+    """settings.api_prefix may resolve to /api; literal /users must still join."""
+    (tmp_path / "settings.py").write_text(
+        """
+class S:
+    api_prefix: str = "/api"
+
+
+settings = S()
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "auth.py").write_text(
+        """
+from fastapi import APIRouter
+
+router = APIRouter()
+
+
+@router.post("/login")
+def login():
+    return {"token": "x"}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "api.py").write_text(
+        """
+from fastapi import APIRouter
+
+from auth import router as auth_router
+
+api_router = APIRouter()
+api_router.include_router(auth_router, prefix="/users")
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "main.py").write_text(
+        """
+from fastapi import FastAPI
+
+from api import api_router
+from settings import settings
+
+
+def get_application():
+    application = FastAPI()
+    application.include_router(api_router, prefix=settings.api_prefix)
+    return application
+
+
+app = get_application()
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+
+    snapshot = _scan(tmp_path)
+    pairs = {(endpoint.method, endpoint.path) for endpoint in snapshot.endpoints}
+    login_paths = {path for method, path in pairs if method == "POST" and path.endswith("/login")}
+
+    assert ("POST", "/login") not in pairs
+    assert any(path.endswith("/users/login") for path in login_paths)
+    assert ("POST", "/api/users/login") in pairs
+
+
+def test_nested_articles_prefix_joins_empty_and_slug_paths(tmp_path: Path) -> None:
+    """Nested prefix=/articles + get('') / get('/{slug}') keep handlers unswapped."""
+    (tmp_path / "articles.py").write_text(
+        """
+from fastapi import APIRouter
+
+router = APIRouter()
+
+
+@router.get("")
+def list_articles():
+    return []
+
+
+@router.get("/{slug}")
+def get_article():
+    return {}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "api.py").write_text(
+        """
+from fastapi import APIRouter
+
+from articles import router as articles_router
+
+api_router = APIRouter()
+api_router.include_router(articles_router, prefix="/articles")
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "main.py").write_text(
+        """
+from fastapi import FastAPI
+
+from api import api_router
+
+
+def get_application():
+    application = FastAPI()
+    application.include_router(api_router)
+    return application
+
+
+app = get_application()
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+
+    snapshot = _scan(tmp_path)
+    by_handler = {}
+    for endpoint in snapshot.endpoints:
+        by_handler.setdefault(endpoint.handler, []).append(endpoint)
+
+    list_eps = by_handler["list_articles"]
+    assert any(endpoint.method == "GET" and endpoint.path == "/articles" for endpoint in list_eps)
+    assert not any("/{slug}" in endpoint.path for endpoint in list_eps)
+
+    get_eps = by_handler["get_article"]
+    assert any(
+        endpoint.method == "GET" and endpoint.path == "/articles/{slug}" for endpoint in get_eps
+    )
+    assert not any(endpoint.path == "/articles" for endpoint in get_eps)
