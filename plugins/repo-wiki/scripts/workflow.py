@@ -28,7 +28,9 @@ except ImportError:  # pragma: no cover - Python 3.8 compatibility guard
 
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 STABLE_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
-NAMED_KV_RE = re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*([=:])\s*[^\s,]+")
+NAMED_KV_RE = re.compile(
+    r"(?i)(api[_-]?key|token|secret|password|authorization)\s*([=:])\s*[^\s,]+"
+)
 BEARER_RE = re.compile(r"(?i)\b(authorization\s*[:=]\s*)?bearer\s+[^\s,]+")
 HIGH_CONFIDENCE_LITERAL_RE = re.compile(
     r"(?ix)"
