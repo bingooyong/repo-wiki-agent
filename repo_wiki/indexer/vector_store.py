@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from repo_wiki.core.logging import warn
 from repo_wiki.generator.io import ensure_dir
 
 _CHROMA_FALLBACK_LOGGED = False
@@ -48,9 +48,10 @@ class ChromaVectorStore:
         except Exception as exc:
             global _CHROMA_FALLBACK_LOGGED
             if isinstance(exc, ImportError) and not _CHROMA_FALLBACK_LOGGED:
-                warn(
-                    "ChromaDB not installed; using vectors.json fallback. "
-                    "Install with: pip install 'repo-wiki[vector]'"
+                print(
+                    "WARN ChromaDB not installed; using vectors.json fallback. "
+                    "Install with: pip install 'repo-wiki[vector]'",
+                    file=sys.stderr,
                 )
                 _CHROMA_FALLBACK_LOGGED = True
             self._chroma = None
