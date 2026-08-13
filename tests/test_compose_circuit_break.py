@@ -61,12 +61,19 @@ def _success_response() -> ChatResponse:
 
 
 class CircuitBreak529Provider(LLMProvider):
-    """Immediate 529 for a budget of calls, then hang (cancelled by page timeout)."""
+    """Immediate 529 for a budget of calls, then hang (cancelled by page timeout).
+
+    Fail-fast calls wait until ``fail_fast_limit`` chats are in flight so the
+    scheduler race (admit a third job before the second failure is recorded)
+    is deterministic under pytest-asyncio.
+    """
 
     def __init__(self, fail_fast_limit: int) -> None:
         self._fail_fast_limit = fail_fast_limit
         self._call_count = 0
         self._hang_count = 0
+        self._fail_fast_started = 0
+        self._fail_fast_gate = asyncio.Event()
         self._config = LLMProviderConfig(
             provider="mock",
             model="mock-gpt",
@@ -93,6 +100,10 @@ class CircuitBreak529Provider(LLMProvider):
     async def chat(self, request: ChatRequest) -> ChatResponse:
         self._call_count += 1
         if self._call_count <= self._fail_fast_limit:
+            self._fail_fast_started += 1
+            if self._fail_fast_started >= self._fail_fast_limit:
+                self._fail_fast_gate.set()
+            await self._fail_fast_gate.wait()
             raise _retryable_529()
         self._hang_count += 1
         await request_never_returns()
@@ -284,7 +295,7 @@ async def test_circuit_break_skips_remaining_pages_without_timeout_wait(
     # the proof leftover pages never entered the per-page timeout path.
     assert elapsed < 3.0
     assert provider.hang_count == 0
-    assert provider.call_count <= MAX_FAILURES * CONCURRENCY
+    assert provider.call_count == MAX_FAILURES
     assert provider.call_count < PAGE_COUNT
     assert llm["provider_disabled_after_failures"] is True
     assert llm["fallback_page_count"] == PAGE_COUNT

@@ -1322,37 +1322,53 @@ class RepoWikiService:
         )
 
         job_cursor = 0
-        state_lock = asyncio.Lock()
+        in_flight = 0
+        admit = asyncio.Condition()
 
         async def worker() -> None:
-            nonlocal job_cursor
+            nonlocal job_cursor, in_flight
             while True:
-                async with state_lock:
-                    if job_cursor >= len(compose_jobs):
-                        return
-                    job = compose_jobs[job_cursor]
-                    job_cursor += 1
-                    if provider_disabled_after_failures:
-                        page = job["page"]
-                        info(
-                            "compose skip llm "
-                            f"page_id={page.page_id} title={page.title} "
-                            "reason=provider_disabled"
-                        )
-                        write_fallback(
-                            page,
-                            job["binding"],
-                            job["page_idx"],
-                            self._provider_disabled_reason(
-                                max_provider_failures=max_provider_failures,
-                                max_real_provider_calls=max_real_provider_calls,
-                                provider_attempt_count=provider_attempt_count,
-                            ),
-                        )
-                        continue
-                result = await compose_job(job)
-                async with state_lock:
-                    record_compose_result(result)
+                async with admit:
+                    while True:
+                        if provider_disabled_after_failures:
+                            while job_cursor < len(compose_jobs):
+                                skipped = compose_jobs[job_cursor]
+                                job_cursor += 1
+                                page = skipped["page"]
+                                info(
+                                    "compose skip llm "
+                                    f"page_id={page.page_id} title={page.title} "
+                                    "reason=provider_disabled"
+                                )
+                                write_fallback(
+                                    page,
+                                    skipped["binding"],
+                                    skipped["page_idx"],
+                                    self._provider_disabled_reason(
+                                        max_provider_failures=max_provider_failures,
+                                        max_real_provider_calls=max_real_provider_calls,
+                                        provider_attempt_count=provider_attempt_count,
+                                    ),
+                                )
+                            return
+                        if job_cursor >= len(compose_jobs):
+                            return
+                        if provider_failure_count + in_flight >= max_provider_failures:
+                            await admit.wait()
+                            continue
+                        job = compose_jobs[job_cursor]
+                        job_cursor += 1
+                        in_flight += 1
+                        break
+                result: dict[str, Any] | None = None
+                try:
+                    result = await compose_job(job)
+                finally:
+                    async with admit:
+                        in_flight -= 1
+                        if result is not None:
+                            record_compose_result(result)
+                        admit.notify_all()
 
         if compose_jobs:
             worker_count = max(1, min(compose_concurrency, len(compose_jobs)))
