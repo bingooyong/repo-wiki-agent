@@ -31,6 +31,7 @@ class _FileFacts:
     class_str_attrs: dict[tuple[str, str], str] = field(default_factory=dict)
     instances: dict[str, str] = field(default_factory=dict)
     module_str_attrs: dict[str, str] = field(default_factory=dict)
+    factories: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -209,6 +210,12 @@ def _parse_file(
         elif isinstance(walked, ast.ClassDef):
             _collect_class_str_attrs(walked, facts)
 
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            returned = _factory_return_class(node)
+            if returned is not None:
+                facts.factories[node.name] = returned
+
     for walked in ast.walk(tree):
         if isinstance(walked, ast.Call) and _is_include_router(walked):
             parent_var = (
@@ -313,44 +320,167 @@ def _resolve_prefix_ref(
     if "." not in prefix_ref:
         return None
     owner, attr = prefix_ref.split(".", 1)
+    return _resolve_named_str_attr(
+        parent_file,
+        owner,
+        attr,
+        facts_by_file,
+        aliases_by_file,
+        file_set,
+        set(),
+    )
 
-    def lookup(file_path: str, name: str) -> str | None:
-        facts = facts_by_file.get(file_path)
-        if facts is None:
-            return None
-        if name in facts.instances:
-            class_name = facts.instances[name]
-            found = facts.class_str_attrs.get((class_name, attr))
-            if found is not None:
-                return found
-        found = facts.class_str_attrs.get((name, attr))
-        if found is not None:
-            return found
-        if name == attr:
-            return facts.module_str_attrs.get(attr)
+
+def _resolve_named_str_attr(
+    file_path: str,
+    owner: str,
+    attr: str,
+    facts_by_file: dict[str, _FileFacts],
+    aliases_by_file: dict[str, dict[str, tuple[str, str]]],
+    file_set: set[str],
+    seen: set[tuple[str, str]],
+) -> str | None:
+    key = (file_path, owner)
+    if key in seen:
+        return None
+    seen.add(key)
+    facts = facts_by_file.get(file_path)
+    if facts is None:
         return None
 
-    local = lookup(parent_file, owner)
-    if local is not None:
-        return local
+    found = facts.class_str_attrs.get((owner, attr))
+    if found is not None:
+        return found
+    if owner == attr:
+        module_val = facts.module_str_attrs.get(attr)
+        if module_val is not None:
+            return module_val
 
-    imported = aliases_by_file.get(parent_file, {}).get(owner)
+    if owner in facts.instances:
+        bound = _resolve_named_str_attr(
+            file_path,
+            facts.instances[owner],
+            attr,
+            facts_by_file,
+            aliases_by_file,
+            file_set,
+            seen,
+        )
+        if bound is not None:
+            return bound
+
+    if owner in facts.factories:
+        returned = facts.factories[owner]
+        bound = _resolve_named_str_attr(
+            file_path,
+            returned,
+            attr,
+            facts_by_file,
+            aliases_by_file,
+            file_set,
+            seen,
+        )
+        if bound is not None:
+            return bound
+        imported_return = aliases_by_file.get(file_path, {}).get(returned)
+        if imported_return is not None:
+            module, orig = imported_return
+            target = _find_module_file(module, file_set)
+            if target is not None:
+                bound = _resolve_named_str_attr(
+                    target,
+                    orig,
+                    attr,
+                    facts_by_file,
+                    aliases_by_file,
+                    file_set,
+                    seen,
+                )
+                if bound is not None:
+                    return bound
+        unique = _unique_class_attr(returned, attr, facts_by_file)
+        if unique is not None:
+            return unique
+
+    imported = aliases_by_file.get(file_path, {}).get(owner)
     if imported is None:
         return None
     module, orig = imported
     target = _find_module_file(module, file_set)
     if target is None:
         return None
-    found = lookup(target, orig)
-    if found is not None:
-        return found
-    facts = facts_by_file.get(target)
-    if facts is None:
+    bound = _resolve_named_str_attr(
+        target,
+        orig,
+        attr,
+        facts_by_file,
+        aliases_by_file,
+        file_set,
+        seen,
+    )
+    if bound is not None:
+        return bound
+    target_facts = facts_by_file.get(target)
+    if target_facts is None:
         return None
-    values = {value for (cls, name), value in facts.class_str_attrs.items() if name == attr}
-    values.update(value for name, value in facts.module_str_attrs.items() if name == attr)
+    values = {value for (cls, name), value in target_facts.class_str_attrs.items() if name == attr}
+    values.update(value for name, value in target_facts.module_str_attrs.items() if name == attr)
     if len(values) == 1:
         return next(iter(values))
+    return None
+
+
+def _unique_class_attr(
+    class_name: str, attr: str, facts_by_file: dict[str, _FileFacts]
+) -> str | None:
+    values: set[str] = set()
+    for facts in facts_by_file.values():
+        found = facts.class_str_attrs.get((class_name, attr))
+        if found is not None:
+            values.add(found)
+    if len(values) == 1:
+        return next(iter(values))
+    return None
+
+
+def _is_no_arg_factory(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    positional = list(node.args.args)
+    if positional and positional[0].arg in {"self", "cls"}:
+        return False
+    if len(positional) > len(node.args.defaults):
+        return False
+    return all(default is not None for default in node.args.kw_defaults)
+
+
+def _type_name(node: ast.AST | None) -> str | None:
+    if node is None:
+        return None
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _factory_return_class(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
+    if not _is_no_arg_factory(node):
+        return None
+    names: set[str] = set()
+    annotated = _type_name(node.returns)
+    if annotated and annotated not in _ROUTER_CTORS:
+        names.add(annotated)
+    for walked in ast.walk(node):
+        if not isinstance(walked, ast.Return) or walked.value is None:
+            continue
+        ctor = _call_ctor_name(walked.value)
+        if ctor and ctor not in _ROUTER_CTORS:
+            names.add(ctor)
+            continue
+        named = _type_name(walked.value)
+        if named and named not in _ROUTER_CTORS:
+            names.add(named)
+    if len(names) == 1:
+        return next(iter(names))
     return None
 
 
