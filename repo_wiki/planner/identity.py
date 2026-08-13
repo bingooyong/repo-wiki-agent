@@ -18,6 +18,81 @@ from pathlib import Path
 
 from repo_wiki.planner.schema import RepositoryIdentity
 
+_README_CANDIDATE_NAMES = (
+    "README.md",
+    "README.rst",
+    "README.txt",
+    "README",
+    "README.zh.md",
+    "README_CN.md",
+    "README_en.md",
+)
+_GENERIC_README_TITLES = frozenset({"readme", "overview", "index", "documentation", "docs"})
+_RST_DECORATION_RE = re.compile(r"^[=\-`:.'\"~^_*+#]{3,}$")
+
+
+def _iter_readme_files(root: Path) -> list[Path]:
+    found: dict[str, Path] = {}
+    for name in _README_CANDIDATE_NAMES:
+        path = root / name
+        if path.is_file():
+            found[path.name] = path
+    for path in sorted(root.glob("README*")):
+        if path.is_file() and path.name not in found:
+            found[path.name] = path
+    ordered: list[Path] = []
+    for name in _README_CANDIDATE_NAMES:
+        candidate = found.get(name)
+        if candidate is not None:
+            ordered.append(candidate)
+    for extra in found.values():
+        if extra not in ordered:
+            ordered.append(extra)
+    return ordered
+
+
+def _readme_title_and_description(root: Path) -> tuple[str | None, str | None]:
+    """Extract product title and description from README, never from stubs or eval notes."""
+    for readme in _iter_readme_files(root):
+        try:
+            content = readme.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        title, description = _parse_readme_identity(content)
+        if title or description:
+            return title, description
+    return None, None
+
+
+def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
+    substantial: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("<!--") or stripped.startswith(".. "):
+            continue
+        if _RST_DECORATION_RE.fullmatch(stripped):
+            continue
+        if stripped.startswith("#"):
+            stripped = stripped.lstrip("#").strip()
+            if not stripped:
+                continue
+        substantial.append(stripped)
+        if len(substantial) >= 4:
+            break
+    if not substantial:
+        return None, None
+    first = substantial[0]
+    title: str | None = None if first.lower() in _GENERIC_README_TITLES else first
+    body_parts = substantial[1:] if title else substantial
+    if not body_parts and title:
+        description: str | None = title
+    else:
+        joined = " ".join(body_parts).strip()
+        description = joined or title
+    if description:
+        description = description[:200]
+    return title, description
+
 
 def resolve_repository_identity(root: Path) -> RepositoryIdentity:
     """Resolve repository identity from metadata files.
@@ -90,11 +165,22 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         except (subprocess.TimeoutExpired, OSError):
             pass
 
+    readme_title, readme_description = _readme_title_and_description(root)
+    if readme_title:
+        name_candidates.append((readme_title, "readme"))
+
     # 5. Fallback to directory name
     name_candidates.append((root.name, "directory-name"))
 
-    # Select the best name (prefer explicit metadata over git-remote over directory)
-    name_priority = ["package.json", "pyproject.toml", "pom.xml", "git-remote", "directory-name"]
+    # Select the best name (prefer explicit metadata, then README title, then git/directory)
+    name_priority = [
+        "package.json",
+        "pyproject.toml",
+        "pom.xml",
+        "readme",
+        "git-remote",
+        "directory-name",
+    ]
     best_name = None
     best_source = None
     for source in name_priority:
@@ -121,23 +207,10 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Then try README if no description from package.json
-    if not description:
-        for readme_name in ["README.md", "README.zh.md", "README_CN.md", "README_en.md"]:
-            readme = root / readme_name
-            if readme.exists():
-                content = readme.read_text(encoding="utf-8", errors="ignore")
-                # Extract first paragraph description
-                lines = content.split("\n")
-                for line in lines:
-                    stripped = line.strip()
-                    if stripped.startswith("# "):
-                        continue  # skip title
-                    if stripped and not stripped.startswith("<!--"):
-                        description = stripped[:200]
-                        break
-                if description:
-                    break
+    # Then try README if no description from package.json. Never use AGENTS.md,
+    # init stubs, or eval reports as product identity.
+    if not description and readme_description:
+        description = readme_description[:200]
 
     # Read version from various sources.
     for metadata_path in [package_json, pyproject, pom_xml]:
@@ -164,7 +237,7 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
 
     return RepositoryIdentity(
         name=best_name,
-        display_name=_human_readable_name(best_name),
+        display_name=best_name if best_source == "readme" else _human_readable_name(best_name),
         root_path=str(root.resolve()),
         language="unknown",
         framework="unknown",

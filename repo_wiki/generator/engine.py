@@ -97,6 +97,7 @@ class NarrativeBuilder:
         endpoints: list[dict[str, Any]],
         models: list[dict[str, Any]],
         commands: dict[str, str],
+        product_description: str | None = None,
     ) -> None:
         self.repo_name = repo_name
         self.primary_language = primary_language
@@ -105,6 +106,7 @@ class NarrativeBuilder:
         self.endpoints = endpoints
         self.models = models
         self.commands = commands
+        self.product_description = (product_description or "").strip() or None
 
         # Analyze repository signals once during initialization
         self._analyze_signals()
@@ -197,6 +199,14 @@ class NarrativeBuilder:
         Derives from: project type, language, framework, module composition
         """
         # Build description based on actual project signals
+        if self.product_description:
+            lang_context = f"{self.primary_language.title()} "
+            if self.framework and self.framework != "unknown":
+                lang_context += f"({self.framework})"
+            else:
+                lang_context += "项目"
+            return f"{self.repo_name} 是一个基于 {lang_context} 的项目。{self.product_description}"
+
         capabilities = []
 
         # Detect actual capabilities from module analysis
@@ -2212,6 +2222,14 @@ class GenerationEngine:
         repo_name = repo.get("name", self.root.name)
         primary_language = repo.get("primary_language", "unknown")
         framework = repo.get("framework", "unknown")
+        # Lazy import: planner.identity -> planner package init -> evidence ->
+        # orchestration.service -> this module.
+        from repo_wiki.planner.identity import resolve_repository_identity
+
+        identity = resolve_repository_identity(Path(self.root))
+        if identity.description:
+            repo_name = identity.display_name or identity.name or repo_name
+        product_description = identity.description
 
         # Initialize NarrativeBuilder with repository signals
         narrative_builder = NarrativeBuilder(
@@ -2222,6 +2240,7 @@ class GenerationEngine:
             endpoints=endpoints,
             models=models,
             commands=commands,
+            product_description=product_description,
         )
 
         # Use NarrativeBuilder to generate repository-specific prose

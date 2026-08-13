@@ -862,6 +862,10 @@ class RepoWikiService:
         import os
 
         from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
+        from repo_wiki.scanner.docs_scanner import (
+            is_eval_or_agent_instruction_doc,
+            is_init_generated_doc,
+        )
         from repo_wiki.scanner.source_spans import SourceSpanExtractor
 
         extractor = SourceSpanExtractor()
@@ -921,12 +925,17 @@ class RepoWikiService:
                     continue
                 if self._matches_project_exclude(relative):
                     continue
+                rel = relative.as_posix()
+                if is_eval_or_agent_instruction_doc(rel):
+                    continue
                 if path.stat().st_size > max_size:
                     continue
 
                 try:
                     content = path.read_text(encoding="utf-8", errors="ignore")
                 except OSError:
+                    continue
+                if is_init_generated_doc(rel, content):
                     continue
 
                 for span in extractor.extract_from_file(relative, content):
