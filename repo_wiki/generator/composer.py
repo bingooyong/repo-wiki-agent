@@ -603,17 +603,34 @@ class LLMPageComposer:
 
         return await chat_with_retry(self._provider, request)
 
+    def _uses_compact_mock_token_cap(self) -> bool:
+        """Keep the compact 1400 completion cap for mock/tests only.
+
+        Real providers (MiniMax-M3, OpenAI, ...) must not share that cap:
+        reasoning models spend tokens on hidden reasoning, and 1400 leaves
+        ``message.content`` empty. Mock fixtures stay cheap.
+        """
+        config_provider = str(self._llm_config.provider or "").strip().lower()
+        resolved_name = str(getattr(self._provider, "name", "") or "").strip().lower()
+        return config_provider in {"mock", "test"} or resolved_name in {"mock", "test"}
+
     def _resolve_request_max_tokens(self) -> int:
+        configured = self._llm_config.max_tokens
+        provider_max = int(
+            getattr(self._provider.capabilities, "max_context_tokens", configured) or configured
+        )
         raw = os.environ.get("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS")
         if raw:
             try:
                 value = int(raw)
             except ValueError:
                 value = 1400
-            return max(256, min(value, self._llm_config.max_tokens))
-        if self._use_compact_prompt():
-            return min(self._llm_config.max_tokens, 1400)
-        return self._llm_config.max_tokens
+            return max(256, min(value, configured, provider_max))
+        if self._use_compact_prompt() and self._uses_compact_mock_token_cap():
+            return max(256, min(configured, 1400))
+        # Real providers: use configured llm.max_tokens, or at least 4096, still
+        # <= provider max. Compact prompt must not clamp these to 1400.
+        return max(256, min(max(configured, 4096), provider_max))
 
     def _normalize_markdown_response(self, content: str, title: str) -> str:
         """Ensure provider output is a readable Markdown page."""

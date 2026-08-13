@@ -41,6 +41,7 @@ class ErrorCode(str, Enum):
     RATE_LIMIT = "RATE_LIMIT"
     SERVER_ERROR = "SERVER_ERROR"
     NETWORK_ERROR = "NETWORK_ERROR"
+    EMPTY_CONTENT = "EMPTY_CONTENT"
 
     # Non-retryable errors
     AUTH_FAILURE = "AUTH_FAILURE"
