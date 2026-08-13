@@ -53,7 +53,6 @@ docs/getting-started.md
 docs/go-no-go-dossier.md
 docs/release-gate-policy.md
 docs/rollback-plan.md
-docs/00-overview.md
 docs/phases/
 docs/operations/run-inventory-cleanup-report.md
 # Keep curated contracts versioned while ignoring generated scanner artifacts.

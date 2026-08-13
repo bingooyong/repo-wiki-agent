@@ -91,4 +91,4 @@ docs/delivery/
 ## 参考信息
 
 - **实施计划**：`docs/plans/`
-- **GitHub**：https://github.com/bingooyong/repo-agent
+- **GitHub**：https://github.com/bingooyong/repo-wiki-agent

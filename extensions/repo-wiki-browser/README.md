@@ -1,10 +1,10 @@
 # Repo Wiki Browser - VS Code Extension
 
-A VS Code extension for browsing repo-agent wiki outputs from a dedicated Activity Bar entry.
+A VS Code extension for browsing repo-wiki READY wiki outputs from a dedicated Activity Bar entry.
 
 ## 使用流程（概要）
 
-1. **安装 `repo-wiki` CLI**：克隆 [repo-agent](https://github.com/bingooyong/repo-agent) 后在该仓库根目录执行 `uv pip install -e .`（或 PyPI 发布后 `pip install repo-wiki`）；需要 Python ≥ 3.11，建议使用 `uv`。
+1. **安装 `repo-wiki` CLI**：克隆 [repo-wiki-agent](https://github.com/bingooyong/repo-wiki-agent) 后在该仓库根目录执行 `uv pip install -e .`（或 PyPI 发布后 `pip install repo-wiki`）；需要 Python ≥ 3.11，建议使用 `uv`。
 2. **配置 LLM**：在活动栏 **Repo Wiki** 侧栏点击「配置」选择 LLM source。默认 `extension` 仅注入非空 provider/model/base URL；`yaml` 保留 `repo-wiki.yaml` 的非敏感字段；`environment` 不注入任何 LLM 覆盖变量。点击「设置 Key」可把真实 API Key 保存到 VS Code SecretStorage。扩展不直接调用 LLM。
 3. **生成并发布 Wiki**：在目标仓库执行 `uv run repo-wiki init`、`index`、`generate --profile qoder-like --output .repo-agent-eval`。候选 run 产出在 `.repo-agent-eval/runs/<run>/repowiki/zh/**`；通过门禁后发布到 `.repo-agent-eval/repowiki/zh/content` 与 `.repo-agent-eval/repowiki/zh/meta`。
 4. **安装本插件**：VSIX「Install from VSIX」，或在本目录 `npm run compile` + `vsce package`。
@@ -72,12 +72,12 @@ A VS Code extension for browsing repo-agent wiki outputs from a dedicated Activi
    code extensions/repo-wiki-browser
   ```
 2. Press `F5` to launch the Extension Development Host
-3. The extension will be activated when you open a workspace containing a repo-agent project
+3. The extension will be activated when you open a workspace containing a READY `.repo-agent-eval` release
 
 ## Requirements
 
 - VS Code 1.75.0 or higher
-- A workspace with a READY repo-agent release manifest at `.repo-agent-eval/repowiki/zh/manifest.json`
+- A workspace with a READY repo-wiki release manifest at `.repo-agent-eval/repowiki/zh/manifest.json`
 
 ## LLM configuration
 
