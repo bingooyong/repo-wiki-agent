@@ -31,3 +31,20 @@ def test_service_template_root_without_target_templates(tmp_path: Path) -> None:
     engine = svc._generation_engine()
     assert (engine.template_root / "docs" / "00-overview.md.j2").is_file()
     assert engine.validate_templates() == []
+
+
+def test_vendored_templates_match_repo_root_templates() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    checkout = repo_root / "templates"
+    vendored = repo_root / "repo_wiki" / "templates"
+    checkout_files = {
+        p.relative_to(checkout).as_posix(): p.read_bytes()
+        for p in checkout.rglob("*")
+        if p.is_file()
+    }
+    vendored_files = {
+        p.relative_to(vendored).as_posix(): p.read_bytes()
+        for p in vendored.rglob("*")
+        if p.is_file()
+    }
+    assert checkout_files == vendored_files
