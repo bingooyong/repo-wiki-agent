@@ -410,9 +410,9 @@ def generate_manifest(
     }
     git_fresh = not stale_detection["is_stale"]
 
-    candidate_repowiki_zh_root = (
-        Path(target_repo) / ".repo-agent-eval" / "runs" / run_id / "repowiki" / "zh"
-    )
+    actual_zh = Path(output_dir) / "repowiki" / "zh"
+    canonical_zh = Path(target_repo) / ".repo-agent-eval" / "runs" / run_id / "repowiki" / "zh"
+    candidate_repowiki_zh_root = actual_zh if actual_zh.exists() else canonical_zh
     candidate_content_root = candidate_repowiki_zh_root / "content"
     candidate_meta_root = candidate_repowiki_zh_root / "meta"
 

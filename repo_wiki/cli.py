@@ -18,6 +18,7 @@ from repo_wiki.llm.diagnostics import (
     format_diagnostics_text,
     run_llm_diagnostics,
 )
+from repo_wiki.orchestration.latest_run_selector import select_run
 from repo_wiki.orchestration.service import RepoWikiService
 
 app = typer.Typer(help="repo-wiki: local-first repository wiki generator")
@@ -281,8 +282,6 @@ def improve_status_command(
 
 
 def _resolve_release_publish_run(output: Path, run: str | None) -> Path:
-    from repo_wiki.orchestration.latest_run_selector import select_run
-
     root = output.resolve()
     if run:
         raw = Path(run)
@@ -1228,7 +1227,13 @@ def _resolve_verify_root(project_root: Path, output: str | None) -> Path:
         return project_root
     raw = Path(output)
     if raw.exists():
-        return raw.resolve()
+        resolved = raw.resolve()
+        if (resolved / "manifest.json").is_file():
+            return resolved
+        try:
+            return select_run(resolved).resolve()
+        except ValueError:
+            return resolved
     # run-id mode: nested qoder-like layout under .repo-agent-eval/runs/<id>/
     nested = project_root / ".repo-agent-eval" / "runs" / output
     if nested.exists():
@@ -1241,8 +1246,6 @@ def _resolve_verify_root(project_root: Path, output: str | None) -> Path:
 
 
 def _resolve_improve_run(output: Path, run: str | None) -> Path:
-    from repo_wiki.orchestration.latest_run_selector import select_run
-
     root = output.resolve()
     raw = Path(run).resolve() if run and Path(run).exists() else None
     if raw:

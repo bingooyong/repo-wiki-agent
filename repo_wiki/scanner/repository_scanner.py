@@ -26,6 +26,7 @@ from repo_wiki.core.security import (
     sanitize_text,
     should_scan,
 )
+from repo_wiki.scanner.artifacts import is_product_source_path, path_role_for
 
 _CODE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".kt"}
 _MODEL_FILE_HINTS = ("model", "schema", "entity", "dto", "migration", "alembic")
@@ -509,6 +510,8 @@ class RepositoryScanner:
             suffix = file.path.suffix.lower()
             if suffix not in _CODE_SUFFIXES:
                 continue
+            if not is_product_source_path(file.path.as_posix()):
+                continue
             module_path = self._choose_module_path(file.path)
             module_name = modules[module_path].name
             text = file.text
@@ -882,6 +885,21 @@ class RepositoryScanner:
             # Combine all signals
             all_signals = f"{path_lower} {exports_lower} {interfaces_lower} {data_models_lower} {file_contents} {extensions}"
 
+            # Classify service family based on language/framework
+            service_family, sf_confidence, sf_reason = self._score_service_family(
+                all_signals, module.path, module.exports
+            )
+            module.service_family = service_family
+
+            path_role = path_role_for(module.path)
+            if path_role is not None:
+                module.domain, module.runtime_role = path_role
+                module.domain_confidence = 1.0
+                module.domain_classification_reason = (
+                    f"Path role from top-level directory '{Path(module.path).parts[0]}'"
+                )
+                continue
+
             # Classify domain
             domain, domain_confidence, domain_reason = self._score_classification(
                 all_signals, _DOMAIN_SIGNALS, "path and content"
@@ -889,12 +907,6 @@ class RepositoryScanner:
             module.domain = domain
             module.domain_confidence = domain_confidence
             module.domain_classification_reason = domain_reason
-
-            # Classify service family based on language/framework
-            service_family, sf_confidence, sf_reason = self._score_service_family(
-                all_signals, module.path, module.exports
-            )
-            module.service_family = service_family
 
             # Classify runtime role
             runtime_role, rr_confidence, rr_reason = self._score_runtime_role(

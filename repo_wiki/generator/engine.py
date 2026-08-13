@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from repo_wiki.scanner.artifacts import is_product_source_path, path_role_for
 
 from .cache import GenerationCache
 from .cites import select_primary_cite
@@ -135,50 +138,47 @@ class NarrativeBuilder:
             return "library"
         return "application"
 
+    def _product_modules(self) -> list[dict[str, Any]]:
+        product: list[dict[str, Any]] = []
+        for module in self.modules:
+            path = str(module.get("path") or module.get("name") or "")
+            if path_role_for(path) is not None:
+                continue
+            product.append(module)
+        return product
+
+    def _combined_product_signals(self) -> str:
+        path_signals: list[str] = []
+        domain_signals: list[str] = []
+        for module in self._product_modules():
+            path_signals.append(str(module.get("path") or "").lower())
+            path_signals.append(" ".join(module.get("exports") or []).lower())
+            path_signals.append(str(module.get("responsibility") or "").lower())
+            domain_signals.append(str(module.get("domain") or "").lower())
+        return (
+            self.repo_name.lower() + " " + " ".join(path_signals) + " " + " ".join(domain_signals)
+        )
+
+    def _has_word_signal(self, haystack: str, signals: list[str]) -> bool:
+        return any(re.search(rf"\b{re.escape(signal)}\b", haystack) for signal in signals)
+
     def _detect_knowledge_management_signals(self) -> bool:
         """Detect if this is a knowledge management system."""
         knowledge_signals = [
             "knowledge",
             "graph",
-            "index",
             "retrieval",
             "embedding",
             "vector",
             "chroma",
             "sqlite",
         ]
-        name_lower = self.repo_name.lower()
-        path_signals = []
-        domain_signals = []
-
-        for m in self.modules:
-            path = m.get("path", "").lower()
-            path_signals.append(path)
-            exports = " ".join(m.get("exports", []) or []).lower()
-            path_signals.append(exports)
-            # Also check domain
-            domain = m.get("domain", "").lower()
-            domain_signals.append(domain)
-            # Check responsibility field too
-            resp = m.get("responsibility", "").lower()
-            path_signals.append(resp)
-
-        combined = name_lower + " " + " ".join(path_signals) + " " + " ".join(domain_signals)
-        return any(signal in combined for signal in knowledge_signals)
+        return self._has_word_signal(self._combined_product_signals(), knowledge_signals)
 
     def _detect_document_generation_signals(self) -> bool:
         """Detect if this is a document generation system."""
-        doc_signals = ["document", "wiki", "doc", "markdown", "template", "generate", "render"]
-        name_lower = self.repo_name.lower()
-        path_signals = []
-        for m in self.modules:
-            path = m.get("path", "").lower()
-            path_signals.append(path)
-            exports = " ".join(m.get("exports", []) or []).lower()
-            path_signals.append(exports)
-
-        combined = name_lower + " " + " ".join(path_signals)
-        return any(signal in combined for signal in doc_signals)
+        doc_signals = ["document", "wiki", "markdown", "template", "generate", "render"]
+        return self._has_word_signal(self._combined_product_signals(), doc_signals)
 
     def build_project_description(self) -> str:
         """Build repository-specific project description.
@@ -326,10 +326,15 @@ class NarrativeBuilder:
                 capabilities.append("命令行工具和自动化脚本")
 
         # Derive capabilities from endpoints
-        if self.endpoints:
-            api_modules = set(e.get("module", "unknown") for e in self.endpoints)
+        product_endpoints = [
+            endpoint
+            for endpoint in self.endpoints
+            if is_product_source_path(str(endpoint.get("file_path") or ""))
+        ]
+        if product_endpoints:
+            api_modules = set(e.get("module", "unknown") for e in product_endpoints)
             capabilities.append(
-                f"RESTful API 接口（{len(self.endpoints)} 个端点，跨越 {len(api_modules)} 个模块）"
+                f"RESTful API 接口（{len(product_endpoints)} 个端点，跨越 {len(api_modules)} 个模块）"
             )
 
         # Derive capabilities from data models

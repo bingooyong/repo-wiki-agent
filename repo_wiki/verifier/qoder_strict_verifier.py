@@ -1616,10 +1616,33 @@ class QoderLikeVerifierService(VerifierService):
             return True
         return False
 
+    def _layout_meta_root(self) -> Path | None:
+        for candidate in (
+            self.root / "repowiki" / "zh" / "meta",
+            self.root / "meta",
+        ):
+            if candidate.is_dir():
+                return candidate
+        return None
+
     def _manifest_meta_root(self, payload: dict[str, Any]) -> Path | None:
+        layout = self._layout_meta_root()
+        if layout is not None and (
+            (layout / "quality-report.json").exists() or (layout / "page-registry.json").exists()
+        ):
+            return layout
+
         raw = payload.get("candidate_meta_root")
         if isinstance(raw, str) and raw:
-            return Path(raw)
+            declared = Path(raw)
+            if not declared.is_absolute():
+                declared = self.root / declared
+            if declared.exists() or layout is None:
+                return declared
+
+        if layout is not None:
+            return layout
+
         repowiki = payload.get("candidate_repowiki_zh_root")
         if isinstance(repowiki, str) and repowiki:
             return Path(repowiki) / "meta"
