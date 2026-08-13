@@ -21,7 +21,7 @@ from typing import Any
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.orchestration.release_meta_schema import SCHEMA_VERSION_SOURCE_INVENTORY
 from repo_wiki.scanner.artifacts import is_product_source_path
-from repo_wiki.scanner.fastapi_routes import extract_fastapi_endpoints
+from repo_wiki.scanner.fastapi_routes import FastAPIEndpoint, extract_fastapi_endpoints
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 
 # ---------------------------------------------------------------------------
@@ -201,6 +201,46 @@ def _scan_python(text: str, rel: str, record: FileScanRecord) -> None:
                 "evidence_path": rel,
             }
         )
+
+
+def _record_has_fastapi_service(record: dict[str, Any]) -> bool:
+    return any(item.get("kind") == "python_fastapi_app" for item in record.get("services", []))
+
+
+def _fastapi_surface(endpoint: FastAPIEndpoint) -> dict[str, Any]:
+    return {
+        "runtime": "python",
+        "method": endpoint.method,
+        "path": endpoint.path,
+        "handler": endpoint.handler,
+        "evidence_path": endpoint.file_path,
+    }
+
+
+def _with_full_repo_fastapi_surfaces(
+    cached_records: dict[str, dict[str, Any]],
+    python_files: list[tuple[str, str]],
+) -> dict[str, dict[str, Any]]:
+    """Replace per-file FastAPI routes with one full-repo extract (joined prefixes)."""
+    endpoints = extract_fastapi_endpoints(python_files)
+    by_file: dict[str, list[FastAPIEndpoint]] = {}
+    for endpoint in endpoints:
+        by_file.setdefault(endpoint.file_path, []).append(endpoint)
+
+    overlayed: dict[str, dict[str, Any]] = {}
+    for path, record in cached_records.items():
+        if path not in by_file and not _record_has_fastapi_service(record):
+            overlayed[path] = record
+            continue
+        copied = dict(record)
+        copied["api_surfaces"] = [
+            item for item in record.get("api_surfaces", []) if item.get("runtime") != "python"
+        ]
+        copied["api_surfaces"].extend(
+            _fastapi_surface(endpoint) for endpoint in by_file.get(path, [])
+        )
+        overlayed[path] = copied
+    return overlayed
 
 
 def _scan_js_ts(text: str, rel: str, record: FileScanRecord) -> None:
@@ -472,6 +512,7 @@ class MultiRuntimeSourceScannerV3:
 
         current_paths: set[str] = set()
         current_hashes: dict[str, str] = {}
+        python_files: list[tuple[str, str]] = []
 
         for batch in self._legacy.iter_file_batches(batch_size=batch_size):
             batches_processed += 1
@@ -483,6 +524,8 @@ class MultiRuntimeSourceScannerV3:
                 text = sf.text
                 digest = _sha256_text(text)
                 current_hashes[rel_s] = digest
+                if rel.suffix.lower() == ".py" and is_product_source_path(rel_s):
+                    python_files.append((rel_s, text))
 
                 if incremental and hashes.get(rel_s) == digest and rel_s in cached_records:
                     record_dict = cached_records[rel_s]
@@ -538,8 +581,9 @@ class MultiRuntimeSourceScannerV3:
         frontend_callers: list[dict[str, Any]] = []
         deployment_assets: list[dict[str, Any]] = []
         tests: list[dict[str, Any]] = []
+        inventory_records = _with_full_repo_fastapi_surfaces(cached_records, python_files)
 
-        for _path, rec in sorted(cached_records.items()):
+        for _path, rec in sorted(inventory_records.items()):
             _merge_lists(services, rec.get("services", []))
             _merge_lists(api_surfaces, rec.get("api_surfaces", []))
             _merge_lists(data_models, rec.get("data_models", []))
