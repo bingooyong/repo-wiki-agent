@@ -131,6 +131,48 @@ app = get_application()
     (root / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
 
 
+def _write_realworld_env_factory_fastapi_tree(root: Path) -> None:
+    """RealWorld config factory: annotation AppSettings plus ``return config()``."""
+    _write_realworld_fastapi_tree(root)
+    (root / "app" / "core" / "config.py").write_text(
+        """
+from enum import Enum
+from functools import lru_cache
+
+from app.core.settings.app import AppSettings
+
+
+class AppEnv(str, Enum):
+    prod = "prod"
+    dev = "dev"
+
+
+class BaseAppSettings:
+    app_env: AppEnv = AppEnv.prod
+
+
+class DevSettings(AppSettings):
+    pass
+
+
+class ProdSettings(AppSettings):
+    pass
+
+
+environments = {AppEnv.prod: ProdSettings, AppEnv.dev: DevSettings}
+
+
+@lru_cache
+def get_app_settings() -> AppSettings:
+    app_env = BaseAppSettings().app_env
+    config = environments[app_env]
+    return config()
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_include_router_prefix_is_joined_into_product_path(tmp_path: Path) -> None:
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "main.py").write_text(
@@ -588,3 +630,15 @@ def test_v3_and_repository_scanner_agree_on_mounted_fastapi_paths(tmp_path: Path
     assert mounted <= scanner_pairs
     assert mounted <= v3_pairs
     assert scanner_pairs & mounted == v3_pairs & mounted
+
+
+def test_env_dict_factory_return_config_resolves_api_prefix(tmp_path: Path) -> None:
+    """Annotation AppSettings plus ``return config()`` must still join api_prefix=/api."""
+    _write_realworld_env_factory_fastapi_tree(tmp_path)
+    scanner_pairs = _endpoint_pairs(_scan(tmp_path))
+    v3_pairs = _v3_endpoint_pairs(tmp_path)
+
+    for pairs in (scanner_pairs, v3_pairs):
+        assert ("POST", "/api/users/login") in pairs
+        assert ("POST", "/login") not in pairs
+        assert ("POST", "/users/login") not in pairs
