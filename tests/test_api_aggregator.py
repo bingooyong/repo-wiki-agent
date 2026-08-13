@@ -5,7 +5,9 @@ domain, and exposure pattern, and that entry-point selection uses principled
 scoring rather than just top-K retrieval.
 """
 
-from repo_wiki.generator.engine import APIAggregator, APIEndpoint
+from pathlib import Path
+
+from repo_wiki.generator.engine import APIAggregator, APIEndpoint, GenerationEngine
 
 
 class TestAPIAggregatorInitialization:
@@ -758,3 +760,53 @@ class TestEmptyEndpointState:
         assert "| 服务族/域 |" in table
         assert "python-backend" in table
         assert "/health" not in table or "1" in table
+
+    def test_build_core_context_empty_endpoints_uses_no_http_message(self, tmp_path: Path):
+        engine = GenerationEngine(tmp_path, template_root=tmp_path)
+        context = engine._build_core_context(
+            {
+                "repo_map": {"repository": {"name": "demo"}, "commands": {}},
+                "module_index": {"modules": []},
+                "api_index": {"endpoints": []},
+                "data_models": {"models": []},
+                "graph": {"modules": {}},
+            }
+        )
+
+        assert context["endpoint_index_table"] == APIAggregator.NO_HTTP_API_MESSAGE
+
+    def test_build_core_context_nonempty_endpoints_builds_index_table(self, tmp_path: Path):
+        engine = GenerationEngine(tmp_path, template_root=tmp_path)
+        context = engine._build_core_context(
+            {
+                "repo_map": {"repository": {"name": "demo"}, "commands": {}},
+                "module_index": {"modules": [{"name": "api", "path": "api"}]},
+                "api_index": {
+                    "endpoints": [
+                        {
+                            "method": "GET",
+                            "path": "/health",
+                            "module": "api",
+                            "handler": "health",
+                            "file_path": "api/main.py",
+                        },
+                        {
+                            "method": "POST",
+                            "path": "/webhook/github",
+                            "module": "tests",
+                            "handler": "handle",
+                            "file_path": "tests/api.py",
+                        },
+                    ]
+                },
+                "data_models": {"models": []},
+                "graph": {"modules": {}},
+            }
+        )
+        table = context["endpoint_index_table"]
+
+        assert table != APIAggregator.NO_HTTP_API_MESSAGE
+        assert "| 方法 | 路径 |" in table
+        assert "`/health`" in table
+        assert "[模块文档](modules/api.md)" in table
+        assert "[测试模块](modules/tests.md)" in table
