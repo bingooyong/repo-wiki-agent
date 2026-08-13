@@ -104,8 +104,9 @@ repo-wiki release-publish --output .repo-agent-eval
 ## Codex 插件
 
 仓库包含 skills-only 的 `repo-wiki` Codex 插件。它复用当前 Python 环境中的
-`repo_wiki.main`，不会安装依赖、修改 shell profile，或保存 API Key。v1 不包含
-MCP server。
+`repo_wiki.main`，要求同一解释器中安装 `repo-wiki >= 0.1.0`，不会自行安装依赖、修改
+shell profile，或保存 API Key。v1 不包含 MCP server；只有需要无 shell 主机、typed tools
+或进度 UI 时才考虑增加 MCP。
 
 完成上面的 CLI 安装后，在仓库根目录将本地 marketplace 加入 Codex。命令输出会显示
 marketplace 名称；在第二条命令中使用该名称：
@@ -119,6 +120,14 @@ codex plugin add repo-wiki@<marketplace-name>
 `repo-wiki-maintain` 或 `repo-wiki-verify` skill。生成或改进 run 只会止步于验证成功的
 candidate；只有提供完整 G005 质量证据、通过 inspect，并明确确认同一 run ID 后，才会
 替换本地 READY release。
+
+示例请求：
+
+```text
+使用 repo-wiki 检查当前仓库，并告诉我下一步应该初始化、生成还是验证。
+使用 repo-wiki-generate 为当前仓库生成 run ID 为 review-2026-08-13 的验证候选。
+使用 repo-wiki-verify 验证 run review-2026-08-13，不要发布。
+```
 
 开发插件更新时，先更新 cachebuster，再升级或重新安装 marketplace/plugin，刷新 Codex，
 并在新的 conversation 中完成 smoke test：
@@ -142,10 +151,11 @@ python scripts/smoke_codex_plugin.py
 
 ```bash
 codex plugin remove repo-wiki@<marketplace-name>
+codex plugin marketplace remove repo-wiki-local
 ```
 
-随后可选择保留 marketplace 供后续安装，或通过 Codex 的 marketplace removal 命令移除它。
-READY replacement 的回滚仍由现有 atomic publisher 的 backup/restore 行为负责。
+第二条命令是可选的；保留 marketplace 可供后续重装。READY replacement 的回滚仍由现有
+atomic publisher 的 backup/restore 行为负责。
 
 ## CLI 命令
 
