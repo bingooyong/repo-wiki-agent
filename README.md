@@ -10,7 +10,7 @@
 ## 核心能力
 
 - **Qoder-like 输出** — 提供隔离生成、发布清单和可配置的严格质量门禁
-- **Local-first** — 无需外部数据库，SQLite + ChromaDB 嵌入式运行
+- **Local-first** — 无需外部数据库；SQLite+FTS 必有。Chroma 可选（`pip install 'repo-wiki[vector]'`），未安装时语义索引降级为本地 `vectors.json`
 - **隔离输出** — `--profile qoder-like` 输出到 `.repo-agent-eval/`，不污染目标仓库
 - **增量更新** — 基于 git diff 实现页面级失效和选择性重生成
 - **Strict Verify** — 13 项质量门禁（prose density、citations、Mermaid、stale commit 等）
@@ -52,6 +52,8 @@ llm:
   base_url: https://api.example.com/v1
   api_key_env: REPO_WIKI_LLM_API_KEY
 ```
+
+无 YAML 时默认 `provider=openai`、`model=gpt-4o-mini`。要用 Anthropic 请在 YAML 里显式写 `provider: anthropic`。
 
 然后在当前 VS Code 集成终端或 shell 中设置真实 API Key：
 
@@ -216,7 +218,7 @@ code --install-extension repo-wiki-browser-0.1.0.vsix --force
 
 - **Python 3.11+** with `uv` package manager
 - **SQLite/FTS5** — 本地状态和全文检索
-- **ChromaDB** — 语义向量存储
+- **ChromaDB** — 可选语义向量存储（`repo-wiki[vector]`）；未安装时 JSON fallback
 - **LLM** — OpenAI-compatible / Minimax
 - **VS Code/Cursor Extension** — TypeScript sidebar for browsing READY Wiki releases
 
