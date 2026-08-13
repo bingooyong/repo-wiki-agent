@@ -21,6 +21,7 @@ from typing import Any
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.orchestration.release_meta_schema import SCHEMA_VERSION_SOURCE_INVENTORY
 from repo_wiki.scanner.artifacts import is_product_source_path
+from repo_wiki.scanner.fastapi_routes import extract_fastapi_endpoints
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 
 # ---------------------------------------------------------------------------
@@ -162,20 +163,33 @@ def _scan_python(text: str, rel: str, record: FileScanRecord) -> None:
         record.services.append({"kind": "python_fastapi_app", "evidence_path": rel})
     if re.search(r"\bFlask\s*\(", text):
         record.services.append({"kind": "python_flask_app", "evidence_path": rel})
-    for meth, path_lit, handler in re.findall(
-        r"@(?:router|app|bp)\.(get|post|put|patch|delete)\(\s*[\"']([^\"']+)[\"'][^)]*\)\s*(?:async\s+)?def\s+(\w+)",
-        text,
-        re.IGNORECASE,
-    ):
-        record.api_surfaces.append(
-            {
-                "runtime": "python",
-                "method": meth.upper(),
-                "path": path_lit,
-                "handler": handler,
-                "evidence_path": rel,
-            }
-        )
+    fastapi_endpoints = extract_fastapi_endpoints([(rel, text)])
+    if fastapi_endpoints:
+        for endpoint in fastapi_endpoints:
+            record.api_surfaces.append(
+                {
+                    "runtime": "python",
+                    "method": endpoint.method,
+                    "path": endpoint.path,
+                    "handler": endpoint.handler,
+                    "evidence_path": rel,
+                }
+            )
+    else:
+        for meth, path_lit, handler in re.findall(
+            r"@(?:router|app|bp)\.(get|post|put|patch|delete)\(\s*[\"']([^\"']*)[\"'][^)]*\)\s*(?:async\s+)?def\s+(\w+)",
+            text,
+            re.IGNORECASE,
+        ):
+            record.api_surfaces.append(
+                {
+                    "runtime": "python",
+                    "method": meth.upper(),
+                    "path": path_lit,
+                    "handler": handler,
+                    "evidence_path": rel,
+                }
+            )
     for base in re.findall(
         r"class\s+(\w+)\s*\(\s*(?:BaseModel|SQLModel|DeclarativeBase|db\.Model)",
         text,

@@ -144,3 +144,48 @@ def test_rendered_init_overview_is_marked_as_placeholder(tmp_path: Path) -> None
     assert "repo-wiki-init-stub" in content
     for phrase in _INVENTED_IDENTITY_PHRASES:
         assert phrase not in content
+
+
+def test_init_stub_section_docs_are_not_product_identity_claims(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.py").write_text("def ping():\n    return True\n", encoding="utf-8")
+    (tmp_path / "docs" / "sections" / "api").mkdir(parents=True)
+    (tmp_path / "docs" / "sections" / "services").mkdir(parents=True)
+    stub = """# API Reference and Contracts
+
+<!-- repo-wiki-init-stub -->
+
+本节涵盖 core-platform 等 3 个模块的内容。
+系统提供 api-gateway 与核心平台基础设施。
+知识管理和文档生成平台面向开发者。
+"""
+    (tmp_path / "docs" / "sections" / "api" / "index.md").write_text(stub, encoding="utf-8")
+    (tmp_path / "docs" / "sections" / "services" / "index.md").write_text(
+        "# Core Services\n\n<!-- repo-wiki-init-stub -->\n\ncore-platform api-gateway\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text(
+        "# Conduit\n\nRealWorld FastAPI example app for users and articles.\n",
+        encoding="utf-8",
+    )
+
+    inventory = scan_repository_docs_inventory(
+        tmp_path, _source_inventory(), incremental=False, persist_cache=False
+    )
+    section_docs = [
+        doc
+        for doc in inventory["documents"]
+        if str(doc.get("path", "")).startswith("docs/sections/")
+    ]
+    assert section_docs
+    for doc in section_docs:
+        claims = " ".join(doc.get("conflicting_claims") or [])
+        stale = " ".join(doc.get("stale_references") or [])
+        assert doc["authority_level"] not in {"source_backed"}
+        assert doc["authority_score"] < 0.5
+        assert "知识管理" not in claims
+        assert "api-gateway" not in claims
+        assert "core-platform" not in claims
+        assert "知识管理" not in stale
+        assert "api-gateway" not in stale
+        assert "core-platform" not in stale

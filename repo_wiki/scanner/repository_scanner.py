@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import Literal
 
 from pathspec import PathSpec
 
@@ -27,11 +28,23 @@ from repo_wiki.core.security import (
     should_scan,
 )
 from repo_wiki.scanner.artifacts import is_product_source_path, path_role_for
+from repo_wiki.scanner.fastapi_routes import extract_fastapi_endpoints
 
 _CODE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".kt"}
 _MODEL_FILE_HINTS = ("model", "schema", "entity", "dto", "migration", "alembic")
 _MODULE_ROOT_HINTS = {"src", "app", "apps", "services", "modules", "internal", "cmd"}
 _HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
+_HTTP_METHOD_LITERALS: dict[
+    str, Literal["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
+] = {
+    "GET": "GET",
+    "POST": "POST",
+    "PUT": "PUT",
+    "PATCH": "PATCH",
+    "DELETE": "DELETE",
+    "OPTIONS": "OPTIONS",
+    "HEAD": "HEAD",
+}
 
 # Domain classification signals
 _DOMAIN_SIGNALS: dict[str, tuple[frozenset[str], float]] = {
@@ -506,6 +519,30 @@ class RepositoryScanner:
         self, files: list[ScannedFile], modules: dict[str, Module]
     ) -> list[Endpoint]:
         endpoints: list[Endpoint] = []
+        python_files = [
+            (file.path.as_posix(), file.text)
+            for file in files
+            if file.path.suffix.lower() == ".py" and is_product_source_path(file.path.as_posix())
+        ]
+        fastapi_endpoints = extract_fastapi_endpoints(python_files)
+        fastapi_files = {item.file_path for item in fastapi_endpoints}
+        for item in fastapi_endpoints:
+            method = _HTTP_METHOD_LITERALS.get(item.method.upper())
+            if method is None:
+                continue
+            module_path = self._choose_module_path(Path(item.file_path))
+            module_name = modules[module_path].name if module_path in modules else module_path
+            endpoints.append(
+                Endpoint(
+                    method=method,
+                    path=item.path,
+                    module=module_name,
+                    handler=item.handler,
+                    file_path=item.file_path,
+                    line_number=item.lineno,
+                )
+            )
+
         for file in files:
             suffix = file.path.suffix.lower()
             if suffix not in _CODE_SUFFIXES:
@@ -515,21 +552,25 @@ class RepositoryScanner:
             module_path = self._choose_module_path(file.path)
             module_name = modules[module_path].name
             text = file.text
+            skip_fastapi_decorators = file.path.as_posix() in fastapi_files or bool(
+                re.search(r"\b(?:APIRouter|FastAPI)\s*\(", text)
+            )
 
-            for method, path_expr, handler in re.findall(
-                r"\b(?:router|app|server|r)\.(get|post|put|patch|delete|options|head)\(\s*[\"']([^\"']+)[\"']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)",
-                text,
-                re.IGNORECASE,
-            ):
-                endpoints.append(
-                    Endpoint(
-                        method=method.upper(),
-                        path=path_expr,
-                        module=module_name,
-                        handler=handler,
-                        file_path=file.path.as_posix(),
+            if not skip_fastapi_decorators:
+                for method, path_expr, handler in re.findall(
+                    r"\b(?:router|app|server|r)\.(get|post|put|patch|delete|options|head)\(\s*[\"']([^\"']+)[\"']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)",
+                    text,
+                    re.IGNORECASE,
+                ):
+                    endpoints.append(
+                        Endpoint(
+                            method=method.upper(),
+                            path=path_expr,
+                            module=module_name,
+                            handler=handler,
+                            file_path=file.path.as_posix(),
+                        )
                     )
-                )
 
             for decorator, path_expr in re.findall(
                 r"@(Get|Post|Put|Patch|Delete|Options|Head)\(\s*[\"']?([^\"')]+)[\"']?\)", text
@@ -544,20 +585,21 @@ class RepositoryScanner:
                     )
                 )
 
-            for method, path_expr in re.findall(
-                r"@(?:app|router|bp)\.(get|post|put|patch|delete|options|head)\(\s*[\"']([^\"']+)[\"']",
-                text,
-                re.IGNORECASE,
-            ):
-                endpoints.append(
-                    Endpoint(
-                        method=method.upper(),
-                        path=path_expr,
-                        module=module_name,
-                        handler=self._guess_handler(text),
-                        file_path=file.path.as_posix(),
+            if not skip_fastapi_decorators:
+                for method, path_expr in re.findall(
+                    r"@(?:app|router|bp)\.(get|post|put|patch|delete|options|head)\(\s*[\"']([^\"']+)[\"']",
+                    text,
+                    re.IGNORECASE,
+                ):
+                    endpoints.append(
+                        Endpoint(
+                            method=method.upper(),
+                            path=path_expr,
+                            module=module_name,
+                            handler=self._guess_handler(text),
+                            file_path=file.path.as_posix(),
+                        )
                     )
-                )
 
             for path_expr, handler in re.findall(
                 r"http\.HandleFunc\(\s*[\"']([^\"']+)[\"']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)", text
@@ -572,19 +614,20 @@ class RepositoryScanner:
                     )
                 )
 
-            for method, path_expr, handler in re.findall(
-                r"\b(?:r|router|app)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\(\s*[\"']([^\"']+)[\"']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)",
-                text,
-            ):
-                endpoints.append(
-                    Endpoint(
-                        method=method.upper(),
-                        path=path_expr,
-                        module=module_name,
-                        handler=handler,
-                        file_path=file.path.as_posix(),
+            if not skip_fastapi_decorators:
+                for method, path_expr, handler in re.findall(
+                    r"\b(?:r|router|app)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\(\s*[\"']([^\"']+)[\"']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)",
+                    text,
+                ):
+                    endpoints.append(
+                        Endpoint(
+                            method=method.upper(),
+                            path=path_expr,
+                            module=module_name,
+                            handler=handler,
+                            file_path=file.path.as_posix(),
+                        )
                     )
-                )
 
             # Flask-style @app.route("/path", methods=["GET"])
             for path_expr, methods in re.findall(
