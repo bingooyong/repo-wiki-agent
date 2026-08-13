@@ -19,6 +19,20 @@ class FastAPIEndpoint:
     lineno: int
 
 
+@dataclass(frozen=True)
+class _Mount:
+    child_ref: str
+    prefix: str = ""
+    prefix_ref: str | None = None
+
+
+@dataclass
+class _FileFacts:
+    class_str_attrs: dict[tuple[str, str], str] = field(default_factory=dict)
+    instances: dict[str, str] = field(default_factory=dict)
+    module_str_attrs: dict[str, str] = field(default_factory=dict)
+
+
 @dataclass
 class _RouterDef:
     file_path: str
@@ -26,7 +40,7 @@ class _RouterDef:
     constructor_prefix: str = ""
     is_app: bool = False
     routes: list[tuple[str, str, str, int]] = field(default_factory=list)
-    mounts: list[tuple[str, str]] = field(default_factory=list)
+    mounts: list[_Mount] = field(default_factory=list)
 
 
 def join_http_paths(*parts: str) -> str:
@@ -49,15 +63,18 @@ def extract_fastapi_endpoints(files: Sequence[tuple[str, str]]) -> list[FastAPIE
     routers: dict[tuple[str, str], _RouterDef] = {}
     imports_by_file: dict[str, dict[str, str]] = {}
     aliases_by_file: dict[str, dict[str, tuple[str, str]]] = {}
+    facts_by_file: dict[str, _FileFacts] = {}
     file_set = {path for path, _text in files}
 
     for path, text in files:
         parsed = _parse_file(path, text)
         if parsed is None:
             continue
-        imports_by_file[path] = parsed[1]
-        aliases_by_file[path] = parsed[2]
-        for router in parsed[0]:
+        routers_in_file, imported_modules, imported_symbols, facts = parsed
+        imports_by_file[path] = imported_modules
+        aliases_by_file[path] = imported_symbols
+        facts_by_file[path] = facts
+        for router in routers_in_file:
             routers[(router.file_path, router.var_name)] = router
 
     mounted: set[tuple[str, str]] = set()
@@ -72,6 +89,22 @@ def extract_fastapi_endpoints(files: Sequence[tuple[str, str]]) -> list[FastAPIE
             imports_by_file.get(parent_file, {}),
             aliases_by_file.get(parent_file, {}),
             file_set,
+        )
+
+    def resolve_mount_prefix(parent_file: str, mount: _Mount) -> str:
+        if mount.prefix:
+            return mount.prefix
+        if not mount.prefix_ref:
+            return ""
+        return (
+            _resolve_prefix_ref(
+                parent_file,
+                mount.prefix_ref,
+                facts_by_file,
+                aliases_by_file,
+                file_set,
+            )
+            or ""
         )
 
     def walk(node_id: tuple[str, str], prefix: str) -> None:
@@ -94,11 +127,13 @@ def extract_fastapi_endpoints(files: Sequence[tuple[str, str]]) -> list[FastAPIE
                     lineno=lineno,
                 )
             )
-        for child_ref, mount_prefix in router.mounts:
-            child = resolve_child(router.file_path, child_ref)
+        for mount in router.mounts:
+            child = resolve_child(router.file_path, mount.child_ref)
             if child is None:
                 continue
-            walk(child, join_http_paths(local_prefix, mount_prefix))
+            walk(
+                child, join_http_paths(local_prefix, resolve_mount_prefix(router.file_path, mount))
+            )
 
     for node_id, router in routers.items():
         if router.is_app:
@@ -106,6 +141,9 @@ def extract_fastapi_endpoints(files: Sequence[tuple[str, str]]) -> list[FastAPIE
 
     for node_id, router in routers.items():
         if node_id in mounted or router.is_app:
+            continue
+        if router.mounts:
+            walk(node_id, router.constructor_prefix)
             continue
         local_prefix = router.constructor_prefix
         for method, path, handler, lineno in router.routes:
@@ -128,7 +166,7 @@ def extract_fastapi_endpoints(files: Sequence[tuple[str, str]]) -> list[FastAPIE
 
 def _parse_file(
     path: str, text: str
-) -> tuple[list[_RouterDef], dict[str, str], dict[str, tuple[str, str]]] | None:
+) -> tuple[list[_RouterDef], dict[str, str], dict[str, tuple[str, str]], _FileFacts] | None:
     try:
         tree = ast.parse(text)
     except SyntaxError:
@@ -137,6 +175,7 @@ def _parse_file(
     routers: dict[str, _RouterDef] = {}
     imported_modules: dict[str, str] = {}
     imported_symbols: dict[str, tuple[str, str]] = {}
+    facts = _FileFacts()
 
     for node in tree.body:
         if isinstance(node, ast.Import):
@@ -153,10 +192,22 @@ def _parse_file(
                 else:
                     imported_modules[local] = alias.name
                     imported_symbols[local] = (alias.name, alias.name)
-        elif isinstance(node, ast.Assign):
-            _maybe_bind_router(node.targets, node.value, path, routers)
-        elif isinstance(node, ast.AnnAssign) and node.value is not None and node.target is not None:
-            _maybe_bind_router([node.target], node.value, path, routers)
+
+    for walked in ast.walk(tree):
+        if isinstance(walked, ast.Assign):
+            _maybe_bind_router(walked.targets, walked.value, path, routers)
+            _maybe_bind_instance(walked.targets, walked.value, facts)
+            _maybe_bind_module_str(walked.targets, walked.value, facts)
+        elif (
+            isinstance(walked, ast.AnnAssign)
+            and walked.value is not None
+            and walked.target is not None
+        ):
+            _maybe_bind_router([walked.target], walked.value, path, routers)
+            _maybe_bind_instance([walked.target], walked.value, facts)
+            _maybe_bind_module_str([walked.target], walked.value, facts)
+        elif isinstance(walked, ast.ClassDef):
+            _collect_class_str_attrs(walked, facts)
 
     for walked in ast.walk(tree):
         if isinstance(walked, ast.Call) and _is_include_router(walked):
@@ -170,7 +221,10 @@ def _parse_file(
             child_ref = _expr_ref(walked.args[0]) if walked.args else None
             if not child_ref:
                 continue
-            routers[parent_var].mounts.append((child_ref, _keyword_str(walked, "prefix") or ""))
+            prefix, prefix_ref = _prefix_from_call(walked)
+            routers[parent_var].mounts.append(
+                _Mount(child_ref=child_ref, prefix=prefix, prefix_ref=prefix_ref)
+            )
         elif isinstance(walked, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for decorator in walked.decorator_list:
                 parsed = _decorator_route(decorator)
@@ -181,7 +235,7 @@ def _parse_file(
                     continue
                 routers[router_var].routes.append((method, route_path, walked.name, walked.lineno))
 
-    return list(routers.values()), imported_modules, imported_symbols
+    return list(routers.values()), imported_modules, imported_symbols, facts
 
 
 def _maybe_bind_router(
@@ -200,6 +254,119 @@ def _maybe_bind_router(
             constructor_prefix=prefix,
             is_app=ctor == "FastAPI",
         )
+
+
+def _maybe_bind_instance(targets: list[ast.expr], value: ast.AST, facts: _FileFacts) -> None:
+    ctor = _call_ctor_name(value)
+    if ctor is None or ctor in _ROUTER_CTORS:
+        return
+    for target in targets:
+        if isinstance(target, ast.Name):
+            facts.instances[target.id] = ctor
+
+
+def _maybe_bind_module_str(targets: list[ast.expr], value: ast.AST, facts: _FileFacts) -> None:
+    text = _const_str(value)
+    if text is None:
+        return
+    for target in targets:
+        if isinstance(target, ast.Name):
+            facts.module_str_attrs[target.id] = text
+
+
+def _collect_class_str_attrs(node: ast.ClassDef, facts: _FileFacts) -> None:
+    for stmt in node.body:
+        if isinstance(stmt, ast.Assign):
+            text = _const_str(stmt.value)
+            if text is None:
+                continue
+            for target in stmt.targets:
+                if isinstance(target, ast.Name):
+                    facts.class_str_attrs[(node.name, target.id)] = text
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            text = _const_str(stmt.value)
+            if text is None or not isinstance(stmt.target, ast.Name):
+                continue
+            facts.class_str_attrs[(node.name, stmt.target.id)] = text
+
+
+def _prefix_from_call(call: ast.Call) -> tuple[str, str | None]:
+    for keyword in call.keywords:
+        if keyword.arg != "prefix":
+            continue
+        literal = _const_str(keyword.value)
+        if literal is not None:
+            return literal, None
+        ref = _expr_ref(keyword.value)
+        if ref is not None:
+            return "", ref
+    return "", None
+
+
+def _resolve_prefix_ref(
+    parent_file: str,
+    prefix_ref: str,
+    facts_by_file: dict[str, _FileFacts],
+    aliases_by_file: dict[str, dict[str, tuple[str, str]]],
+    file_set: set[str],
+) -> str | None:
+    if "." not in prefix_ref:
+        return None
+    owner, attr = prefix_ref.split(".", 1)
+
+    def lookup(file_path: str, name: str) -> str | None:
+        facts = facts_by_file.get(file_path)
+        if facts is None:
+            return None
+        if name in facts.instances:
+            class_name = facts.instances[name]
+            found = facts.class_str_attrs.get((class_name, attr))
+            if found is not None:
+                return found
+        found = facts.class_str_attrs.get((name, attr))
+        if found is not None:
+            return found
+        if name == attr:
+            return facts.module_str_attrs.get(attr)
+        return None
+
+    local = lookup(parent_file, owner)
+    if local is not None:
+        return local
+
+    imported = aliases_by_file.get(parent_file, {}).get(owner)
+    if imported is None:
+        return None
+    module, orig = imported
+    target = _find_module_file(module, file_set)
+    if target is None:
+        return None
+    found = lookup(target, orig)
+    if found is not None:
+        return found
+    facts = facts_by_file.get(target)
+    if facts is None:
+        return None
+    values = {value for (cls, name), value in facts.class_str_attrs.items() if name == attr}
+    values.update(value for name, value in facts.module_str_attrs.items() if name == attr)
+    if len(values) == 1:
+        return next(iter(values))
+    return None
+
+
+def _find_module_file(module: str, file_set: set[str]) -> str | None:
+    for candidate in _module_file_candidates(module):
+        if candidate in file_set:
+            return candidate
+    stem = module.rsplit(".", 1)[-1]
+    matches = [
+        path
+        for path in file_set
+        if path.replace("\\", "/").endswith(f"/{stem}.py") or path == f"{stem}.py"
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def _decorator_route(decorator: ast.AST) -> tuple[str, str, str] | None:
