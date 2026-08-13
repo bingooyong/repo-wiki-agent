@@ -1,0 +1,40 @@
+{
+  "grade": "FAIL",
+  "profile": "qoder-like",
+  "exit_code": 1,
+  "status": "NOT_READY",
+  "fastapi_sha": "029eb7781c60d5f563ee8990a0cbfb79b244538c",
+  "repo_wiki_sha": "9cadf853858cbd4cbf19b0eb568b92c7562ebafc",
+  "model": "MiniMax-M3",
+  "summary": {
+    "total": 25,
+    "pass": 13,
+    "warn": 0,
+    "fail": 12,
+    "hard_gate_failures": 12,
+    "soft_gate_failures": 0
+  },
+  "hard_gate_codes": [
+    "QODER_MANIFEST_PATH_INVALID",
+    "QODER_PAGE_QUALITY_STATE_MISSING",
+    "QODER_UNRESOLVED_FACT_CONFLICT",
+    "QODER_REQUIRED_INVENTORY_MISSING",
+    "QODER_CITATION_INVALID",
+    "QODER_CITATION_FACT_COVERAGE_LOW",
+    "QODER_OWNER_COVERAGE_MISSING",
+    "QODER_CITATION_RELEVANCE_MISMATCH",
+    "QODER_API_MERMAID_MISSING",
+    "QODER_DATA_MODEL_ER_MERMAID_MISSING",
+    "QODER_PAGE_DUMP",
+    "QODER_DIRTY_WORKTREE"
+  ],
+  "notes": {
+    "pages": 89,
+    "empty_llm_shells": 60,
+    "invalid_citations": 22,
+    "claim_coverage": "43.50%",
+    "unresolved_fact_conflicts": 74,
+    "llm_529": 0,
+    "fallback_page_count": 0
+  }
+}
