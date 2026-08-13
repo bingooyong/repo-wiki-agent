@@ -1072,7 +1072,6 @@ class RepoWikiService:
         quality_warnings: list[dict[str, str]] = []
         target_mermaid_pages = max(1, math.ceil(len(pages_to_compose) * 0.3))
         compose_concurrency = self._resolve_llm_concurrency()
-        semaphore = asyncio.Semaphore(compose_concurrency)
         compose_jobs: list[dict[str, Any]] = []
         page_results: dict[int, tuple[str, str]] = {}
         priority_mode = self._resolve_llm_priority_mode()
@@ -1087,48 +1086,153 @@ class RepoWikiService:
             f"concurrency={compose_concurrency} priority={priority_mode} cache={cache_path}"
         )
 
-        async def compose_job(job: dict[str, Any]) -> dict[str, Any]:
-            async with semaphore:
-                page = job["page"]
-                attempt_no = job["attempt_no"]
+        def _should_add_mermaid(page_idx: int, page: Any) -> bool:
+            return (
+                page_idx < target_mermaid_pages
+                or str(getattr(page, "category", "")).lower() == "api_reference"
+            )
+
+        def write_fallback(page: Any, binding: Any, page_idx: int, reason: str) -> None:
+            nonlocal fallback_page_count
+            fallback_page_count += 1
+            failed_pages.append({"page_id": page.page_id, "title": page.title, "reason": reason})
+            fallback = self._fallback_markdown_for_failed_page(page, binding)
+            enriched = self._enforce_qoder_page_contract(
+                page=page,
+                markdown=fallback,
+                binding=binding,
+                add_mermaid=_should_add_mermaid(page_idx, page),
+                composition_context=context,
+            )
+            page_results[page_idx] = (page.output_path, enriched)
+            page_metadata_by_idx[page_idx] = {
+                "page_id": page.page_id,
+                "source_path": page.output_path,
+                "generation_mode": "fallback",
+                "quality_state": "DEGRADED",
+                "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                "reasons": [reason],
+            }
+
+        def note_provider_failure() -> None:
+            nonlocal provider_failure_count, provider_disabled_after_failures
+            provider_failure_count += 1
+            if provider_failure_count >= max_provider_failures:
+                provider_disabled_after_failures = True
                 info(
-                    "llm page started "
-                    f"attempt={attempt_no}/{max_real_provider_calls or 'unlimited'} "
-                    f"page_id={page.page_id} title={page.title}"
+                    "compose provider disabled "
+                    f"consecutive_failures={provider_failure_count} "
+                    f"max_failures={max_provider_failures}"
                 )
-                try:
-                    output = await asyncio.wait_for(
-                        composer.compose_page(job["input_data"]),
-                        timeout=page_timeout_seconds,
-                    )
-                    info(
-                        "llm page completed "
-                        f"attempt={attempt_no} page_id={page.page_id} "
-                        f"tokens={output.tokens_used} rejected={output.rejected}"
-                    )
-                    return {"status": "ok", "job": job, "output": output}
-                except TimeoutError:
-                    info(
-                        "llm page timeout "
-                        f"attempt={attempt_no} page_id={page.page_id} "
-                        f"timeout={page_timeout_seconds:.1f}s"
-                    )
-                    return {
-                        "status": "error",
-                        "job": job,
-                        "reason": f"LLM page timeout after {page_timeout_seconds:.1f}s",
+
+        async def compose_job(job: dict[str, Any]) -> dict[str, Any]:
+            page = job["page"]
+            attempt_no = job["attempt_no"]
+            info(
+                "llm page started "
+                f"attempt={attempt_no}/{max_real_provider_calls or 'unlimited'} "
+                f"page_id={page.page_id} title={page.title}"
+            )
+            try:
+                output = await asyncio.wait_for(
+                    composer.compose_page(job["input_data"]),
+                    timeout=page_timeout_seconds,
+                )
+                info(
+                    "llm page completed "
+                    f"attempt={attempt_no} page_id={page.page_id} "
+                    f"tokens={output.tokens_used} rejected={output.rejected}"
+                )
+                return {"status": "ok", "job": job, "output": output}
+            except TimeoutError:
+                info(
+                    "llm page timeout "
+                    f"attempt={attempt_no} page_id={page.page_id} "
+                    f"timeout={page_timeout_seconds:.1f}s"
+                )
+                return {
+                    "status": "error",
+                    "job": job,
+                    "reason": f"LLM page timeout after {page_timeout_seconds:.1f}s",
+                }
+            except Exception as exc:  # pragma: no cover - provider-specific defensive path
+                info(
+                    "llm page failed "
+                    f"attempt={attempt_no} page_id={page.page_id} "
+                    f"error={type(exc).__name__}: {str(exc)[:160]}"
+                )
+                return {
+                    "status": "error",
+                    "job": job,
+                    "reason": f"{type(exc).__name__}: {str(exc)[:300]}",
+                }
+
+        def record_compose_result(result: dict[str, Any]) -> None:
+            nonlocal llm_call_count, actual_tokens, provider_failure_count
+            job = result["job"]
+            page = job["page"]
+            binding = job["binding"]
+            page_idx = job["page_idx"]
+
+            if result["status"] == "error":
+                note_provider_failure()
+                write_fallback(page, binding, page_idx, str(result["reason"]))
+                return
+
+            output = result["output"]
+            llm_call_count += 1
+            actual_tokens += output.tokens_used
+
+            if output.rejected:
+                note_provider_failure()
+                write_fallback(
+                    page,
+                    binding,
+                    page_idx,
+                    output.rejection_reason or "llm_output_rejected",
+                )
+                return
+
+            provider_failure_count = 0
+            if not (output.citations_preserved and output.headings_preserved):
+                quality_warnings.append(
+                    {
+                        "page_id": page.page_id,
+                        "title": page.title,
+                        "citations_preserved": str(output.citations_preserved),
+                        "headings_preserved": str(output.headings_preserved),
                     }
-                except Exception as exc:  # pragma: no cover - provider-specific defensive path
-                    info(
-                        "llm page failed "
-                        f"attempt={attempt_no} page_id={page.page_id} "
-                        f"error={type(exc).__name__}: {str(exc)[:160]}"
-                    )
-                    return {
-                        "status": "error",
-                        "job": job,
-                        "reason": f"{type(exc).__name__}: {str(exc)[:300]}",
-                    }
+                )
+            enriched = self._enforce_qoder_page_contract(
+                page=page,
+                markdown=output.markdown,
+                binding=binding,
+                add_mermaid=_should_add_mermaid(page_idx, page),
+                composition_context=context,
+            )
+            self._store_composer_cache_page(
+                cache,
+                page_id=page.page_id,
+                input_hash=job["input_hash"],
+                output_markdown=enriched,
+                tokens_used=output.tokens_used,
+                model_name=llm_config.model,
+                doc_type=page.category.value,
+                cost_usd=estimate_cost_from_tokens(output.tokens_used, llm_config.model),
+            )
+            page_results[page_idx] = (page.output_path, enriched)
+            effective_mode = "llm" if llm_summary.get("mode") == "real" else "rule"
+            reasons = []
+            if llm_summary.get("mode") == "mock":
+                reasons.append(f"mock_llm:{llm_summary.get('mock_reason') or 'forced'}")
+            page_metadata_by_idx[page_idx] = {
+                "page_id": page.page_id,
+                "source_path": page.output_path,
+                "generation_mode": effective_mode,
+                "quality_state": "READY" if effective_mode == "llm" else "PASS",
+                "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                "reasons": reasons,
+            }
 
         for page_idx, page in page_entries:
             binding = evidence_bindings.get(page.page_id)
@@ -1169,44 +1273,16 @@ class RepoWikiService:
             cache_misses += 1
 
             if provider_disabled_after_failures:
-                fallback_page_count += 1
-                failed_pages.append(
-                    {
-                        "page_id": page.page_id,
-                        "title": page.title,
-                        "reason": self._provider_disabled_reason(
-                            max_provider_failures=max_provider_failures,
-                            max_real_provider_calls=max_real_provider_calls,
-                            provider_attempt_count=provider_attempt_count,
-                        ),
-                    }
-                )
-                fallback = self._fallback_markdown_for_failed_page(page, binding)
-                enriched = self._enforce_qoder_page_contract(
-                    page=page,
-                    markdown=fallback,
-                    binding=binding,
-                    add_mermaid=(
-                        page_idx < target_mermaid_pages
-                        or str(getattr(page, "category", "")).lower() == "api_reference"
+                write_fallback(
+                    page,
+                    binding,
+                    page_idx,
+                    self._provider_disabled_reason(
+                        max_provider_failures=max_provider_failures,
+                        max_real_provider_calls=max_real_provider_calls,
+                        provider_attempt_count=provider_attempt_count,
                     ),
-                    composition_context=context,
                 )
-                page_results[page_idx] = (page.output_path, enriched)
-                page_metadata_by_idx[page_idx] = {
-                    "page_id": page.page_id,
-                    "source_path": page.output_path,
-                    "generation_mode": "fallback",
-                    "quality_state": "DEGRADED",
-                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
-                    "reasons": [
-                        self._provider_disabled_reason(
-                            max_provider_failures=max_provider_failures,
-                            max_real_provider_calls=max_real_provider_calls,
-                            provider_attempt_count=provider_attempt_count,
-                        )
-                    ],
-                }
                 continue
 
             if (
@@ -1214,44 +1290,16 @@ class RepoWikiService:
                 and provider_attempt_count >= max_real_provider_calls
             ):
                 provider_disabled_after_failures = True
-                fallback_page_count += 1
-                failed_pages.append(
-                    {
-                        "page_id": page.page_id,
-                        "title": page.title,
-                        "reason": self._provider_disabled_reason(
-                            max_provider_failures=max_provider_failures,
-                            max_real_provider_calls=max_real_provider_calls,
-                            provider_attempt_count=provider_attempt_count,
-                        ),
-                    }
-                )
-                fallback = self._fallback_markdown_for_failed_page(page, binding)
-                enriched = self._enforce_qoder_page_contract(
-                    page=page,
-                    markdown=fallback,
-                    binding=binding,
-                    add_mermaid=(
-                        page_idx < target_mermaid_pages
-                        or str(getattr(page, "category", "")).lower() == "api_reference"
+                write_fallback(
+                    page,
+                    binding,
+                    page_idx,
+                    self._provider_disabled_reason(
+                        max_provider_failures=max_provider_failures,
+                        max_real_provider_calls=max_real_provider_calls,
+                        provider_attempt_count=provider_attempt_count,
                     ),
-                    composition_context=context,
                 )
-                page_results[page_idx] = (page.output_path, enriched)
-                page_metadata_by_idx[page_idx] = {
-                    "page_id": page.page_id,
-                    "source_path": page.output_path,
-                    "generation_mode": "fallback",
-                    "quality_state": "DEGRADED",
-                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
-                    "reasons": [
-                        self._provider_disabled_reason(
-                            max_provider_failures=max_provider_failures,
-                            max_real_provider_calls=max_real_provider_calls,
-                            provider_attempt_count=provider_attempt_count,
-                        )
-                    ],
-                }
                 continue
 
             provider_attempt_count += 1
@@ -1272,125 +1320,43 @@ class RepoWikiService:
             f"llm_jobs={len(compose_jobs)} cache_hits={cache_hits} "
             f"cache_misses={cache_misses} immediate_fallbacks={fallback_page_count}"
         )
-        for result in await asyncio.gather(*(compose_job(job) for job in compose_jobs)):
-            job = result["job"]
-            page = job["page"]
-            binding = job["binding"]
-            page_idx = job["page_idx"]
 
-            if result["status"] == "error":
-                provider_failure_count += 1
-                fallback_page_count += 1
-                failed_pages.append(
-                    {
-                        "page_id": page.page_id,
-                        "title": page.title,
-                        "reason": result["reason"],
-                    }
-                )
-                fallback = self._fallback_markdown_for_failed_page(page, binding)
-                enriched = self._enforce_qoder_page_contract(
-                    page=page,
-                    markdown=fallback,
-                    binding=binding,
-                    add_mermaid=(
-                        page_idx < target_mermaid_pages
-                        or str(getattr(page, "category", "")).lower() == "api_reference"
-                    ),
-                    composition_context=context,
-                )
-                page_results[page_idx] = (page.output_path, enriched)
-                page_metadata_by_idx[page_idx] = {
-                    "page_id": page.page_id,
-                    "source_path": page.output_path,
-                    "generation_mode": "fallback",
-                    "quality_state": "DEGRADED",
-                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
-                    "reasons": [str(result["reason"])],
-                }
-                continue
+        job_cursor = 0
+        state_lock = asyncio.Lock()
 
-            output = result["output"]
-            llm_call_count += 1
-            actual_tokens += output.tokens_used
+        async def worker() -> None:
+            nonlocal job_cursor
+            while True:
+                async with state_lock:
+                    if job_cursor >= len(compose_jobs):
+                        return
+                    job = compose_jobs[job_cursor]
+                    job_cursor += 1
+                    if provider_disabled_after_failures:
+                        page = job["page"]
+                        info(
+                            "compose skip llm "
+                            f"page_id={page.page_id} title={page.title} "
+                            "reason=provider_disabled"
+                        )
+                        write_fallback(
+                            page,
+                            job["binding"],
+                            job["page_idx"],
+                            self._provider_disabled_reason(
+                                max_provider_failures=max_provider_failures,
+                                max_real_provider_calls=max_real_provider_calls,
+                                provider_attempt_count=provider_attempt_count,
+                            ),
+                        )
+                        continue
+                result = await compose_job(job)
+                async with state_lock:
+                    record_compose_result(result)
 
-            if output.rejected:
-                provider_failure_count += 1
-                fallback_page_count += 1
-                failed_pages.append(
-                    {
-                        "page_id": page.page_id,
-                        "title": page.title,
-                        "reason": output.rejection_reason or "unknown",
-                    }
-                )
-                if provider_failure_count >= max_provider_failures:
-                    provider_disabled_after_failures = True
-                fallback = self._fallback_markdown_for_failed_page(page, binding)
-                enriched = self._enforce_qoder_page_contract(
-                    page=page,
-                    markdown=fallback,
-                    binding=binding,
-                    add_mermaid=(
-                        page_idx < target_mermaid_pages
-                        or str(getattr(page, "category", "")).lower() == "api_reference"
-                    ),
-                    composition_context=context,
-                )
-                page_results[page_idx] = (page.output_path, enriched)
-                page_metadata_by_idx[page_idx] = {
-                    "page_id": page.page_id,
-                    "source_path": page.output_path,
-                    "generation_mode": "fallback",
-                    "quality_state": "DEGRADED",
-                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
-                    "reasons": [output.rejection_reason or "llm_output_rejected"],
-                }
-                continue
-
-            provider_failure_count = 0
-            if not (output.citations_preserved and output.headings_preserved):
-                quality_warnings.append(
-                    {
-                        "page_id": page.page_id,
-                        "title": page.title,
-                        "citations_preserved": str(output.citations_preserved),
-                        "headings_preserved": str(output.headings_preserved),
-                    }
-                )
-            enriched = self._enforce_qoder_page_contract(
-                page=page,
-                markdown=output.markdown,
-                binding=binding,
-                add_mermaid=(
-                    page_idx < target_mermaid_pages
-                    or str(getattr(page, "category", "")).lower() == "api_reference"
-                ),
-                composition_context=context,
-            )
-            self._store_composer_cache_page(
-                cache,
-                page_id=page.page_id,
-                input_hash=job["input_hash"],
-                output_markdown=enriched,
-                tokens_used=output.tokens_used,
-                model_name=llm_config.model,
-                doc_type=page.category.value,
-                cost_usd=estimate_cost_from_tokens(output.tokens_used, llm_config.model),
-            )
-            page_results[page_idx] = (page.output_path, enriched)
-            effective_mode = "llm" if llm_summary.get("mode") == "real" else "rule"
-            reasons = []
-            if llm_summary.get("mode") == "mock":
-                reasons.append(f"mock_llm:{llm_summary.get('mock_reason') or 'forced'}")
-            page_metadata_by_idx[page_idx] = {
-                "page_id": page.page_id,
-                "source_path": page.output_path,
-                "generation_mode": effective_mode,
-                "quality_state": "READY" if effective_mode == "llm" else "PASS",
-                "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
-                "reasons": reasons,
-            }
+        if compose_jobs:
+            worker_count = max(1, min(compose_concurrency, len(compose_jobs)))
+            await asyncio.gather(*[worker() for _ in range(worker_count)])
 
         pages = [page_results[idx] for idx in sorted(page_results)]
         page_metadata = [page_metadata_by_idx[idx] for idx in sorted(page_metadata_by_idx)]
