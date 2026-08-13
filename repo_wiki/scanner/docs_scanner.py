@@ -342,6 +342,33 @@ def _extract_claims(text: str) -> tuple[set[str], set[str]]:
     return service_like, path_like
 
 
+INIT_STUB_MARKER = "repo-wiki-init-stub"
+_INIT_STUB_PHRASES = (
+    "知识管理和文档生成平台",
+    "知识管理平台",
+    "RESTful API 接口（",
+)
+_INIT_STUB_EXACT_PATHS = frozenset(
+    {
+        "docs/00-overview.md",
+        "docs/01-architecture.md",
+        "docs/03-module-map.md",
+        "docs/04-api-contracts.md",
+        "docs/05-data-model.md",
+    }
+)
+
+
+def is_init_generated_doc(rel: str, text: str) -> bool:
+    """Return True for repo-wiki init placeholders, not the user's real docs."""
+    rel_n = _normalize_rel_path(rel)
+    if INIT_STUB_MARKER in text:
+        return True
+    if rel_n in _INIT_STUB_EXACT_PATHS or rel_n.startswith("docs/sections/"):
+        return any(phrase in text for phrase in _INIT_STUB_PHRASES)
+    return False
+
+
 @dataclass
 class _DocScanRecord:
     path: str
@@ -507,7 +534,14 @@ class DocumentationScanner:
                 authority_base = override.authority_score
                 authority_score_overridden = True
             spec_score = _specificity(text)
-            claim_names, claim_paths = _extract_claims(text)
+            if is_init_generated_doc(rel, text):
+                claim_names: set[str] = set()
+                claim_paths: set[str] = set()
+                authority_level = "historical"
+                authority_base = 0.1
+                authority_score_overridden = True
+            else:
+                claim_names, claim_paths = _extract_claims(text)
 
             stale_refs = sorted(
                 [

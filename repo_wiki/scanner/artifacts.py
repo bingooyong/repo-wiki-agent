@@ -10,10 +10,40 @@ from repo_wiki.generator.io import ensure_dir, write_yamlish
 _EXCLUDED_SOURCE_OF_TRUTH_PATH_PARTS = {
     "node_modules",
     "tests",
+    "examples",
+    "tutorials",
     "fixtures",
     "fixture",
     "__pycache__",
 }
+
+# Top-level trees that may be cited as 示例/docs/tests but are not product services.
+_PATH_ROLE_BY_TOP_LEVEL: dict[str, tuple[str, str]] = {
+    "tests": ("testing", "test-harness"),
+    "test": ("testing", "test-harness"),
+    "examples": ("examples", "sample-app"),
+    "example": ("examples", "sample-app"),
+    "tutorials": ("examples", "sample-app"),
+    "docs": ("documentation", "docs"),
+}
+
+
+def path_role_for(path: str) -> tuple[str, str] | None:
+    """Return ``(domain, runtime_role)`` for non-product trees, else ``None``."""
+    parts = Path(path).parts
+    if not parts:
+        return None
+    return _PATH_ROLE_BY_TOP_LEVEL.get(parts[0].lower())
+
+
+def is_product_source_path(path: str) -> bool:
+    """Return whether a file belongs in the product HTTP API / service inventory."""
+    if not path:
+        return True
+    if path_role_for(path) is not None:
+        return False
+    return not _has_excluded_source_path(path)
+
 
 _PARSER_PSEUDO_FACT_FILES = {
     "repo_wiki/scanner/repository_scanner.py",
@@ -49,7 +79,7 @@ def should_emit_source_fact(value: Any) -> bool:
     path = _source_fact_path(value)
     if not path:
         return True
-    if _has_excluded_source_path(path):
+    if not is_product_source_path(path):
         return False
     if _is_parser_pseudo_fact(path):
         return False

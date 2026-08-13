@@ -20,6 +20,7 @@ from typing import Any
 
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.orchestration.release_meta_schema import SCHEMA_VERSION_SOURCE_INVENTORY
+from repo_wiki.scanner.artifacts import is_product_source_path
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 
 # ---------------------------------------------------------------------------
@@ -391,6 +392,12 @@ def scan_single_file(rel: Path, text: str) -> FileScanRecord:
     # Health / probe hints in any code
     if re.search(r"(health|readiness|liveness)", text, re.I):
         record.deployment.append({"kind": "health_probe_hint", "evidence_path": rel_s})
+
+    if not is_product_source_path(rel_s):
+        if record.api_surfaces or record.services:
+            record.tests.append({"kind": "non_product_runtime", "evidence_path": rel_s})
+        record.api_surfaces = []
+        record.services = []
 
     return record
 
