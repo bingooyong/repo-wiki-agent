@@ -46,6 +46,10 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Ruff >=0.16 formats Python fences in Markdown by default. This repo treats
+# Ruff as a Python code formatter (see CONTRIBUTING.md); docs snippets are
+# illustrative and should not fail CI format checks.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
