@@ -6,7 +6,7 @@
 **时间：** 2026-08-13 22:42–23:02 CST（compose ≈19m）  
 **verify JSON：** `docs/eval/2026-08-13-fastapi-realworld-round2-verify.json`
 
-第一轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round1.md`。
+第一轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round1.md`。第三轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round3.md`。
 
 ## 生成
 
