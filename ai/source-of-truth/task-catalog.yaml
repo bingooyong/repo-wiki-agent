@@ -20,9 +20,23 @@ module_references:
   - repo_wiki.verifier
   - repo_wiki.viewer
   - extensions/repo-wiki-browser
+  - plugins/repo-wiki
   - tests
 
 tasks:
+  - name: validate-codex-plugin
+    description: Validate the skills-only Codex plugin package and its repository marketplace contract before local installation.
+    commands:
+      - python ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/repo-wiki
+      - python scripts/smoke_codex_plugin.py
+    inputs:
+      - plugins/repo-wiki/.codex-plugin/plugin.json
+      - .agents/plugins/marketplace.json
+    verifies:
+      - Plugin has no MCP or app capability in v1.
+      - Marketplace resolves the plugin from ./plugins/repo-wiki.
+      - Runner uses the current Python executable and does not persist API keys.
+
   - name: config-check
     description: Validate local non-secret LLM and output configuration before generation.
     commands:

@@ -1,0 +1,24 @@
+{
+  "name": "repo-wiki",
+  "version": "0.1.0",
+  "description": "Safe in-session workflows for generating, verifying, and maintaining Repo Wiki releases.",
+  "author": {"name": "Repo Wiki maintainers"},
+  "homepage": "https://github.com/bingooyong/repo-wiki-agent",
+  "repository": "https://github.com/bingooyong/repo-wiki-agent",
+  "license": "MIT",
+  "keywords": ["repository", "wiki", "documentation"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Repo Wiki",
+    "shortDescription": "Generate and maintain a local repository Wiki",
+    "longDescription": "Guided Repo Wiki generation, verification, and exact-run local release workflows.",
+    "developerName": "Repo Wiki maintainers",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write", "Interactive"],
+    "defaultPrompt": [
+      "Inspect this repository and suggest the next Repo Wiki action.",
+      "Generate a verified Repo Wiki candidate for this repository.",
+      "Verify a Repo Wiki run before publishing it locally."
+    ]
+  }
+}

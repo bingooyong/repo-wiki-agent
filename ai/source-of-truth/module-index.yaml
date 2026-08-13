@@ -235,6 +235,34 @@ modules:
     depended_by: []
     doc_path: docs/operations/vscode-extension-manual-llm-configuration.md
 
+  - name: plugins/repo-wiki
+    path: plugins/repo-wiki
+    kind: codex-plugin
+    domain: agent-integration
+    responsibility: Skills-only Codex plugin that routes repository Wiki lifecycle work through a deterministic local runner.
+    key_files:
+      - plugins/repo-wiki/.codex-plugin/plugin.json
+      - plugins/repo-wiki/scripts/workflow.py
+      - .agents/plugins/marketplace.json
+    workflows:
+      - repo-wiki
+      - repo-wiki-generate
+      - repo-wiki-maintain
+      - repo-wiki-verify
+    runner_contract:
+      executable: sys.executable -m repo_wiki.main
+      preserves_repository_run_config_and_signer_identity: true
+      requires_confirmation_for_ready_replacement: true
+      persists_api_keys: false
+      mcp_server: false
+    depends_on:
+      - repo_wiki
+      - repo_wiki.orchestration
+      - repo_wiki.verifier
+    depended_by:
+      - tests
+    doc_path: README.md
+
   - name: ai/source-of-truth
     path: ai/source-of-truth
     kind: structured-contracts
@@ -247,6 +275,7 @@ modules:
     depends_on:
       - repo_wiki
       - extensions/repo-wiki-browser
+      - plugins/repo-wiki
     depended_by:
       - repo_wiki
       - tests
@@ -269,5 +298,6 @@ modules:
       - repo_wiki.verifier
       - repo_wiki.viewer
       - extensions/repo-wiki-browser
+      - plugins/repo-wiki
     depended_by: []
     doc_path: docs/03-module-map.md

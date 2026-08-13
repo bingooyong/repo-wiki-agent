@@ -8,7 +8,9 @@
 .codex/
 .claude/
 .apm/
-.agents/
+.agents/*
+!.agents/plugins/
+!.agents/plugins/marketplace.json
 .cursor/
 .omx/
 .playwright-mcp/
