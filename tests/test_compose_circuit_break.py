@@ -277,7 +277,12 @@ async def test_circuit_break_skips_remaining_pages_without_timeout_wait(
     elapsed = time.perf_counter() - started
     llm = result["llm"]
 
-    assert elapsed < PAGE_TIMEOUT_SECONDS
+    # Scheduling test, not a micro-benchmark. CI 3.11 observed 1.53s vs a
+    # 1.5s cap. The pre-fix gather queued every leftover page, so remaining
+    # work waited ceil((8-2)/2) timeout waves (~4.5s). 3s is above one
+    # timeout of jitter and still below that gather wait. hang_count==0 is
+    # the proof leftover pages never entered the per-page timeout path.
+    assert elapsed < 3.0
     assert provider.hang_count == 0
     assert provider.call_count <= MAX_FAILURES * CONCURRENCY
     assert provider.call_count < PAGE_COUNT
