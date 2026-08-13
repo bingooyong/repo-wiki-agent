@@ -18,6 +18,7 @@ from repo_wiki.planner.schema import (
     WikiPlanManifest,
     WikiTaxonomyCategory,
 )
+from repo_wiki.scanner.docs_scanner import is_product_citation_source
 
 # Minimum candidate spans per page when evidence exists
 MIN_CANDIDATES_PER_PAGE = 5
@@ -337,6 +338,9 @@ def rank_evidence_for_page(
     candidates: list[tuple[float, int, EvidenceSpanRecord, list[str]]] = []
 
     for idx, span in enumerate(available_spans):
+        file_path = str(getattr(span, "file_path", "") or "")
+        if not is_product_citation_source(file_path):
+            continue
         score, signals = score_evidence_for_page(page, span)
         if score > 0:
             candidates.append((score, idx, span, signals))
