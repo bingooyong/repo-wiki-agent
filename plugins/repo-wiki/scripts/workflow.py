@@ -28,9 +28,9 @@ except ImportError:  # pragma: no cover - Python 3.8 compatibility guard
 
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 STABLE_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
-SECRET_RE = re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*([=:])\s*[^\s,]+")
+NAMED_KV_RE = re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*([=:])\s*[^\s,]+")
 BEARER_RE = re.compile(r"(?i)\b(authorization\s*[:=]\s*)?bearer\s+[^\s,]+")
-HIGH_CONFIDENCE_SECRET_RE = re.compile(
+HIGH_CONFIDENCE_LITERAL_RE = re.compile(
     r"(?ix)"
     r"\b(?:"
     r"sk-[a-z0-9_-]{20,}|"
@@ -102,10 +102,10 @@ def redact(value: Any) -> Any:
     """Keep structured events useful without allowing secret-shaped content through."""
     if isinstance(value, str):
         without_bearer = BEARER_RE.sub("Authorization=***REDACTED***", value)
-        without_named_secret = SECRET_RE.sub(
+        without_named_kv = NAMED_KV_RE.sub(
             lambda match: f"{match.group(1)}=***REDACTED***", without_bearer
         )
-        return HIGH_CONFIDENCE_SECRET_RE.sub("***REDACTED***", without_named_secret)
+        return HIGH_CONFIDENCE_LITERAL_RE.sub("***REDACTED***", without_named_kv)
     if isinstance(value, list):
         return [redact(item) for item in value]
     if isinstance(value, tuple):
