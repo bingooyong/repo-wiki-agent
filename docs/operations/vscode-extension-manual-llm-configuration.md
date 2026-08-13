@@ -1,6 +1,6 @@
-# VS Code 插件当前版本的 LLM 人工配置指南
+# VS Code 插件 LLM 配置：UI 主路径与终端后备
 
-**状态：** 当前可用路径 / 插件可视化配置落地前的必备文档
+**状态：** 与本仓扩展源码对齐。插件 UI + SecretStorage 为推荐路径；本文保留 YAML/env 供 CI、纯终端、旧 VSIX。
 **日期：** 2026-07-08
 **适用对象：** 使用 `Repo Wiki Browser` VS Code/Cursor 插件触发 `repo-wiki` CLI 生成 Wiki 的用户
 **完整 CLI 配置参考：** `docs/configuration.md`
@@ -10,19 +10,9 @@
 
 ## 1. 先说结论
 
-当前 `Repo Wiki Browser` 插件 **还不支持在插件 UI 中配置 LLM**。当前已安装/打包的插件只支持：
-
-- 浏览 READY Wiki release；
-- 展示 `repo-wiki.yaml` / `.repo-wiki.yaml` 中的 LLM 摘要；
-- 执行 `repoWikiBrowser.generateCommand` 指定的终端命令；
-- 默认命令为 `uv run repo-wiki generate --profile qoder-like`。
-
-因此，在插件可视化配置实现前，必须通过 **CLI 运行环境** 人工配置 LLM。推荐方式是：
-
-1. 在目标仓库写入非敏感 `repo-wiki.yaml`；
-2. 通过 shell 环境变量或本地未提交 `.env` 设置真实 API Key；
-3. 先运行 `uv run repo-wiki config --ci` 验证配置；
-4. 再用插件 `Repo Wiki: Update Wiki` 或终端命令生成 Wiki。
+本仓 `extensions/repo-wiki-browser` **已经支持**在插件 UI 中配置 LLM（Configure / Set Key / Clear / Test）。Key 进入 SecretStorage。真正调用 LLM 的仍是 `repo-wiki` CLI。
+UI 逐步说明见 `extensions/repo-wiki-browser/README.md` 的 LLM configuration 一节。
+在没有插件、CI、或只想用终端时，继续用下面的 YAML + 环境变量。旧 VSIX 若看不到这些命令，从本仓重新 `vsce package`。
 
 ---
 
@@ -30,17 +20,19 @@
 
 | 能力 | 当前状态 | 说明 |
 | --- | --- | --- |
-| 插件 UI 配置 provider | 未支持 | 后续见 `docs/specs/vscode-llm-configuration-spec.md`。 |
-| 插件 UI 配置 model | 未支持 | 当前只能通过 YAML / env / CLI 运行环境配置。 |
-| 插件 UI 配置 base_url | 未支持 | 当前只能通过 YAML / env / CLI 运行环境配置。 |
-| 插件 SecretStorage 保存 API Key | 未支持 | 当前不要把 key 写入 VS Code settings。 |
-| 插件自动注入 `LLM_*` env | 未支持 | 当前 `Update Wiki` 只是向集成终端发送命令。 |
+| 插件 UI 配置 provider | 已支持（源码） | Configure LLM Settings。 |
+| 插件 UI 配置 model | 已支持（源码） | Configure LLM Settings。 |
+| 插件 UI 配置 base_url | 已支持（源码） | Configure LLM Settings。 |
+| 插件 SecretStorage 保存 API Key | 已支持（源码） | Set / Clear LLM API Key。不要把 key 写入 VS Code settings。 |
+| 插件自动注入 `LLM_*` env | 已支持（源码） | Update Wiki 按 source 策略注入非空 `LLM_*`。 |
 | 展示 YAML 中 LLM 摘要 | 已支持 | 只展示 provider/model 等摘要，不管理 key。 |
 | 自定义生成命令 | 已支持 | 设置项：`repoWikiBrowser.generateCommand`。 |
 
 ---
 
 ## 3. 推荐安全配置方式
+
+无插件 UI 时用本节。有插件时优先 SecretStorage，不要把 key 写入 YAML。
 
 ### 3.1 在目标仓库写入非敏感 YAML
 

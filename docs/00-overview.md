@@ -40,6 +40,6 @@ repo-wiki release-publish --output .repo-agent-eval
 ## 下一步
 
 - 架构：`docs/01-architecture.md`
-- 配置：`docs/configuration.md`
+- 配置：`docs/configuration.md`；插件可配 LLM（Key 进 SecretStorage），见扩展 README 与 `docs/operations/vscode-extension-manual-llm-configuration.md`
 - 安装与插件：`docs/operations/installation-and-vscode-extension.md`
 - Agent 入口：仓库根 `AGENTS.md`

@@ -35,7 +35,9 @@ repo-wiki --help
 
 ### 2. 在目标项目配置 LLM
 
-当前 VS Code/Cursor 插件还不支持可视化配置 LLM。生成 Wiki 前，需要先在目标项目中人工配置 CLI 的 LLM 接入。
+推荐用 VS Code/Cursor 插件侧栏配置：活动栏 **Repo Wiki** → **Configure LLM Settings** / **Set LLM API Key** / **Test LLM Configuration**。Key 进入 VS Code SecretStorage，不写入 YAML 或普通 settings。真正调用 LLM 的仍是 Python CLI。
+
+YAML + 环境变量仍可用（CI、纯终端、或旧 VSIX）。从本仓重新 `vsce package` 后才有上述 UI。
 
 在目标项目根目录创建 `repo-wiki.yaml`，只写非敏感配置：
 
@@ -57,7 +59,7 @@ llm:
 export REPO_WIKI_LLM_API_KEY="<your-api-key>"
 ```
 
-不要把真实 API Key 写入 `repo-wiki.yaml`、VS Code settings、命令字符串、日志、文档或已提交文件。当前插件实现 SecretStorage 前，推荐优先使用临时终端环境变量；shell profile 或未提交 `.env` 属于本机落盘方案，仅在你接受该风险时使用。
+不要把真实 API Key 写入 `repo-wiki.yaml`、VS Code settings、命令字符串、日志、文档或已提交文件。插件里用 **Set LLM API Key** 写入 SecretStorage；终端场景用临时环境变量。shell profile 或未提交 `.env` 仅在你接受本机落盘风险时使用。
 
 也可以不写 YAML，直接使用环境变量：
 
@@ -152,15 +154,17 @@ repo-wiki release-publish --output .repo-agent-eval
 
 - 浏览 `.repo-agent-eval/repowiki/zh/manifest.json` 中 READY release 的 `navigation_tree`；
 - 打开生成的 Markdown 预览；
-- 触发 `Repo Wiki: Update Wiki`，本质是向 VS Code 集成终端发送 `repoWikiBrowser.generateCommand`；
+- 触发 `Repo Wiki: Update Wiki`，向集成终端发送 `repoWikiBrowser.generateCommand`，并按 source 策略注入非空 `LLM_*`；
+- 可视化配置 provider / model / base URL / `api_key_env`（Configure LLM Settings）；
+- 用 SecretStorage 保存/清除 API Key（Set / Clear LLM API Key）；
+- 运行 `Repo Wiki: Test LLM Configuration`（`repo-wiki config --ci`，输出脱敏）；
 - 展示 `repo-wiki.yaml` / `.repo-wiki.yaml` 中的 LLM 摘要。
 
 当前插件限制：
 
-- 尚不支持可视化配置 LLM provider / model / base URL / API Key；
-- 尚不支持 SecretStorage 保存 API Key；
-- 尚不自动注入 `LLM_PROVIDER`、`LLM_MODEL`、`LLM_BASE_URL`、`LLM_API_KEY_ENV`；
-- 使用插件前仍需按上文或 `docs/operations/vscode-extension-manual-llm-configuration.md` 手动配置 CLI 环境。
+- 扩展不内嵌 Python，也不直接调用 LLM；
+- 未执行 `release-publish` 时可能看不到可浏览 Wiki；
+- 旧 VSIX 可能没有 LLM UI，需从本仓按下面步骤重新打包。
 
 重新打包插件：
 
