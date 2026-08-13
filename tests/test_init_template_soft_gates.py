@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from repo_wiki.generator.cites import select_primary_cite
-
 from repo_wiki.generator.io import write_text
+from repo_wiki.generator.templates import TemplateRenderer
 from repo_wiki.verifier.service import VerifierService
 from tests.test_verifier import _write_minimum_with_sections
 
@@ -228,3 +228,50 @@ See architecture for system design.
     validity_check = _named_check(result, "citation-validity")
     assert validity_check["status"] == "FAIL"
     assert validity_check["reason_code"] == "CITATION_BROKEN_PATH"
+
+
+def test_rendered_init_overview_passes_list_and_citation(tmp_path: Path) -> None:
+    _write_minimum_with_sections(tmp_path)
+    source = tmp_path / "pkg" / "main.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def main():\n    return 0\n", encoding="utf-8")
+
+    prose = (
+        "This repository is a local-first wiki generator that scans source trees, "
+        "indexes modules and APIs, generates reader-facing documentation, and verifies "
+        "that the output stays tied to real files in the target repository. The pages "
+        "are written as prose so engineers can understand the system without a list wall."
+    )
+    renderer = TemplateRenderer(Path(__file__).resolve().parents[1] / "templates")
+    content = renderer.render(
+        "docs/00-overview.md.j2",
+        {
+            "repository_name": "demo",
+            "primary_cite": "<cite>pkg/main.py:1</cite>",
+            "project_description": prose,
+            "project_positioning": prose,
+            "architecture_description": prose,
+            "core_problem": prose,
+            "core_capabilities": (
+                "The system scans repositories, indexes source-of-truth artifacts, "
+                "generates wiki pages, and verifies citation and prose quality."
+            ),
+            "environment_requirements": "Python 3.11 or newer is required.",
+            "startup_commands": "Run repo-wiki init then repo-wiki index.",
+            "reading_navigation": "Start with architecture, then the module map.",
+            "repository_root": str(tmp_path),
+            "primary_language": "python",
+            "framework": "typer",
+            "module_count": "1",
+            "endpoint_count": "0",
+            "model_count": "0",
+            "domain_groups_markdown": "Core tooling lives in the pkg package.",
+        },
+    )
+    write_text(tmp_path / "docs/00-overview.md", content)
+
+    result = VerifierService(tmp_path).verify(ci=True)
+    overview_check = _named_check(result, "overview-prose-quality")
+    citation_check = _named_check(result, "citation-coverage")
+    assert overview_check["status"] == "PASS"
+    assert citation_check["status"] == "PASS"

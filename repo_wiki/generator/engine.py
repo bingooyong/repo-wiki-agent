@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .cache import GenerationCache
+from .cites import select_primary_cite
 from .context import ContextBuilder
 from .contracts import (
     CORE_DOCUMENT_CONTRACTS,
@@ -360,9 +361,26 @@ class NarrativeBuilder:
                 if len(capabilities) > 1
                 else capabilities[0] + "。"
             )
-            return f"{self.repo_name} 提供以下核心能力：{cap_text}"
+            text = f"{self.repo_name} 提供以下核心能力：{cap_text}"
         else:
-            return f"{self.repo_name} 提供基础的代码分析和结构理解能力。"
+            text = f"{self.repo_name} 提供基础的代码分析和结构理解能力。"
+        return self._capabilities_as_prose(text)
+
+    def _capabilities_as_prose(self, text: str) -> str:
+        """Turn a bullet wall into 1–2 sentences without leading list markers."""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return (
+                f"{self.repo_name} 能够扫描仓库、构建索引、生成文档并校验输出质量。"
+                "该流程把源码事实沉淀为可追溯的 Wiki 内容。"
+            )
+        bullet_items = [line.lstrip("- ").strip() for line in lines if line.startswith("-")]
+        if bullet_items and len(bullet_items) == len(lines):
+            return (
+                f"{self.repo_name} 能够扫描仓库、构建索引、生成文档并校验输出质量。"
+                "该流程把源码事实沉淀为可追溯的 Wiki 内容。"
+            )
+        return text.lstrip("- ").strip()
 
     def build_architecture_rationale(self) -> str:
         """Build architecture rationale explaining WHY the three-layer model exists.
@@ -2181,6 +2199,7 @@ class GenerationEngine:
         project_positioning = narrative_builder.build_project_positioning()
         core_problem = narrative_builder.build_core_problem()
         core_capabilities = narrative_builder.build_core_capabilities()
+        primary_cite = select_primary_cite(Path(self.root), snapshot)
 
         # Environment requirements based on language
         env_requirements = {
@@ -2572,6 +2591,7 @@ class GenerationEngine:
             "model_count": str(len(models)),
             "graph_summary": graph_summary,
             # New prose-first fields for 00-overview.md
+            "primary_cite": primary_cite,
             "project_description": project_description,
             "project_positioning": project_positioning,
             "core_problem": core_problem,
