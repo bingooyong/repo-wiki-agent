@@ -5,7 +5,9 @@ domain, and exposure pattern, and that entry-point selection uses principled
 scoring rather than just top-K retrieval.
 """
 
-from repo_wiki.generator.engine import APIAggregator, APIEndpoint
+from pathlib import Path
+
+from repo_wiki.generator.engine import APIAggregator, APIEndpoint, GenerationEngine
 
 
 class TestAPIAggregatorInitialization:
@@ -692,3 +694,119 @@ class TestNoEndpointDump:
         is_valid, reason = validate_api_contract_grouped(aggregated_content)
         # This should pass because it has proper structure
         assert is_valid or "service/API grouping" in reason
+
+
+_FORBIDDEN_HTTP_PATHS = ("/health", "/webhook", "/items", "/ready", "/status", "/path")
+
+
+class TestEmptyEndpointState:
+    """Empty api-index must not invent HTTP contracts."""
+
+    def test_empty_build_api_groups_table_has_no_fake_inventory(self):
+        aggregator = APIAggregator(endpoints=[], modules=[])
+        table = aggregator.build_api_groups_table()
+
+        assert "| 服务族/域 |" not in table
+        assert "未扫描到 HTTP API" in table
+        for path in _FORBIDDEN_HTTP_PATHS:
+            assert path not in table
+
+    def test_empty_build_api_groups_detail_has_no_fake_inventory(self):
+        aggregator = APIAggregator(endpoints=[], modules=[])
+        detail = aggregator.build_api_groups_detail()
+
+        assert "python-backend/core-platform" not in detail
+        assert "端点数量**: 10" not in detail
+        for path in _FORBIDDEN_HTTP_PATHS:
+            assert path not in detail
+        assert "未扫描到 HTTP API" in detail or "暂无 API" in detail
+
+    def test_empty_summarize_auth_conventions_is_inapplicable(self):
+        aggregator = APIAggregator(endpoints=[], modules=[])
+        summary = aggregator.summarize_auth_conventions()
+
+        assert "Bearer" not in summary
+        assert "不适用" in summary or "未扫描到 HTTP API" in summary
+
+    def test_empty_summarize_error_conventions_has_no_status_table(self):
+        aggregator = APIAggregator(endpoints=[], modules=[])
+        summary = aggregator.summarize_error_conventions()
+
+        assert "| 401 |" not in summary
+        assert "不适用" in summary or "未扫描到 HTTP API" in summary
+
+    def test_nonempty_health_fixture_still_builds_group_table(self):
+        endpoints = [
+            {
+                "method": "GET",
+                "path": "/health",
+                "module": "api",
+                "handler": "health",
+                "file_path": "api/main.py",
+            }
+        ]
+        modules = [
+            {
+                "name": "api",
+                "domain": "api-gateway",
+                "service_family": "python-backend",
+                "runtime_role": "api-server",
+            }
+        ]
+
+        aggregator = APIAggregator(endpoints=endpoints, modules=modules)
+        table = aggregator.build_api_groups_table()
+
+        assert "| 服务族/域 |" in table
+        assert "python-backend" in table
+        assert "/health" not in table or "1" in table
+
+    def test_build_core_context_empty_endpoints_uses_no_http_message(self, tmp_path: Path):
+        engine = GenerationEngine(tmp_path, template_root=tmp_path)
+        context = engine._build_core_context(
+            {
+                "repo_map": {"repository": {"name": "demo"}, "commands": {}},
+                "module_index": {"modules": []},
+                "api_index": {"endpoints": []},
+                "data_models": {"models": []},
+                "graph": {"modules": {}},
+            }
+        )
+
+        assert context["endpoint_index_table"] == APIAggregator.NO_HTTP_API_MESSAGE
+
+    def test_build_core_context_nonempty_endpoints_builds_index_table(self, tmp_path: Path):
+        engine = GenerationEngine(tmp_path, template_root=tmp_path)
+        context = engine._build_core_context(
+            {
+                "repo_map": {"repository": {"name": "demo"}, "commands": {}},
+                "module_index": {"modules": [{"name": "api", "path": "api"}]},
+                "api_index": {
+                    "endpoints": [
+                        {
+                            "method": "GET",
+                            "path": "/health",
+                            "module": "api",
+                            "handler": "health",
+                            "file_path": "api/main.py",
+                        },
+                        {
+                            "method": "POST",
+                            "path": "/webhook/github",
+                            "module": "tests",
+                            "handler": "handle",
+                            "file_path": "tests/api.py",
+                        },
+                    ]
+                },
+                "data_models": {"models": []},
+                "graph": {"modules": {}},
+            }
+        )
+        table = context["endpoint_index_table"]
+
+        assert table != APIAggregator.NO_HTTP_API_MESSAGE
+        assert "| 方法 | 路径 |" in table
+        assert "`/health`" in table
+        assert "[模块文档](modules/api.md)" in table
+        assert "[测试模块](modules/tests.md)" in table

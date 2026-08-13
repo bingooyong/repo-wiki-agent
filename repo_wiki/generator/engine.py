@@ -604,6 +604,11 @@ class APIAggregator:
     Phase 10 - Task 10.2: True API aggregation and entry-point summarization
     """
 
+    NO_HTTP_API_MESSAGE = (
+        "本仓库未扫描到 HTTP API 端点。产品接口是 `repo-wiki` CLI 命令面，"
+        "见 `ai/source-of-truth/task-catalog.yaml` 与 README。"
+    )
+
     def __init__(
         self,
         endpoints: list[dict[str, Any]],
@@ -799,6 +804,8 @@ class APIAggregator:
 
     def summarize_auth_conventions(self) -> str:
         """Summarize authentication conventions across all endpoints."""
+        if not self.api_endpoints:
+            return self.NO_HTTP_API_MESSAGE + "\n认证约定：不适用（无 HTTP 端点）。"
         auth_by_module: dict[str, set[str]] = {}
         for ep in self.api_endpoints:
             if ep.module not in auth_by_module:
@@ -814,6 +821,8 @@ class APIAggregator:
 
     def summarize_error_conventions(self) -> str:
         """Summarize error and status code conventions."""
+        if not self.api_endpoints:
+            return self.NO_HTTP_API_MESSAGE + "\n错误码约定：不适用（无 HTTP 端点）。"
         # Group error codes by pattern
         common_codes: set[int] = set()
         for ep in self.api_endpoints:
@@ -880,6 +889,8 @@ class APIAggregator:
     def build_api_groups_table(self) -> str:
         """Build API groups overview table with service family and domain grouping."""
         groups = self.group_by_service_family()
+        if not groups:
+            return self.NO_HTTP_API_MESSAGE
 
         lines = [
             "| 服务族/域 | 端点数 | 认证模式 | 暴露类型 |",
@@ -905,6 +916,8 @@ class APIAggregator:
     def build_api_groups_detail(self) -> str:
         """Build detailed API groups with calling conventions summaries."""
         groups = self.group_by_service_family()
+        if not groups:
+            return self.NO_HTTP_API_MESSAGE
         detail_parts = []
 
         for group_key in sorted(groups.keys()):
@@ -2480,28 +2493,29 @@ class GenerationEngine:
             key_entry_apis = "- 暂无关键入口 API 定义"
 
         # Build endpoint index table (simplified for reference)
-        endpoint_index_lines = [
-            "| 方法 | 路径 | 模块 | 处理器 | 文档 |",
-            "|------|------|------|--------|------|",
-        ]
-        for ep in sorted(endpoints, key=lambda x: (x.get("module", ""), x.get("path", ""))):
-            method = ep.get("method", "GET")
-            path = ep.get("path", "/")
-            module_name = ep.get("module", "unknown")
-            handler = ep.get("handler", "unknown")
-            file_path = ep.get("file_path", "")
-            # Find module doc path
-            doc_link = (
-                f"[模块文档](modules/{module_name}.md)"
-                if module_name != "tests"
-                else "[测试模块](modules/tests.md)"
-            )
-            endpoint_index_lines.append(
-                f"| {method} | `{path}` | {module_name} | `{handler}` | {doc_link} |"
-            )
-        endpoint_index_table = (
-            "\n".join(endpoint_index_lines) if endpoint_index_lines else "| 无端点 | | | |"
-        )
+        if not endpoints:
+            endpoint_index_table = APIAggregator.NO_HTTP_API_MESSAGE
+        else:
+            endpoint_index_lines = [
+                "| 方法 | 路径 | 模块 | 处理器 | 文档 |",
+                "|------|------|------|--------|------|",
+            ]
+            for ep in sorted(endpoints, key=lambda x: (x.get("module", ""), x.get("path", ""))):
+                method = ep.get("method", "GET")
+                path = ep.get("path", "/")
+                module_name = ep.get("module", "unknown")
+                handler = ep.get("handler", "unknown")
+                file_path = ep.get("file_path", "")
+                # Find module doc path
+                doc_link = (
+                    f"[模块文档](modules/{module_name}.md)"
+                    if module_name != "tests"
+                    else "[测试模块](modules/tests.md)"
+                )
+                endpoint_index_lines.append(
+                    f"| {method} | `{path}` | {module_name} | `{handler}` | {doc_link} |"
+                )
+            endpoint_index_table = "\n".join(endpoint_index_lines)
 
         # =====================================================================
         # Domain-aggregated data model generation (Phase 10 - Task 10.3)
