@@ -1,5 +1,5 @@
 repository:
-  name: repo-agent
+  name: repo-wiki-agent
   root_path: .
   primary_language: python
   secondary_languages:
