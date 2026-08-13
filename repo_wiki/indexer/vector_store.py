@@ -6,7 +6,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from repo_wiki.core.logging import warn
 from repo_wiki.generator.io import ensure_dir
+
+_CHROMA_FALLBACK_LOGGED = False
 
 
 @dataclass
@@ -42,7 +45,14 @@ class ChromaVectorStore:
 
             self._chroma = chromadb.PersistentClient(path=str(root_dir))
             self._collection = self._chroma.get_or_create_collection("repo_wiki_chunks")
-        except Exception:
+        except Exception as exc:
+            global _CHROMA_FALLBACK_LOGGED
+            if isinstance(exc, ImportError) and not _CHROMA_FALLBACK_LOGGED:
+                warn(
+                    "ChromaDB not installed; using vectors.json fallback. "
+                    "Install with: pip install 'repo-wiki[vector]'"
+                )
+                _CHROMA_FALLBACK_LOGGED = True
             self._chroma = None
             self._collection = None
 

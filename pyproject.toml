@@ -26,6 +26,7 @@ dev = [
   "ruff>=0.1",
   "mypy>=1.8",
 ]
+vector = ["chromadb>=0.5.0"]
 
 [project.scripts]
 repo-wiki = "repo_wiki.cli:app"
