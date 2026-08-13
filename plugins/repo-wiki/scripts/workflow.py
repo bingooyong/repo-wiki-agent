@@ -56,6 +56,7 @@ REQUIRED_G005_ARTIFACTS = frozenset(
     }
 )
 MAINTENANCE_OPERATIONS = frozenset({"init", "index", "update", "sync"})
+QUALITY_GATE_OPERATION = "quality-gate"
 
 
 class WorkflowError(RuntimeError):
@@ -94,6 +95,7 @@ class WorkflowContext:
     config_explicit: bool = False
     config_fingerprint: FileFingerprint | None = None
     allowed_signers_fingerprint: FileFingerprint | None = None
+    quality_gate_args: tuple[str, ...] = ()
 
 
 def redact(value: Any) -> Any:
@@ -297,7 +299,7 @@ def validate_existing_run(root: Path, run_id: str) -> tuple[Path, Path]:
 
 def command(ctx: WorkflowContext, *args: str, config: bool = False) -> list[str]:
     argv = [ctx.executable, "-m", "repo_wiki.main", *args]
-    if config and ctx.config:
+    if config and ctx.config_explicit and ctx.config:
         argv.extend(["--config", str(ctx.config)])
     return argv
 
@@ -309,6 +311,9 @@ def cli_environment(import_root: Path) -> dict[str, str]:
     env["PYTHONPATH"] = str(import_root)
     env.pop("PYTHONHOME", None)
     env.pop("PYTHONSTARTUP", None)
+    # G005 also accepts this ambient fallback, but publication identity must
+    # come only from the explicit, fingerprinted runner argument.
+    env.pop("REPO_WIKI_G005_REVIEW_ALLOWED_SIGNERS", None)
     return env
 
 
@@ -499,6 +504,7 @@ def probe_cli(
         "index": ("index", "--help"),
         "update": ("update", "--help"),
         "sync": ("sync", "--help"),
+        "quality-gate": ("quality-gate", "--help"),
         "generate": ("generate", "--help"),
         "improve": ("improve", "--help"),
         "verify": ("verify", "--help"),
@@ -511,6 +517,7 @@ def probe_cli(
             "index",
             "update",
             "sync",
+            "quality-gate",
             "generate",
             "improve",
             "verify",
@@ -521,6 +528,7 @@ def probe_cli(
         "index": ("--config",),
         "update": ("--config",),
         "sync": ("--config",),
+        "quality-gate": ("--output", "--run", "--review-allowed-signers"),
         "generate": ("--output", "--run-id", "--config"),
         "improve": ("--output", "--run-id", "--config"),
         "verify": ("--profile", "--output", "--ci", "--config"),
@@ -650,6 +658,37 @@ def maintain(ctx: WorkflowContext) -> None:
     doctor(ctx)
     result = invoke(ctx, ctx.operation, command(ctx, ctx.operation, config=True))
     emit(ctx, ctx.operation, "PASS", result=result)
+
+
+def quality_gate(ctx: WorkflowContext) -> None:
+    """Compile supplied G005 evidence through the fixed runner context."""
+    assert ctx.run_id and ctx.run_dir
+    recheck_context(ctx)
+    result = invoke(
+        ctx,
+        QUALITY_GATE_OPERATION,
+        command(
+            ctx,
+            QUALITY_GATE_OPERATION,
+            "--output",
+            ".repo-agent-eval",
+            "--run",
+            ctx.run_id,
+            *ctx.quality_gate_args,
+        ),
+    )
+    report = ctx.run_dir / "reports" / "g005-quality-gates.json"
+    if (
+        result.get("status") != "PASS"
+        or result.get("run_id") != ctx.run_id
+        or result.get("report_json") != str(report)
+        or not report.is_file()
+    ):
+        raise WorkflowError(
+            "quality_gate_failed", "G005 quality-gate did not produce the selected run"
+        )
+    recheck_context(ctx)
+    emit(ctx, QUALITY_GATE_OPERATION, "PASS", report_path=str(report))
 
 
 def require_g005(ctx: WorkflowContext) -> None:
@@ -785,7 +824,10 @@ def build_context(args: argparse.Namespace) -> WorkflowContext:
     if probed_version != cli_version:
         raise WorkflowError("incompatible_cli", "repo-wiki distribution version changed")
     run_id = validate_run_id(args.run_id) if args.run_id else None
-    if args.operation in {"generate", "improve", "verify", "publish"} and not run_id:
+    if (
+        args.operation in {"generate", "improve", "verify", "publish", QUALITY_GATE_OPERATION}
+        and not run_id
+    ):
         raise WorkflowError("run_id_required", "This operation requires --run-id")
     output_parent = validate_output_parent(root)
     run_dir: Path | None = None
@@ -802,6 +844,23 @@ def build_context(args: argparse.Namespace) -> WorkflowContext:
                 "unsafe_allowed_signers", "Allowed-signers file must exist outside eval output"
             )
         signer_fingerprint = fingerprint_file(signer, "unsafe_allowed_signers")
+    quality_gate_args: list[str] = []
+    if args.operation == QUALITY_GATE_OPERATION:
+        for option, value in (
+            ("--qoder-comparison", args.qoder_comparison),
+            ("--blind-review-v3", args.blind_review_v3),
+            ("--acceptance-fixture-registry", args.acceptance_fixture_registry),
+            ("--strict-verify", args.strict_verify),
+            ("--citation-evidence", args.citation_evidence),
+            ("--critical-false-fact-evidence", args.critical_false_fact_evidence),
+            ("--quality-evidence", args.quality_evidence),
+            ("--conflict-evidence", args.conflict_evidence),
+            ("--acceptance-artifact-root", args.acceptance_artifact_root),
+            ("--blind-review-attestation", args.blind_review_attestation),
+            ("--review-allowed-signers", signer),
+        ):
+            if value:
+                quality_gate_args.extend([option, str(value)])
     return WorkflowContext(
         root,
         config,
@@ -819,6 +878,7 @@ def build_context(args: argparse.Namespace) -> WorkflowContext:
         config_explicit,
         config_fingerprint,
         signer_fingerprint,
+        tuple(quality_gate_args),
     )
 
 
@@ -832,6 +892,7 @@ def main() -> int:
             "index",
             "update",
             "sync",
+            QUALITY_GATE_OPERATION,
             "generate",
             "improve",
             "verify",
@@ -842,6 +903,16 @@ def main() -> int:
     parser.add_argument("--config")
     parser.add_argument("--confirm-run-id")
     parser.add_argument("--review-allowed-signers")
+    parser.add_argument("--qoder-comparison")
+    parser.add_argument("--blind-review-v3")
+    parser.add_argument("--acceptance-fixture-registry")
+    parser.add_argument("--strict-verify")
+    parser.add_argument("--citation-evidence")
+    parser.add_argument("--critical-false-fact-evidence")
+    parser.add_argument("--quality-evidence")
+    parser.add_argument("--conflict-evidence")
+    parser.add_argument("--acceptance-artifact-root")
+    parser.add_argument("--blind-review-attestation")
     parser.add_argument("--cwd", default=os.getcwd())
     args = parser.parse_args()
     ctx: WorkflowContext | None = None
@@ -851,6 +922,8 @@ def main() -> int:
             doctor(ctx)
         elif args.operation in MAINTENANCE_OPERATIONS:
             maintain(ctx)
+        elif args.operation == QUALITY_GATE_OPERATION:
+            quality_gate(ctx)
         elif args.operation in {"generate", "improve"}:
             generate_or_improve(ctx)
         elif args.operation == "verify":

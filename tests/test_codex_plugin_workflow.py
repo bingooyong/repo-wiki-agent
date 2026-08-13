@@ -65,12 +65,13 @@ def main() -> int:
     stage = args[0] if args and args[0] != "--help" else "root"
     if "--help" in args:
         help_text = {
-            "root": "config init index update sync generate improve verify release-publish",
+            "root": "config init index update sync quality-gate generate improve verify release-publish",
             "config": "--ci",
             "init": "--config",
             "index": "--config",
             "update": "--config",
             "sync": "--config",
+            "quality-gate": "--output --run --review-allowed-signers",
             "generate": "--output --run-id --config",
             "improve": "--output --run-id --config",
             "verify": "--profile --output --ci --config",
@@ -111,6 +112,11 @@ def main() -> int:
             "verify_root": os.environ.get("FAKE_VERIFY_ROOT", str(run_dir)),
             "canonical_report_path": os.environ.get("FAKE_REPORT_PATH", str(report)),
         }
+    elif stage == "quality-gate":
+        report = cwd / ".repo-agent-eval" / "runs" / run_id / "reports" / "g005-quality-gates.json"
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text("{}", encoding="utf-8")
+        payload = {"status": "PASS", "run_id": run_id, "report_json": str(report)}
     elif stage == "release-publish":
         inspect_only = "--inspect-only" in args
         payload = {
@@ -165,6 +171,7 @@ def _context(workflow: ModuleType, root: Path, operation: str, run_id: str = "ru
                 "index",
                 "update",
                 "sync",
+                "quality-gate",
                 "generate",
                 "improve",
                 "verify",
@@ -205,12 +212,13 @@ class FakeModule:
         stage = tail[0] if tail and tail[0] != "--help" else "root"
         if "--help" in tail:
             help_text = {
-                "root": "config init index update sync generate improve verify release-publish",
+                "root": "config init index update sync quality-gate generate improve verify release-publish",
                 "config": "--ci",
                 "init": "--config",
                 "index": "--config",
                 "update": "--config",
                 "sync": "--config",
+                "quality-gate": "--output --run --review-allowed-signers",
                 "generate": "--output --run-id --config",
                 "improve": "--output --run-id --config",
                 "verify": "--profile --output --ci --config",
@@ -239,6 +247,11 @@ class FakeModule:
                 "verify_root": str(run_dir),
                 "canonical_report_path": str(report),
             }
+        elif stage == "quality-gate":
+            report = run_dir / "reports" / "g005-quality-gates.json"
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text("{}", encoding="utf-8")
+            payload = {"status": "PASS", "run_id": self.run_id, "report_json": str(report)}
         elif stage == "release-publish":
             payload = {
                 "status": self.inspect_status if "--inspect-only" in tail else "PUBLISHED",
@@ -450,6 +463,32 @@ def test_command_uses_current_python_module_and_only_attaches_config_when_reques
     assert workflow.command(ctx, "config", "--ci", config=True)[-2:] == ["--config", str(config)]
 
 
+def test_command_omits_config_argv_for_auto_discovered_yaml(
+    workflow: ModuleType, repository: Path
+) -> None:
+    config = repository / "repo-wiki.yaml"
+    config.write_text("{}", encoding="utf-8")
+    ctx = replace(_context(workflow, repository, "doctor"), config=config, config_explicit=False)
+
+    assert workflow.command(ctx, "config", "--ci", config=True) == [
+        sys.executable,
+        "-m",
+        "repo_wiki.main",
+        "config",
+        "--ci",
+    ]
+
+
+def test_cli_environment_removes_ambient_allowed_signers(
+    workflow: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("REPO_WIKI_G005_REVIEW_ALLOWED_SIGNERS", str(tmp_path / "ambient"))
+
+    env = workflow.cli_environment(tmp_path)
+
+    assert "REPO_WIKI_G005_REVIEW_ALLOWED_SIGNERS" not in env
+
+
 def test_probe_cli_checks_every_help_contract_and_ignores_path_binary(
     workflow: ModuleType, repository: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -465,13 +504,14 @@ def test_probe_cli_checks_every_help_contract_and_ignores_path_binary(
         "index",
         "update",
         "sync",
+        "quality-gate",
         "generate",
         "improve",
         "verify",
         "release-publish",
     }
     assert all(call[:3] == [sys.executable, "-m", "repo_wiki.main"] for call in fake.calls)
-    assert len(fake.calls) == 10
+    assert len(fake.calls) == 11
 
 
 @pytest.mark.parametrize("operation", ["generate", "improve"])
@@ -558,6 +598,41 @@ def test_maintenance_workflow_runs_config_then_exact_operation(
 
     assert [call[3] for call in fake.calls] == ["config", operation]
     assert fake.calls[-1][3:] == [operation]
+
+
+def test_quality_gate_uses_exact_run_and_canonical_signer(
+    workflow: ModuleType, repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(workflow, repository, "quality-gate")
+    ctx.run_dir.mkdir(parents=True)
+    signers = repository.parent / "quality-gate-signers"
+    signers.write_text("reviewer", encoding="utf-8")
+    ctx = replace(
+        ctx,
+        allowed_signers=signers.resolve(),
+        allowed_signers_fingerprint=workflow.fingerprint_file(
+            signers.resolve(), "unsafe_allowed_signers"
+        ),
+        quality_gate_args=("--review-allowed-signers", str(signers.resolve())),
+    )
+    fake = FakeModule(repository)
+    fake.install(monkeypatch, workflow)
+    monkeypatch.setattr(workflow, "select_config", lambda *_: None)
+    monkeypatch.setattr(workflow, "probe_cli", lambda *_: ("0.1.0", ctx.capabilities))
+
+    workflow.quality_gate(ctx)
+
+    calls = _lifecycle_calls(fake)
+    assert len(calls) == 1
+    assert calls[0][3:] == [
+        "quality-gate",
+        "--output",
+        ".repo-agent-eval",
+        "--run",
+        "run-42",
+        "--review-allowed-signers",
+        str(signers.resolve()),
+    ]
 
 
 def test_verify_rejects_manifest_for_a_different_run(
@@ -742,6 +817,7 @@ def test_subprocess_ignores_target_local_module_and_path_shadow(
             "index",
             "update",
             "sync",
+            "quality-gate",
             "generate",
             "improve",
             "verify",

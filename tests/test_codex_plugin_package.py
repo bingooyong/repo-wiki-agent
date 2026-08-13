@@ -77,6 +77,11 @@ def test_skills_have_unique_frontmatter_and_route_writes_through_runner() -> Non
     assert "does not create" in (PLUGIN / "skills" / "repo-wiki-maintain" / "SKILL.md").read_text(
         encoding="utf-8"
     )
+    maintain = (PLUGIN / "skills" / "repo-wiki-maintain" / "SKILL.md").read_text(encoding="utf-8")
+    assert 'workflow.py" quality-gate' in maintain
+    assert "never invoke `repo-wiki quality-gate` directly" in maintain
+    assert maintain.count("--review-allowed-signers") >= 3
+    assert "do not rely on ambient signer environment variables" in maintain
 
 
 def test_skill_commands_exist_and_secrets_are_policy_only() -> None:
