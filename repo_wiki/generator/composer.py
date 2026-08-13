@@ -28,6 +28,7 @@ from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.models import ChatMessage, ChatRequest, ChatResponse, LLMProvider
 from repo_wiki.llm.providers import create_mock_provider
+from repo_wiki.llm.retry import chat_with_retry
 from repo_wiki.planner.schema import INVENTORY_SERVICE_API_PAGE_ID, WikiPagePlan
 from repo_wiki.prompts.contracts import (
     PagePromptContract,
@@ -600,7 +601,7 @@ class LLMPageComposer:
             timeout=self._llm_config.timeout,
         )
 
-        return await self._provider.chat(request)
+        return await chat_with_retry(self._provider, request)
 
     def _resolve_request_max_tokens(self) -> int:
         raw = os.environ.get("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS")
