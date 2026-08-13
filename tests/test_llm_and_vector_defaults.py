@@ -31,4 +31,6 @@ def test_readme_does_not_claim_chroma_is_unconditional() -> None:
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "SQLite + ChromaDB 嵌入式运行" not in text
     assert "chromadb" in text.lower() or "Chroma" in text
-    assert "vector" in text.lower() or "fallback" in text.lower() or "降级" in text or "可选" in text
+    assert (
+        "vector" in text.lower() or "fallback" in text.lower() or "降级" in text or "可选" in text
+    )
