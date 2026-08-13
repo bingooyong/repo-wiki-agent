@@ -462,9 +462,22 @@ def _type_name(node: ast.AST | None) -> str | None:
     return None
 
 
+def _function_assigned_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    names: set[str] = set()
+    for stmt in node.body:
+        if isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            names.add(stmt.target.id)
+    return names
+
+
 def _factory_return_class(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
     if not _is_no_arg_factory(node):
         return None
+    local_names = _function_assigned_names(node)
     names: set[str] = set()
     annotated = _type_name(node.returns)
     if annotated and annotated not in _ROUTER_CTORS:
@@ -473,14 +486,19 @@ def _factory_return_class(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str |
         if not isinstance(walked, ast.Return) or walked.value is None:
             continue
         ctor = _call_ctor_name(walked.value)
-        if ctor and ctor not in _ROUTER_CTORS:
+        if ctor and ctor not in _ROUTER_CTORS and ctor not in local_names:
             names.add(ctor)
             continue
         named = _type_name(walked.value)
-        if named and named not in _ROUTER_CTORS:
+        if named and named not in _ROUTER_CTORS and named not in local_names:
             names.add(named)
     if len(names) == 1:
         return next(iter(names))
+    # RealWorld: `-> AppSettings` plus `return config()` is not unique; keep the
+    # annotation. Prefix lookup later succeeds only if that class has a string
+    # constant attr (e.g. api_prefix="/api"); otherwise no prefix is invented.
+    if annotated and annotated not in _ROUTER_CTORS:
+        return annotated
     return None
 
 
