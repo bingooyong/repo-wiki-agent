@@ -13,8 +13,8 @@ Thank you for your interest in contributing to repo-wiki!
 
 ```bash
 # Clone the repository
-git clone https://github.com/bingooyong/repo-agent.git
-cd repo-agent
+git clone https://github.com/bingooyong/repo-wiki-agent.git
+cd repo-wiki-agent
 
 # Create virtual environment
 uv venv .venv && source .venv/bin/activate
@@ -39,13 +39,15 @@ pytest tests/test_cli.py -v
 
 ## Code Style
 
-We use **Ruff** for linting and formatting:
+We use **Ruff** for linting and formatting Python source. Markdown files are
+excluded (`extend-exclude = ["*.md"]`) so illustrative code fences in `docs/`
+are not rewritten by `ruff format`.
 
 ```bash
 # Check code style
 ruff check .
 
-# Format code
+# Format Python source
 ruff format .
 ```
 

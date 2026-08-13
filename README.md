@@ -20,8 +20,8 @@
 ### 1. 安装 `repo-wiki` CLI
 
 ```bash
-git clone https://github.com/bingooyong/repo-agent.git
-cd repo-agent
+git clone https://github.com/bingooyong/repo-wiki-agent.git
+cd repo-wiki-agent
 uv venv .venv && source .venv/bin/activate
 uv pip install -e .
 ```

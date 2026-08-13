@@ -16,27 +16,32 @@ PACKAGE_JSON = EXT_DIR / "package.json"
 EXTENSION_TS = EXT_DIR / "src" / "extension.ts"
 
 
+def _run_in_extension(args: list[str]) -> None:
+    result = subprocess.run(args, cwd=EXT_DIR, capture_output=True, text=True)
+    if result.returncode:
+        pytest.fail(
+            f"{' '.join(args)} failed with exit {result.returncode}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+
+def _ensure_extension_node_modules() -> None:
+    if (EXT_DIR / "node_modules" / "typescript").is_dir():
+        return
+    _run_in_extension(["npm", "ci"])
+
+
 @pytest.mark.skipif(shutil.which("npm") is None, reason="npm not on PATH")
 def test_repo_wiki_browser_npm_compile() -> None:
-    subprocess.run(
-        ["npm", "run", "compile"],
-        cwd=EXT_DIR,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    _ensure_extension_node_modules()
+    _run_in_extension(["npm", "run", "compile"])
 
 
 @pytest.mark.skipif(shutil.which("npx") is None, reason="npx not on PATH")
 def test_repo_wiki_browser_vsce_package(tmp_path: Path) -> None:
+    _ensure_extension_node_modules()
     vsix = tmp_path / "repo-wiki-browser-0.1.0.vsix"
-    subprocess.run(
-        ["npx", "--yes", "@vscode/vsce", "package", "--out", str(vsix)],
-        cwd=EXT_DIR,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    _run_in_extension(["npx", "--yes", "@vscode/vsce", "package", "--out", str(vsix)])
     assert vsix.is_file()
     assert vsix.stat().st_size > 10_000
 
