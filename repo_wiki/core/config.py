@@ -36,7 +36,7 @@ class IndexConfig(BaseModel):
 class LlmConfig(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
-    provider: str = "anthropic"
+    provider: str = "openai"
     model: str | None = None
     base_url: str | None = None
     api_key_env: str | None = None
