@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, TypeVar
 
 import repo_wiki.llm
-from repo_wiki.llm.models import LLMProvider, RetryableError
+from repo_wiki.llm.models import ErrorCode, LLMProvider, RetryableError
 
 T = TypeVar("T")
 
@@ -92,12 +92,21 @@ async def with_retry(
         raise last_error
 
 
+def assistant_content_is_empty(content: str | None) -> bool:
+    """Return True when assistant content is missing, empty, or whitespace-only."""
+    return not str(content or "").strip()
+
+
 async def chat_with_retry(
     provider: LLMProvider,
     request: repo_wiki.llm.ChatRequest,
     retry_config: RetryConfig | None = None,
 ) -> repo_wiki.llm.ChatResponse:
     """Send a chat request with retry logic.
+
+    HTTP 200 responses with empty/whitespace assistant ``content`` are treated as
+    ``RetryableError`` (MiniMax-M3 and similar reasoning models can spend the
+    token budget on hidden reasoning and return a blank ``content`` field).
 
     Args:
         provider: LLM provider
@@ -110,8 +119,21 @@ async def chat_with_retry(
     Raises:
         RetryableError: If all retries exhausted
     """
+
+    async def _chat_rejecting_empty_content(
+        chat_request: repo_wiki.llm.ChatRequest,
+    ) -> repo_wiki.llm.ChatResponse:
+        response = await provider.chat(chat_request)
+        if assistant_content_is_empty(response.content):
+            raise RetryableError(
+                message="Empty LLM assistant content",
+                code=ErrorCode.EMPTY_CONTENT,
+                details={"status": 200},
+            )
+        return response
+
     return await with_retry(
-        provider.chat,
+        _chat_rejecting_empty_content,
         request,
         retry_config=retry_config,
         provider=provider,

@@ -32,6 +32,7 @@ from repo_wiki.generator.composer import (
     create_composer,
     run_smoke_test,
 )
+from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.providers import MockLLMProvider, create_mock_provider
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.orchestration.service import RepoWikiService
@@ -43,6 +44,14 @@ from repo_wiki.planner.schema import (
 )
 from repo_wiki.prompts.contracts import PagePromptContract, PagePromptType
 from repo_wiki.prompts.skeleton import build_skeleton
+
+
+class _NamedMockProvider(MockLLMProvider):
+    """Mock chat implementation that reports a real provider name (e.g. minimax)."""
+
+    @property
+    def name(self) -> str:
+        return self._config.provider
 
 
 class TestCitationPreservationValidator:
@@ -327,6 +336,39 @@ class TestLLMPageComposer:
         composer = create_composer()
         assert composer is not None
         assert composer._provider is not None
+
+    def test_real_provider_compact_max_tokens_not_clamped_to_1400(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Compact prompt must not cap real providers at 1400 (starves MiniMax-M3 reasoning).
+
+        Split: mock/tests may keep a compact 1400 cap; real-looking configs use
+        configured llm.max_tokens (or at least 4096), still <= provider max.
+        """
+        monkeypatch.setenv("REPO_WIKI_COMPACT_LLM_PROMPT", "1")
+        monkeypatch.delenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", raising=False)
+        llm_config = LLMProviderConfig(
+            provider="minimax",
+            model="MiniMax-M3",
+            max_tokens=8192,
+        )
+        provider = _NamedMockProvider(config=llm_config)
+        composer = create_composer(provider=provider, llm_config=llm_config)
+        resolved = composer._resolve_request_max_tokens()
+        assert resolved != 1400
+        assert resolved == 8192
+        assert resolved >= 4096
+        assert resolved <= llm_config.max_tokens
+
+    def test_mock_provider_compact_max_tokens_keeps_small_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Mock/tests may keep the compact 1400 cap so existing fixtures stay cheap."""
+        monkeypatch.setenv("REPO_WIKI_COMPACT_LLM_PROMPT", "1")
+        monkeypatch.delenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", raising=False)
+        composer = create_composer()
+        resolved = composer._resolve_request_max_tokens()
+        assert resolved <= 1400
 
     @pytest.mark.asyncio
     async def test_compose_page_success(

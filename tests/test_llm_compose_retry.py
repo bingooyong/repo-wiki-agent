@@ -38,6 +38,11 @@ def _success_response() -> ChatResponse:
     return ChatResponse(content=SUCCESS_MARKDOWN, model="mock-gpt")
 
 
+def _empty_response(content: str = "") -> ChatResponse:
+    """HTTP 200 ChatResponse with blank/whitespace assistant content."""
+    return ChatResponse(content=content, model="mock-gpt")
+
+
 class SequenceLLMProvider(LLMProvider):
     """Fake provider that yields a scripted sequence of errors or responses."""
 
@@ -201,3 +206,58 @@ async def test_compose_page_rejects_after_retries_exhausted(
     assert "529" in (output.rejection_reason or "")
     assert provider.call_count == RetryConfig().max_retries + 1
     assert provider.call_count <= 20
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_empty_content_then_succeeds(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    """HTTP 200 with blank/whitespace content is retryable, like 5xx/429."""
+    provider = SequenceLLMProvider(
+        [_empty_response(""), _empty_response("  \n\t"), _success_response()],
+    )
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert SUCCESS_MARKDOWN.splitlines()[0] in output.markdown
+    assert "LLM composer did not return content" not in output.markdown
+    assert provider.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_compose_page_rejects_after_empty_content_retries_exhausted(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    """Exhausted empty-content retries must fail, not PASS with a placeholder shell."""
+    provider = SequenceLLMProvider([_empty_response("") for _ in range(10)])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is True
+    assert output.rejection_reason
+    assert not (
+        output.rejected is False and "LLM composer did not return content" in output.markdown
+    )
+    assert "LLM composer did not return content" not in output.markdown
+    assert provider.call_count == RetryConfig().max_retries + 1
+    assert provider.call_count <= 20
+
+
+@pytest.mark.asyncio
+async def test_compose_page_does_not_retry_nonempty_content(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_success_response(), _empty_response("")])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "LLM composer did not return content" not in output.markdown
+    assert provider.call_count == 1
