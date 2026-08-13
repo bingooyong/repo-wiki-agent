@@ -16,4 +16,4 @@ Model: MiniMax-M3 (reasoning). No API keys recorded here.
 
 ## Follow-up
 
-Round-2 Flask generate should run after the hardening fixes land (packaged templates, safe path claims, honor `llm.timeout` with a 300s ceiling).
+Round-2 Flask generate should run after the hardening fixes land (packaged templates, safe path claims, honor `llm.timeout` with a 300s ceiling). Round-2 notes: `docs/eval/2026-08-13-flask-round2.md`.

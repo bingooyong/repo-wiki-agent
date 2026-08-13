@@ -1,0 +1,44 @@
+{
+  "grade": "FAIL",
+  "profile": "qoder-like",
+  "strict_mode": true,
+  "ci_mode": true,
+  "exit_code": 1,
+  "status": "NOT_READY",
+  "flask_sha": "2a8a38b051fc248865730bf3511bf2e2ea325e81",
+  "repo_wiki_sha": "98aa8bd38394ca252b4109b3b00b2003b5613cc9",
+  "model": "MiniMax-M3",
+  "summary": {
+    "total": 25,
+    "pass": 12,
+    "warn": 1,
+    "fail": 12,
+    "hard_gate_failures": 12,
+    "soft_gate_failures": 0
+  },
+  "hard_gate_codes": [
+    "QODER_QUALITY_ARTIFACT_MISSING",
+    "QODER_UNRESOLVED_FACT_CONFLICT",
+    "QODER_REQUIRED_INVENTORY_MISSING",
+    "QODER_CITATION_INVALID",
+    "QODER_CITATION_FACT_COVERAGE_LOW",
+    "QODER_CITATION_RELEVANCE_MISMATCH",
+    "QODER_API_MERMAID_MISSING",
+    "QODER_API_AGGREGATION_LOW",
+    "QODER_PAGE_DUMP",
+    "QODER_PROSE_TOO_LOW",
+    "QODER_DIRTY_WORKTREE"
+  ],
+  "soft_gate_codes": [],
+  "notes": {
+    "pages": 84,
+    "invalid_citations": 31,
+    "claim_coverage": "15.06%",
+    "page_dumps": 16,
+    "low_prose_pages": 4,
+    "api_aggregation": "8/14",
+    "unresolved_fact_conflicts": 406,
+    "quality_artifacts": "written under repowiki/zh/meta/ but verifier expected release layout",
+    "verify_invocation": "repo-wiki verify --profile qoder-like --ci --output <run-id>"
+  }
+}
