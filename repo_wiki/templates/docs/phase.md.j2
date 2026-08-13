@@ -1,0 +1,30 @@
+# ${phase_title}
+
+{% if phase_status %}
+**Status:** ${phase_status}
+{% endif %}
+
+## Objectives
+
+${phase_objectives}
+
+## Deliverables
+
+${phase_deliverables}
+
+{% if phase_dependencies %}
+## Dependencies
+
+${phase_dependencies}
+{% endif %}
+
+## Navigation
+
+- [Overview](../00-overview.md)
+- [Architecture](../01-architecture.md)
+{% if phase_prev %}
+- [Previous: ${phase_prev_title}](../phases/${phase_prev}.md)
+{% endif %}
+{% if phase_next %}
+- [Next: ${phase_next_title}](../phases/${phase_next}.md)
+{% endif %}
