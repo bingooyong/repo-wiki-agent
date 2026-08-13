@@ -17,4 +17,4 @@
 
 ## 第三语料建议
 
-**要，且应是小型 FastAPI 应用（不是 fastapi/fastapi）。** 本 wrap-up **不启动** 该语料。不要 push pallets/flask，不要把 Flask 加为 submodule。
+**要，且应是小型 FastAPI 应用（不是 fastapi/fastapi）。** FastAPI RealWorld 第一轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round1.md`。不要 push pallets/flask，不要把 Flask 加为 submodule。
