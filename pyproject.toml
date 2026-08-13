@@ -38,6 +38,9 @@ where = ["."]
 include = ["repo_wiki*"]
 exclude = ["tests*", "scripts*", "ci*", "docs*", "templates*", "extensions*", "ai*"]
 
+[tool.uv]
+constraint-dependencies = ["idna>=3.15"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 pythonpath = ["."]
