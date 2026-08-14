@@ -8,6 +8,7 @@
 **verify JSON：** `docs/eval/2026-08-14-fastapi-realworld-round6-verify.json`
 
 第五轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round5.md`。  
+第七轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round7.md`。  
 对照 wrap 见 `docs/eval/2026-08-13-fastapi-realworld-wrap.md`。
 
 ## 生成前身份（#54）
