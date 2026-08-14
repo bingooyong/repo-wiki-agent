@@ -32,7 +32,7 @@ from repo_wiki.orchestration.runtime_store import (
     create_runtime_store,
 )
 from repo_wiki.retrieval.service import RetrievalService
-from repo_wiki.scanner.artifacts import write_source_of_truth
+from repo_wiki.scanner.artifacts import has_frontend_wiki_surface, write_source_of_truth
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 from repo_wiki.verifier.service import VerifierService
 
@@ -627,9 +627,13 @@ class RepoWikiService:
         enhanced = enhance_plan_with_llm(base_plan, MockLLMProvider())
         max_budget = self._resolve_qoder_like_max_pages()
         min_budget = min(self._resolve_qoder_like_min_pages(), max_budget)
-        return self._normalize_qoder_like_plan(enhanced, minimum_pages=min_budget)
+        return self._normalize_qoder_like_plan(
+            enhanced, minimum_pages=min_budget, snapshot=snapshot
+        )
 
-    def _normalize_qoder_like_plan(self, plan: Any, minimum_pages: int) -> Any:
+    def _normalize_qoder_like_plan(
+        self, plan: Any, minimum_pages: int, snapshot: Any = None
+    ) -> Any:
         from repo_wiki.planner.llm_planner import _RebuildPlanner
         from repo_wiki.planner.schema import (
             GenerationMode,
@@ -659,6 +663,10 @@ class RepoWikiService:
                 "故障排除与维护",
             ),
         ]
+        if not has_frontend_wiki_surface(getattr(snapshot, "modules", None)):
+            required_roots = [
+                row for row in required_roots if row[1] != "frontend-applications-index"
+            ]
 
         for sort_order, (category, page_id, title) in enumerate(required_roots):
             if page_id in page_ids:
