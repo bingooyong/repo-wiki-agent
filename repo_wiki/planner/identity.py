@@ -29,6 +29,11 @@ _README_CANDIDATE_NAMES = (
 )
 _GENERIC_README_TITLES = frozenset({"readme", "overview", "index", "documentation", "docs"})
 _RST_DECORATION_RE = re.compile(r"^[=\-`:.'\"~^_*+#]{3,}$")
+_RST_FIELD_LIST_RE = re.compile(r"^:[a-zA-Z][-a-zA-Z0-9_]*:")
+_RST_SUBSTITUTION_LINE_RE = re.compile(r"^(\|[^|]+\|\s*)+$")
+_PYPROJECT_STRING_FIELD_RE = re.compile(
+    r'^\s*(name|version|description)\s*=\s*"([^"]+)"', re.MULTILINE
+)
 
 
 def _iter_readme_files(root: Path) -> list[Path]:
@@ -51,6 +56,48 @@ def _iter_readme_files(root: Path) -> list[Path]:
     return ordered
 
 
+def _pyproject_string_fields(content: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for match in _PYPROJECT_STRING_FIELD_RE.finditer(content):
+        fields.setdefault(match.group(1), match.group(2))
+    return fields
+
+
+def _is_rst_noise_line(stripped: str) -> bool:
+    if not stripped or stripped.startswith("<!--") or stripped.startswith(".. "):
+        return True
+    if stripped in {"|", ".."}:
+        return True
+    if _RST_DECORATION_RE.fullmatch(stripped):
+        return True
+    if _RST_FIELD_LIST_RE.match(stripped):
+        return True
+    if _RST_SUBSTITUTION_LINE_RE.fullmatch(stripped):
+        return True
+    return False
+
+
+def _is_product_sentence(text: str | None) -> bool:
+    if not text:
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if ":target:" in stripped or ":alt:" in stripped:
+        return False
+    if _RST_FIELD_LIST_RE.match(stripped) or _RST_SUBSTITUTION_LINE_RE.fullmatch(stripped):
+        return False
+    return True
+
+
+def _looks_like_heading(line: str) -> bool:
+    if line.lower() in _GENERIC_README_TITLES:
+        return False
+    if len(line) > 80 or line.endswith("."):
+        return False
+    return True
+
+
 def _readme_title_and_description(root: Path) -> tuple[str | None, str | None]:
     """Extract product title and description from README, never from stubs or eval notes."""
     for readme in _iter_readme_files(root):
@@ -68,13 +115,11 @@ def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
     substantial: list[str] = []
     for line in content.splitlines():
         stripped = line.strip()
-        if not stripped or stripped.startswith("<!--") or stripped.startswith(".. "):
-            continue
-        if _RST_DECORATION_RE.fullmatch(stripped):
+        if _is_rst_noise_line(stripped):
             continue
         if stripped.startswith("#"):
             stripped = stripped.lstrip("#").strip()
-            if not stripped:
+            if not stripped or _is_rst_noise_line(stripped):
                 continue
         substantial.append(stripped)
         if len(substantial) >= 4:
@@ -82,7 +127,7 @@ def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
     if not substantial:
         return None, None
     first = substantial[0]
-    title: str | None = None if first.lower() in _GENERIC_README_TITLES else first
+    title: str | None = first if _looks_like_heading(first) else None
     body_parts = substantial[1:] if title else substantial
     if not body_parts and title:
         description: str | None = title
@@ -91,6 +136,8 @@ def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
         description = joined or title
     if description:
         description = description[:200]
+    if not _is_product_sentence(description):
+        description = None
     return title, description
 
 
@@ -121,18 +168,14 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         except (json.JSONDecodeError, OSError):
             pass
 
-    # 2. Read pyproject.toml if exists
+    # 2. Read pyproject.toml if exists ([project] or [tool.poetry])
     pyproject = root / "pyproject.toml"
+    pyproject_fields: dict[str, str] = {}
     if pyproject.exists():
         content = pyproject.read_text(encoding="utf-8", errors="ignore")
-        # Look for name in [project] section
-        match = re.search(r'^\s*name\s*=\s*"([^"]+)"', content, re.MULTILINE)
-        if match:
-            name_candidates.append((match.group(1), "pyproject.toml"))
-        # Look for version
-        match = re.search(r'^\s*version\s*=\s*"([^"]+)"', content, re.MULTILINE)
-        if match:
-            pass  # handled below
+        pyproject_fields = _pyproject_string_fields(content)
+        if name := pyproject_fields.get("name"):
+            name_candidates.append((name, "pyproject.toml"))
 
     # 3. Read pom.xml if exists
     pom_xml = root / "pom.xml"
@@ -207,10 +250,15 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Then try README if no description from package.json. Never use AGENTS.md,
+    # Then try README prose if package.json had no product sentence. Skip RST
+    # badge junk. Fall back to pyproject description. Never use AGENTS.md,
     # init stubs, or eval reports as product identity.
-    if not description and readme_description:
-        description = readme_description[:200]
+    if not _is_product_sentence(description) and _is_product_sentence(readme_description):
+        description = (readme_description or "")[:200]
+    if not _is_product_sentence(description):
+        pyproject_description = pyproject_fields.get("description")
+        if _is_product_sentence(pyproject_description):
+            description = (pyproject_description or "")[:200]
 
     # Read version from various sources.
     for metadata_path in [package_json, pyproject, pom_xml]:
@@ -225,9 +273,8 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
                 except json.JSONDecodeError:
                     continue
             elif metadata_path.name == "pyproject.toml":
-                match = re.search(r'^\s*version\s*=\s*"([^"]+)"', content, re.MULTILINE)
-                if match:
-                    version = match.group(1)
+                if v := pyproject_fields.get("version"):
+                    version = v
                     break
             elif metadata_path.name == "pom.xml":
                 match = re.search(r"<version>([^<]+)</version>", content)

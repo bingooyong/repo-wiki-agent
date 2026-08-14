@@ -86,6 +86,65 @@ knowledge-management or documentation platform.
     )
 
 
+def _write_realworld_badge_readme_rst(root: Path, *, include_product_prose: bool) -> None:
+    """Shape like nsidnev/fastapi-realworld-example-app: substitutions + badge field lists."""
+    prose = ""
+    if include_product_prose:
+        prose = (
+            "\n**NOTE**: This repository is not actively maintained because this "
+            "example is quite complete and does its primary goal - passing Conduit "
+            "testsuite.\n"
+            "\n"
+            "This codebase follows the RealWorld spec from gothinkster rather than "
+            "a knowledge-management platform.\n"
+        )
+    (root / "README.rst").write_text(
+        f"""
+.. |build| image:: https://github.com/example/fastapi-realworld-example-app/workflows/Tests/badge.svg
+    :target: https://github.com/example/fastapi-realworld-example-app
+    :alt: Build status
+
+.. image:: https://github.com/example/fastapi-realworld-example-app/workflows/API%20spec/badge.svg
+    :target: https://github.com/example/fastapi-realworld-example-app
+
+.. image:: https://codecov.io/gh/example/fastapi-realworld-example-app/branch/master/graph/badge.svg
+    :target: https://codecov.io/gh/example/fastapi-realworld-example-app
+
+|build|
+
+----------
+{prose}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_realworld_pyproject(root: Path, *, poetry_table: bool = False) -> None:
+    table = "[tool.poetry]" if poetry_table else "[project]"
+    (root / "pyproject.toml").write_text(
+        f"""
+{table}
+name = "fastapi-realworld-example-app"
+version = "0.0.0"
+description = "Backend logic implementation for https://github.com/gothinkster/realworld with awesome FastAPI"
+""",
+        encoding="utf-8",
+    )
+
+
+def _assert_identity_is_realworld_product(identity: object) -> None:
+    description = getattr(identity, "description", None) or ""
+    display = getattr(identity, "display_name", None) or ""
+    blob = f"{description} {display}"
+    assert ":target:" not in blob, blob
+    assert "知识管理" not in blob, blob
+    assert "repo-wiki-init-stub" not in blob, blob
+    assert any(
+        marker in description for marker in ("Conduit", "RealWorld", "realworld", "gothinkster")
+    ), description
+
+
 def _write_conduit_fixture(root: Path) -> None:
     (root / "app").mkdir()
     (root / "app" / "main.py").write_text(
@@ -113,6 +172,39 @@ def test_identity_prefers_readme_rst_over_init_stub_agents_and_eval_report(
         part for part in (identity.name, identity.display_name, identity.description or "") if part
     )
     _assert_product_not_pollution(blob)
+
+
+def test_identity_skips_rst_badge_junk_and_uses_conduit_prose(tmp_path: Path) -> None:
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text(
+        "from fastapi import FastAPI\n\napp = FastAPI()\n",
+        encoding="utf-8",
+    )
+    _write_realworld_badge_readme_rst(tmp_path, include_product_prose=True)
+    _write_realworld_pyproject(tmp_path)
+    _write_pollution_docs(tmp_path)
+
+    identity = resolve_repository_identity(tmp_path)
+    assert identity.name == "fastapi-realworld-example-app"
+    _assert_identity_is_realworld_product(identity)
+
+
+def test_identity_uses_pyproject_description_when_readme_has_no_product_sentence(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text(
+        "from fastapi import FastAPI\n\napp = FastAPI()\n",
+        encoding="utf-8",
+    )
+    _write_realworld_badge_readme_rst(tmp_path, include_product_prose=False)
+    _write_realworld_pyproject(tmp_path, poetry_table=True)
+    _write_pollution_docs(tmp_path)
+
+    identity = resolve_repository_identity(tmp_path)
+    assert identity.name == "fastapi-realworld-example-app"
+    _assert_identity_is_realworld_product(identity)
+    assert "gothinkster/realworld" in (identity.description or "")
 
 
 def test_docs_inventory_does_not_treat_agents_or_eval_reports_as_product_source_docs(
