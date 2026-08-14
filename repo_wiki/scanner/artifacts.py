@@ -45,6 +45,67 @@ def is_product_source_path(path: str) -> bool:
     return not _has_excluded_source_path(path)
 
 
+_NON_PRODUCT_WIKI_PATH_PARTS = frozenset(
+    {
+        "tests",
+        "test",
+        "docs",
+        "examples",
+        "example",
+        "tutorials",
+        "fixtures",
+        "fixture",
+        "__pycache__",
+        "node_modules",
+    }
+)
+_NON_PRODUCT_WIKI_DOMAINS = frozenset({"testing", "documentation", "examples"})
+_NON_PRODUCT_WIKI_ROLES = frozenset({"test-harness", "docs", "sample-app"})
+
+
+def is_product_wiki_module(
+    path: str,
+    *,
+    name: str = "",
+    domain: str = "",
+    runtime_role: str = "",
+) -> bool:
+    """Return whether a scanned module should get a product wiki service/API page."""
+    if not path:
+        return False
+    if not is_product_source_path(path):
+        return False
+    parts = [part.lower() for part in Path(path).parts]
+    if any(part in _NON_PRODUCT_WIKI_PATH_PARTS for part in parts):
+        return False
+    label = (name or Path(path).name).lower()
+    if label in _NON_PRODUCT_WIKI_PATH_PARTS:
+        return False
+    stem = Path(label).stem
+    if stem.startswith("test_") or stem.endswith("_test") or stem.endswith("_tests"):
+        return False
+    if domain in _NON_PRODUCT_WIKI_DOMAINS:
+        return False
+    return runtime_role not in _NON_PRODUCT_WIKI_ROLES
+
+
+def has_frontend_wiki_surface(modules: Any) -> bool:
+    """Return whether inventory has a real frontend surface (not an empty taxonomy slot)."""
+    for module in modules or []:
+        path = str(getattr(module, "path", "") or "")
+        name = str(getattr(module, "name", "") or "")
+        domain = str(getattr(module, "domain", "") or "")
+        runtime_role = str(getattr(module, "runtime_role", "") or "")
+        service_family = str(getattr(module, "service_family", "") or "")
+        if not is_product_wiki_module(path, name=name, domain=domain, runtime_role=runtime_role):
+            continue
+        if domain == "frontend" or service_family == "typescript-frontend":
+            return True
+        if "frontend" in f"{name} {path}".lower():
+            return True
+    return False
+
+
 _PARSER_PSEUDO_FACT_FILES = {
     "repo_wiki/scanner/repository_scanner.py",
     "repo_wiki/scanner/database_migrations.py",
