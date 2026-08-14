@@ -2,12 +2,13 @@
 
 **日期：** 2026-08-13–2026-08-14 CST  
 **对照：** nsidnev/fastapi-realworld-example-app `029eb778` × MiniMax-M3  
-**CLI：** r1 `9cadf85`（#40）→ r2 `c2407979`（#42 空 content 重试 + #43 FastAPI 扫描）→ r3 `a3d58b4`（#45 导入 router 前缀拼接）→ r4 `9328896`（#50；含 #48 `api_prefix` + #49 circuit-break）
+**CLI：** r1 `9cadf85`（#40）→ r2 `c2407979`（#42 空 content 重试 + #43 FastAPI 扫描）→ r3 `a3d58b4`（#45 导入 router 前缀拼接）→ r4 `9328896`（#50；含 #48 `api_prefix` + #49 circuit-break）→ r5 `8912c89`（#52 README/身份优先于 init stub 与 eval notes）
 
 第一轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round1.md`。  
 第二轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round2.md`。  
 第三轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round3.md`。  
-第四轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round4.md`。
+第四轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round4.md`。  
+第五轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round5.md`。
 
 ## r1 vs r2
 
@@ -43,7 +44,7 @@
 | owner missing | 21 | **23**（14 条 v3 相对路径 + 9 models） |
 | Overview Conduit | 否 | **否**（仍 api-gateway / init stub） |
 
-## 本回路已合并（#37–#50）
+## 本回路已合并（#37–#52）
 
 - **#37**（`98aa8bd`）：packaged templates、长 citation 路径、LLM 页超时跟 YAML/300s cap。
 - **#38**：Flask round-2 评测文档。
@@ -58,7 +59,9 @@
 - **#47**：FastAPI RealWorld round-3 评测文档。
 - **#48**（`8f0d1f5`）：env factory `return config()` 不再丢掉 annotated `AppSettings`，`settings.api_prefix=/api` 解析到。r4 index **19/19 `/api/*`**；HIT `POST /api/users/login`、`GET /api/articles/feed`；相对残留 **NONE**。
 - **#49**（`0121f9b`）：circuit-break 后不再把剩余页全部 `gather`。代码已装上；本轮无 529/timeout 风暴，skip path **未证实**。不要声称 #49 “救了”本轮。
-- **#50**（`9328896`）：Codex plugin workflow；本轮 CLI SHA。不含 wiki 生成修复。
+- **#50**（`9328896`）：Codex plugin workflow；r4 CLI SHA。不含 wiki 生成修复。
+- **#51**：FastAPI RealWorld round-4 评测文档。
+- **#52**（`8912c89`）：README/身份优先于 init stub 与 eval notes。r5：name 来自 pyproject（非 init-stub）；Overview 已无 init-stub / 知识管理 / product-name api-gateway；`AGENTS.md` / `round*-report.md` 作证据已消失。仍不是 Conduit：README.rst 解析器把 `|` 当 title、把缩进的 `:target:` 当 description；pyproject description 未读。
 
 ## r3 vs r4
 
@@ -90,12 +93,42 @@
 
 #49 代码已装上，但本轮无 529/timeout 风暴，skip path **未证实**。wall 长于 r3 是因为 r3 16×529 短失败，r4 完成了 89 次完整 LLM，没有 180s 等待。
 
-## 残留（r4；不改 generator/scanner）
+## r4 vs r5
 
-- README/Conduit 仍输给 init stub；应忽略 eval 文件（`AGENTS.md` / `round3-report.md`）当产品证据。Overview Conduit：**FAIL**。Init stub 不当身份：**FAIL**。
-- citation `file:` 前缀 27→**62**。
-- owner mapping 在正确的 `/api` 路径上仍 19/19 missing（owner missing 24 = 19 `/api/*` + 5 models）。
+| 项 | r4 | r5 |
+|---|---|---|
+| generate | 89/89 | 89/89 |
+| cache | 0/89（r3 composer cache 挪开） | **0/89**（r4 composer cache 挪开） |
+| 空壳 | 0/89 | **0/89**（守住） |
+| 529 | 0；circuit-break **未触发** | **0**；circuit-break **false** |
+| fallback / rejected | 3 | **5**（development-guide、python-service-apis、api-issues、core-data-models、db） |
+| LLM | 89 / 345891 tokens | 89 / **308226** |
+| evidence spans | 490 | **350** |
+| endpoints | 19 `/api/*`；相对残留 **NONE** | **19 `/api/*`**；HIT `POST /api/users/login`、`GET /api/articles/feed` |
+| wiki 中 UNRESOLVED | 0 | **0** |
+| login 页命中 | `POST /api/users/login` **14 页** | `POST /api/users/login` **14 页** |
+| verify | 12 HARD / 0 SOFT（`QODER_PROSE_TOO_LOW` PASS） | **13 HARD / 0 SOFT**（未放宽；`QODER_PROSE_TOO_LOW` **FAIL×2**） |
+| 页质量 | PASS 86 / DEGRADED 3 | PASS **84** / DEGRADED **5** |
+| 无效 citation | 62（`file:` 前缀） | **109**（列出的 30 条全部为 `file:README.rst`） |
+| claim coverage | 51.51%（868/1685） | **51.62%**（909/1761） |
+| page dumps | 48 | **42** |
+| API mermaid 缺失 | 9 | 9 |
+| data-model ER mermaid 缺失 | — | 5 |
+| API aggregation | PASS 13/13 | PASS **13/13** |
+| owner missing | 24（19 `/api/*` + 5 models） | **28**（19 `/api/*` + 9 models） |
+| Overview Conduit | 否（init-stub / api-gateway；Conduit 只来自 eval 污染） | **否**（无 init-stub / 知识管理 / product-name api-gateway；仍不是 Conduit） |
+| eval 产物作证据 | `AGENTS.md` / `round3-report.md` | **已消失** |
+| wall | 19m48s（compose 1186.1s） | **19m18s**（compose 1156.3s） |
+
+#52 去掉了 init-stub / 知识管理 / product-name api-gateway，以及 `AGENTS.md` / `round*-report.md` 作证据。00 仍不是 Conduit：README.rst 解析器把 `|` 当 title、把缩进的 `:target:` 当 description，从未读到 “passing Conduit testsuite”；pyproject description 未读。
+
+## 残留（r5；不改 generator/scanner）
+
+- README.rst 解析器 + 未读 pyproject description，故 00 仍不是 Conduit。Overview Conduit：**FAIL**。Init stub 不当身份：**PASS**。eval 产物不当证据：**PASS**。
+- citation `file:` 前缀 62→**109** HARD（列出的 30 条全部为 `file:README.rst`）。
+- owner mapping 在正确的 `/api` 路径上仍 19/19 missing（owner missing 28 = 19 `/api/*` + 9 models）。
 - tests-as-product：`核心服务/Tests.md` 仍把 tests 当产品 api-server。
-- **#49 skip path 本轮未证实**——除非 review 发现仍有 gather-all timeout，否则不另开 PR。
-- 产品契约本轮 **PASS**：API参考列出全部 19 条 `/api/*`，未编造 `/health` `/webhook` `/items`。
-- r4 verify：**12 HARD / 0 SOFT**（r3 为 13/0；`QODER_PROSE_TOO_LOW` 本轮 PASS，仍是 HARD gate）。eval-layout HARD 是布局问题，不是产品失败。不要松阈值。
+- taxonomy 幻觉：Agent代理API / API网关 / 前端应用。
+- 产品契约本轮 **PASS**：API参考列出全部 19 条 `/api/*`。
+- r5 verify：**13 HARD / 0 SOFT**（r4 为 12/0；`QODER_PROSE_TOO_LOW` 本轮 FAIL×2，仍是 HARD gate）。eval-layout HARD 是布局问题，不是产品失败。不要松阈值。
+
