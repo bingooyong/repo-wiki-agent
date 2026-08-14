@@ -1111,10 +1111,7 @@ class RepoWikiService:
         )
 
         def _should_add_mermaid(page_idx: int, page: Any) -> bool:
-            return (
-                page_idx < target_mermaid_pages
-                or str(getattr(page, "category", "")).lower() == "api_reference"
-            )
+            return page_idx < target_mermaid_pages or self._page_requires_hard_mermaid(page)
 
         def write_fallback(page: Any, binding: Any, page_idx: int, reason: str) -> None:
             nonlocal fallback_page_count
@@ -1278,8 +1275,7 @@ class RepoWikiService:
                     markdown=cached.output_markdown,
                     binding=binding,
                     add_mermaid=(
-                        page_idx < target_mermaid_pages
-                        or str(getattr(page, "category", "")).lower() == "api_reference"
+                        page_idx < target_mermaid_pages or self._page_requires_hard_mermaid(page)
                     ),
                     composition_context=context,
                 )
@@ -1675,6 +1671,21 @@ class RepoWikiService:
             return cleaned[:177].rstrip() + "..."
         return cleaned
 
+    def _page_requires_hard_mermaid(self, page: Any) -> bool:
+        from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+        return getattr(page, "category", None) in {
+            WikiTaxonomyCategory.API_REFERENCE,
+            WikiTaxonomyCategory.DATA_MODELS,
+        }
+
+    def _content_has_mermaid_fence(self, content: str) -> bool:
+        return "```mermaid" in content or ":::mermaid" in content
+
+    def _content_has_er_mermaid(self, content: str) -> bool:
+        blocks = re.findall(r"```mermaid\s*(.*?)```", content, flags=re.IGNORECASE | re.DOTALL)
+        return any("erdiagram" in block.lower() for block in blocks)
+
     def _enforce_qoder_page_contract(
         self,
         page: Any,
@@ -1745,7 +1756,13 @@ class RepoWikiService:
                     "汇总表结构演进、索引策略与迁移脚本影响范围，支持后续增量变更评估。"
                 )
 
-        if add_mermaid and "```mermaid" not in content:
+        is_api_page = page.category == WikiTaxonomyCategory.API_REFERENCE
+        is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
+        needs_er_mermaid = is_data_model_page and not self._content_has_er_mermaid(content)
+        needs_any_mermaid = (add_mermaid or is_api_page) and not self._content_has_mermaid_fence(
+            content
+        )
+        if needs_er_mermaid or needs_any_mermaid:
             if is_api_like_page and not self._evidence_backed_api_endpoints(
                 page, composition_context
             ):
@@ -1756,7 +1773,12 @@ class RepoWikiService:
                     binding=binding,
                     composition_context=composition_context,
                 )
-            if rendered_blocks:
+            if needs_er_mermaid:
+                er_blocks = [block for block in rendered_blocks if "erdiagram" in block.lower()]
+                content += "\n\n## 架构图\n\n" + (
+                    "\n\n".join(er_blocks) if er_blocks else self._build_minimal_mermaid_block(page)
+                )
+            elif rendered_blocks:
                 content += "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
             else:
                 content += "\n\n## 架构图\n\n" + self._build_minimal_mermaid_block(page)
