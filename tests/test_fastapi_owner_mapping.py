@@ -21,7 +21,6 @@ from repo_wiki.verifier.ownership_coverage import (
     page_has_owner_or_warning,
 )
 from repo_wiki.verifier.qoder_strict_verifier import QoderLikeVerifierService
-
 from tests.test_fastapi_router_inventory import (
     _endpoint_pairs,
     _v3_endpoint_pairs,
