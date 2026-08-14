@@ -15,6 +15,17 @@ class OwnerInventoryItem:
     kind: str
     identifier: str
     source: str
+    defining_file: str = ""
+    defining_handler: str = ""
+
+
+@dataclass(frozen=True)
+class ApiOwnerBinding:
+    """Mounted ``METHOD path`` bound to the handler file that defines it."""
+
+    identifier: str
+    defining_file: str
+    defining_handler: str
 
 
 OWNER_HINT_PATTERN = re.compile(
@@ -39,6 +50,33 @@ def collect_owner_inventory_items(meta_root: Path) -> list[OwnerInventoryItem]:
     for item in items:
         deduped[(item.kind, item.identifier)] = item
     return list(deduped.values())
+
+
+def map_mounted_api_owners(surfaces: Any) -> dict[str, ApiOwnerBinding]:
+    """Join inventory surfaces to mounted ``METHOD path`` owner keys.
+
+    Stub: current main never joins handler/file onto mounted FastAPI paths.
+    """
+    return {}
+
+
+def owner_coverage_gaps(
+    items: list[OwnerInventoryItem],
+    pages: list[str],
+    warnings: set[Any],
+) -> list[OwnerInventoryItem]:
+    """Return inventory items that still lack owner mapping or UNIDENTIFIED warning."""
+    missing: list[OwnerInventoryItem] = []
+    for item in items:
+        covered = (item.kind, item.identifier) in warnings or item.identifier in warnings
+        if not covered:
+            for page_text in pages:
+                covered, _reason = page_has_owner_or_warning(page_text, item.identifier)
+                if covered:
+                    break
+        if not covered:
+            missing.append(item)
+    return missing
 
 
 def page_has_owner_or_warning(page_text: str, identifier: str) -> tuple[bool, str]:
