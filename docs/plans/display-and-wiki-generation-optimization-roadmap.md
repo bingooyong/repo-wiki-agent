@@ -5,6 +5,7 @@
 **范围：** `repo-wiki` CLI、qoder-like Wiki 生成流水线、VS Code/Cursor 插件展示层
 **关联文档：**
 
+- 现行周期规划：`docs/plans/current-roadmap.md`
 - `docs/project-analysis.md`
 - `docs/operations/vscode-extension-manual-llm-configuration.md`
 - `docs/specs/vscode-llm-configuration-spec.md`
