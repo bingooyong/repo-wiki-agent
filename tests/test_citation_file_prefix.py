@@ -219,3 +219,71 @@ def test_compact_prompt_does_not_teach_file_scheme_cites() -> None:
     prompt = composer._build_compact_prompt(composer_input, composer._build_context(composer_input))
     assert "<cite>file:" not in prompt
     assert "file:start-end" not in prompt
+
+
+def test_normalize_relpath_prefix_readme_rst_cite_is_accepted_by_verifier(tmp_path: Path) -> None:
+    """Emit/normalize relpath:README.rst so verify looks up README.rst, not relpath:README.rst."""
+    (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+    composer = create_composer(workspace_root=tmp_path)
+    raw = _overview_page("relpath:README.rst:1-3")
+    normalized = composer._normalize_markdown_response(raw, "Project Overview")
+
+    assert "relpath:README.rst" not in normalized
+    assert "<cite>README.rst:1-3</cite>" in normalized
+
+    _write_release_candidate(tmp_path, normalized)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "PASS"
+    assert citation_check["details"]["invalid_count"] == 0
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+    invalid = citation_check["details"].get("invalid") or []
+    assert not any("file does not exist" in str(item.get("problem", "")) for item in invalid)
+
+
+def test_placeholder_relpath_start_end_cite_is_dropped(tmp_path: Path) -> None:
+    """Literal <cite>relpath:start-end</cite> is a prompt leftover, not a file path."""
+    (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+    composer = create_composer(workspace_root=tmp_path)
+    raw = _overview_page("README.rst:1-3") + "\n<cite>relpath:start-end</cite>\n"
+    normalized = composer._normalize_markdown_response(raw, "Project Overview")
+
+    assert "<cite>relpath:start-end</cite>" not in normalized
+    assert "relpath:start-end" not in normalized
+    assert "<cite>README.rst:1-3</cite>" in normalized
+
+    # Already-published pages may still contain the template token.
+    _write_release_candidate(tmp_path, raw)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "PASS"
+    assert citation_check["details"]["invalid_count"] == 0
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+    invalid = citation_check["details"].get("invalid") or []
+    assert not any("relpath:start-end" in str(item.get("citation", "")) for item in invalid)
+    assert not any(
+        "relpath:start-end" in str(item) or item.get("citation") == "relpath:start-end"
+        for item in invalid
+    )
+
+
+def test_compact_prompt_does_not_teach_relpath_scheme_cites() -> None:
+    """Composer must not instruct writers to emit <cite>relpath:...</cite>."""
+    composer = LLMPageComposer()
+    context = ComposerContext(
+        repository_name="demo",
+        primary_language="python",
+        framework="fastapi",
+        repository_root=".",
+    )
+    page = WikiPagePlan(
+        page_id="project-overview",
+        title="项目概述",
+        category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        output_path="docs/pages/overview/project-overview.md",
+        generation_mode=GenerationMode.LLM_ASSISTED,
+    )
+    composer_input = build_composer_input(page, None, context)
+    prompt = composer._build_compact_prompt(composer_input, composer._build_context(composer_input))
+    assert "<cite>relpath:" not in prompt
+    assert "relpath:start-end" not in prompt

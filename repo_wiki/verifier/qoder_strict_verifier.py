@@ -8,7 +8,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.evidence.citation_renderer import normalize_citation_ref
+from repo_wiki.evidence.citation_renderer import (
+    is_placeholder_citation_ref,
+    normalize_citation_ref,
+)
 from repo_wiki.verifier.service import CheckResult, GateType, SeverityThreshold, VerifierService
 
 
@@ -1926,8 +1929,12 @@ class QoderLikeVerifierService(VerifierService):
     def _extract_citation_refs(self, text: str) -> list[str]:
         refs: list[str] = []
         for raw in re.findall(r"<cite>\s*([^<]+?)\s*</cite>", text):
+            if is_placeholder_citation_ref(raw):
+                continue
             refs.append(raw.strip())
         for raw in re.findall(r"\[cite:\s*([^\]]+?)\]", text):
+            if is_placeholder_citation_ref(raw):
+                continue
             refs.append(raw.strip())
         return refs
 
