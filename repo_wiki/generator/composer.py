@@ -62,6 +62,7 @@ class ComposerContext:
     models: list[dict[str, Any]] = field(default_factory=list)
     commands: dict[str, str] = field(default_factory=dict)
     domain_groups_markdown: str = ""
+    product_description: str | None = None
 
 
 @dataclass
@@ -384,6 +385,23 @@ class LLMPageComposer:
                 uncertainty_reasons=[],
             )
 
+    def _resolve_product_description(self, input: ComposerInput) -> str:
+        """Prefer explicit context, then repository identity.description."""
+        explicit = (input.context.product_description or "").strip()
+        if explicit:
+            return explicit
+        root = input.context.repository_root or (
+            str(self.workspace_root) if self.workspace_root else ""
+        )
+        if not root:
+            return ""
+        # Lazy import: planner.identity -> planner package init -> evidence ->
+        # orchestration.service -> this module.
+        from repo_wiki.planner.identity import resolve_repository_identity
+
+        identity = resolve_repository_identity(Path(root))
+        return (identity.description or "").strip()
+
     def _build_context(self, input: ComposerInput) -> dict[str, Any]:
         """Build prompt context from input."""
         page = input.page_plan
@@ -392,6 +410,8 @@ class LLMPageComposer:
             "title": page.title,
             "category": page.category.value,
             "generation_mode": page.generation_mode.value,
+            "repository_name": input.context.repository_name,
+            "product_description": self._resolve_product_description(input),
         }
 
         # Add source requirements
@@ -441,6 +461,8 @@ class LLMPageComposer:
         modules = context.get("modules") or "未指定"
         endpoints = context.get("endpoints") or "未指定"
         data_models = context.get("data_models") or "未指定"
+        product_description = context.get("product_description") or "（未解析到产品描述）"
+        repository_name = context.get("repository_name") or input.context.repository_name
         api_quality_rules = ""
         if page.category.value == "api_reference":
             api_quality_rules = (
@@ -455,6 +477,9 @@ class LLMPageComposer:
 页面标题：{page.title}
 页面类型：{page.category.value}
 页面 ID：{page.page_id}
+仓库名称：{repository_name}
+产品身份（必须写入简介，优先于仓库 slug 或通用 api-server/core-platform 表述）：
+{product_description}
 相关模块：{modules}
 相关 API：{endpoints}
 相关数据模型：{data_models}
@@ -467,6 +492,7 @@ class LLMPageComposer:
 - 至少保留 3 个 `<cite>file:start-end</cite>` 引用。
 - 使用段落解释为主，列表只用于核心组件或检查项。
 - 如果证据不足，明确写”当前证据显示”，不要过度推断。
+- 简介必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
 {api_quality_rules}
 
 {self._build_low_confidence_guidance(input)}

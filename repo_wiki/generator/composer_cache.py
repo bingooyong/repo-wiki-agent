@@ -178,13 +178,14 @@ def compute_context_hash(context: ComposerContext) -> str:
     """Compute deterministic hash from composer context.
 
     Includes: repository_name, primary_language, framework,
-    modules, endpoints, models, commands.
+    product_description, modules, endpoints, models, commands.
     """
     parts = [
         context.repository_name,
         context.primary_language,
         context.framework,
         context.repository_root,
+        context.product_description or "",
     ]
 
     # Sort modules by name for deterministic ordering
