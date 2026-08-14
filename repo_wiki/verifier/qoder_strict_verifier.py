@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from repo_wiki.evidence.citation_renderer import normalize_citation_ref
 from repo_wiki.verifier.service import CheckResult, GateType, SeverityThreshold, VerifierService
 
 
@@ -1942,7 +1943,7 @@ class QoderLikeVerifierService(VerifierService):
             is_source_looking_url,
         )
 
-        raw = citation.strip()
+        raw = normalize_citation_ref(citation)
         if is_source_looking_url(raw):
             return "source-looking external URL cannot validate repository lines"
         if is_external_url(raw):

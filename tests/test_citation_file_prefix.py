@@ -1,0 +1,221 @@
+"""Writers must not emit file: citation prefixes that verify rejects.
+
+R7 measured 18 HARD QODER_CITATION_INVALID cites, all file: / file does not exist.
+Product files such as README.rst exist; the prefix is the bug.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from repo_wiki.generator.composer import (
+    ComposerContext,
+    LLMPageComposer,
+    build_composer_input,
+    create_composer,
+)
+from repo_wiki.planner.schema import GenerationMode, WikiPagePlan, WikiTaxonomyCategory
+from repo_wiki.verifier.qoder_strict_verifier import QoderLikeVerifierService
+
+
+def _write_release_candidate(root: Path, page_markdown: str) -> None:
+    content_dir = root / "repowiki" / "zh" / "content"
+    meta_dir = root / "repowiki" / "zh" / "meta"
+    content_dir.mkdir(parents=True)
+    meta_dir.mkdir(parents=True)
+    (root / "src").mkdir(exist_ok=True)
+    (root / "src" / "app.py").write_text("\n".join(f"line {i}" for i in range(1, 41)))
+    page_rel = "项目概述/00-overview.md"
+    page = content_dir / page_rel
+    page.parent.mkdir()
+    page.write_text(page_markdown, encoding="utf-8")
+    (meta_dir / "quality-report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "repo_agent.quality_report/1.0",
+                "summary": {"profile": "qoder-like", "grade": "PASS", "strict_mode": True},
+                "page_quality": [{"relative_path": page_rel, "quality_state": "READY"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (meta_dir / "page-registry.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "repo_agent.page_registry/1.0",
+                "generated_at": "2026-07-15T00:00:00Z",
+                "pages": [
+                    {
+                        "page_id": "overview",
+                        "relative_path": page_rel,
+                        "category": "overview",
+                        "page_type": "content",
+                        "quality_state": "READY",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (meta_dir / "api-inventory.json").write_text(
+        json.dumps({"endpoints": [{"method": "GET", "path": "/health"}]}),
+        encoding="utf-8",
+    )
+    (meta_dir / "service-registry.json").write_text(
+        json.dumps({"services": [{"service_id": "api-gateway"}]}), encoding="utf-8"
+    )
+    (meta_dir / "data-model-inventory.json").write_text(
+        json.dumps({"models": [{"model_id": "user-entity"}]}), encoding="utf-8"
+    )
+    (meta_dir / "runtime-inventory.json").write_text(
+        json.dumps({"runtime_entrypoints": [{"entrypoint": "repo-wiki"}]}),
+        encoding="utf-8",
+    )
+    (meta_dir / "source-inventory.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "repo_agent.source_inventory/1.0",
+                "services": [{"service_id": "api-gateway"}],
+                "api_surfaces": [{"method": "GET", "path": "/health"}],
+                "data_models": [{"model_id": "user-entity"}],
+                "runtime_entrypoints": [{"entrypoint": "repo-wiki"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": "1.1",
+                "run_id": "run-cite-prefix",
+                "readiness_state": "READY",
+                "readiness_reasons": [],
+                "target_dirty": False,
+                "git_fresh": True,
+                "candidate_repowiki_zh_root": str(root / "repowiki" / "zh"),
+                "candidate_content_root": str(content_dir),
+                "candidate_meta_root": str(meta_dir),
+                "report_paths": {"strict_verify": "reports/strict-verify-output.json"},
+                "files": [{"path": "reports/strict-verify-output.json"}],
+                "evidence": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _citation_targets_check(result: dict) -> dict:
+    return next(check for check in result["checks"] if check["name"] == "qoder-citation-targets")
+
+
+def _overview_page(cite: str) -> str:
+    return f"""# Project Overview
+
+## Table of Contents
+- [Intro](#intro)
+
+## Intro
+
+GET /health is the supported health endpoint for Service `api-gateway` and Model `user-entity`.
+
+```mermaid
+graph LR
+  A --> B
+```
+
+<cite>{cite}</cite>
+"""
+
+
+def test_normalize_file_prefix_readme_rst_cite_is_accepted_by_verifier(tmp_path: Path) -> None:
+    """Emit/normalize file:README.rst so verify looks up README.rst, not file:README.rst."""
+    (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+    composer = create_composer(workspace_root=tmp_path)
+    raw = _overview_page("file:README.rst:1")
+    normalized = composer._normalize_markdown_response(raw, "Project Overview")
+
+    assert "file:README.rst" not in normalized
+    assert "<cite>README.rst:1</cite>" in normalized
+
+    _write_release_candidate(tmp_path, normalized)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "PASS"
+    assert citation_check["details"]["invalid_count"] == 0
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+    invalid = citation_check["details"].get("invalid") or []
+    assert not any("file does not exist" in str(item.get("problem", "")) for item in invalid)
+
+
+def test_existing_valid_citation_schemes_remain_accepted(tmp_path: Path) -> None:
+    """Bare paths and source: cites that already pass must stay valid."""
+    (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+    composer = create_composer(workspace_root=tmp_path)
+    page = composer._normalize_markdown_response(
+        """# Project Overview
+
+## Table of Contents
+- [Intro](#intro)
+
+## Intro
+
+GET /health is the supported health endpoint for Service `api-gateway` and Model `user-entity`.
+
+```mermaid
+graph LR
+  A --> B
+```
+
+<cite>source:src/app.py:1-10</cite>
+<cite>README.rst:1</cite>
+""",
+        "Project Overview",
+    )
+    assert "<cite>source:src/app.py:1-10</cite>" in page
+    assert "<cite>README.rst:1</cite>" in page
+
+    _write_release_candidate(tmp_path, page)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "PASS"
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+
+
+def test_missing_citation_target_still_qoder_citation_invalid(tmp_path: Path) -> None:
+    """Do not weaken QODER_CITATION_INVALID for paths that truly do not exist."""
+    (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+    composer = create_composer(workspace_root=tmp_path)
+    page = composer._normalize_markdown_response(
+        _overview_page("file:missing/nope.py:1"),
+        "Project Overview",
+    )
+    _write_release_candidate(tmp_path, page)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    assert "QODER_CITATION_INVALID" in result.get("hard_gate_codes", [])
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "FAIL"
+    assert citation_check["reason_code"] == "QODER_CITATION_INVALID"
+    assert citation_check["gate_type"] == "HARD"
+
+
+def test_compact_prompt_does_not_teach_file_scheme_cites() -> None:
+    """Composer must not instruct writers to emit <cite>file:...</cite>."""
+    composer = LLMPageComposer()
+    context = ComposerContext(
+        repository_name="demo",
+        primary_language="python",
+        framework="fastapi",
+        repository_root=".",
+    )
+    page = WikiPagePlan(
+        page_id="project-overview",
+        title="项目概述",
+        category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        output_path="docs/pages/overview/project-overview.md",
+        generation_mode=GenerationMode.LLM_ASSISTED,
+    )
+    composer_input = build_composer_input(page, None, context)
+    prompt = composer._build_compact_prompt(composer_input, composer._build_context(composer_input))
+    assert "<cite>file:" not in prompt
+    assert "file:start-end" not in prompt
