@@ -1531,7 +1531,7 @@ class QoderLikeVerifierService(VerifierService):
         """Require every important inventory item to map to an owner page or UNIDENTIFIED warning."""
         from repo_wiki.verifier.ownership_coverage import (
             collect_owner_inventory_items,
-            page_has_owner_or_warning,
+            item_owner_coverage,
         )
 
         if not self._is_release_candidate_root():
@@ -1565,13 +1565,7 @@ class QoderLikeVerifierService(VerifierService):
         warnings = self._load_structured_unidentified_warnings(meta_root)
         missing: list[dict[str, str]] = []
         for item in items:
-            covered = (item.kind, item.identifier) in warnings or item.identifier in warnings
-            reason = "structured unidentified warning"
-            if not covered:
-                for page_text in pages:
-                    covered, reason = page_has_owner_or_warning(page_text, item.identifier)
-                    if covered:
-                        break
+            covered, reason = item_owner_coverage(item, pages, warnings)
             if not covered:
                 missing.append(
                     {
