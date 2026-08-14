@@ -39,6 +39,8 @@ repo-wiki release-publish --output .repo-agent-eval
 
 ## 下一步
 
+- 现行规划：`docs/plans/current-roadmap.md`
+- 中期 Phase 09–12：`docs/repo-wiki-phase-09-12-roadmap.md`
 - 架构：`docs/01-architecture.md`
 - 配置：`docs/configuration.md`；插件可配 LLM（Key 进 SecretStorage），见扩展 README 与 `docs/operations/vscode-extension-manual-llm-configuration.md`
 - 安装与插件：`docs/operations/installation-and-vscode-extension.md`

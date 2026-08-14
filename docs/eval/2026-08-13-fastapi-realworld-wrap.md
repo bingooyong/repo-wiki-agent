@@ -2,7 +2,7 @@
 
 **日期：** 2026-08-13–2026-08-14 CST  
 **对照：** nsidnev/fastapi-realworld-example-app `029eb778` × MiniMax-M3  
-**CLI：** r1 `9cadf85`（#40）→ r2 `c2407979`（#42 空 content 重试 + #43 FastAPI 扫描）→ r3 `a3d58b4`（#45 导入 router 前缀拼接）→ r4 `9328896`（#50；含 #48 `api_prefix` + #49 circuit-break）→ r5 `8912c89`（#52 README/身份优先于 init stub 与 eval notes）→ r6 `b0a06f4`（#54 README.rst 解析 + pyproject fallback）→ r7 `2e3a3f0`（#56 identity.description 流入 overview）
+**CLI：** r1 `9cadf85`（#40）→ r2 `c2407979`（#42 空 content 重试 + #43 FastAPI 扫描）→ r3 `a3d58b4`（#45 导入 router 前缀拼接）→ r4 `9328896`（#50；含 #48 `api_prefix` + #49 circuit-break）→ r5 `8912c89`（#52 README/身份优先于 init stub 与 eval notes）→ r6 `b0a06f4`（#54 README.rst 解析 + pyproject fallback）→ r7 `2e3a3f0`（#56 identity.description 流入 overview）→ r8 `05bb3b8`（#58 去掉 citation `file:` 前缀）
 
 第一轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round1.md`。  
 第二轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round2.md`。  
@@ -10,7 +10,8 @@
 第四轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round4.md`。  
 第五轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round5.md`。  
 第六轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round6.md`。  
-第七轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round7.md`。
+第七轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round7.md`。  
+第八轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round8.md`。
 
 ## r1 vs r2
 
@@ -46,7 +47,7 @@
 | owner missing | 21 | **23**（14 条 v3 相对路径 + 9 models） |
 | Overview Conduit | 否 | **否**（仍 api-gateway / init stub） |
 
-## 本回路已合并（#37–#56）
+## 本回路已合并（#37–#58）
 
 - **#37**（`98aa8bd`）：packaged templates、长 citation 路径、LLM 页超时跟 YAML/300s cap。
 - **#38**：Flask round-2 评测文档。
@@ -68,6 +69,8 @@
 - **#54**（`b0a06f4`）：跳过 RST badge / `:target:` / `:alt:`，读 README 第一段产品句；README 无产品句时回退 pyproject description。r6：identity.description 含 “passing Conduit testsuite”，无 `:target:` 垃圾；pyproject description **未读**（README 已是产品句）。00 仍无 Conduit、无产品名 RealWorld（仅 slug）；identity.description **未流入** 00 正文。引言引用 `README.rst:32-73`（Quickstart），跳过 L28 Conduit NOTE。
 - **#55**：FastAPI RealWorld round-6 评测文档。
 - **#56**（`2e3a3f0`）：identity.description 流入 overview context / composer prompt。r7：Overview **HIT Conduit**（中文「通过 Conduit 测试套件」）；`project-overview` 在 circuit-break 前完成（5288 tokens，PASS），#56 检查有效。不要重开 overview-identity PR。
+- **#57**：FastAPI RealWorld round-7 评测文档。
+- **#58**（`05bb3b8`）：去掉 wiki citation 的 `file:` 前缀。r8：`file:` = 0；新残差是字面量 `relpath:`。不要声称 #58 修好了 coverage。
 
 ## r3 vs r4
 
@@ -193,4 +196,35 @@
 - 可选：529 retry-before-circuit-break。不要松 HARD。
 - 产品契约本轮 **PASS**：index 与 wiki 均为 19/19 `/api/*`；`POST /api/users/login` HIT 14；API参考全部 19 条 `/api/*`。
 - r7 verify：**13 HARD / 0 SOFT**（与 r6 相同；未放宽）。不要松阈值。
+
+## r7 vs r8
+
+评测正文：`docs/eval/2026-08-14-fastapi-realworld-round8.md`。  
+verify JSON：`docs/eval/2026-08-14-fastapi-realworld-round8-verify.json`。
+
+| 项 | r7 | **r8** |
+|---|---|---|
+| CLI | `2e3a3f0` / #56 | **`05bb3b8` / #58** |
+| generate | 89/89；LLM 仅 37 | **89/89；LLM 89** |
+| cache | 0/89 | **0/89** |
+| fallback | 57 | **0** |
+| 529 / circuit-break | 4 / tripped | **0 / false** |
+| verify | 13 HARD / 0 SOFT | **12 HARD / 0 SOFT**（未放宽；`QODER_PROSE_TOO_LOW` 本轮 PASS） |
+| 页质量 | PASS 32 / DEGRADED 57 | **PASS 89 / DEGRADED 0** |
+| 无效 citation | 18（全部 `file:`） | **108**（`file:` = **0**；全部是字面量 `relpath:`） |
+| claim coverage | 17.75% | **42.28%**（MiniMax 健康回升，不是 #58 修好 coverage） |
+| owner missing | 28 | **29**（19 `/api/*` + 9 models + 1 service `db`） |
+| Overview Conduit | HIT | **HIT** |
+| wall | ~9m00s（后页 skip） | **~38m28s**（打完全部 89 页；不是变慢回归） |
+
+**#58 HIT**（`file:` = 0）。新残差是字面量 `relpath:` 模板。不要再为 `file:` 开重复 PR。coverage 回升是 provider 健康。本评测早于 #59。不要松 HARD/SOFT。
+
+## 残留（r8；不改 generator/scanner）
+
+- citation 字面量 `relpath:` — 108 HARD（`file:` 已清零）。
+- owner mapping 对已前缀的 `/api/*` 仍 19/19 缺失（this eval predates #59）。
+- tests-as-product：`核心服务/Tests.md`。
+- taxonomy 幻觉页；泄漏 `<think>` 89 页。
+- coverage 42.28% 仍 << 95%；eval-layout HARD；API mermaid 缺 9 / ER 缺 5。
+- r8 verify：**12 HARD / 0 SOFT**（未放宽）。不要松阈值。
 
