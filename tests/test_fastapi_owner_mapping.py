@@ -21,6 +21,7 @@ from repo_wiki.verifier.ownership_coverage import (
     OwnerInventoryItem,
     collect_owner_inventory_items,
     map_mounted_api_owners,
+    map_scanned_model_owners,
     owner_coverage_gaps,
     page_has_owner_or_warning,
 )
@@ -221,8 +222,6 @@ def test_qoder_owner_check_accepts_inventory_defining_owner(tmp_path: Path) -> N
 
 def test_owner_mapping_joins_scanned_models_to_defining_file_class(tmp_path: Path) -> None:
     """Mixin/DTO inventory identifiers must join to defining file/class after scan."""
-    from repo_wiki.verifier.ownership_coverage import map_scanned_model_owners
-
     _write_realworld_fastapi_tree(tmp_path)
     snapshot = _scan(tmp_path)
     inventory = scan_repository_source_inventory_v3(tmp_path, incremental=False)
