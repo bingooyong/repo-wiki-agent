@@ -226,6 +226,26 @@ class HeadingPreservationValidator:
 # LLM PAGE COMPOSER
 # =============================================================================
 
+_CLOSED_THINK_DUMP_RE = re.compile(
+    r"<think(?:ing)?>.*?</think(?:ing)?>",
+    re.IGNORECASE | re.DOTALL,
+)
+_UNCLOSED_THINK_PREFIX_RE = re.compile(
+    r"\A\s*<think(?:ing)?>.*?(?=(?:\r?\n)[ \t]*#)",
+    re.IGNORECASE | re.DOTALL,
+)
+_LEADING_THINK_TAG_RE = re.compile(r"\A<think(?:ing)?>", re.IGNORECASE)
+
+
+def _strip_leaked_think_dumps(content: str) -> str:
+    """Drop leaked model <think>/<thinking> dumps so they never reach disk."""
+    text = _CLOSED_THINK_DUMP_RE.sub("", content)
+    text = _UNCLOSED_THINK_PREFIX_RE.sub("", text)
+    text = text.strip()
+    if _LEADING_THINK_TAG_RE.match(text):
+        return ""
+    return text
+
 
 class LLMPageComposer:
     """Composes Qoder-style Markdown articles from page plans and evidence.
@@ -660,7 +680,7 @@ class LLMPageComposer:
 
     def _normalize_markdown_response(self, content: str, title: str) -> str:
         """Ensure provider output is a readable Markdown page."""
-        stripped = content.strip()
+        stripped = _strip_leaked_think_dumps(content).strip()
         if not stripped:
             return f"# {title}\n\nLLM composer did not return content."
         if not stripped.startswith("#"):
