@@ -287,3 +287,111 @@ def test_compact_prompt_does_not_teach_relpath_scheme_cites() -> None:
     prompt = composer._build_compact_prompt(composer_input, composer._build_context(composer_input))
     assert "<cite>relpath:" not in prompt
     assert "relpath:start-end" not in prompt
+
+
+def test_normalize_readme_md_cite_to_readme_rst_when_only_rst_exists(tmp_path: Path) -> None:
+    """R9 leftover: LLM cites README.md on a README.rst-only repo; remap, do not invent README.md."""
+    (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+    assert not (tmp_path / "README.md").exists()
+    composer = create_composer(workspace_root=tmp_path)
+    raw = _overview_page("README.md:1-3")
+    normalized = composer._normalize_markdown_response(raw, "Project Overview")
+
+    assert "<cite>README.rst:1-3</cite>" in normalized
+    assert "<cite>README.md:1-3</cite>" not in normalized
+    assert not (tmp_path / "README.md").exists()
+
+    _write_release_candidate(tmp_path, normalized)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "PASS"
+    assert citation_check["details"]["invalid_count"] == 0
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+    invalid = citation_check["details"].get("invalid") or []
+    assert not any("file does not exist" in str(item.get("problem", "")) for item in invalid)
+
+
+def test_normalize_readme_md_cite_to_readme_txt_when_only_txt_exists(tmp_path: Path) -> None:
+    """Same alias when the only root readme is README.txt."""
+    (tmp_path / "README.txt").write_text("Conduit example app\n" * 8, encoding="utf-8")
+    assert not (tmp_path / "README.md").exists()
+    composer = create_composer(workspace_root=tmp_path)
+    normalized = composer._normalize_markdown_response(
+        _overview_page("README.md:1-3"),
+        "Project Overview",
+    )
+
+    assert "<cite>README.txt:1-3</cite>" in normalized
+    assert "<cite>README.md:1-3</cite>" not in normalized
+
+    _write_release_candidate(tmp_path, normalized)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "PASS"
+    assert citation_check["details"]["invalid_count"] == 0
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+
+
+def test_readme_md_cite_stays_when_both_md_and_rst_exist(tmp_path: Path) -> None:
+    """Do not steal a real README.md cite when both README.md and README.rst exist."""
+    (tmp_path / "README.md").write_text("# Conduit\n\nFastAPI RealWorld.\n" * 4, encoding="utf-8")
+    (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+    composer = create_composer(workspace_root=tmp_path)
+    normalized = composer._normalize_markdown_response(
+        _overview_page("README.md:1-3"),
+        "Project Overview",
+    )
+
+    assert "<cite>README.md:1-3</cite>" in normalized
+    assert "<cite>README.rst:1-3</cite>" not in normalized
+
+    _write_release_candidate(tmp_path, normalized)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "PASS"
+    assert citation_check["details"]["invalid_count"] == 0
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+
+
+def test_missing_app_nope_py_cite_still_hard_invalid(tmp_path: Path) -> None:
+    """A truly missing file stays HARD QODER_CITATION_INVALID; do not relax gates."""
+    (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+    composer = create_composer(workspace_root=tmp_path)
+    page = composer._normalize_markdown_response(
+        _overview_page("app/nope.py:1"),
+        "Project Overview",
+    )
+    assert "<cite>app/nope.py:1</cite>" in page
+
+    _write_release_candidate(tmp_path, page)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    assert "QODER_CITATION_INVALID" in result.get("hard_gate_codes", [])
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "FAIL"
+    assert citation_check["reason_code"] == "QODER_CITATION_INVALID"
+    assert citation_check["gate_type"] == "HARD"
+
+
+def test_compact_prompt_teaches_actual_readme_rst_filename(tmp_path: Path) -> None:
+    """Composer should name the real root README so writers do not invent README.md."""
+    (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+    composer = LLMPageComposer(workspace_root=tmp_path)
+    context = ComposerContext(
+        repository_name="demo",
+        primary_language="python",
+        framework="fastapi",
+        repository_root=str(tmp_path),
+    )
+    page = WikiPagePlan(
+        page_id="project-overview",
+        title="项目概述",
+        category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        output_path="docs/pages/overview/project-overview.md",
+        generation_mode=GenerationMode.LLM_ASSISTED,
+    )
+    composer_input = build_composer_input(page, None, context)
+    prompt = composer._build_compact_prompt(composer_input, composer._build_context(composer_input))
+    assert "README.rst" in prompt
+    assert "<cite>README.md" not in prompt
+    assert "<cite>file:" not in prompt
+    assert "<cite>relpath:" not in prompt

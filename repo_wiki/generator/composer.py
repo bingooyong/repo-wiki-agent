@@ -23,7 +23,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.evidence.citation_renderer import CitationRenderer, normalize_citation_markup
+from repo_wiki.evidence.citation_renderer import (
+    CitationRenderer,
+    normalize_citation_markup,
+    unique_root_readme_name,
+)
 from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.models import ChatMessage, ChatRequest, ChatResponse, LLMProvider
@@ -467,6 +471,18 @@ class LLMPageComposer:
         raw = os.environ.get("REPO_WIKI_COMPACT_LLM_PROMPT", "1").strip().lower()
         return raw not in {"0", "false", "no", "off"}
 
+    def _root_readme_cite_rule(self) -> str:
+        name = unique_root_readme_name(self.workspace_root)
+        if name and name != "README.md":
+            return (
+                f"- 本仓库根 README 是 `{name}`。引用时写 `<cite>{name}:1-3</cite>`，"
+                "不要写不存在的 README.md。"
+            )
+        return (
+            "- 引用仓库根 README 时必须使用仓库中实际存在的文件名"
+            "（README.md / README.rst / README.txt / README），不要引用不存在的文件。"
+        )
+
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         page = input.page_plan
         required_headings = [
@@ -510,6 +526,7 @@ class LLMPageComposer:
 - 正文控制在 900 到 1400 个中文字符之间，避免长篇泛化。
 - 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
 - 至少保留 3 个 `<cite>` 引用，格式为仓库相对路径加行号范围，例如 `<cite>src/app.py:1-10</cite>`。
+{self._root_readme_cite_rule()}
 - 使用段落解释为主，列表只用于核心组件或检查项。
 - 如果证据不足，明确写”当前证据显示”，不要过度推断。
 - 简介必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
@@ -685,7 +702,7 @@ class LLMPageComposer:
             return f"# {title}\n\nLLM composer did not return content."
         if not stripped.startswith("#"):
             stripped = f"# {title}\n\n{stripped}"
-        return normalize_citation_markup(stripped)
+        return normalize_citation_markup(stripped, self.workspace_root)
 
     @property
     def provider_name(self) -> str:
