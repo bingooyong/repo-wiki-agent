@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.evidence.citation_renderer import CitationRenderer
+from repo_wiki.evidence.citation_renderer import CitationRenderer, normalize_citation_markup
 from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.models import ChatMessage, ChatRequest, ChatResponse, LLMProvider
@@ -489,7 +489,7 @@ class LLMPageComposer:
 - 必须以 `# {page.title}` 开头。
 - 正文控制在 900 到 1400 个中文字符之间，避免长篇泛化。
 - 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
-- 至少保留 3 个 `<cite>file:start-end</cite>` 引用。
+- 至少保留 3 个 `<cite>relpath:start-end</cite>` 引用，路径为仓库相对路径。
 - 使用段落解释为主，列表只用于核心组件或检查项。
 - 如果证据不足，明确写”当前证据显示”，不要过度推断。
 - 简介必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
@@ -663,9 +663,9 @@ class LLMPageComposer:
         stripped = content.strip()
         if not stripped:
             return f"# {title}\n\nLLM composer did not return content."
-        if stripped.startswith("#"):
-            return stripped
-        return f"# {title}\n\n{stripped}"
+        if not stripped.startswith("#"):
+            stripped = f"# {title}\n\n{stripped}"
+        return normalize_citation_markup(stripped)
 
     @property
     def provider_name(self) -> str:

@@ -11,11 +11,45 @@ Paths are kept workspace-relative for maximum portability.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
+
+# Writers/LLMs sometimes emit scheme prefixes. Verifier looks up the literal
+# path, so file:README.rst is treated as a missing file even when README.rst exists.
+_DROP_CITATION_SCHEMES = ("file:", "path:")
+_CITE_BLOCK_RE = re.compile(r"(<cite>\s*)([^<]+?)(\s*</cite>)")
+_BRACKET_CITE_RE = re.compile(r"(\[cite:\s*)([^\]]+?)(\])")
+
+
+def normalize_citation_ref(raw: str) -> str:
+    """Return a citation target the verifier can resolve.
+
+    Drops ``file:`` / ``path:`` prefixes. Keeps ``source:`` and bare repo-relative
+    paths, which already pass. Does not rewrite ``file://`` URIs.
+    """
+    value = raw.strip()
+    lowered = value.lower()
+    if lowered.startswith("file://"):
+        return value
+    for scheme in _DROP_CITATION_SCHEMES:
+        if lowered.startswith(scheme):
+            return value[len(scheme) :].lstrip()
+    return value
+
+
+def normalize_citation_markup(text: str) -> str:
+    """Rewrite cite blocks/brackets so they do not emit file: path prefixes."""
+
+    def _rewrite(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{normalize_citation_ref(match.group(2))}{match.group(3)}"
+
+    rewritten = _CITE_BLOCK_RE.sub(_rewrite, text)
+    return _BRACKET_CITE_RE.sub(_rewrite, rewritten)
+
 
 # ============================================================================
 # Citation Block Types
