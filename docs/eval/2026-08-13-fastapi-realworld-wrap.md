@@ -11,7 +11,8 @@
 第五轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round5.md`。  
 第六轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round6.md`。  
 第七轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round7.md`。  
-第八轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round8.md`。
+第八轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round8.md`。  
+第九轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round9.md`。
 
 ## r1 vs r2
 
