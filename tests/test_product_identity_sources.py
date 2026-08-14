@@ -8,7 +8,12 @@ from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.evidence.ranking import rank_evidence_for_page
 from repo_wiki.generator.engine import GenerationEngine
 from repo_wiki.orchestration.service import RepoWikiService
-from repo_wiki.planner.identity import resolve_repository_identity
+from repo_wiki.planner.identity import (
+    _is_product_sentence,
+    _is_rst_noise_line,
+    _parse_readme_identity,
+    resolve_repository_identity,
+)
 from repo_wiki.planner.schema import SourceRequirement, WikiPagePlan, WikiTaxonomyCategory
 from repo_wiki.scanner.docs_scanner import scan_repository_docs_inventory
 
@@ -110,6 +115,10 @@ def _write_realworld_badge_readme_rst(root: Path, *, include_product_prose: bool
 .. image:: https://codecov.io/gh/example/fastapi-realworld-example-app/branch/master/graph/badge.svg
     :target: https://codecov.io/gh/example/fastapi-realworld-example-app
 
+|
+
+..
+
 |build|
 
 ----------
@@ -205,6 +214,41 @@ def test_identity_uses_pyproject_description_when_readme_has_no_product_sentence
     assert identity.name == "fastapi-realworld-example-app"
     _assert_identity_is_realworld_product(identity)
     assert "gothinkster/realworld" in (identity.description or "")
+
+
+def test_rst_noise_and_non_product_sentences_are_rejected() -> None:
+    assert _is_rst_noise_line("|")
+    assert _is_rst_noise_line("..")
+    assert not _is_rst_noise_line("passing Conduit testsuite")
+    assert not _is_product_sentence(None)
+    assert not _is_product_sentence("   ")
+    assert not _is_product_sentence(":target: https://example.com")
+    assert not _is_product_sentence(":alt: Build")
+    assert not _is_product_sentence(":height: 20")
+    assert not _is_product_sentence("|build|")
+    assert _is_product_sentence("passing Conduit testsuite")
+
+
+def test_parse_readme_skips_empty_hash_and_uses_heading_only_title() -> None:
+    title, description = _parse_readme_identity("#\n# |build|\n\n# Conduit\n")
+    assert title == "Conduit"
+    assert description == "Conduit"
+
+    title, description = _parse_readme_identity(
+        "See the badge :target: https://example.com for status.\n"
+    )
+    assert ":target:" not in (description or "")
+    assert description is None
+
+
+def test_identity_falls_back_when_readme_sentence_is_inline_rst_junk(tmp_path: Path) -> None:
+    (tmp_path / "README.rst").write_text(
+        "See the badge :target: https://example.com for status.\n",
+        encoding="utf-8",
+    )
+    _write_realworld_pyproject(tmp_path)
+    identity = resolve_repository_identity(tmp_path)
+    _assert_identity_is_realworld_product(identity)
 
 
 def test_docs_inventory_does_not_treat_agents_or_eval_reports_as_product_source_docs(
