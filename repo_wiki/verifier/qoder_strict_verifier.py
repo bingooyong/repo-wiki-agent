@@ -1944,7 +1944,7 @@ class QoderLikeVerifierService(VerifierService):
             is_source_looking_url,
         )
 
-        raw = normalize_citation_ref(citation)
+        raw = normalize_citation_ref(citation, self._source_root_for_citations())
         if is_source_looking_url(raw):
             return "source-looking external URL cannot validate repository lines"
         if is_external_url(raw):
