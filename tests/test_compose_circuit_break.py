@@ -47,6 +47,31 @@ The repository layout is described here with extra padding sentences so
 validation passes without falling back to templates during the success path.
 """
 
+# HTTP 200 + non-empty tokens, but almost no counted prose (headers / fences /
+# list items are stripped). Composer must reject this as insufficient prose.
+INSUFFICIENT_PROSE_MARKDOWN = """# Sample Page
+
+```python
+def pad_out_the_body():
+    return "x" * 80
+value_a = 1
+value_b = 2
+value_c = 3
+value_d = 4
+value_e = 5
+```
+
+- bullet one with extra words for length
+- bullet two with extra words for length
+- bullet three with extra words for length
+"""
+
+ENOUGH_TOKENS = {
+    "prompt_tokens": 240,
+    "completion_tokens": 360,
+    "total_tokens": 600,
+}
+
 
 def _retryable_529() -> RetryableError:
     return RetryableError(
@@ -140,6 +165,142 @@ class HealthyLLMProvider(LLMProvider):
     async def chat(self, request: ChatRequest) -> ChatResponse:
         self._call_count += 1
         return _success_response()
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
+class InsufficientProseThenHealthyProvider(LLMProvider):
+    """First N chats are HTTP 200 + tokens but fail the prose-density check."""
+
+    def __init__(self, reject_count: int) -> None:
+        self._reject_count = reject_count
+        self._call_count = 0
+        self._config = LLMProviderConfig(
+            provider="mock",
+            model="mock-gpt",
+            timeout=PAGE_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+
+    @property
+    def name(self) -> str:
+        return "insufficient-prose-fake"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities()
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        self._call_count += 1
+        if self._call_count <= self._reject_count:
+            return ChatResponse(
+                content=INSUFFICIENT_PROSE_MARKDOWN,
+                model="mock-gpt",
+                usage=dict(ENOUGH_TOKENS),
+            )
+        return _success_response()
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
+class Always529Provider(LLMProvider):
+    """Immediate 529 on every chat — a real provider-outage signal."""
+
+    def __init__(self) -> None:
+        self._call_count = 0
+        self._config = LLMProviderConfig(
+            provider="mock",
+            model="mock-gpt",
+            timeout=PAGE_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+
+    @property
+    def name(self) -> str:
+        return "always-529-fake"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities()
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        self._call_count += 1
+        raise _retryable_529()
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
+class AlwaysEmptyContentProvider(LLMProvider):
+    """HTTP 200 with empty assistant content — a real provider-outage signal."""
+
+    def __init__(self) -> None:
+        self._call_count = 0
+        self._config = LLMProviderConfig(
+            provider="mock",
+            model="mock-gpt",
+            timeout=PAGE_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+
+    @property
+    def name(self) -> str:
+        return "empty-content-fake"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities()
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        self._call_count += 1
+        return ChatResponse(content="", model="mock-gpt")
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
+class AlwaysTimeoutProvider(LLMProvider):
+    """Hang until the page wait_for timeout — a real provider-outage signal."""
+
+    def __init__(self) -> None:
+        self._call_count = 0
+        self._config = LLMProviderConfig(
+            provider="mock",
+            model="mock-gpt",
+            timeout=PAGE_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+
+    @property
+    def name(self) -> str:
+        return "timeout-fake"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities()
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        self._call_count += 1
+        await request_never_returns()
+        raise AssertionError("timeout path must be cancelled, not return")
 
     def validate_config(self) -> list[tuple[str, str | None, str]]:
         return []
@@ -369,3 +530,162 @@ async def test_single_529_does_not_disable_provider(
     assert modes.count("fallback") == 1
     assert modes.count("llm") == PAGE_COUNT - 1
     assert provider.call_count == PAGE_COUNT
+
+
+@pytest.mark.asyncio
+async def test_insufficient_prose_rejects_do_not_trip_circuit_breaker(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R10: 3× Insufficient prose (HTTP 200 + tokens) must not disable the provider."""
+    monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    provider = InsufficientProseThenHealthyProvider(reject_count=3)
+    service = _service(root)
+    _install_provider(monkeypatch, service, provider)
+
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+    modes = [meta["generation_mode"] for meta in result["page_metadata"]]
+    prose_rejects = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "Insufficient prose" in reason
+    ]
+    disabled_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "provider disabled after" in reason
+    ]
+
+    assert llm["max_provider_failures"] == 3
+    assert llm["provider_disabled_after_failures"] is False
+    assert provider.call_count == PAGE_COUNT
+    assert llm["llm_call_count"] == PAGE_COUNT
+    assert llm["fallback_page_count"] == 3
+    assert len(prose_rejects) == 3
+    assert not disabled_reasons
+    assert modes.count("fallback") == 3
+    assert modes.count("llm") == PAGE_COUNT - 3
+
+
+@pytest.mark.asyncio
+async def test_three_consecutive_529s_still_trip_circuit_breaker(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#49: three real provider 529s still consume the failure budget."""
+    monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    provider = Always529Provider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, provider)
+
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+
+    assert llm["max_provider_failures"] == 3
+    assert llm["provider_disabled_after_failures"] is True
+    assert provider.call_count == 3
+    assert provider.call_count < PAGE_COUNT
+    assert llm["llm_call_count"] < PAGE_COUNT
+    assert llm["fallback_page_count"] == PAGE_COUNT
+    disabled_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "provider disabled after" in reason
+    ]
+    assert disabled_reasons
+
+
+@pytest.mark.asyncio
+async def test_three_consecutive_empty_content_failures_still_trip_circuit_breaker(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#49: three empty-content provider failures still disable later LLM calls."""
+    monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    provider = AlwaysEmptyContentProvider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, provider)
+
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+
+    assert llm["max_provider_failures"] == 3
+    assert llm["provider_disabled_after_failures"] is True
+    assert provider.call_count == 3
+    assert provider.call_count < PAGE_COUNT
+    assert llm["fallback_page_count"] == PAGE_COUNT
+    disabled_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "provider disabled after" in reason
+    ]
+    assert disabled_reasons
+
+
+@pytest.mark.asyncio
+async def test_three_consecutive_timeouts_still_trip_circuit_breaker(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#49: three page timeouts still disable later LLM calls."""
+    monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    provider = AlwaysTimeoutProvider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, provider)
+
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+
+    assert llm["max_provider_failures"] == 3
+    assert llm["provider_disabled_after_failures"] is True
+    assert provider.call_count == 3
+    assert provider.call_count < PAGE_COUNT
+    assert llm["fallback_page_count"] == PAGE_COUNT
+    disabled_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "provider disabled after" in reason
+    ]
+    assert disabled_reasons
