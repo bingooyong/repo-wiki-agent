@@ -17,6 +17,7 @@ class OwnerInventoryItem:
     source: str
     defining_file: str = ""
     defining_handler: str = ""
+    defining_class: str = ""
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,15 @@ class ApiOwnerBinding:
     identifier: str
     defining_file: str
     defining_handler: str
+
+
+@dataclass(frozen=True)
+class ModelOwnerBinding:
+    """Scanned data-model identifier bound to the file/class that defines it."""
+
+    identifier: str
+    defining_file: str
+    defining_class: str
 
 
 OWNER_HINT_PATTERN = re.compile(
@@ -78,6 +88,27 @@ def map_mounted_api_owners(surfaces: Any) -> dict[str, ApiOwnerBinding]:
     return bindings
 
 
+def map_scanned_model_owners(models: Any) -> dict[str, ModelOwnerBinding]:
+    """Join scanned Pydantic/data-model types to defining file/class owner keys."""
+    bindings: dict[str, ModelOwnerBinding] = {}
+    if not models:
+        return bindings
+    for item in models:
+        identifier = _surface_str(item, ("model_id", "id", "name", "display_name"))
+        defining_file = _surface_str(item, ("file_path", "evidence_path"))
+        defining_class = _surface_str(item, ("defining_class", "class_name", "name"))
+        if not identifier or not defining_file:
+            continue
+        if not defining_class:
+            defining_class = identifier
+        bindings[identifier] = ModelOwnerBinding(
+            identifier=identifier,
+            defining_file=defining_file,
+            defining_class=defining_class,
+        )
+    return bindings
+
+
 def owner_coverage_gaps(
     items: list[OwnerInventoryItem],
     pages: list[str],
@@ -102,6 +133,8 @@ def item_owner_coverage(
         return True, "structured unidentified warning"
     if item.kind == "api" and _has_defining_owner(item):
         return True, "defining file/handler"
+    if item.kind == "model" and _has_defining_owner(item):
+        return True, "defining file/class"
     for page_text in pages:
         covered, reason = page_has_owner_or_warning(page_text, item.identifier)
         if covered:
@@ -163,7 +196,21 @@ def _collect_models(data: dict[str, Any], source: str, items: list[OwnerInventor
         if isinstance(item, dict):
             identifier = _first_str(item, ("model_id", "id", "name", "display_name"))
             if identifier and _is_major(item):
-                items.append(OwnerInventoryItem("model", identifier, source))
+                defining_file = _first_str(item, ("file_path", "evidence_path")) or ""
+                defining_class = ""
+                if defining_file:
+                    defining_class = (
+                        _first_str(item, ("defining_class", "class_name", "name")) or identifier
+                    )
+                items.append(
+                    OwnerInventoryItem(
+                        "model",
+                        identifier,
+                        source,
+                        defining_file=defining_file,
+                        defining_class=defining_class,
+                    )
+                )
 
 
 def _collect_runtime_entrypoints(
@@ -180,6 +227,8 @@ def _collect_runtime_entrypoints(
 
 
 def _has_defining_owner(item: OwnerInventoryItem) -> bool:
+    if item.kind == "model":
+        return bool(item.defining_file.strip())
     return bool(item.defining_file.strip() or item.defining_handler.strip())
 
 
