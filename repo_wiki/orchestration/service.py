@@ -1205,7 +1205,11 @@ class RepoWikiService:
             actual_tokens += output.tokens_used
 
             if output.rejected:
-                note_provider_failure()
+                # Quality rejects after a successful HTTP 200 are page-local
+                # fallbacks, not provider outages. R10: 3× Insufficient prose
+                # must not consume the #49 circuit-break budget.
+                if output.rejection_reason != "Insufficient prose content":
+                    note_provider_failure()
                 write_fallback(
                     page,
                     binding,
