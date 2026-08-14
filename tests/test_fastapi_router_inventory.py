@@ -128,7 +128,41 @@ app = get_application()
         + "\n",
         encoding="utf-8",
     )
+    _write_realworld_fastapi_models(root)
     (root / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+
+
+def _write_realworld_fastapi_models(root: Path) -> None:
+    """Mixin + request DTO matching RealWorld Pydantic inventory leftovers."""
+    models_dir = root / "app" / "models"
+    schemas_dir = models_dir / "schemas"
+    schemas_dir.mkdir(parents=True, exist_ok=True)
+    (models_dir / "__init__.py").write_text("", encoding="utf-8")
+    (schemas_dir / "__init__.py").write_text("", encoding="utf-8")
+    (models_dir / "rwmodel.py").write_text(
+        """
+from pydantic import BaseModel
+
+
+class DateTimeModelMixin(BaseModel):
+    created_at: str | None = None
+    updated_at: str | None = None
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (schemas_dir / "users.py").write_text(
+        """
+from pydantic import BaseModel
+
+
+class UserInUpdate(BaseModel):
+    username: str | None = None
+    email: str | None = None
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _write_realworld_env_factory_fastapi_tree(root: Path) -> None:
