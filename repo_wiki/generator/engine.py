@@ -2642,6 +2642,7 @@ class GenerationEngine:
             "graph_summary": graph_summary,
             # New prose-first fields for 00-overview.md
             "primary_cite": primary_cite,
+            "product_description": product_description or "",
             "project_description": project_description,
             "project_positioning": project_positioning,
             "core_problem": core_problem,

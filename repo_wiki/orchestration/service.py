@@ -1049,6 +1049,12 @@ class RepoWikiService:
         )
         cache_path = self._resolve_composer_cache_path(output_dir)
         cache = ComposerCache(cache_path)
+        identity = getattr(plan, "repository_identity", None)
+        product_description = getattr(identity, "description", None) if identity else None
+        if not product_description:
+            from repo_wiki.planner.identity import resolve_repository_identity
+
+            product_description = resolve_repository_identity(self.root).description
         context = ComposerContext(
             repository_name=snapshot.repository.name,
             primary_language=snapshot.repository.language,
@@ -1058,6 +1064,7 @@ class RepoWikiService:
             endpoints=[e.model_dump() for e in snapshot.endpoints],
             models=[m.model_dump() for m in snapshot.data_models],
             commands=snapshot.commands,
+            product_description=product_description,
         )
 
         pages: list[tuple[str, str]] = []

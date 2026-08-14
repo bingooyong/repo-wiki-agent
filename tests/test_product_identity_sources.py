@@ -6,6 +6,7 @@ from pathlib import Path
 
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.evidence.ranking import rank_evidence_for_page
+from repo_wiki.generator.composer import ComposerContext, LLMPageComposer, build_composer_input
 from repo_wiki.generator.engine import GenerationEngine
 from repo_wiki.orchestration.service import RepoWikiService
 from repo_wiki.planner.identity import (
@@ -14,7 +15,12 @@ from repo_wiki.planner.identity import (
     _parse_readme_identity,
     resolve_repository_identity,
 )
-from repo_wiki.planner.schema import SourceRequirement, WikiPagePlan, WikiTaxonomyCategory
+from repo_wiki.planner.schema import (
+    GenerationMode,
+    SourceRequirement,
+    WikiPagePlan,
+    WikiTaxonomyCategory,
+)
 from repo_wiki.scanner.docs_scanner import scan_repository_docs_inventory
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -125,6 +131,28 @@ def _write_realworld_badge_readme_rst(root: Path, *, include_product_prose: bool
 {prose}
 """.strip()
         + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_realworld_readme_with_later_quickstart(root: Path) -> None:
+    """R6 shape: Conduit NOTE first, then a later Quickstart that citations prefer."""
+    _write_realworld_badge_readme_rst(root, include_product_prose=True)
+    readme = root / "README.rst"
+    current = readme.read_text(encoding="utf-8")
+    readme.write_text(
+        current
+        + """
+Quickstart
+----------
+
+.. code:: bash
+
+    poetry install
+    poetry run uvicorn app.main:app --reload
+
+This later Quickstart is what overview citations currently prefer over the NOTE.
+""",
         encoding="utf-8",
     )
 
@@ -385,3 +413,107 @@ def test_does_not_invent_product_name_when_readme_has_none(tmp_path: Path) -> No
     description = str(context.get("project_description", ""))
     assert "知识管理平台" not in description
     assert "知识管理和文档生成平台" not in description
+
+
+def _write_fastapi_realworld_overview_fixture(root: Path) -> None:
+    (root / "app").mkdir()
+    (root / "app" / "main.py").write_text(
+        "from fastapi import FastAPI\n\napp = FastAPI()\n",
+        encoding="utf-8",
+    )
+    _write_realworld_readme_with_later_quickstart(root)
+    _write_realworld_pyproject(root)
+    _write_pollution_docs(root)
+
+
+def _overview_snapshot(root: Path) -> dict:
+    return {
+        "repo_map": {
+            "repository": {
+                "name": "fastapi-realworld-example-app",
+                "primary_language": "python",
+                "framework": "fastapi",
+            },
+            "commands": {},
+        },
+        "module_index": {
+            "modules": [
+                {
+                    "name": "app",
+                    "path": "app",
+                    "domain": "core-platform",
+                    "runtime_role": "api-server",
+                }
+            ]
+        },
+        "api_index": {
+            "endpoints": [
+                {"method": "GET", "path": "/api/articles", "module": "app"},
+            ]
+        },
+        "data_models": {"models": []},
+        "graph": {"modules": {}},
+    }
+
+
+def test_overview_core_context_includes_identity_description_not_just_slug(
+    tmp_path: Path,
+) -> None:
+    """Overview context must carry identity.description, not only the package slug."""
+    _write_fastapi_realworld_overview_fixture(tmp_path)
+    identity = resolve_repository_identity(tmp_path)
+    assert identity.name == "fastapi-realworld-example-app"
+    assert identity.description
+    assert "Conduit" in identity.description
+
+    engine = GenerationEngine(tmp_path, template_root=_REPO_ROOT / "templates")
+    context = engine._build_core_context(_overview_snapshot(tmp_path))
+    product_description = str(context.get("product_description") or "")
+    assert product_description == identity.description
+    assert "Conduit" in product_description
+    assert identity.name == "fastapi-realworld-example-app"
+
+
+def test_overview_composer_prompt_includes_identity_description_not_just_slug(
+    tmp_path: Path,
+) -> None:
+    """Composer/overview prompt must include the Conduit sentence, not only the slug."""
+    _write_fastapi_realworld_overview_fixture(tmp_path)
+    identity = resolve_repository_identity(tmp_path)
+    assert identity.description
+    assert "Conduit" in identity.description
+    assert "RealWorld" in identity.description or "testsuite" in identity.description
+
+    composer = LLMPageComposer(workspace_root=tmp_path)
+    context = ComposerContext(
+        repository_name=identity.name,
+        primary_language="python",
+        framework="fastapi",
+        repository_root=str(tmp_path),
+        modules=[
+            {
+                "name": "app",
+                "path": "app",
+                "domain": "core-platform",
+                "runtime_role": "api-server",
+            }
+        ],
+        endpoints=[{"method": "GET", "path": "/api/articles", "module": "app"}],
+    )
+    page = WikiPagePlan(
+        page_id="project-overview",
+        title="项目概述",
+        category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        parent=None,
+        output_path="docs/pages/overview/project-overview.md",
+        source_requirements=SourceRequirement(modules=["app"]),
+        generation_mode=GenerationMode.LLM_ASSISTED,
+    )
+    composer_input = build_composer_input(page, None, context)
+    prompt_ctx = composer._build_context(composer_input)
+    prompt = composer._build_compact_prompt(composer_input, prompt_ctx)
+    blob = f"{prompt}\n{prompt_ctx}"
+
+    assert identity.description in blob
+    assert "Conduit" in blob
+    assert identity.name == "fastapi-realworld-example-app"
