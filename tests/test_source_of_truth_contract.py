@@ -222,7 +222,7 @@ def test_generated_task_catalog_tracks_cli_extension_and_excludes_tests() -> Non
     )
     assert (
         generated_commands["extension_update_default"]
-        == "uv run repo-wiki generate --profile qoder-like"
+        == "uv run repo-wiki generate --profile qoder-like --output .repo-agent-eval"
     )
 
     assert "tests" not in task_catalog["module_references"]

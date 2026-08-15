@@ -9,14 +9,14 @@ A VS Code extension for browsing repo-wiki READY wiki outputs from a dedicated A
 3. **生成并发布 Wiki**：在目标仓库执行 `uv run repo-wiki init`、`index`、`generate --profile qoder-like --output .repo-agent-eval`。候选 run 产出在 `.repo-agent-eval/runs/<run>/repowiki/zh/**`；通过门禁后发布到 `.repo-agent-eval/repowiki/zh/content` 与 `.repo-agent-eval/repowiki/zh/meta`。
 4. **安装本插件**：VSIX「Install from VSIX」，或在本目录 `npm run compile` + `vsce package`。
 5. **浏览**：用编辑器打开该目标仓库 → 活动栏 **Repo Wiki** → 侧栏点文档打开 Markdown 预览。
-6. **更新 Wiki**：侧栏「更新 Wiki」或命令 `Repo Wiki: Update Wiki`，默认终端命令为 `uv run repo-wiki generate --profile qoder-like`（可在设置 `repoWikiBrowser.generateCommand` 修改）。
+6. **更新 Wiki**：侧栏「更新 Wiki」或命令 `Repo Wiki: Update Wiki`，默认运行 `uv run repo-wiki generate --profile qoder-like --output .repo-agent-eval`。进度与失败原因显示在侧栏和 **Repo Wiki** 输出通道。生成不会自动发布 READY；验证通过后用侧栏「发布 READY」或 `Repo Wiki: Release Publish READY`。
 
 **完整步骤与说明（中英）**：[docs/operations/installation-and-vscode-extension.md](../../docs/operations/installation-and-vscode-extension.md) 开头的「中文：安装、生成 Wiki、安装插件与更新」一节。
 
 ## Features
 
 - **Repo Wiki Activity Bar**: Adds a dedicated Repo Wiki icon in the left Activity Bar.
-- **Qoder-style Sidebar**: Shows the published release, LLM configuration status, update status, language selector, update/sync actions, and manifest navigation tree.
+- **Qoder-style Sidebar**: Shows the published release or why READY is missing (not generated / verify failed / not published), LLM configuration status, generate progress/failure, language selector, update/verify/publish/sync actions, and manifest navigation tree.
 - **Rendered Markdown Preview**: Click any wiki item to open VS Code's Markdown preview instead of raw markdown text.
 - **Release-only default**: The extension only loads `.repo-agent-eval/repowiki/zh/manifest.json` when it is READY, and does not auto-fallback to `.repo-agent-eval/runs/*`.
 
@@ -36,8 +36,9 @@ A VS Code extension for browsing repo-wiki READY wiki outputs from a dedicated A
 - **Commands**:
   - `Repo Wiki: Open Wiki Viewer` - Opens the wiki overview
   - `Repo Wiki: Refresh Wiki Tree` - Refreshes the navigation tree
-  - `Repo Wiki: Run Verification (--ci)` - Runs `repo-wiki verify --ci`
-  - `Repo Wiki: Update Wiki` - Runs the configured generate/regenerate command with short-lived LLM environment injection (default: `uv run repo-wiki generate --profile qoder-like`; see **CLI environment** below)
+  - `Repo Wiki: Run Verification (--ci)` - Runs `uv run repo-wiki verify --profile qoder-like --ci --output .repo-agent-eval` with captured progress/failure
+  - `Repo Wiki: Update Wiki` - Runs the configured generate command with captured progress/failure (default: `uv run repo-wiki generate --profile qoder-like --output .repo-agent-eval`; see **CLI environment** below)
+  - `Repo Wiki: Release Publish READY` - Runs `uv run repo-wiki release-publish --output .repo-agent-eval` so the sidebar can read the READY wiki
   - `Repo Wiki: Sync Wiki` - Runs `repo-wiki sync`
   - `Repo Wiki: Configure LLM Settings` - Sets the source strategy plus optional provider/model/base URL/API key environment variable name in VS Code settings
   - `Repo Wiki: Set LLM API Key` - Stores the actual API key in VS Code SecretStorage
@@ -96,7 +97,8 @@ Visual workflow:
    - `repoWikiBrowser.llm.apiKeyEnv` → environment variable name for the real key; empty falls back to `REPO_WIKI_LLM_API_KEY`
 5. Click **Set Key** or run `Repo Wiki: Set LLM API Key`. The real key is saved in VS Code SecretStorage under the extension account, not in settings or YAML.
 6. Click **Test** or run `Repo Wiki: Test LLM Configuration`. The extension runs `repo-wiki config --ci` with the same environment injection, captures stdout/stderr, redacts defensively, and shows OK/FAIL plus provider/model/base URL/key-present status.
-7. Click **Update Wiki**. The visible terminal command remains the configured generate command; any selected short-lived LLM values are injected through `createTerminal({ env })` for that terminal session.
+7. Click **Update Wiki**. Generate progress and the failure reason appear in the sidebar and the **Repo Wiki** output channel (not only a silent terminal dump). The visible command remains the configured generate command; any selected short-lived LLM values are injected into that process environment. Generate does **not** auto-publish READY.
+8. After verify passes, click **Publish READY** or run `Repo Wiki: Release Publish READY` (`uv run repo-wiki release-publish --output .repo-agent-eval`), then refresh the sidebar.
 
 Source strategies:
 
@@ -122,14 +124,14 @@ References:
 
 ## CLI environment (generate / update)
 
-The extension is **TypeScript-only** and **does not bundle** the `repo-wiki` Python package, embeddings, or LLM runtime. After installation, **Update Wiki** sends a shell command to the **integrated terminal** (same as typing it yourself). For the default command to work you typically need:
+The extension is **TypeScript-only** and **does not bundle** the `repo-wiki` Python package, embeddings, or LLM runtime. After installation, **Update Wiki** runs the configured generate command as a tracked process (sidebar progress + Output channel). For the default command to work you typically need:
 
 1. **`uv`** installed and on the PATH seen by VS Code’s terminal (sometimes differs from GUI apps on macOS — configure shell integration or use an absolute path if needed).
 2. **A resolvable `repo-wiki` entrypoint** in that workspace context — most commonly `uv run repo-wiki …` from a repo that declares `repo-wiki` (e.g. local editable install / project `pyproject.toml`). Global installs (`pipx`, `pip install`) also work if your terminal finds them.
 
 If you cannot use `uv`, set **Settings → Repo Wiki → Generate Command** (`repoWikiBrowser.generateCommand`) to whatever matches your machine, for example:
 
-- `pipx run repo-wiki generate --profile qoder-like` (if published on PyPI and pipx has it)
+- `pipx run repo-wiki generate --profile qoder-like --output .repo-agent-eval` (if published on PyPI and pipx has it)
 - Path to a venv Python module if your project documents it
 
 **Bundling repo-wiki inside the VSIX** would mean shipping Python, native wheels, and optional large deps across OS/architectures — high maintenance and poor fit for a lightweight sidebar extension. The supported model remains: **browser UI in VS Code + CLI in your environment** (optionally standardized via Dev Containers / tasks.json for repeatable PATH).
@@ -156,6 +158,7 @@ extensions/repo-wiki-browser/
   - `Repo Wiki: Refresh Wiki Tree`
   - `Repo Wiki: Run Verification (--ci)`
   - `Repo Wiki: Update Wiki`
+  - `Repo Wiki: Release Publish READY`
   - `Repo Wiki: Sync Wiki`
   - `Repo Wiki: Configure LLM Settings`
   - `Repo Wiki: Set LLM API Key`
@@ -172,10 +175,10 @@ The extension integrates with:
 
 ## Known Limitations
 
-- **PATH / CLI**: The extension process does not run `uv` itself; only the integrated terminal does. There is no guaranteed preflight check (extension host PATH often differs from the terminal).
+- **PATH / CLI**: The extension host runs the configured generate/verify/publish commands and shows progress/failure in the sidebar. `uv` and `repo-wiki` must still resolve in that process environment.
 - Git drift detection depends on manifest `wiki_git_commit` / `target_git_commit` and local git history availability.
 - The language selector is currently UI state only; content localization depends on generated wiki files.
-- If no READY release manifest with `navigation_tree` is found at `.repo-agent-eval/repowiki/zh/manifest.json`, the sidebar only shows generation guidance.
+- If no READY release manifest with `navigation_tree` is found at `.repo-agent-eval/repowiki/zh/manifest.json`, the sidebar explains whether generate has not run, verify failed, or `release-publish` has not run.
 - Mermaid blocks are rendered by VS Code Markdown preview from published release content files (`repowiki/zh/content/**`).
 
 ## Future Enhancements

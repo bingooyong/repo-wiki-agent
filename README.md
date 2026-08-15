@@ -108,18 +108,28 @@ repo-wiki release-publish --output .repo-agent-eval
 shell profile，或保存 API Key。v1 不包含 MCP server；只有需要无 shell 主机、typed tools
 或进度 UI 时才考虑增加 MCP。
 
-完成上面的 CLI 安装后，在仓库根目录将本地 marketplace 加入 Codex。命令输出会显示
-marketplace 名称；在第二条命令中使用该名称：
+完成上面的 CLI 安装后，在仓库根目录把本地 marketplace 加入 Codex。marketplace 名称写在
+`.agents/plugins/marketplace.json`，固定为 `repo-wiki-local`。第一条命令成功后会打印该名称；
+若加上 `--json`，字段为 `"marketplaceName": "repo-wiki-local"`。第二条命令必须使用这个名称：
 
 ```bash
-codex plugin marketplace add <repo-root>
-codex plugin add repo-wiki@<marketplace-name>
+codex plugin marketplace add .
+codex plugin add repo-wiki@repo-wiki-local
 ```
 
-在新的 Codex conversation 中使用 `repo-wiki`、`repo-wiki-generate`、
-`repo-wiki-maintain` 或 `repo-wiki-verify` skill。生成或改进 run 只会止步于验证成功的
-candidate；只有提供完整 G005 质量证据、通过 inspect，并明确确认同一 run ID 后，才会
-替换本地 READY release。
+不在仓库根目录时，把 `.` 换成仓库根路径，例如 `codex plugin marketplace add <repo-root>`。
+不要改 marketplace 名称，也不要走别的安装入口。
+
+确认 skills 已可用：
+
+```bash
+codex plugin list
+```
+
+期望输出包含 `repo-wiki@repo-wiki-local`，并且状态为 `installed, enabled`。然后新开一个 Codex
+conversation，应能直接使用 `repo-wiki`、`repo-wiki-generate`、`repo-wiki-maintain`、
+`repo-wiki-verify`。生成或改进 run 只会止步于验证成功的 candidate；只有提供完整 G005 质量证据、
+通过 inspect，并明确确认同一 run ID 后，才会替换本地 READY release。v1 不会自动发布 READY。
 
 示例请求：
 
@@ -135,8 +145,8 @@ candidate；只有提供完整 G005 质量证据、通过 inspect，并明确确
 ```bash
 python ~/.codex/skills/.system/plugin-creator/scripts/update_plugin_cachebuster.py \
   plugins/repo-wiki
-codex plugin marketplace add <repo-root>
-codex plugin add repo-wiki@<marketplace-name>
+codex plugin marketplace add .
+codex plugin add repo-wiki@repo-wiki-local
 ```
 
 本地发布前运行官方 package validator，并在可用时运行隔离 Codex smoke test。没有本地
@@ -150,7 +160,7 @@ python scripts/smoke_codex_plugin.py
 移除插件不会删除已生成的 Wiki 或 READY release：
 
 ```bash
-codex plugin remove repo-wiki@<marketplace-name>
+codex plugin remove repo-wiki@repo-wiki-local
 codex plugin marketplace remove repo-wiki-local
 ```
 
@@ -212,7 +222,8 @@ atomic publisher 的 backup/restore 行为负责。
 
 - 浏览 `.repo-agent-eval/repowiki/zh/manifest.json` 中 READY release 的 `navigation_tree`；
 - 打开生成的 Markdown 预览；
-- 触发 `Repo Wiki: Update Wiki`，向集成终端发送 `repoWikiBrowser.generateCommand`，并按 source 策略注入非空 `LLM_*`；
+- 触发 `Repo Wiki: Update Wiki`，运行 `repoWikiBrowser.generateCommand`（默认带 `--output .repo-agent-eval`），在侧栏和输出通道显示进度/失败原因，并按 source 策略注入非空 `LLM_*`；
+- 区分 READY 缺失原因（尚未生成 / 验证失败 / 未 `release-publish`），并提供一键 `Repo Wiki: Release Publish READY`；
 - 可视化配置 provider / model / base URL / `api_key_env`（Configure LLM Settings）；
 - 用 SecretStorage 保存/清除 API Key（Set / Clear LLM API Key）；
 - 运行 `Repo Wiki: Test LLM Configuration`（`repo-wiki config --ci`，输出脱敏）；

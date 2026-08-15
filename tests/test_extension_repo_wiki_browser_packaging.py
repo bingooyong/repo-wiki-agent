@@ -78,7 +78,7 @@ def test_repo_wiki_browser_invalid_api_key_env_blocks_update_and_test() -> None:
     source = EXTENSION_TS.read_text()
 
     update_body = re.search(
-        r"async function runUpdateWiki[\s\S]+?\n}\n\nfunction getWorkspaceRoot", source
+        r"async function runUpdateWiki[\s\S]+?\n}\n\nfunction getRepoWikiOutput", source
     )
     assert update_body is not None
     assert "try" in update_body.group(0)
@@ -86,7 +86,16 @@ def test_repo_wiki_browser_invalid_api_key_env_blocks_update_and_test() -> None:
     assert "vscode.window.showErrorMessage" in update_body.group(0)
     assert update_body.group(0).find(
         "const env = await buildLlmTerminalEnv(secrets);"
-    ) < update_body.group(0).find("runTerminalCommand")
+    ) < update_body.group(0).find("runTrackedCliCommand")
+
+    tracked = re.search(
+        r"async function runTrackedCliCommand[\s\S]+?\n}\n\nfunction getWorkspaceRoot", source
+    )
+    assert tracked is not None
+    assert "ensureWorkspaceTrusted()" in tracked.group(0)
+    assert "summarizeCliOutput" in tracked.group(0)
+    assert "failureReason" in tracked.group(0)
+    assert "childProcess.spawn" in tracked.group(0)
 
     test_body = re.search(
         r"async function testLlmConfig[\s\S]+?\n}\n\nfunction redactDiagnostics", source
