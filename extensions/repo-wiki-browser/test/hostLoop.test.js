@@ -119,6 +119,8 @@ function testSummarizeCliFailureFromJson() {
             status: 'NOT_READY',
             hard_gate_codes: ['QODER_MANIFEST_NOT_READY'],
             error: 'strict verify failed',
+            summary: { hard_gate_failures: 1 },
+            gate_summary: { hard_gate_blocking: true },
         }, null, 2),
     ].join('\n');
     const summary = hostLoop.summarizeCliOutput(output, 1);

@@ -247,20 +247,26 @@ export function diagnoseReadyGap(workspaceRoot: string): ReadyGapDiagnosis {
 }
 
 export function extractLastJsonObject(text: string): Record<string, unknown> | undefined {
-    let cursor = text.lastIndexOf('{');
-    let attempts = 0;
-    while (cursor >= 0 && attempts < 8) {
-        attempts += 1;
-        const slice = text.slice(cursor).trim();
+    const starts: number[] = [];
+    const firstBrace = text.indexOf('{');
+    if (firstBrace >= 0 && text.slice(0, firstBrace).trim() === '') {
+        starts.push(firstBrace);
+    }
+    let idx = text.indexOf('\n{');
+    while (idx !== -1) {
+        starts.push(idx + 1);
+        idx = text.indexOf('\n{', idx + 1);
+    }
+    for (let i = starts.length - 1; i >= 0; i -= 1) {
+        const slice = text.slice(starts[i]).trim();
         try {
             const parsed = JSON.parse(slice) as unknown;
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                 return parsed as Record<string, unknown>;
             }
         } catch {
-            // Keep scanning earlier objects; CLI output often has nested braces.
+            // Nested pretty-printed objects are prefixes of the trailing JSON.
         }
-        cursor = text.lastIndexOf('{', cursor - 1);
     }
     return undefined;
 }
