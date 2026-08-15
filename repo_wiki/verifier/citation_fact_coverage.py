@@ -37,6 +37,7 @@ class ClaimUnit:
     page: str
     line: int
     text: str
+    end_line: int = 0
 
 
 @dataclass(frozen=True)
@@ -75,18 +76,28 @@ def extract_claim_units(markdown: str, *, page: str = "") -> list[ClaimUnit]:
     in_toc = False
     paragraph: list[str] = []
     paragraph_start = 0
+    paragraph_end = 0
 
     def flush() -> None:
-        nonlocal paragraph, paragraph_start
+        nonlocal paragraph, paragraph_start, paragraph_end
         if not paragraph:
             return
         text = " ".join(part.strip() for part in paragraph if part.strip()).strip()
         text = _strip_citations(text)
+        span_end = paragraph_end or paragraph_start
         for sentence in _split_sentences(text):
             if _is_evidence_required(sentence):
-                units.append(ClaimUnit(page=page, line=paragraph_start, text=sentence))
+                units.append(
+                    ClaimUnit(
+                        page=page,
+                        line=paragraph_start,
+                        text=sentence,
+                        end_line=span_end,
+                    )
+                )
         paragraph = []
         paragraph_start = 0
+        paragraph_end = 0
 
     for line_no, line in enumerate(markdown.splitlines(), start=1):
         stripped = line.strip()
@@ -122,18 +133,19 @@ def extract_claim_units(markdown: str, *, page: str = "") -> list[ClaimUnit]:
             item = stripped[2:].strip()
             item = _strip_citations(item)
             if _is_evidence_required(item):
-                units.append(ClaimUnit(page=page, line=line_no, text=item))
+                units.append(ClaimUnit(page=page, line=line_no, text=item, end_line=line_no))
             continue
         if re.match(r"^\d+[.)]\s+", stripped):
             flush()
             item = re.sub(r"^\d+[.)]\s+", "", stripped)
             item = _strip_citations(item)
             if _is_evidence_required(item):
-                units.append(ClaimUnit(page=page, line=line_no, text=item))
+                units.append(ClaimUnit(page=page, line=line_no, text=item, end_line=line_no))
             continue
         if not paragraph:
             paragraph_start = line_no
         paragraph.append(stripped)
+        paragraph_end = line_no
     flush()
     return units
 
@@ -144,15 +156,18 @@ def build_claim_coverage(
     """Compute deterministic claim coverage for a page.
 
     A claim unit is covered when a valid repository citation appears on the same line, the previous
-    line, or the next line. The adjacency rule supports the generator's common pattern of placing a
-    citation immediately after the factual paragraph while keeping coverage auditable.
+    line, the next line, or any line of a wrapped paragraph plus the line immediately after it.
+    The adjacency rule supports the generator's common pattern of placing a citation immediately
+    after the factual paragraph while keeping coverage auditable. Distant footer cites do not cover
+    earlier claims. Uncited claims stay uncovered.
     """
 
     claims = extract_claim_units(markdown, page=page)
     covered = 0
     uncovered: list[dict[str, object]] = []
     for claim in claims:
-        citation_window = {claim.line - 1, claim.line, claim.line + 1}
+        span_end = claim.end_line or claim.line
+        citation_window = set(range(claim.line - 1, span_end + 2))
         if citation_window & valid_repo_citation_lines:
             covered += 1
         else:
