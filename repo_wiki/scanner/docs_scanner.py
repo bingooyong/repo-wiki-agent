@@ -244,15 +244,33 @@ def _flatten_source_tokens(source_inventory: dict[str, Any]) -> tuple[set[str], 
         for item in bucket:
             if not isinstance(item, dict):
                 continue
-            for field in ("name", "service", "service_id", "handler", "path", "evidence_path"):
+            for field in (
+                "name",
+                "service",
+                "service_id",
+                "handler",
+                "path",
+                "kind",
+                "evidence_path",
+            ):
                 val = item.get(field)
                 if isinstance(val, str) and val.strip():
                     token = val.strip()
                     if "/" in token or "." in token:
                         paths.add(token.lower())
-                    for piece in re.findall(r"[A-Za-z_][A-Za-z0-9_-]{2,}", token):
-                        names.add(piece.lower())
+                    names.update(_iter_name_tokens(token))
     return names, paths
+
+
+def _iter_name_tokens(value: str) -> set[str]:
+    tokens: set[str] = set()
+    for piece in _NAME_TOKEN.findall(value):
+        lowered = piece.lower()
+        tokens.add(lowered)
+        for part in re.split(r"[_-]+", lowered):
+            if len(part) >= 3:
+                tokens.add(part)
+    return tokens
 
 
 def _classify_doc_type(rel: str, text: str) -> str:
@@ -302,6 +320,8 @@ def _specificity(text: str) -> float:
 
 
 _PLAUSIBLE_REL_PATH = re.compile(r"^[A-Za-z0-9_./\\-]+$")
+_NAME_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{2,}")
+_GENERIC_FACT_CLAIM_TOKENS = frozenset({"api", "service", "model", "router"})
 
 
 def _is_plausible_rel_path(value: str) -> bool:
@@ -587,7 +607,9 @@ class DocumentationScanner:
                 [
                     n
                     for n in claim_names
-                    if n not in names and n.endswith(("service", "api", "model"))
+                    if n not in names
+                    and n.endswith(("service", "api", "model"))
+                    and n not in _GENERIC_FACT_CLAIM_TOKENS
                 ]
             )
             freshness = max(0.0, 1.0 - (0.2 * len(stale_refs) + 0.15 * len(conflicting_claims)))
