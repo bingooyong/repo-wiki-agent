@@ -521,6 +521,13 @@ class QoderLikeVerifierService(VerifierService):
                     # Cannot determine expected service, skip
                     continue
 
+                own_keywords = PAGE_SERVICE_MAP[page_service]
+                if any(kw in cite_path_lower for kw in own_keywords):
+                    # Nested real-world paths such as app/api/routes/authentication.py
+                    # match both "api"/"route" and "auth". That is the auth API, not a
+                    # high-confidence wrong-service bind.
+                    continue
+
                 # Check if citation path contains evidence of wrong service
                 wrong_service_evidence = False
                 other_services = [k for k in PAGE_SERVICE_MAP if k != page_service]
@@ -529,6 +536,7 @@ class QoderLikeVerifierService(VerifierService):
                     other_keywords = PAGE_SERVICE_MAP[other_service]
                     # High confidence mismatch: page name suggests service A
                     # but citation path contains strong indicators of service B
+                    # and none of service A's own keywords.
                     if any(kw in cite_path_lower for kw in other_keywords):
                         # Make sure it's not shared infrastructure
                         if not is_shared:

@@ -1904,17 +1904,20 @@ class RepoWikiService:
             path = str(endpoint.get("path") or "").strip()
             handler = str(endpoint.get("handler") or "").strip()
             file_path = str(endpoint.get("file_path") or "").strip()
+            line_number = endpoint.get("line_number") or endpoint.get("line_start")
             details = []
             if handler:
                 details.append(f"handler `{handler}`")
             if file_path:
-                line_number = endpoint.get("line_number") or endpoint.get("line_start")
                 location = f"`{file_path}`"
                 if line_number:
                     location += f":{line_number}"
                 details.append(location)
             suffix = f"（{'，'.join(details)}）" if details else ""
-            lines.append(f"- {method} {path}{suffix}")
+            cite = ""
+            if file_path and line_number:
+                cite = f" <cite>{file_path}:{line_number}</cite>"
+            lines.append(f"- {method} {path}{suffix}{cite}")
         return "\n".join(lines)
 
     def _build_truthful_calling_conventions(self, endpoints: list[dict[str, Any]]) -> str:
@@ -1977,7 +1980,12 @@ class RepoWikiService:
                 attrs.append(f"response_type={endpoint.get('response_type')}")
             if endpoint.get("error_codes"):
                 attrs.append(f"error_codes={endpoint.get('error_codes')}")
-            lines.append(f"- {method} {path}: {', '.join(attrs)}")
+            cite = ""
+            file_path = str(endpoint.get("file_path") or "").strip()
+            line_number = endpoint.get("line_number") or endpoint.get("line_start")
+            if file_path and line_number:
+                cite = f" <cite>{file_path}:{line_number}</cite>"
+            lines.append(f"- {method} {path}: {', '.join(attrs)}{cite}")
         return "\n".join(lines)
 
     def _build_mermaid_blocks_from_planner(
