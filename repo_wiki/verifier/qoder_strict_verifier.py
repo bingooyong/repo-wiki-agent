@@ -1660,6 +1660,7 @@ class QoderLikeVerifierService(VerifierService):
     ) -> tuple[dict[str, str], list[str]]:
         states: dict[str, str] = {}
         errors: list[str] = []
+        seen_in_container: dict[str, set[str]] = {key: set() for key in containers}
         for container_key in containers:
             items = payload.get(container_key)
             if items is None:
@@ -1679,12 +1680,19 @@ class QoderLikeVerifierService(VerifierService):
                     errors.append(f"{container_key}[{index}] missing relative_path")
                     continue
                 rel = self._strip_content_prefix(rel.strip())
-                if rel in states:
+                if rel in seen_in_container[container_key]:
                     errors.append(f"duplicate page entry: {rel}")
+                seen_in_container[container_key].add(rel)
                 if not isinstance(state, str) or not state.strip():
                     errors.append(f"{container_key}[{index}] missing quality_state")
                     continue
-                states[rel] = state.strip()
+                normalized_state = state.strip()
+                previous = states.get(rel)
+                if previous is not None and previous != normalized_state:
+                    errors.append(
+                        f"conflicting quality_state for {rel}: {previous!r} vs {normalized_state!r}"
+                    )
+                states[rel] = normalized_state
         return states, errors
 
     def _validate_conflict_report_payload(self, payload: dict[str, Any]) -> list[str]:
