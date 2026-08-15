@@ -1,6 +1,7 @@
 """Tests for CLI update command."""
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 from typer.testing import CliRunner
@@ -90,3 +91,18 @@ class TestGenerateCommand:
         result = runner.invoke(app, ["generate", "--profile", "qoder-like"])
         # Should parse profile option
         assert "--profile" in result.output or result.exit_code in [0, 1]
+
+    @patch("repo_wiki.cli._run_with_service")
+    def test_generate_qoder_like_output_keeps_runs_layout(self, mock_run):
+        """Documented `--output .repo-agent-eval` must keep the runs/<run> contract."""
+        mock_run.return_value = {"status": "ok"}
+
+        result = runner.invoke(
+            app,
+            ["generate", "--profile", "qoder-like", "--output", ".repo-agent-eval"],
+        )
+        assert result.exit_code == 0
+        eval_profile = mock_run.call_args.kwargs["eval_profile"]
+        assert (
+            Path(eval_profile.root).as_posix().replace("\\", "/").endswith(".repo-agent-eval/runs")
+        )
