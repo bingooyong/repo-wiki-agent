@@ -1,6 +1,6 @@
 # FastAPI RealWorld wiki 质量对照 wrap
 
-**日期：** 2026-08-13–2026-08-14 CST  
+**日期：** 2026-08-13–2026-08-15 CST  
 **对照：** nsidnev/fastapi-realworld-example-app `029eb778` × MiniMax-M3  
 **CLI：** r1 `9cadf85`（#40）→ r2 `c2407979`（#42 空 content 重试 + #43 FastAPI 扫描）→ r3 `a3d58b4`（#45 导入 router 前缀拼接）→ r4 `9328896`（#50；含 #48 `api_prefix` + #49 circuit-break）→ r5 `8912c89`（#52 README/身份优先于 init stub 与 eval notes）→ r6 `b0a06f4`（#54 README.rst 解析 + pyproject fallback）→ r7 `2e3a3f0`（#56 identity.description 流入 overview）→ r8 `05bb3b8`（#58 去掉 citation `file:` 前缀）
 
@@ -13,7 +13,9 @@
 第七轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round7.md`。  
 第八轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round8.md`。  
 第九轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round9.md`。  
-第十轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round10.md`。
+第十轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round10.md`。  
+第十一轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round11.md`（#71）。  
+第十二轮评测见 `docs/eval/2026-08-15-fastapi-realworld-round12.md`。
 
 ## r1 vs r2
 
@@ -229,4 +231,20 @@ verify JSON：`docs/eval/2026-08-14-fastapi-realworld-round8-verify.json`。
 - taxonomy 幻觉页；泄漏 `<think>` 89 页。
 - coverage 42.28% 仍 << 95%；eval-layout HARD；API mermaid 缺 9 / ER 缺 5。
 - r8 verify：**12 HARD / 0 SOFT**（未放宽）。不要松阈值。
+
+## r11 vs r12
+
+评测正文：`docs/eval/2026-08-15-fastapi-realworld-round12.md`。  
+verify JSON：`docs/eval/2026-08-15-fastapi-realworld-round12-verify.json`。
+
+| 项 | r11 | **r12** |
+|---|---|---|
+| CLI | `1fe6840` / #70 | 本地 `c8033aa` = main + #72+#73+#74+#75（**未进 main**） |
+| generate | EXIT=0；81/81；MiniMax-M3；cache 0/81 | **未跑**（本云环境无 MiniMax/LLM 凭据） |
+| VERIFY_EXIT | 1 / FAIL NOT_READY | **未跑** |
+| HARD / SOFT | 9 / 0 | **N/A**（门未放宽） |
+| coverage | 50.87% 仍 << 95% | **N/A**（95% 门未改） |
+| #72–#75 | 未合入 | 本地 merge **无冲突**；HIT/MISS **N/A**（无 verify HARD codes） |
+
+R12 **BLOCKED**。不要把缺凭据写成质量结果。不要松 HARD/SOFT。不要把 #72–#75 合进 main。#76 未纳入 eval CLI。
 
