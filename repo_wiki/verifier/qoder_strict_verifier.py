@@ -88,6 +88,71 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         return self.get_gate_type(reason_code) == GateType.HARD
 
 
+def count_qoder_list_metrics(content: str) -> tuple[int, int, float]:
+    """Return (prose_lines, list_items, list_ratio) used by QODER_PAGE_DUMP."""
+    prose_lines = 0
+    list_items = 0
+    in_code_block = False
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block or stripped.startswith("#"):
+            continue
+        if stripped.startswith("-") or stripped.startswith("*"):
+            list_items += 1
+        else:
+            prose_lines += 1
+    total = prose_lines + list_items
+    ratio = (list_items / total) if total else 0.0
+    return prose_lines, list_items, ratio
+
+
+def is_qoder_page_dump(
+    content: str,
+    *,
+    max_list_ratio: float = 0.6,
+    min_list_items: int = 10,
+) -> bool:
+    """True when the page would HARD-fail QODER_PAGE_DUMP."""
+    _, list_items, ratio = count_qoder_list_metrics(content)
+    return list_items > min_list_items and ratio > max_list_ratio
+
+
+def count_qoder_prose_chars(content: str) -> int:
+    """Count prose characters the same way QODER_PROSE_TOO_LOW does."""
+    prose_lines: list[str] = []
+    in_code_block = False
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        if (
+            stripped.startswith("#")
+            or stripped.startswith("-")
+            or stripped.startswith("*")
+            or stripped.startswith("|")
+        ):
+            continue
+        prose_lines.append(stripped)
+    return len(" ".join(prose_lines))
+
+
+def qoder_prose_density(content: str) -> float:
+    total = len(content)
+    if total <= 0:
+        return 1.0
+    return count_qoder_prose_chars(content) / total
+
+
 class QoderLikeVerifierService(VerifierService):
     """Strict verifier focused on qoder-like `content/**` outputs."""
 
@@ -894,28 +959,12 @@ class QoderLikeVerifierService(VerifierService):
                 content = read_text(f)
             except Exception:
                 continue
-            lines = content.split("\n")
-            prose_lines = 0
-            list_items = 0
-            in_code_block = False
-            for line in lines:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                if stripped.startswith("```"):
-                    in_code_block = not in_code_block
-                    continue
-                if in_code_block or stripped.startswith("#"):
-                    continue
-                if stripped.startswith("-") or stripped.startswith("*"):
-                    list_items += 1
-                else:
-                    prose_lines += 1
-            total = prose_lines + list_items
-            if total > 0:
-                list_ratio = list_items / total
-                if list_ratio > self.MAX_LIST_RATIO and list_items > 10:
-                    dump_pages.append(f.name)
+            if is_qoder_page_dump(
+                content,
+                max_list_ratio=self.MAX_LIST_RATIO,
+                min_list_items=10,
+            ):
+                dump_pages.append(f.name)
 
         if dump_pages:
             return CheckResult(
@@ -947,9 +996,7 @@ class QoderLikeVerifierService(VerifierService):
                 content = read_text(f)
             except Exception:
                 continue
-            prose = self._count_prose_chars(content)
-            total = len(content)
-            if total > 0 and (prose / total) < self.MIN_PROSE_DENSITY:
+            if qoder_prose_density(content) < self.MIN_PROSE_DENSITY:
                 low_density_pages.append(f.name)
         if low_density_pages:
             return CheckResult(
@@ -2061,27 +2108,7 @@ class QoderLikeVerifierService(VerifierService):
         return None
 
     def _count_prose_chars(self, content: str) -> int:
-        lines = content.split("\n")
-        prose_lines = []
-        in_code_block = False
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if stripped.startswith("```"):
-                in_code_block = not in_code_block
-                continue
-            if in_code_block:
-                continue
-            if (
-                stripped.startswith("#")
-                or stripped.startswith("-")
-                or stripped.startswith("*")
-                or stripped.startswith("|")
-            ):
-                continue
-            prose_lines.append(stripped)
-        return len(" ".join(prose_lines))
+        return count_qoder_prose_chars(content)
 
     def _skip_check(self, name: str, reason: str) -> CheckResult:
         return CheckResult(
