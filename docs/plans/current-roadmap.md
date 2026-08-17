@@ -22,7 +22,7 @@
 
 - qoder-like 隔离输出与 HARD/SOFT 门禁（不放宽）
 - FastAPI 对照闭环里已修：路由前缀 / `settings.api_prefix`、产品身份（README/pyproject → overview）、`file:` 引用、mounted `/api` owner 绑定（#43–#59）
-- Codex plugin #50；R8 评测见 `docs/eval/2026-08-14-fastapi-realworld-round8.md`；R9 评测见 `docs/eval/2026-08-14-fastapi-realworld-round9.md`；R10 评测见 `docs/eval/2026-08-14-fastapi-realworld-round10.md`
+- Codex plugin #50；R8 评测见 `docs/eval/2026-08-14-fastapi-realworld-round8.md`；R9 评测见 `docs/eval/2026-08-14-fastapi-realworld-round9.md`；R10 评测见 `docs/eval/2026-08-14-fastapi-realworld-round10.md`；R14 评测见 `docs/eval/2026-08-17-fastapi-realworld-round14.md`
 
 ## 本周期（先把单库 Wiki 做准）
 
