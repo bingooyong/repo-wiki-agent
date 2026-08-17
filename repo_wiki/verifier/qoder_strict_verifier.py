@@ -14,6 +14,57 @@ from repo_wiki.evidence.citation_renderer import (
 )
 from repo_wiki.verifier.service import CheckResult, GateType, SeverityThreshold, VerifierService
 
+_HTTP_METHOD_PATH = re.compile(
+    r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(/[-A-Za-z0-9_./{}:]+)",
+    flags=re.IGNORECASE,
+)
+_PATH_PARAM_SEGMENT = re.compile(r"^\{[^{}/]+\}$")
+
+
+def normalize_claimed_api_path(path: str) -> str:
+    """Strip schema-summary punctuation without dropping trailing ``{param}``.
+
+    ``GET /api/articles:`` is schema punctuation (``/api/articles``).
+    FastAPI converters such as ``/{slug:path}`` already end with ``}`` and stay intact.
+    """
+    text = (path or "").strip()
+    while text.endswith(":") and not text.endswith("}"):
+        text = text[:-1]
+    return text
+
+
+def extract_http_method_paths(text: str) -> list[tuple[str, str]]:
+    """Extract ``METHOD /path`` claims, keeping ``{slug}`` path params."""
+    pairs: list[tuple[str, str]] = []
+    for method, raw_path in _HTTP_METHOD_PATH.findall(text):
+        path = normalize_claimed_api_path(raw_path)
+        if path:
+            pairs.append((method.upper(), path))
+    return pairs
+
+
+def _remainder_is_trailing_path_params(claimed_path: str, inventory_path: str) -> bool:
+    """True when inventory is claimed path plus only ``/{param}`` segments."""
+    if not inventory_path.startswith(claimed_path):
+        return False
+    remainder = inventory_path[len(claimed_path) :]
+    if not remainder.startswith("/"):
+        return False
+    segments = [segment for segment in remainder.split("/") if segment]
+    return bool(segments) and all(_PATH_PARAM_SEGMENT.fullmatch(segment) for segment in segments)
+
+
+def api_claim_in_inventory(method: str, claimed_path: str, apis: set[tuple[str, str]]) -> bool:
+    """Match a wiki API claim to inventory, including a missing trailing ``{param}``."""
+    path = normalize_claimed_api_path(claimed_path)
+    method_u = method.upper()
+    if (method_u, path) in apis:
+        return True
+    return any(
+        inv_method == method_u and _remainder_is_trailing_path_params(path, inv_path)
+        for inv_method, inv_path in apis
+    )
+
 
 class QoderLikeSeverityThreshold(SeverityThreshold):
     """Strict severity thresholds for qoder-like profile."""
@@ -1372,16 +1423,13 @@ class QoderLikeVerifierService(VerifierService):
             text = page.read_text(encoding="utf-8", errors="ignore")
             rel = page.relative_to(content_dir).as_posix()
             if inventories["apis"]:
-                for method, api_path in re.findall(
-                    r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(/[-A-Za-z0-9_./{}:]+)",
-                    text,
-                ):
-                    if (method.upper(), api_path) not in inventories["apis"]:
+                for method, api_path in extract_http_method_paths(text):
+                    if not api_claim_in_inventory(method, api_path, inventories["apis"]):
                         offenders.append(
                             {
                                 "page": rel,
                                 "claim_type": "api",
-                                "claim": f"{method.upper()} {api_path}",
+                                "claim": f"{method} {api_path}",
                             }
                         )
             if inventories["services"]:
