@@ -14,6 +14,33 @@ from repo_wiki.evidence.citation_renderer import (
 )
 from repo_wiki.verifier.service import CheckResult, GateType, SeverityThreshold, VerifierService
 
+_HTTP_METHOD_PATH = re.compile(
+    r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(/[-A-Za-z0-9_./{}:]+)",
+    flags=re.IGNORECASE,
+)
+
+
+def normalize_claimed_api_path(path: str) -> str:
+    """Strip schema-summary punctuation so ``GET /api/articles:`` is ``/api/articles``.
+
+    FastAPI converters such as ``/{slug:path}`` already end with ``}`` and stay intact.
+    Trailing ASCII ``:`` after a scanned route is prose/schema punctuation, not a path.
+    """
+    text = (path or "").strip()
+    while text.endswith(":") and not text.endswith("}"):
+        text = text[:-1]
+    return text
+
+
+def extract_http_method_paths(text: str) -> list[tuple[str, str]]:
+    """Extract ``METHOD /path`` claims, ignoring trailing schema colons."""
+    pairs: list[tuple[str, str]] = []
+    for method, raw_path in _HTTP_METHOD_PATH.findall(text):
+        path = normalize_claimed_api_path(raw_path)
+        if path:
+            pairs.append((method.upper(), path))
+    return pairs
+
 
 class QoderLikeSeverityThreshold(SeverityThreshold):
     """Strict severity thresholds for qoder-like profile."""
@@ -1372,16 +1399,13 @@ class QoderLikeVerifierService(VerifierService):
             text = page.read_text(encoding="utf-8", errors="ignore")
             rel = page.relative_to(content_dir).as_posix()
             if inventories["apis"]:
-                for method, api_path in re.findall(
-                    r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(/[-A-Za-z0-9_./{}:]+)",
-                    text,
-                ):
-                    if (method.upper(), api_path) not in inventories["apis"]:
+                for method, api_path in extract_http_method_paths(text):
+                    if (method, api_path) not in inventories["apis"]:
                         offenders.append(
                             {
                                 "page": rel,
                                 "claim_type": "api",
-                                "claim": f"{method.upper()} {api_path}",
+                                "claim": f"{method} {api_path}",
                             }
                         )
             if inventories["services"]:
@@ -1866,7 +1890,7 @@ class QoderLikeVerifierService(VerifierService):
             flags=re.IGNORECASE,
         ):
             normalized = value.lower()
-            claims[(method.upper(), path)] = (
+            claims[(method.upper(), normalize_claimed_api_path(path))] = (
                 "none"
                 if "public" in normalized
                 or "unauthenticated" in normalized

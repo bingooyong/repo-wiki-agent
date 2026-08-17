@@ -1720,11 +1720,7 @@ class RepoWikiService:
                 "并通过源码行号引用维持可追溯性。"
             )
 
-        is_api_like_page = (
-            page.category == WikiTaxonomyCategory.API_REFERENCE
-            or "api" in str(getattr(page, "output_path", "")).lower()
-            or "api" in str(getattr(page, "title", "")).lower()
-        )
+        is_api_like_page = self._is_qoder_api_contract_page(page)
         if is_api_like_page:
             api_endpoints = self._evidence_backed_api_endpoints(page, composition_context)
             content = self._strip_unsupported_generic_api_claims(content, api_endpoints)
@@ -1804,6 +1800,25 @@ class RepoWikiService:
         content = self._ensure_minimum_prose_density(content, page)
 
         return content.strip() + "\n"
+
+    def _is_qoder_api_contract_page(self, page: Any) -> bool:
+        """True only for API reference pages, not titles/paths that merely contain 'API'.
+
+        R12 leftover: ``故障排除/API问题.md``, ``核心服务/API.md``, and
+        ``开发指南/API开发指南.md`` received the full scanned endpoint catalog
+        because ``'api' in title or output_path``. Those pages then asserted
+        ``GET /api/articles*`` as facts. Restrict grouping/schema inject to the
+        API reference taxonomy so troubleshooting and guides do not dump routes.
+        """
+        from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+        if getattr(page, "category", None) == WikiTaxonomyCategory.API_REFERENCE:
+            return True
+        output_path = str(getattr(page, "output_path", "") or "").replace("\\", "/")
+        lowered = output_path.lower()
+        if output_path.startswith("API参考/") or "/API参考/" in output_path:
+            return True
+        return lowered.startswith("docs/pages/api/") or "/pages/api/" in lowered
 
     def _evidence_backed_api_endpoints(
         self,
@@ -1977,7 +1992,7 @@ class RepoWikiService:
                 attrs.append(f"response_type={endpoint.get('response_type')}")
             if endpoint.get("error_codes"):
                 attrs.append(f"error_codes={endpoint.get('error_codes')}")
-            lines.append(f"- {method} {path}: {', '.join(attrs)}")
+            lines.append(f"- {method} {path} — {', '.join(attrs)}")
         return "\n".join(lines)
 
     def _build_mermaid_blocks_from_planner(
