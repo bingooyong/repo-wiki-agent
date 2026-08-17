@@ -1,57 +1,87 @@
 # FastAPI RealWorld 对照 Wiki 第十二轮评测
 
 **对照仓：** nsidnev/fastapi-realworld-example-app `029eb7781c60d5f563ee8990a0cbfb79b244538c`
-**CLI（本地合入，未推进 main）：** `c8033aa` = main `1fe6840` + #72 `9693b16` + #73 `6253398` + #74 `23db73f` + #75 `6b69586`
-**时间：** 2026-08-15 CST。generate **未跑**。
-**模型：** MiniMax-M3（与 R11 相同；本环境无法调用）
+**CLI：** `6c98b06`（本地合入 #72→#73→#74→#75 onto main `1fe6840`；未推进 main）
+**时间：** 2026-08-17 09:16:30–09:32:43 CST（generate wall **16m13s**；verify wall 4s）
+**run：** r12-2026-08-17b
+**模型：** MiniMax-M3，host `api.minimaxi.com`（`LLM_BASE_URL=https://api.minimaxi.com/v1`），cache 0/81
 **verify JSON：** `docs/eval/2026-08-15-fastapi-realworld-round12-verify.json`
 
-第十一轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round11.md`（#71，docs-only，未合入 main）。  
+本文件替换 #77 先前的凭据阻断文案。本轮是真实 MiniMax generate，不是 MockLLM。
+
+第十一轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round11.md`（#71，docs-only）。  
 对照 wrap 见 `docs/eval/2026-08-13-fastapi-realworld-wrap.md`。
 
-本 PR 只含评测文档。未改产品代码。未把 #72–#75 推进 main。未包含 #76。门槛未放宽。
+本 PR 只含评测文档。未改产品代码。未把 #72–#75 推进 main。未包含 #76。门槛未放宽。不要声称 #72–#75 全部清掉。
 
-## Blocked
+## Hits / Misses（相对 R11 leftover HARD）
 
-本云环境 **没有 MiniMax / LLM 凭据**，generate 未执行，**没有编造指标**。
-
-证据：
-
-- `printenv` 无 `MINIMAX_API_KEY`、`LLM_*`、`OPENAI_API_KEY`、`APP_LLM_MINIMAX*`、`REPO_WIKI_LLM_API_KEY`
-- 无 `repo-wiki.yaml` / `.repo-wiki.yaml` / `.env`
-- Cursor environment-info：`environment: null`（无 linked environment / 无注入 secrets）
-- 在本地合入 CLI `c8033aa` 上 `python3 -m repo_wiki.main config --ci` → `summary=FAIL`，`api_key_present=false`，`issues=["api_key_env: MISSING_API_KEY"]`（默认解析为 openai/gpt-4o-mini，因为 MiniMax env 也不存在）
-
-未使用 MockLLM，未放宽 HARD/SOFT，未改 95% coverage 门。
-
-## Local merge
-
-从 main `1fe6840` 建本地分支，依次 merge #72 #73 #74 #75。**无冲突**（`qoder_strict_verifier.py` / `service.py` 由 ort 自动合并）。未把该 merge 推到 main，也未开产品 PR。
-
-| PR | HEAD | 目标 HARD | 本轮 |
+| leftover code | R11 | **R12** | |
 |---|---|---|---|
-| #72 | `9693b16` | `QODER_PAGE_QUALITY_STATE_MISSING`, `QODER_MANIFEST_PATH_INVALID` | **N/A**（无 generate/verify） |
-| #73 | `6253398` | `QODER_REQUIRED_INVENTORY_MISSING`, `QODER_UNRESOLVED_FACT_CONFLICT` | **N/A** |
-| #74 | `23db73f` | `QODER_PAGE_DUMP`, `QODER_PROSE_TOO_LOW` | **N/A** |
-| #75 | `6b69586` | `QODER_CITATION_FACT_COVERAGE_LOW`, `QODER_CITATION_RELEVANCE_MISMATCH` | **N/A** |
-| #76 | — | host polish | 未纳入 eval CLI |
+| `QODER_MANIFEST_PATH_INVALID` | HARD | 未发出（WARN `QODER_MANIFEST_NOT_READY` target_dirty=true） | **HIT** |
+| `QODER_PAGE_QUALITY_STATE_MISSING` | HARD | 未发出（`QODER_PAGE_QUALITY_STATE_DEGRADED` 因 16 fallback） | **HIT** |
+| `QODER_UNRESOLVED_FACT_CONFLICT` | HARD | FAIL（README.rst `STALE_DOC_REFERENCE`；unresolved_count 2，同一 JSON 在 `reports/` 与 `meta/`） | **MISS** |
+| `QODER_REQUIRED_INVENTORY_MISSING` | HARD | 未发出（owner 洞改为 `QODER_OWNER_COVERAGE_MISSING`） | **HIT** |
+| `QODER_CITATION_FACT_COVERAGE_LOW` | HARD 50.87% | FAIL **66.51%**（1017/1529）；门仍是 95% | **MISS**（改善，仍低于门） |
+| `QODER_CITATION_RELEVANCE_MISMATCH` | HARD | FAIL（message 28 / details 20） | **MISS** |
+| `QODER_PAGE_DUMP` | HARD（25 detected） | PASS | **HIT** |
+| `QODER_PROSE_TOO_LOW` | HARD ×6 | PASS（6 页 insufficient-prose 走 fallback；该 leftover code 未发出） | **HIT** |
+| `QODER_DIRTY_WORKTREE` | HARD | FAIL（untracked `.repo-agent-eval/`） | **MISS** |
 
-R11 leftover `QODER_DIRTY_WORKTREE` 是评测产物，本轮无 run，故 **N/A**。owner / mermaid / cite 回归检查同样 **N/A**。
+#72 HIT（两条 leftover code 均未再以原名发出）。#73 MIXED（inventory HIT / conflict MISS）。#74 HIT（dump + prose leftover code 未发出）。#75 MISS（coverage + relevance 仍 HARD）。不要声称四张产品 PR 全部清掉。
 
-## Compare（R11 基线；R12 无新数字）
+## Generate
+
+GENERATE_EXIT=0。Cold cache：cache_hits=0，cache_misses=81。
+
+| 项 | R11 | **R12** |
+|---|---|---|
+| planned / written | 81 / 81 | **81 / 81** |
+| LLM PASS / DEGRADED | 71 / 10 | **65 / 16** |
+| generation_mode | llm 71（fallback 10 仍计 LLM 调用后 prose reject） | llm=65 fallback=16 |
+| llm_call_count / tokens | 81 / — | **71 / 279211** |
+| fallback | 10 prose + 0 skip | **10 timeout 60s + 6 insufficient prose** |
+| 529 / circuit-break | 0 / false | **0 / false** |
+| provider_failure_count | 0 | **0** |
+| empty-content | 0 | **0** |
+| Overview Conduit | HIT | **MISS**（overview 页是 fallback） |
+| wall | 22m26s | **16m13s** generate + 4s verify |
+
+16 fallback：
+
+- timeout 60s ×10：readme, installation, data-models-overview, deployment-overview, database-migration-strategy, core, logging, authentication, common-issues, error-codes
+- insufficient prose ×6：project-overview, api-overview, system-components, models, services, ide-setup
+
+## Compare
 
 | | R11 | **R12** |
 |---|---|---|
-| CLI | `1fe6840` / #70 | 本地 `c8033aa` / #72+#73+#74+#75（未进 main） |
-| generate | EXIT=0；81/81；cache 0/81 | **未跑** |
-| LLM PASS / DEGRADED | 71 / 10 | **N/A** |
-| fallback | 10 prose + 0 skip | **N/A** |
-| coverage | 50.87%（761/1496）仍 << 95% | **N/A**（门仍是 95%） |
-| HARD / SOFT | 9 / 0 | **N/A**（门未放宽） |
-| VERIFY_EXIT | 1 / FAIL NOT_READY | **未跑** |
+| CLI | `1fe6840` / #70 | **`6c98b06`** / #72+#73+#74+#75（未进 main） |
+| coverage | 50.87%（761/1496） | **66.51%**（1017/1529）仍 << 95% |
+| HARD / SOFT | 9 / 0 | **7 / 0**（未放宽） |
+| page dump | HARD | **PASS** |
+| prose too low | HARD ×6 | **PASS**（code 未发出） |
+| owner missing | 0（items=30） | **2**（services `app`, `db`） |
+| mermaid API / ER miss | 0 / 0 | **0 / 0** |
+| invalid cites / file: / relpath / think | 0 / 0 / 0 / 0 | **0 / 0 / 0 / 0** |
+| empty taxonomy | 0 | **0** |
 
-R11 leftover HARD（本轮无法证实是否消失）：`QODER_MANIFEST_PATH_INVALID`, `QODER_PAGE_QUALITY_STATE_MISSING`, `QODER_UNRESOLVED_FACT_CONFLICT`, `QODER_REQUIRED_INVENTORY_MISSING`, `QODER_CITATION_FACT_COVERAGE_LOW`, `QODER_CITATION_RELEVANCE_MISMATCH`, `QODER_PAGE_DUMP`（25 detected, listed 10）, `QODER_PROSE_TOO_LOW`（×6）, `QODER_DIRTY_WORKTREE`。
+## Verify
 
-## Next
+VERIFY_EXIT=1 / FAIL。HARD 7 / SOFT 0。Gates **not** relaxed。95% coverage 门未改。
 
-注入 `MINIMAX_API_KEY`（`LLM_PROVIDER=minimax`，`LLM_MODEL=MiniMax-M3`）后，在同一合入 SHA `c8033aa` 上：挪开 composer cache，对对照仓跑 `generate --profile qoder-like --output .repo-agent-eval`，再 `verify --profile qoder-like --ci`。用真实 HARD codes / coverage / dump / prose 把上表 N/A 改成 HIT / MISS。不要松门槛。不要把 #72–#75 合进 main。
+Leftover HARD：
+
+1. `QODER_PAGE_QUALITY_STATE_DEGRADED`（16 fallback）
+2. `QODER_UNRESOLVED_FACT_CONFLICT`（README.rst STALE_DOC_REFERENCE；count 2 = reports/ + meta/）
+3. `QODER_CRITICAL_FALSE_FACT`（`/api/articles*` on `故障排除/API问题.md`, `核心服务/API.md`, `开发指南/API开发指南.md`）
+4. `QODER_CITATION_FACT_COVERAGE_LOW` 66.51%（1017/1529）
+5. `QODER_OWNER_COVERAGE_MISSING` services `app`, `db`
+6. `QODER_CITATION_RELEVANCE_MISMATCH`（message 28 / details 20）
+7. `QODER_DIRTY_WORKTREE`（untracked `.repo-agent-eval/`）
+
+WARN：`QODER_MANIFEST_NOT_READY`（target_dirty=true）。SOFT none。
+
+新残差（R11 没有、本轮 HARD）：`QODER_CRITICAL_FALSE_FACT`、`QODER_PAGE_QUALITY_STATE_DEGRADED`、`QODER_OWNER_COVERAGE_MISSING`。不要把 HARD 9→7 解读成门槛放松。
+
+不要在本评测 PR 里改产品代码。不要把 #72–#75 合进 main。
