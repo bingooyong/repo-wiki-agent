@@ -878,11 +878,13 @@ class ParityMetricExtractor:
         if not content_dir:
             return self._fail_result("api_aggregation", "No content directory found")
 
-        # Look for API documentation pages
-        api_files = []
-        for f in content_dir.rglob("*.md"):
-            if "api" in f.stem.lower() or "API" in f.name:
-                api_files.append(f)
+        # API reference taxonomy only. Filenames that merely contain "API"
+        # (故障排除/API问题.md, 核心服务/API.md) are not aggregation pages.
+        api_files = [
+            path
+            for path in content_dir.rglob("*.md")
+            if self._is_api_reference_page(path, content_dir)
+        ]
 
         if not api_files:
             return self._fail_result("api_aggregation", "No API pages found")
@@ -985,6 +987,17 @@ class ParityMetricExtractor:
             if score >= defn.threshold
             else [f"Only {aggregated_count}/{len(dm_files)} data model pages are aggregated"],
         )
+
+    def _is_api_reference_page(self, path: Path, content_dir: Path) -> bool:
+        """True for API参考 / docs/pages/api pages, not titles that merely contain API."""
+        try:
+            rel = path.relative_to(content_dir).as_posix()
+        except ValueError:
+            rel = path.as_posix().replace("\\", "/")
+        if rel.startswith("API参考/"):
+            return True
+        lowered = rel.lower()
+        return lowered.startswith("docs/pages/api/") or "/pages/api/" in lowered
 
     def _find_content_dir(self) -> Path | None:
         """Find the content directory in the root."""
