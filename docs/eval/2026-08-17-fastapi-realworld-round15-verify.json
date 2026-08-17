@@ -1,0 +1,61 @@
+{
+  "run_id": "r15-2026-08-17",
+  "cli": "6b966d4",
+  "cli_full": "6b966d447b0a7b1fde569ff3a96d630dc08a0bb2",
+  "cli_branch": "r15-eval-local",
+  "base_main": "1fe6840",
+  "prs": ["#72", "#73", "#74", "#75", "#82", "#83", "#85", "#87"],
+  "stacked_eval": "r14-eval-local 278164e (r13 stack #72 #73 #74 #75 #82 #83 @ 3053586 + #85 550782c, two keep-both) + #87 e1073f6 (cursor/fix-trailing-path-param-false-fact-194d) onto main 1fe6840; keep-both on qoder_strict_verifier.py preserved r14 helpers and #87 api_claim_in_inventory; not pushed",
+  "pr87_hit": "HIT",
+  "grade": "FAIL",
+  "hard_fail": 4,
+  "soft_fail": 0,
+  "hard_codes": [
+    "QODER_PAGE_QUALITY_STATE_DEGRADED",
+    "QODER_CITATION_FACT_COVERAGE_LOW",
+    "QODER_CITATION_RELEVANCE_MISMATCH",
+    "QODER_DIRTY_WORKTREE"
+  ],
+  "pages": {
+    "planned": 81,
+    "written": 81,
+    "pass": 70,
+    "degraded": 11,
+    "fallback": 11,
+    "llm_call_count": 81
+  },
+  "fallback_breakdown": {
+    "insufficient_prose": 11
+  },
+  "http_529": 0,
+  "minimax_1004": 0,
+  "circuit_break_tripped": false,
+  "provider_failure_count": 0,
+  "empty_content": 0,
+  "cache_hits": 0,
+  "cache_misses": 81,
+  "actual_tokens": 302995,
+  "timeout_s": 180,
+  "host": "api.minimaxi.com",
+  "owner_check": "PASS",
+  "owner_missing": 0,
+  "claim_coverage_percent": "67.02%",
+  "claim_coverage": "951/1419",
+  "claim_coverage_gate_percent": "95%",
+  "relevance_mismatch": {"message": 25, "details": 20},
+  "api_aggregation": {"result": "PASS"},
+  "conflict": {
+    "code": "QODER_UNRESOLVED_FACT_CONFLICT",
+    "result": "PASS"
+  },
+  "critical_false_fact": {
+    "result": "PASS",
+    "r14_shape": "DELETE /api/articles",
+    "claim_count": 0
+  },
+  "generate_exit": 0,
+  "verify_exit": 1,
+  "generate_wall": "11m10s",
+  "verify_wall": "3s",
+  "note": "Real MiniMax-M3 run r15-2026-08-17. CLI 6b966d4 = r14-eval-local 278164e (r13 stack #72 #73 #74 #75 #82 #83 @ 3053586 + #85 550782c, two keep-both) + #87 e1073f6 (r15-eval-local; keep-both on qoder_strict_verifier.py; not pushed). HARD 4 / SOFT 0 (dropped vs R14 HARD 5). HIT vs R14 leftover: CRITICAL_FALSE_FACT PASS (#87). MISS: degraded (11 fallback), coverage 67.02% still << 95%, relevance, dirty worktree. Do not claim leftover HARD cleared. HARD count dropped 5→4. Gates not relaxed. Stack not pushed/merged."
+}
