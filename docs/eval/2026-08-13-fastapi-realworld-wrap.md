@@ -1,6 +1,6 @@
 # FastAPI RealWorld wiki 质量对照 wrap
 
-**日期：** 2026-08-13–2026-08-14 CST  
+**日期：** 2026-08-13–2026-08-17 CST  
 **对照：** nsidnev/fastapi-realworld-example-app `029eb778` × MiniMax-M3  
 **CLI：** r1 `9cadf85`（#40）→ r2 `c2407979`（#42 空 content 重试 + #43 FastAPI 扫描）→ r3 `a3d58b4`（#45 导入 router 前缀拼接）→ r4 `9328896`（#50；含 #48 `api_prefix` + #49 circuit-break）→ r5 `8912c89`（#52 README/身份优先于 init stub 与 eval notes）→ r6 `b0a06f4`（#54 README.rst 解析 + pyproject fallback）→ r7 `2e3a3f0`（#56 identity.description 流入 overview）→ r8 `05bb3b8`（#58 去掉 citation `file:` 前缀）
 
@@ -13,7 +13,10 @@
 第七轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round7.md`。  
 第八轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round8.md`。  
 第九轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round9.md`。  
-第十轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round10.md`。
+第十轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round10.md`。  
+第十一轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round11.md`（#71）。  
+第十二轮评测见 `docs/eval/2026-08-15-fastapi-realworld-round12.md`（#77）。  
+第十三轮评测见 `docs/eval/2026-08-17-fastapi-realworld-round13.md`。
 
 ## r1 vs r2
 
@@ -229,4 +232,31 @@ verify JSON：`docs/eval/2026-08-14-fastapi-realworld-round8-verify.json`。
 - taxonomy 幻觉页；泄漏 `<think>` 89 页。
 - coverage 42.28% 仍 << 95%；eval-layout HARD；API mermaid 缺 9 / ER 缺 5。
 - r8 verify：**12 HARD / 0 SOFT**（未放宽）。不要松阈值。
+
+## r12 vs r13
+
+评测正文：`docs/eval/2026-08-17-fastapi-realworld-round13.md`。  
+verify JSON：`docs/eval/2026-08-17-fastapi-realworld-round13-verify.json`。
+
+真实 MiniMax-M3 run `r13-2026-08-17`。CLI `3053586` = main `1fe6840` + #72+#73+#74+#75+#82+#83（本地 `r13-eval-local`；两处 keep-both；**未推送、未进 main**）。未纳入 #76。未叠到 #77。R12 正文在 #77。
+
+| 项 | r12 | **r13** |
+|---|---|---|
+| CLI | `6c98b06` / #72+#73+#74+#75（未进 main） | **`3053586`** / #72+#73+#74+#75+#82+#83（未进 main） |
+| generate | EXIT=0；81/81；cache 0/81 | **EXIT=0；81/81；cache 0/81** |
+| LLM PASS / DEGRADED | 65 / 16 | **69 / 12** |
+| llm_call_count / tokens | 71 / 279211 | **81 / 316375** |
+| fallback | 10 timeout 60s + 6 prose | **9 insufficient prose + 3 composition 529** |
+| 60s page timeout | 10 | **0** |
+| 529 / circuit-break | 0 / false | **3 / false** |
+| MiniMax 1004 | — | **0** |
+| coverage | 66.51%（1017/1529）仍 << 95% | **65.08%**（874/1343）仍 << 95% |
+| HARD / SOFT | 7 / 0 | **7 / 0**（同一计数，不同 mix；未放宽） |
+| Overview Conduit | MISS（overview fallback） | **HIT**（两张 overview 页） |
+| owner missing | 2（services `app`, `db`） | **0**（owner check PASS） |
+| #82 leftover code | `CRITICAL_FALSE_FACT`（`/api/articles*` dump） | **MISS**（仍 HARD；6 页 service `entity`，不是 R12 dump） |
+| #83 leftover codes | conflict + owner `app`/`db` | **MIXED**（owner HIT / conflict MISS，证据换成 GitHub badge/path tokens） |
+| API aggregation | 未作为本轮 HARD | **NEW** `QODER_API_AGGREGATION_LOW`（5/9） |
+
+不要声称 #72–#75+#82+#83 全部清掉。HARD 计数未下降。不要松 HARD/SOFT。不要把这些产品 PR 合进 main。
 

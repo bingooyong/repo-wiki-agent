@@ -1,0 +1,81 @@
+{
+  "run_id": "r13-2026-08-17",
+  "cli": "3053586",
+  "cli_full": "3053586069ff4a285a989821939c27f866502f5c",
+  "cli_branch": "r13-eval-local",
+  "base_main": "1fe6840",
+  "prs": ["#72", "#73", "#74", "#75", "#82", "#83"],
+  "stacked_eval": "local merge of #72 #73 #74 #75 #82 #83 onto main 1fe6840; two keep-both conflict resolutions; not pushed",
+  "pr82_hit": false,
+  "pr83_hit": "MIXED",
+  "grade": "FAIL",
+  "hard_fail": 7,
+  "soft_fail": 0,
+  "hard_codes": [
+    "QODER_PAGE_QUALITY_STATE_DEGRADED",
+    "QODER_UNRESOLVED_FACT_CONFLICT",
+    "QODER_CRITICAL_FALSE_FACT",
+    "QODER_CITATION_FACT_COVERAGE_LOW",
+    "QODER_CITATION_RELEVANCE_MISMATCH",
+    "QODER_API_AGGREGATION_LOW",
+    "QODER_DIRTY_WORKTREE"
+  ],
+  "pages": {
+    "planned": 81,
+    "written": 81,
+    "pass": 69,
+    "degraded": 12,
+    "fallback": 12,
+    "llm_call_count": 81
+  },
+  "fallback_breakdown": {
+    "insufficient_prose": 9,
+    "composition_server_error_529": 3,
+    "timeout_60s": 0
+  },
+  "http_529": 3,
+  "minimax_1004": 0,
+  "circuit_break_tripped": false,
+  "provider_failure_count": 0,
+  "empty_content": 0,
+  "cache_hits": 0,
+  "cache_misses": 81,
+  "actual_tokens": 316375,
+  "timeout_s": 180,
+  "host": "api.minimaxi.com",
+  "owner_check": "PASS",
+  "owner_missing": 0,
+  "overview_conduit": true,
+  "overview_conduit_both_pages": true,
+  "claim_coverage_percent": "65.08%",
+  "claim_coverage": "874/1343",
+  "claim_coverage_gate_percent": "95%",
+  "relevance_mismatch": {"message": 36, "details": 20},
+  "api_aggregation": {"aggregated_apis": 5, "total_api_pages": 9, "code": "QODER_API_AGGREGATION_LOW"},
+  "conflict": {
+    "code": "QODER_UNRESOLVED_FACT_CONFLICT",
+    "kind": "STALE_DOC_REFERENCE",
+    "source": "README.rst",
+    "unresolved_count": 2,
+    "duplicate_locations": ["reports/", "meta/"],
+    "evidence": ["app/blob/master/license", "app/workflows/api"],
+    "not_r12_evidence": [".env", "/docs", "/redoc"]
+  },
+  "critical_false_fact": {
+    "shape": "service entity",
+    "not_r12_shape": "/api/articles* dumps",
+    "pages": [
+      "API参考/错误处理与状态码.md",
+      "认证授权API.md",
+      "API参考.md",
+      "核心服务API/API API.md",
+      "核心服务API.md",
+      "Python服务API.md"
+    ]
+  },
+  "generate_exit": 0,
+  "verify_exit": 1,
+  "generate_wall": "16m42s",
+  "verify_wall": "4s",
+  "note": "Real MiniMax-M3 run r13-2026-08-17. CLI 3053586 = main 1fe6840 + #72 #73 #74 #75 #82 #83 (r13-eval-local; two keep-both; not pushed). HARD 7 / SOFT 0 (same count as R12, different mix). HIT vs R12 leftovers: OWNER_COVERAGE_MISSING (0 missing), dump leftover code, prose leftover code, Overview Conduit both pages. MISS: false-fact (new shape), conflict (new evidence), degraded, coverage 65.08% still << 95%, relevance, dirty worktree. NEW: QODER_API_AGGREGATION_LOW 5/9. Do not claim #72–#75+#82+#83 fully cleared. HARD count did not drop. Gates not relaxed. #76 not in eval CLI."
+}
