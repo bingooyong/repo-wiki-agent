@@ -23,6 +23,8 @@
 | `QODER_CITATION_FACT_COVERAGE_LOW` | FAIL **64.44%**（928/1440）；门仍是 95% | FAIL **67.02%**（951/1419）；门仍是 95% | **MISS**（略升，仍 << 95%） |
 | `QODER_CITATION_RELEVANCE_MISMATCH` | FAIL（message 27 / details 20） | FAIL（message 25 / details 20） | **MISS** |
 | `QODER_DIRTY_WORKTREE` | FAIL（untracked `.repo-agent-eval/`） | FAIL（untracked `.repo-agent-eval/`） | **MISS** |
+| `QODER_API_AGGREGATION_LOW` | PASS 6/6 | **PASS 6/6** | 与 R14 同一 leftover-clear |
+| Overview Conduit | HIT（两张 overview 页） | **HIT**（两张 overview 页） | 与 R14 相同 |
 
 #87 目标是 trailing path param false-fact（R14 形态 `DELETE /api/articles`）。本轮 `QODER_CRITICAL_FALSE_FACT` **HIT / PASS**。不要声称 leftover HARD 已清。HARD 5→4，计数下降但未清场。
 
@@ -40,6 +42,7 @@ GENERATE_EXIT=0。Cold cache：cache_hits=0，cache_misses=81。isolated=true。
 | MiniMax 1004 | 0 | **0** |
 | provider_failure_count | 0 | **0** |
 | empty-content | 0 | **0** |
+| Overview Conduit | HIT（两张 overview 页） | **HIT**（两张 overview 页） |
 | wall | 13m13s generate + 4s verify | **11m10s** generate + 3s verify |
 
 DEGRADED 11 页（全部 Insufficient prose content）：event-architecture、database-architecture、authentication-authorization-api、api-development、core-data-models、services、kubernetes-deployment、deployment-issues、vulnerability-management、testing-guide、performance-optimization。R14 为 13；本轮多过的两页属于更早 fallback 集合，不点名。
@@ -52,8 +55,9 @@ DEGRADED 11 页（全部 Insufficient prose content）：event-architecture、da
 | coverage | 64.44%（928/1440）；门仍是 95% | **67.02%**（951/1419）仍 << 95% |
 | HARD / SOFT | 5 / 0 | **4 / 0**（未放宽） |
 | owner missing | 0 | **0** |
-| API aggregation | PASS | **PASS** |
+| API aggregation | PASS 6/6 | **PASS 6/6** |
 | conflict | PASS | **PASS** |
+| Overview Conduit | HIT（两张 overview 页） | **HIT**（两张 overview 页） |
 | false-fact | `DELETE /api/articles`（1 claim） | **PASS**（#87 HIT；claim_count 0） |
 
 ## Verify

@@ -250,8 +250,9 @@ verify JSON：`docs/eval/2026-08-17-fastapi-realworld-round15-verify.json`。
 | coverage | 64.44%（928/1440）；门仍是 95% | **67.02%**（951/1419）仍 << 95% |
 | HARD / SOFT | 5 / 0 | **4 / 0**（未放宽） |
 | owner missing | 0 | **0** |
+| Overview Conduit | HIT（两张 overview 页） | **HIT**（两张 overview 页） |
 | conflict（GitHub badges） | PASS | **PASS** |
-| API aggregation | PASS | **PASS** |
+| API aggregation | PASS 6/6 | **PASS 6/6** |
 | #87 leftover code | `CRITICAL_FALSE_FACT`（`DELETE /api/articles`） | **HIT**（PASS；claim_count 0） |
 
 不要声称 leftover HARD 已清。HARD 计数 5→4。不要松 HARD/SOFT。不要把这些产品 PR 合进 main。
