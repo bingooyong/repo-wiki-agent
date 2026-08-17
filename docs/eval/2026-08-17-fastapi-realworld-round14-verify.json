@@ -1,0 +1,69 @@
+{
+  "run_id": "r14-2026-08-17",
+  "cli": "278164e",
+  "cli_full": "278164eff0e1de710d960356eaac95156ea8f7ad",
+  "cli_branch": "r14-eval-local",
+  "base_main": "1fe6840",
+  "prs": ["#72", "#73", "#74", "#75", "#82", "#83", "#85"],
+  "stacked_eval": "r13 stack #72 #73 #74 #75 #82 #83 @ 3053586 + #85 550782c onto main 1fe6840; two keep-both conflict resolutions; not pushed",
+  "pr85_hit": "MIXED",
+  "grade": "FAIL",
+  "hard_fail": 5,
+  "soft_fail": 0,
+  "hard_codes": [
+    "QODER_PAGE_QUALITY_STATE_DEGRADED",
+    "QODER_CRITICAL_FALSE_FACT",
+    "QODER_CITATION_FACT_COVERAGE_LOW",
+    "QODER_CITATION_RELEVANCE_MISMATCH",
+    "QODER_DIRTY_WORKTREE"
+  ],
+  "pages": {
+    "planned": 81,
+    "written": 81,
+    "pass": 68,
+    "degraded": 13,
+    "fallback": 13,
+    "llm_call_count": 81
+  },
+  "fallback_breakdown": {
+    "insufficient_prose": 13
+  },
+  "http_529": 0,
+  "minimax_1004": 0,
+  "circuit_break_tripped": false,
+  "provider_failure_count": 0,
+  "empty_content": 0,
+  "cache_hits": 0,
+  "cache_misses": 81,
+  "actual_tokens": 312531,
+  "timeout_s": 180,
+  "host": "api.minimaxi.com",
+  "owner_check": "PASS",
+  "owner_missing": 0,
+  "overview_conduit": true,
+  "overview_conduit_both_pages": true,
+  "claim_coverage_percent": "64.44%",
+  "claim_coverage": "928/1440",
+  "claim_coverage_gate_percent": "95%",
+  "relevance_mismatch": {"message": 27, "details": 20},
+  "api_aggregation": {"result": "PASS", "score": "6/6"},
+  "conflict": {
+    "code": "QODER_UNRESOLVED_FACT_CONFLICT",
+    "result": "PASS",
+    "r13_shape": "GitHub badges"
+  },
+  "critical_false_fact": {
+    "shape": "DELETE /api/articles",
+    "not_r13_shape": "mermaid entity",
+    "claim_count": 1,
+    "real_route": "DELETE /api/articles/{slug}",
+    "pages": [
+      "API参考/核心服务API/API API.md"
+    ]
+  },
+  "generate_exit": 0,
+  "verify_exit": 1,
+  "generate_wall": "13m13s",
+  "verify_wall": "4s",
+  "note": "Real MiniMax-M3 run r14-2026-08-17. CLI 278164e = r13 stack #72 #73 #74 #75 #82 #83 @ 3053586 + #85 550782c (r14-eval-local; two keep-both; not pushed). HARD 5 / SOFT 0 (dropped vs R13 HARD 7). HIT vs R13 leftovers: UNRESOLVED_FACT_CONFLICT (GitHub badges) PASS, API_AGGREGATION_LOW PASS 6/6, mermaid entity shape gone, owner 0 missing, dump/prose leftover codes PASS, Overview Conduit both pages. MISS: CRITICAL_FALSE_FACT (new shape DELETE /api/articles), degraded (13 fallback), coverage 64.44% still << 95%, relevance, dirty worktree. Do not claim #85 fully cleared HARD. HARD count dropped 7→5. Gates not relaxed."
+}
