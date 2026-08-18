@@ -1,0 +1,60 @@
+{
+  "run_id": "r16-2026-08-18",
+  "cli": "c8a30a6",
+  "cli_full": "c8a30a690a95ab13692f186c6ee59190dec4ead4",
+  "cli_branch": "r16-eval-local",
+  "base_main": "1fe6840",
+  "prs": ["#72", "#73", "#74", "#75", "#82", "#83", "#85", "#87", "#89"],
+  "stacked_eval": "r15-eval-local 6b966d4 (r14 278164e + #87 e1073f6) + merge of #89 025d7d2272836cea6c6416e4bd04131a9ec5bd8e (cursor/fix-fastapi-sibling-layer-relevance-2e1d) onto main 1fe6840; auto-merge, no keep-both; not pushed, not merged to origin/main",
+  "pr89_hit": "HIT",
+  "grade": "FAIL",
+  "hard_fail": 3,
+  "soft_fail": 0,
+  "hard_codes": [
+    "QODER_PAGE_QUALITY_STATE_DEGRADED",
+    "QODER_CITATION_FACT_COVERAGE_LOW",
+    "QODER_DIRTY_WORKTREE"
+  ],
+  "pages": {
+    "planned": 81,
+    "written": 81,
+    "pass": 77,
+    "degraded": 4,
+    "fallback": 4,
+    "llm_call_count": 81
+  },
+  "fallback_breakdown": {
+    "insufficient_prose": 3,
+    "http_529": 1
+  },
+  "http_529": 1,
+  "minimax_1004": 0,
+  "circuit_break_tripped": false,
+  "provider_failure_count": 0,
+  "empty_content": 0,
+  "cache_hits": 0,
+  "cache_misses": 81,
+  "actual_tokens": 323357,
+  "timeout_s": 180,
+  "host": "api.minimaxi.com",
+  "owner_check": "PASS",
+  "owner_missing": 0,
+  "claim_coverage_percent": "68.76%",
+  "claim_coverage": "940/1367",
+  "claim_coverage_gate_percent": "95%",
+  "relevance": "PASS",
+  "relevance_mismatch": {"result": "PASS", "n": 0},
+  "api_aggregation": {"result": "PASS", "score": "6/6"},
+  "conflict": {
+    "code": "QODER_UNRESOLVED_FACT_CONFLICT",
+    "result": "PASS"
+  },
+  "critical_false_fact": {
+    "result": "PASS"
+  },
+  "generate_exit": 0,
+  "verify_exit": 1,
+  "generate_wall": "15m56s",
+  "verify_wall": "3s",
+  "note": "Real MiniMax-M3 run r16-2026-08-18. CLI c8a30a6 = r15-eval-local 6b966d4 (r14 278164e + #87 e1073f6) + #89 025d7d2 (r16-eval-local; auto-merge, no keep-both; not pushed). HARD 3 / SOFT 0 (dropped vs R15 HARD 4). HIT vs R15 leftover: CITATION_RELEVANCE_MISMATCH PASS (#89). API aggregation PASS 6/6 (same leftover-clear as R15). MISS: degraded (4 fallback: 3 insufficient prose + 1x529), coverage 68.76% still << 95%, dirty worktree. 1x529 on security-best-practices is a provider blip, not a relevance wiring miss. Not an 81-fallback auth-1004 run. Do not claim leftover HARD cleared. HARD count dropped 4→3. Gates not relaxed. Stack not pushed/merged."
+}
