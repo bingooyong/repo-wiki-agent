@@ -273,6 +273,41 @@ class AlwaysEmptyContentProvider(LLMProvider):
         return []
 
 
+class TimeoutOnceThenHealthyProvider(LLMProvider):
+    """First chat hangs; the rewrite call and later pages succeed."""
+
+    def __init__(self) -> None:
+        self._call_count = 0
+        self._config = LLMProviderConfig(
+            provider="mock",
+            model="mock-gpt",
+            timeout=PAGE_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+
+    @property
+    def name(self) -> str:
+        return "timeout-once-fake"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities()
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        self._call_count += 1
+        if self._call_count == 1:
+            await request_never_returns()
+            raise AssertionError("timeout path must be cancelled, not return")
+        return _success_response()
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
 class AlwaysTimeoutProvider(LLMProvider):
     """Hang until the page wait_for timeout — a real provider-outage signal."""
 
@@ -655,11 +690,57 @@ async def test_empty_content_rejects_do_not_trip_circuit_breaker(
 
 
 @pytest.mark.asyncio
-async def test_three_consecutive_timeouts_still_trip_circuit_breaker(
+async def test_page_timeout_then_rewrite_is_not_degraded(
     compose_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#49: three page timeouts still disable later LLM calls."""
+    """One page timeout is a page-local rewrite, not a DEGRADED fallback."""
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    provider = TimeoutOnceThenHealthyProvider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, provider)
+
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+    states = [meta["quality_state"] for meta in result["page_metadata"]]
+    modes = [meta["generation_mode"] for meta in result["page_metadata"]]
+    timeout_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "LLM page timeout" in reason
+    ]
+    disabled_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "provider disabled after" in reason
+    ]
+
+    assert llm["provider_disabled_after_failures"] is False
+    assert llm["fallback_page_count"] == 0
+    assert "DEGRADED" not in states
+    assert modes.count("fallback") == 0
+    assert not timeout_reasons
+    assert not disabled_reasons
+    assert provider.call_count == PAGE_COUNT + 1
+    assert llm["llm_call_count"] == PAGE_COUNT
+
+
+@pytest.mark.asyncio
+async def test_page_timeout_twice_stays_degraded_without_circuit_break(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two timeouts on a page stay DEGRADED and must not disable sibling LLM pages."""
     monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
     root = compose_env / "repo"
     root.mkdir()
@@ -676,16 +757,24 @@ async def test_three_consecutive_timeouts_still_trip_circuit_breaker(
         output_dir=output_dir,
     )
     llm = result["llm"]
-
-    assert llm["max_provider_failures"] == 3
-    assert llm["provider_disabled_after_failures"] is True
-    assert provider.call_count == 3
-    assert provider.call_count < PAGE_COUNT
-    assert llm["fallback_page_count"] == PAGE_COUNT
+    states = [meta["quality_state"] for meta in result["page_metadata"]]
+    timeout_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "LLM page timeout" in reason
+    ]
     disabled_reasons = [
         reason
         for meta in result["page_metadata"]
         for reason in meta["reasons"]
         if "provider disabled after" in reason
     ]
-    assert disabled_reasons
+
+    assert llm["max_provider_failures"] == 3
+    assert llm["provider_disabled_after_failures"] is False
+    assert provider.call_count == PAGE_COUNT * 2
+    assert llm["fallback_page_count"] == PAGE_COUNT
+    assert states == ["DEGRADED"] * PAGE_COUNT
+    assert timeout_reasons
+    assert not disabled_reasons

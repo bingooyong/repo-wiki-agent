@@ -34,26 +34,13 @@ from repo_wiki.orchestration.runtime_store import (
 from repo_wiki.retrieval.service import RetrievalService
 from repo_wiki.scanner.artifacts import has_frontend_wiki_surface, write_source_of_truth
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
-from repo_wiki.verifier.handbook import (
-    EMPTY_CONTENT_REJECTION,
-    GENERATOR_META_REJECTION,
-    UNCLOSED_FENCE_REJECTION,
-)
+from repo_wiki.verifier.handbook import is_page_local_quality_rejection
 from repo_wiki.verifier.service import VerifierService
 
 if TYPE_CHECKING:
     from repo_wiki.evidence.ranking import PageEvidenceBinding
     from repo_wiki.llm.config import LLMProviderConfig
     from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
-
-_PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
-    {
-        "Insufficient prose content",
-        GENERATOR_META_REJECTION,
-        EMPTY_CONTENT_REJECTION,
-        UNCLOSED_FENCE_REJECTION,
-    }
-)
 
 
 def _packaged_template_root() -> Path:
@@ -1169,9 +1156,11 @@ class RepoWikiService:
                 f"page_id={page.page_id} title={page.title}"
             )
             try:
+                # Envelope covers the original call plus one rewrite at the same
+                # per-call timeout. This does not raise the 180s page timeout.
                 output = await asyncio.wait_for(
                     composer.compose_page(job["input_data"]),
-                    timeout=page_timeout_seconds,
+                    timeout=page_timeout_seconds * 2 + 1.0,
                 )
                 info(
                     "llm page completed "
@@ -1210,7 +1199,8 @@ class RepoWikiService:
             page_idx = job["page_idx"]
 
             if result["status"] == "error":
-                note_provider_failure()
+                if not is_page_local_quality_rejection(str(result.get("reason") or "")):
+                    note_provider_failure()
                 write_fallback(page, binding, page_idx, str(result["reason"]))
                 return
 
@@ -1219,11 +1209,9 @@ class RepoWikiService:
             actual_tokens += output.tokens_used
 
             if output.rejected:
-                # Quality rejects after a successful HTTP 200 are page-local
-                # fallbacks, not provider outages. R10: 3× Insufficient prose
-                # (and handbook generator-meta rejects) must not consume the
-                # #49 circuit-break budget.
-                if output.rejection_reason not in _PAGE_LOCAL_QUALITY_REJECTIONS:
+                # Quality rejects after a successful HTTP 200, and page LLM
+                # timeouts, are page-local fallbacks, not provider outages.
+                if not is_page_local_quality_rejection(output.rejection_reason):
                     note_provider_failure()
                 write_fallback(
                     page,

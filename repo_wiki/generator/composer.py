@@ -17,6 +17,7 @@ Key features:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from dataclasses import dataclass, field
@@ -64,6 +65,8 @@ from repo_wiki.verifier.handbook import (
     UNCLOSED_FENCE_REJECTION,
     contains_generator_meta,
     has_unclosed_fence,
+    is_page_timeout_rejection,
+    page_timeout_rejection,
 )
 
 _PROSE_RECOVERY_REASONS = frozenset(
@@ -353,7 +356,31 @@ class LLMPageComposer:
 
             for attempt in range(2):
                 try:
-                    response = await self._call_llm(prompt, input.page_plan.title)
+                    response = await asyncio.wait_for(
+                        self._call_llm(prompt, input.page_plan.title),
+                        timeout=self._resolve_page_timeout(),
+                    )
+                except TimeoutError:
+                    last_rejected = ComposerOutput(
+                        page_id=page_id,
+                        markdown="",
+                        citations_preserved=False,
+                        headings_preserved=False,
+                        evidence_count=0,
+                        rejected=True,
+                        rejection_reason=page_timeout_rejection(self._resolve_page_timeout()),
+                        tokens_used=total_tokens,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        low_confidence=False,
+                        uncertainty_reasons=[],
+                    )
+                    if attempt == 0:
+                        prompt = self._build_prose_recovery_prompt(input, context, "")
+                        continue
+                    return last_rejected
                 except RetryableError as exc:
                     if getattr(exc, "code", None) != ErrorCode.EMPTY_CONTENT:
                         raise
@@ -406,7 +433,10 @@ class LLMPageComposer:
                 if not output.rejected:
                     return output
                 last_rejected = output
-                if attempt == 0 and validation_result.rejection_reason in _PROSE_RECOVERY_REASONS:
+                if attempt == 0 and (
+                    validation_result.rejection_reason in _PROSE_RECOVERY_REASONS
+                    or is_page_timeout_rejection(validation_result.rejection_reason)
+                ):
                     prompt = self._build_prose_recovery_prompt(input, context, response_content)
                     continue
                 return output
@@ -786,6 +816,17 @@ class LLMPageComposer:
         )
 
         return await chat_with_retry(self._provider, request)
+
+    def _resolve_page_timeout(self) -> float:
+        """Per-call timeout for one LLM attempt. Rewrite uses a second call, not a longer budget."""
+        raw = os.environ.get("REPO_WIKI_LLM_PAGE_TIMEOUT_SECONDS")
+        if raw:
+            try:
+                return max(1.0, float(raw))
+            except ValueError:
+                pass
+        configured = float(getattr(self._llm_config, "timeout", 60.0) or 60.0)
+        return max(1.0, min(configured, 300.0))
 
     def _uses_compact_mock_token_cap(self) -> bool:
         """Keep the compact 1400 completion cap for mock/tests only.

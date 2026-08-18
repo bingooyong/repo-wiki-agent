@@ -15,6 +15,7 @@ HANDBOOK_META_PHRASES: tuple[str, ...] = (
 GENERATOR_META_REJECTION = "Handbook generator meta content"
 EMPTY_CONTENT_REJECTION = "Empty LLM assistant content"
 UNCLOSED_FENCE_REJECTION = "Unclosed fenced code block"
+PAGE_TIMEOUT_REJECTION_PREFIX = "LLM page timeout after"
 
 _PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
     {
@@ -55,9 +56,20 @@ def has_unclosed_fence(markdown: str) -> bool:
     return in_fence
 
 
+def is_page_timeout_rejection(reason: str | None) -> bool:
+    """True for ``LLM page timeout after {seconds}s`` reasons."""
+    return bool(reason) and reason.startswith(PAGE_TIMEOUT_REJECTION_PREFIX)
+
+
+def page_timeout_rejection(seconds: float) -> str:
+    return f"{PAGE_TIMEOUT_REJECTION_PREFIX} {seconds:.1f}s"
+
+
 def is_page_local_quality_rejection(reason: str | None) -> bool:
-    """Quality rejects after HTTP 200 are page-local, not provider outages."""
-    return reason in _PAGE_LOCAL_QUALITY_REJECTIONS
+    """Quality rejects after HTTP 200, or a page LLM timeout, are not provider outages."""
+    if reason in _PAGE_LOCAL_QUALITY_REJECTIONS:
+        return True
+    return is_page_timeout_rejection(reason)
 
 
 def iter_markdown_pages(content_dir: Path | None) -> list[Path]:

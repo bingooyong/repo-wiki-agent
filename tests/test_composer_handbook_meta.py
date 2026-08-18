@@ -161,4 +161,5 @@ async def test_generator_meta_rejection_is_page_local_like_insufficient_prose(
     assert is_page_local_quality_rejection(GENERATOR_META_REJECTION) is True
     assert is_page_local_quality_rejection("Empty LLM assistant content") is True
     assert is_page_local_quality_rejection("Unclosed fenced code block") is True
+    assert is_page_local_quality_rejection("LLM page timeout after 180.0s") is True
     assert is_page_local_quality_rejection("Composition error: 529") is False
