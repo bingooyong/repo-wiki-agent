@@ -105,6 +105,38 @@ def test_overview_identity_passes_with_identity(tmp_path: Path) -> None:
     assert result.status == "PASS"
 
 
+def test_overview_identity_passes_with_slug_matching_display_name(tmp_path: Path) -> None:
+    """display_name 'Novel Agent' must match page token novel-agent."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "novel-agent"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text("# Novel Agent\n\nWriting desk.\n", encoding="utf-8")
+    _write_page(
+        tmp_path,
+        "project-overview.md",
+        "# 项目概述\n\nnovel-agent 提供本地写作工作台。\n",
+    )
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_overview_identity()
+    assert result.status == "PASS"
+    assert result.reason_code != "QODER_HANDBOOK_OVERVIEW_IDENTITY"
+
+
+def test_overview_identity_passes_with_directory_identity_token(tmp_path: Path) -> None:
+    repo = tmp_path / "ai-open-writing"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text('[project]\nname = "novel-agent"\n', encoding="utf-8")
+    (repo / "README.md").write_text("# Novel Agent\n\nWriting desk.\n", encoding="utf-8")
+    _write_page(
+        repo,
+        "project-overview.md",
+        "# 项目概述\n\nai-open-writing 是该仓库的产品身份。\n",
+    )
+    result = QoderLikeVerifierService(repo, strict=True)._check_handbook_overview_identity()
+    assert result.status == "PASS"
+    assert result.reason_code != "QODER_HANDBOOK_OVERVIEW_IDENTITY"
+
+
 def test_overview_identity_ignores_key_features_sibling_under_overview_folder(
     tmp_path: Path,
 ) -> None:
@@ -165,6 +197,38 @@ def test_install_run_passes_with_run_clues(tmp_path: Path) -> None:
     )
     result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_install_run()
     assert result.status == "PASS"
+
+
+def test_install_run_passes_with_uv_and_npm_from_readme(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text(
+        "# Novel Agent\n\n```bash\nuv sync\nuv run novel init\ncd writing-desk && npm install\n```\n"
+        "SQLite is the default database.\n",
+        encoding="utf-8",
+    )
+    _write_page(
+        tmp_path,
+        "installation.md",
+        "# 安装指南\n\n先 `uv sync`，再 `npm install` 启动 writing-desk。"
+        " <cite>README.md:3-8</cite>\n",
+    )
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_install_run()
+    assert result.status == "PASS"
+    assert result.reason_code != "QODER_HANDBOOK_INSTALL_RUN"
+
+
+def test_install_run_fails_when_page_only_says_clone(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text(
+        "# Novel Agent\n\nClone the repo, then `uv sync` and `npm install`.\n",
+        encoding="utf-8",
+    )
+    _write_page(
+        tmp_path,
+        "installation.md",
+        "# 安装指南\n\nClone the repo and start reading.\n\n<cite>README.md:1-4</cite>\n",
+    )
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_install_run()
+    assert result.status == "FAIL"
+    assert result.reason_code == "QODER_HANDBOOK_INSTALL_RUN"
 
 
 def test_api_route_file_requires_routes_cite(tmp_path: Path) -> None:

@@ -36,6 +36,16 @@ _INSTALL_CLUE_PATTERNS = (
     ("docker", re.compile(r"\bdocker\b", re.I)),
     ("DATABASE_URL", re.compile(r"database_url", re.I)),
     ("POSTGRES", re.compile(r"postgres", re.I)),
+    ("sqlite", re.compile(r"\bsqlite3?\b", re.I)),
+    ("uv sync", re.compile(r"\buv\s+sync\b", re.I)),
+    ("uv run", re.compile(r"\buv\s+run\b", re.I)),
+    ("npm install", re.compile(r"\bnpm\s+install\b", re.I)),
+    ("npm", re.compile(r"\bnpm\b", re.I)),
+    ("npx", re.compile(r"\bnpx\b", re.I)),
+    ("yarn", re.compile(r"\byarn\b", re.I)),
+    ("pnpm", re.compile(r"\bpnpm\b", re.I)),
+    ("pip install", re.compile(r"\bpip(?:3)?\s+install\b", re.I)),
+    ("poetry", re.compile(r"\bpoetry\s+(?:install|run)\b", re.I)),
 )
 
 
@@ -105,6 +115,32 @@ def existing_readme_names(repo_root: Path) -> tuple[str, ...]:
     return tuple(found) if found else _README_NAMES
 
 
+def _fold_identity_token(value: str) -> str:
+    return re.sub(r"[-_\s]+", "", value.casefold())
+
+
+def identity_match_tokens(repo_root: Path) -> tuple[str, ...]:
+    """Identity strings a handbook overview may use: display_name, name, directory."""
+    from repo_wiki.planner.identity import resolve_repository_identity
+
+    identity = resolve_repository_identity(repo_root)
+    tokens: list[str] = []
+    for raw in (identity.display_name, identity.name, repo_root.name):
+        text = (raw or "").strip()
+        if text and text not in tokens:
+            tokens.append(text)
+    return tuple(tokens)
+
+
+def page_contains_identity_token(markdown: str, token: str) -> bool:
+    if not token.strip():
+        return False
+    if token.lower() in markdown.lower():
+        return True
+    folded = _fold_identity_token(token)
+    return bool(folded) and folded in _fold_identity_token(markdown)
+
+
 def overview_identity_satisfied(markdown: str, repo_root: Path) -> bool:
     """Return True when overview page states sample identity or resolved identity."""
     readme = read_readme_text(repo_root)
@@ -114,17 +150,33 @@ def overview_identity_satisfied(markdown: str, repo_root: Path) -> bool:
         has_product = "conduit" in page_lower or "realworld" in page_lower
         has_fastapi = "fastapi" in page_lower
         return has_product and has_fastapi
-    from repo_wiki.planner.identity import resolve_repository_identity
-
-    identity = resolve_repository_identity(repo_root)
-    token = (identity.display_name or identity.name or "").strip()
-    if not token:
-        return False
-    return token.lower() in page_lower
+    return any(
+        page_contains_identity_token(markdown, token) for token in identity_match_tokens(repo_root)
+    )
 
 
-def install_run_clue_count(markdown: str) -> int:
-    return sum(1 for _name, pattern in _INSTALL_CLUE_PATTERNS if pattern.search(markdown))
+def _repo_run_source_text(repo_root: Path) -> str:
+    chunks = [read_readme_text(repo_root)]
+    for rel in ("pyproject.toml", "package.json"):
+        path = repo_root / rel
+        if path.is_file():
+            chunks.append(path.read_text(encoding="utf-8", errors="ignore"))
+    return "\n".join(chunks)
+
+
+def repo_run_clue_names(repo_root: Path) -> tuple[str, ...]:
+    blob = _repo_run_source_text(repo_root)
+    return tuple(name for name, pattern in _INSTALL_CLUE_PATTERNS if pattern.search(blob))
+
+
+def install_run_clue_count(markdown: str, repo_root: Path | None = None) -> int:
+    """Count how-to-run clues on a page, preferring this repo's README/scripts."""
+    if repo_root is None:
+        patterns = _INSTALL_CLUE_PATTERNS
+    else:
+        present = set(repo_run_clue_names(repo_root))
+        patterns = tuple(item for item in _INSTALL_CLUE_PATTERNS if item[0] in present)
+    return sum(1 for _name, pattern in patterns if pattern.search(markdown))
 
 
 def has_readme_citation(markdown: str, readme_names: tuple[str, ...]) -> bool:

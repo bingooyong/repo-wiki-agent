@@ -2270,7 +2270,7 @@ class QoderLikeVerifierService(VerifierService):
         offenders: list[str] = []
         for page in pages:
             text = page.read_text(encoding="utf-8", errors="ignore")
-            clues = install_run_clue_count(text)
+            clues = install_run_clue_count(text, repo_root)
             if clues < 2 or not has_readme_citation(text, readme_names):
                 offenders.append(page.as_posix())
         if offenders:
