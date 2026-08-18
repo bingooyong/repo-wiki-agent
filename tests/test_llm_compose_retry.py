@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 from repo_wiki.generator.composer import (
     ComposerContext,
     build_composer_input,
@@ -20,6 +21,7 @@ from repo_wiki.llm.models import (
     RetryableError,
 )
 from repo_wiki.llm.retry import RetryConfig
+from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
 
 SUCCESS_MARKDOWN = "# Sample Page\n\nRetried LLM content with enough prose for validation."
@@ -49,6 +51,7 @@ class SequenceLLMProvider(LLMProvider):
     def __init__(self, outcomes: list[Exception | ChatResponse]) -> None:
         self._outcomes = list(outcomes)
         self._call_count = 0
+        self.user_prompts: list[str] = []
         self._config = LLMProviderConfig(provider="mock", model="mock-gpt")
 
     @property
@@ -65,6 +68,9 @@ class SequenceLLMProvider(LLMProvider):
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         self._call_count += 1
+        self.user_prompts.append(
+            next((m.content for m in reversed(request.messages) if m.role == "user"), "")
+        )
         if self._call_count > 20:
             raise AssertionError("retry loop exceeded guard; expected RetryConfig.max_retries")
         if not self._outcomes:
@@ -398,6 +404,108 @@ def test_prose_recovery_prompt_forbids_evidence_fences(
     assert "段落" in prompt
     assert "mermaid" in prompt.lower()
     assert "def get_current_user" not in prompt
+
+
+FENCEPACK_TOKEN = "UNIQUE_FENCEPACK_DUMP_SHOULD_NOT_REACH_REWRITE"
+
+
+def _fence_heavy_binding() -> PageEvidenceBinding:
+    """Eight long dumps whose distinctive token sits after the compact snippet window."""
+    prefix = ("alpha_token " * 12).strip() + " "
+    suffix = "\n".join(["def pad():", "    return 1"] * 20)
+    candidates: list[EvidenceCandidate] = []
+    for index in range(8):
+        span = EvidenceSpanRecord(
+            digest=f"fence-{index}",
+            file_path=f"app/api/routes/file_{index}.py",
+            line_start=1,
+            line_end=80,
+            language="python",
+            symbol=f"handler_{index}",
+            span_text=f"{prefix}{FENCEPACK_TOKEN}_FILE{index}\n{suffix}",
+        )
+        candidates.append(
+            EvidenceCandidate(
+                evidence_id=index + 1,
+                span=span,
+                score=1.0,
+                match_signals=["module_match"],
+                citation_order=index,
+            )
+        )
+    return PageEvidenceBinding(
+        page_id="sample-page",
+        doc_type="overview",
+        candidates=candidates,
+        bound_count=8,
+    )
+
+
+def test_prose_recovery_prompt_uses_compact_evidence_and_forbids_empty_replies(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+) -> None:
+    composer = create_composer()
+    binding = _fence_heavy_binding()
+    composer_input = build_composer_input(sample_page, binding, sample_context)
+    first = composer._build_compose_prompt(composer_input, composer._build_context(composer_input))
+    recovery = composer._build_prose_recovery_prompt(
+        composer_input,
+        composer._build_context(composer_input),
+        FENCE_HEAVY_MARKDOWN,
+    )
+    assert FENCEPACK_TOKEN in first
+    assert FENCEPACK_TOKEN not in recovery
+    assert "file_0.py" in recovery
+    assert "file_7.py" not in recovery
+    assert "def get_current_user" not in recovery
+    assert "禁止空" in recovery or "不要返回空" in recovery
+    assert "段落" in recovery
+    assert "mermaid" in recovery.lower()
+
+
+@pytest.mark.asyncio
+async def test_empty_then_paragraph_rewrite_sends_compact_recovery_prompt(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider(
+        [_empty_response("") for _ in range(RetryConfig().max_retries + 1)]
+        + [_paragraph_response()]
+    )
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(
+        build_composer_input(sample_page, _fence_heavy_binding(), sample_context)
+    )
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == RetryConfig().max_retries + 2
+    assert len(provider.user_prompts) == RetryConfig().max_retries + 2
+    assert FENCEPACK_TOKEN in provider.user_prompts[0]
+    assert FENCEPACK_TOKEN not in provider.user_prompts[-1]
+    assert "禁止空" in provider.user_prompts[-1] or "不要返回空" in provider.user_prompts[-1]
+
+
+@pytest.mark.asyncio
+async def test_insufficient_prose_rewrite_sends_compact_recovery_prompt(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_fence_heavy_response(), _paragraph_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(
+        build_composer_input(sample_page, _fence_heavy_binding(), sample_context)
+    )
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == 2
+    assert FENCEPACK_TOKEN in provider.user_prompts[0]
+    assert FENCEPACK_TOKEN not in provider.user_prompts[1]
+    assert "段落" in provider.user_prompts[1]
 
 
 UNCLOSED_FENCE_MARKDOWN = """# Sample Page

@@ -526,18 +526,41 @@ class LLMPageComposer:
                 lines.append(line)
         return "\n".join(lines).strip()
 
+    def _build_compact_recovery_evidence(self, binding: PageEvidenceBinding | None) -> str:
+        """Short path+snippet list for rewrite. Full fence packs emptied the first call."""
+        if not binding or not binding.candidates:
+            return "（无）"
+        lines: list[str] = []
+        for candidate in binding.candidates[:4]:
+            span = candidate.span
+            snippet = self._compact_snippet(
+                self._strip_fenced_blocks(getattr(span, "span_text", "") or ""),
+                max_chars=80,
+            )
+            loc = f"{span.file_path}:{span.line_start}-{span.line_end}"
+            if snippet:
+                lines.append(f"- {loc}: {snippet}")
+            else:
+                lines.append(f"- {loc}")
+        return "\n".join(lines) if lines else "（无）"
+
     def _build_prose_recovery_prompt(
         self, input: ComposerInput, context: dict[str, Any], previous: str
     ) -> str:
-        base = self._build_compose_prompt(input, context)
-        previous_for_prompt = self._strip_fenced_blocks(previous)[:2000]
+        title = input.page_plan.title
+        compact_evidence = self._build_compact_recovery_evidence(input.evidence_binding)
+        previous_for_prompt = self._strip_fenced_blocks(previous)[:1200]
+        product = (context.get("product_description") or "").strip() or "（未解析到产品描述）"
         return (
-            f"{base}\n\n上次草稿段落 prose 不足、围栏未闭合，或助手返回了空正文。"
-            "请重写为段落为主的中文 Markdown：列表只能作附录检查项，不能充当正文；"
+            f"请重写 Wiki 页「{title}」为段落为主的中文 Markdown。\n"
+            f"产品身份：{product}\n"
+            "禁止空回复，不要返回空正文；必须写出至少两段可读段落，不能只回标题或空白。\n"
             "禁止把证据原文整段放进 Markdown 代码围栏（```）；"
-            "禁止 mermaid 或围栏堆砌替代正文；围栏必须成对闭合。"
+            "禁止 mermaid 或围栏堆砌替代正文；围栏必须成对闭合。\n"
+            "列表只能作附录检查项，不能充当正文。"
             "每个事实句的 `<cite>` 必须写在该句同一行或下一行。不要解释过程。\n\n"
-            f"上次草稿（已去掉代码围栏）：\n{previous_for_prompt or '（空）'}\n"
+            f"精简证据（仅路径与短摘录，不要复述源码围栏）：\n{compact_evidence}\n\n"
+            f"上次草稿（已去掉代码围栏与 mermaid）：\n{previous_for_prompt or '（空）'}\n"
         )
 
     def _build_evidence_context(self, binding: PageEvidenceBinding) -> str:
