@@ -14,12 +14,14 @@ HANDBOOK_META_PHRASES: tuple[str, ...] = (
 
 GENERATOR_META_REJECTION = "Handbook generator meta content"
 EMPTY_CONTENT_REJECTION = "Empty LLM assistant content"
+UNCLOSED_FENCE_REJECTION = "Unclosed fenced code block"
 
 _PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
     {
         "Insufficient prose content",
         GENERATOR_META_REJECTION,
         EMPTY_CONTENT_REJECTION,
+        UNCLOSED_FENCE_REJECTION,
     }
 )
 
@@ -42,6 +44,15 @@ def contains_generator_meta(markdown: str) -> bool:
         return False
     lowered = markdown.lower()
     return any(phrase.lower() in lowered for phrase in HANDBOOK_META_PHRASES)
+
+
+def has_unclosed_fence(markdown: str) -> bool:
+    """Return True when a ``` fenced code block is opened and never closed."""
+    in_fence = False
+    for line in markdown.splitlines():
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+    return in_fence
 
 
 def is_page_local_quality_rejection(reason: str | None) -> bool:

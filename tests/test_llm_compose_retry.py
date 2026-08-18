@@ -396,4 +396,51 @@ def test_prose_recovery_prompt_forbids_evidence_fences(
     )
     assert "代码" in prompt or "围栏" in prompt or "fence" in prompt.lower()
     assert "段落" in prompt
+    assert "mermaid" in prompt.lower()
     assert "def get_current_user" not in prompt
+
+
+UNCLOSED_FENCE_MARKDOWN = """# Sample Page
+
+Operators monitor FastAPI latency with Prometheus scrapes and Grafana boards for production.
+This opening paragraph is long enough to pass the one-hundred character prose floor.
+
+```
+Prometheus scrapes /metrics and the remaining body is trapped in this fence.
+Grafana dashboards show request latency, error rate, and saturation.
+The unclosed fence must not be accepted as a passing composed page.
+"""
+
+
+def _unclosed_fence_response() -> ChatResponse:
+    return ChatResponse(content=UNCLOSED_FENCE_MARKDOWN, model="mock-gpt")
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_unclosed_fence_once(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_unclosed_fence_response(), _paragraph_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_compose_page_rejects_unclosed_fence_after_one_recovery(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_unclosed_fence_response(), _unclosed_fence_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is True
+    assert output.rejection_reason == "Unclosed fenced code block"
+    assert provider.call_count == 2

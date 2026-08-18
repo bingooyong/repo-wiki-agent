@@ -21,6 +21,7 @@ from repo_wiki.verifier.handbook import (
     install_run_clue_count,
     iter_markdown_pages,
     overview_identity_satisfied,
+    read_readme_text,
 )
 from repo_wiki.verifier.service import CheckResult, GateType, SeverityThreshold, VerifierService
 
@@ -112,6 +113,19 @@ class QoderLikeVerifierService(VerifierService):
     MIN_FILE_LINE_COVERAGE = 0.7
     MIN_MERMAID_COVERAGE = 0.3
     MERMAID_CODE_BLOCK_PATTERN = re.compile(r"```mermaid\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+    _FASTAPI_AUTODOC_PATHS = frozenset({"/docs", "/redoc"})
+    _YAML_ACTIONS_NON_SERVICE_NAMES = frozenset({"options"})
+    _CI_OPS_PAGE_HINTS = (
+        "流水线",
+        "部署",
+        "运维",
+        "pipeline",
+        "github-action",
+        "github_action",
+        "ci/cd",
+        "ci／cd",
+        "cicd",
+    )
 
     def __init__(
         self,
@@ -1393,6 +1407,7 @@ class QoderLikeVerifierService(VerifierService):
             return self._skip_check("critical-false-facts", "No structured inventories")
 
         offenders: list[dict[str, str]] = []
+        fastapi_app = self._repo_looks_like_fastapi()
         for page in content_dir.rglob("*.md"):
             text = page.read_text(encoding="utf-8", errors="ignore")
             rel = page.relative_to(content_dir).as_posix()
@@ -1401,6 +1416,8 @@ class QoderLikeVerifierService(VerifierService):
                     r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(/[-A-Za-z0-9_./{}:]+)",
                     text,
                 ):
+                    if fastapi_app and self._is_fastapi_framework_docs_path(api_path):
+                        continue
                     if (method.upper(), api_path) not in inventories["apis"]:
                         offenders.append(
                             {
@@ -1411,6 +1428,8 @@ class QoderLikeVerifierService(VerifierService):
                         )
             if inventories["services"]:
                 for service in self._extract_structured_name_claims(text, "service"):
+                    if self._is_github_actions_options_token(service, text, rel):
+                        continue
                     if service not in inventories["services"]:
                         offenders.append({"page": rel, "claim_type": "service", "claim": service})
             if inventories["models"]:
@@ -1925,6 +1944,69 @@ class QoderLikeVerifierService(VerifierService):
                 if claim and claim.lower() not in generic:
                     claims.add(claim)
         return claims
+
+    def _normalize_claimed_api_path(self, path: str) -> str:
+        if path != "/" and path.endswith("/"):
+            return path.rstrip("/")
+        return path
+
+    def _is_fastapi_framework_docs_path(self, path: str) -> bool:
+        """FastAPI auto-docs URLs are framework-generated, not scanned route files."""
+        return self._normalize_claimed_api_path(path) in self._FASTAPI_AUTODOC_PATHS
+
+    def _repo_looks_like_fastapi(self) -> bool:
+        """Detect a FastAPI app from README/quickstart or common dependency files."""
+        seen: set[Path] = set()
+        roots: list[Path] = []
+        for candidate in (self._source_root_for_citations(), self.root):
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            roots.append(candidate)
+        markers = (
+            "README.md",
+            "README.rst",
+            "README.txt",
+            "README",
+            "pyproject.toml",
+            "requirements.txt",
+            "app/main.py",
+            "main.py",
+        )
+        for root in roots:
+            readme = read_readme_text(root)
+            if re.search(r"\bfastapi\b", readme, re.I):
+                return True
+            for rel in markers:
+                path = root / rel
+                if not path.is_file():
+                    continue
+                text = path.read_text(encoding="utf-8", errors="ignore")
+                if re.search(r"\bfastapi\b", text, re.I):
+                    return True
+        return False
+
+    def _is_ci_ops_page(self, rel: str) -> bool:
+        lowered = rel.replace("\\", "/").lower()
+        if any(hint in lowered for hint in self._CI_OPS_PAGE_HINTS):
+            return True
+        parts = [part for part in re.split(r"[^a-z0-9]+", lowered) if part]
+        return "ci" in parts or "cd" in parts
+
+    def _is_github_actions_options_token(self, service: str, text: str, rel: str) -> bool:
+        """YAML/Actions ``services.*.options`` is not a product service named options."""
+        if service.strip("`").lower() != "options":
+            return False
+        if self._is_ci_ops_page(rel):
+            return True
+        return bool(
+            re.search(
+                r"services\s*[.:].{0,120}options|options:\s|--health-cmd|github\s+actions",
+                text,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        )
 
     def _load_structured_unidentified_warnings(self, meta_root: Path) -> set[Any]:
         warnings: set[Any] = set()

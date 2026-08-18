@@ -61,13 +61,16 @@ from repo_wiki.prompts.skeleton import (
 from repo_wiki.verifier.handbook import (
     EMPTY_CONTENT_REJECTION,
     GENERATOR_META_REJECTION,
+    UNCLOSED_FENCE_REJECTION,
     contains_generator_meta,
+    has_unclosed_fence,
 )
 
 _PROSE_RECOVERY_REASONS = frozenset(
     {
         "Insufficient prose content",
         EMPTY_CONTENT_REJECTION,
+        UNCLOSED_FENCE_REJECTION,
     }
 )
 
@@ -499,9 +502,10 @@ class LLMPageComposer:
         base = self._build_compose_prompt(input, context)
         previous_for_prompt = self._strip_fenced_blocks(previous)[:2000]
         return (
-            f"{base}\n\n上次草稿段落 prose 不足，或助手返回了空正文。"
+            f"{base}\n\n上次草稿段落 prose 不足、围栏未闭合，或助手返回了空正文。"
             "请重写为段落为主的中文 Markdown：列表只能作附录检查项，不能充当正文；"
-            "禁止把证据原文整段放进 Markdown 代码围栏（```）；围栏不能替代正文。"
+            "禁止把证据原文整段放进 Markdown 代码围栏（```）；"
+            "禁止 mermaid 或围栏堆砌替代正文；围栏必须成对闭合。"
             "每个事实句的 `<cite>` 必须写在该句同一行或下一行。不要解释过程。\n\n"
             f"上次草稿（已去掉代码围栏）：\n{previous_for_prompt or '（空）'}\n"
         )
@@ -871,9 +875,11 @@ class LLMPageComposer:
             preserved, missing = heading_validator.validate_preservation(content)
             result.headings_preserved = preserved
 
-        # Check prose minimum only for substantial content
-        # Skip this check for short content (may be from mock providers in tests)
-        if len(content) > 150 and self._count_prose_chars(content) < 100:
+        # Unclosed fences trap the rest of the page as code. Reject even when
+        # the opening paragraph already meets the 100-character prose floor.
+        if has_unclosed_fence(content):
+            result.rejection_reason = UNCLOSED_FENCE_REJECTION
+        elif len(content) > 150 and self._count_prose_chars(content) < 100:
             result.rejection_reason = "Insufficient prose content"
 
         if not result.rejection_reason and contains_generator_meta(content):

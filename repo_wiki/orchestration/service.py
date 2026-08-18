@@ -34,7 +34,11 @@ from repo_wiki.orchestration.runtime_store import (
 from repo_wiki.retrieval.service import RetrievalService
 from repo_wiki.scanner.artifacts import has_frontend_wiki_surface, write_source_of_truth
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
-from repo_wiki.verifier.handbook import EMPTY_CONTENT_REJECTION, GENERATOR_META_REJECTION
+from repo_wiki.verifier.handbook import (
+    EMPTY_CONTENT_REJECTION,
+    GENERATOR_META_REJECTION,
+    UNCLOSED_FENCE_REJECTION,
+)
 from repo_wiki.verifier.service import VerifierService
 
 if TYPE_CHECKING:
@@ -47,6 +51,7 @@ _PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
         "Insufficient prose content",
         GENERATOR_META_REJECTION,
         EMPTY_CONTENT_REJECTION,
+        UNCLOSED_FENCE_REJECTION,
     }
 )
 

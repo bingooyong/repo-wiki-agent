@@ -1293,3 +1293,73 @@ class TestG005SecondRoundVerifierClosure:
         )
         result = QoderLikeVerifierService(run_dir, strict=True).verify(ci=True)
         assert "QODER_CRITICAL_FALSE_FACT" in result.get("hard_gate_codes", [])
+
+    def test_fastapi_readme_docs_urls_are_not_missing_inventory_routes(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        (run_dir / "README.md").write_text(
+            "# Conduit\n\nFastAPI RealWorld example.\n"
+            "Interactive API docs are at /docs and ReDoc at /redoc.\n",
+            encoding="utf-8",
+        )
+        page.write_text(
+            page.read_text(encoding="utf-8")
+            + "\nOperators open GET /docs and GET /redoc for the auto-generated schema.\n"
+            + "The same FastAPI process also serves /docs and /redoc without route files.\n"
+            + "<cite>source:src/app.py:20</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+
+    def test_fastapi_unmatched_api_claim_still_false_fact(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        (run_dir / "README.md").write_text(
+            "# Conduit\n\nFastAPI RealWorld example. Docs live at /docs.\n",
+            encoding="utf-8",
+        )
+        page.write_text(
+            page.read_text(encoding="utf-8")
+            + "\nGET /api/does-not-exist is a product route.\n"
+            + "<cite>source:src/app.py:21</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "FAIL"
+        assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
+        claims = [item.get("claim") for item in check.details.get("offenders", [])]
+        assert "GET /api/does-not-exist" in claims
+
+    def test_github_actions_service_options_is_not_a_product_service(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        content_dir = page.parent.parent
+        ci_page = content_dir / "部署运维" / "CI／CD流水线.md"
+        ci_page.parent.mkdir(parents=True)
+        ci_page.write_text(
+            "# CI/CD\n\n"
+            "GitHub Actions service options run the Postgres healthcheck.\n"
+            "A bare options token on this CI page is the compose healthcheck flag.\n"
+            "```yaml\nservices:\n  postgres:\n    options: --health-cmd pg_isready\n```\n"
+            "<cite>source:src/app.py:22</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+
+    def test_unmatched_app_module_service_claim_still_false_fact(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        content_dir = page.parent.parent
+        app_page = content_dir / "核心服务" / "用户服务.md"
+        app_page.parent.mkdir(parents=True)
+        app_page.write_text(
+            "# 用户服务\n\n"
+            "The ghost-ledger service handles account authentication for Conduit.\n"
+            "<cite>source:src/app.py:23</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "FAIL"
+        assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
+        claims = [item.get("claim") for item in check.details.get("offenders", [])]
+        assert any("ghost-ledger" in str(claim) for claim in claims)
