@@ -7,6 +7,7 @@ Product files such as README.rst exist; the prefix is the bug.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from repo_wiki.generator.composer import (
@@ -395,3 +396,81 @@ def test_compact_prompt_teaches_actual_readme_rst_filename(tmp_path: Path) -> No
     assert "<cite>README.md" not in prompt
     assert "<cite>file:" not in prompt
     assert "<cite>relpath:" not in prompt
+
+
+def _long_readme_rst(root: Path) -> None:
+    (root / "README.rst").write_text(
+        "\n".join(f"readme line {i}" for i in range(1, 121)),
+        encoding="utf-8",
+    )
+
+
+def test_parenthetical_readme_rst_cite_without_lines_is_dropped(tmp_path: Path) -> None:
+    """``README.rst（产品身份声明）`` has no line range; drop it, keep a valid sibling."""
+    _long_readme_rst(tmp_path)
+    composer = create_composer(workspace_root=tmp_path)
+    raw = (
+        _overview_page("README.rst（产品身份声明）")
+        + "\nThe health endpoint is documented in application code.\n"
+        + "<cite>src/app.py:1-10</cite>\n"
+    )
+    normalized = composer._normalize_markdown_response(raw, "Project Overview")
+
+    assert "README.rst（" not in normalized
+    assert "<cite>README.rst</cite>" not in normalized
+    assert "<cite>src/app.py:1-10</cite>" in normalized
+
+    _write_release_candidate(tmp_path, normalized)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+
+
+def test_comma_joined_readme_cites_split_into_two_valid_cites(tmp_path: Path) -> None:
+    _long_readme_rst(tmp_path)
+    composer = create_composer(workspace_root=tmp_path)
+    normalized = composer._normalize_markdown_response(
+        _overview_page("README.rst:32-73, README.rst:74-115"),
+        "Project Overview",
+    )
+
+    assert "<cite>README.rst:32-73</cite>" in normalized
+    assert "<cite>README.rst:74-115</cite>" in normalized
+    assert "README.rst:32-73, README.rst:74-115" not in normalized
+
+    _write_release_candidate(tmp_path, normalized)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "PASS"
+    assert citation_check["details"]["invalid_count"] == 0
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+
+
+def test_readme_parenthetical_without_lines_is_dropped_not_invented(tmp_path: Path) -> None:
+    """``README（项目身份说明）`` must not grow invented ``README.rst:N-M`` lines."""
+    _long_readme_rst(tmp_path)
+    composer = create_composer(workspace_root=tmp_path)
+    raw = _overview_page("README（项目身份说明）") + "\n<cite>src/app.py:1-10</cite>\n"
+    normalized = composer._normalize_markdown_response(raw, "Project Overview")
+
+    assert "（项目身份说明）" not in normalized
+    assert "<cite>README</cite>" not in normalized
+    assert not re.search(r"<cite>README(?:\.rst|\.md)?:\d", normalized)
+    assert "<cite>src/app.py:1-10</cite>" in normalized
+
+    _write_release_candidate(tmp_path, normalized)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+
+
+def test_readme_note_cite_is_dropped(tmp_path: Path) -> None:
+    _long_readme_rst(tmp_path)
+    composer = create_composer(workspace_root=tmp_path)
+    raw = _overview_page("README:NOTE") + "\n<cite>src/app.py:1-10</cite>\n"
+    normalized = composer._normalize_markdown_response(raw, "Project Overview")
+
+    assert "README:NOTE" not in normalized
+    assert "<cite>src/app.py:1-10</cite>" in normalized
+
+    _write_release_candidate(tmp_path, normalized)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
