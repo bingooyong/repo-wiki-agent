@@ -116,6 +116,7 @@ Model Count: {model_count}
 3. DO NOT claim capabilities not verified by source code
 4. All factual claims MUST have <cite> citation
 5. Repository name and specifics must appear in content
+6. README spans MUST place `<cite>` on the same line or the next line (同一行或下一行)
 
 ### Style Guidelines
 
@@ -253,6 +254,7 @@ Error Handling: {error_status_behavior}
 2. DO NOT claim authentication methods not implemented
 3. All endpoint references MUST have file:line citations
 4. HTTP methods and paths must match actual implementation
+5. When evidence includes `api/routes` files, the page MUST cite at least one `api/routes` path
 
 ### Style Guidelines
 
@@ -485,6 +487,7 @@ Contributing: {contribution_guide}
 2. DO NOT claim testing frameworks not present
 3. All commands MUST be verifiable
 4. Version requirements must match actual
+5. README spans MUST place `<cite>` on the same line or the next line (同一行或下一行)
 
 ### Style Guidelines
 

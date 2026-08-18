@@ -109,7 +109,10 @@ class PagePromptContract:
 
 OVERVIEW_PAGE_CONTRACT = PagePromptContract(
     page_type=PagePromptType.OVERVIEW,
-    description="Project overview page with positioning, problem, capabilities",
+    description=(
+        "Project overview page with positioning, problem, capabilities. "
+        "README spans require same-line or next-line <cite> (同一行或下一行)."
+    ),
     heading_structure=(
         HeadingRequirement(1, "# {repository_name} - 项目概览"),
         HeadingRequirement(2, "## 项目定位"),
@@ -194,7 +197,10 @@ SERVICE_PAGE_CONTRACT = PagePromptContract(
 
 API_PAGE_CONTRACT = PagePromptContract(
     page_type=PagePromptType.API,
-    description="API reference page with endpoints, auth patterns, error handling",
+    description=(
+        "API reference page with endpoints, auth patterns, error handling. "
+        "When evidence includes api/routes files, the page must cite at least one api/routes path."
+    ),
     heading_structure=(
         HeadingRequirement(1, "# API 参考"),
         HeadingRequirement(2, "## API 分组"),
@@ -343,7 +349,10 @@ OPS_PAGE_CONTRACT = PagePromptContract(
 
 DEVELOPMENT_PAGE_CONTRACT = PagePromptContract(
     page_type=PagePromptType.DEVELOPMENT,
-    description="Development guide page with setup, testing, contribution",
+    description=(
+        "Development guide page with setup, testing, contribution. "
+        "README spans require same-line or next-line <cite> (同一行或下一行)."
+    ),
     heading_structure=(
         HeadingRequirement(1, "# 开发指南"),
         HeadingRequirement(2, "## 环境搭建"),

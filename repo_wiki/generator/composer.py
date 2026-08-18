@@ -33,7 +33,11 @@ from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.models import ChatMessage, ChatRequest, ChatResponse, LLMProvider
 from repo_wiki.llm.providers import create_mock_provider
 from repo_wiki.llm.retry import chat_with_retry
-from repo_wiki.planner.schema import INVENTORY_SERVICE_API_PAGE_ID, WikiPagePlan
+from repo_wiki.planner.schema import (
+    INVENTORY_SERVICE_API_PAGE_ID,
+    WikiPagePlan,
+    WikiTaxonomyCategory,
+)
 from repo_wiki.prompts.contracts import (
     PagePromptContract,
     PagePromptType,
@@ -487,6 +491,45 @@ class LLMPageComposer:
             "（README.md / README.rst / README.txt / README），不要引用不存在的文件。"
         )
 
+    def _is_handbook_overview_or_install(self, page: WikiPagePlan) -> bool:
+        page_id = (page.page_id or "").lower()
+        tags = {str(tag).lower() for tag in (page.tags or [])}
+        if page_id in {"project-overview", "installation", "quickstart", "getting-started"}:
+            return True
+        if page.category in {
+            WikiTaxonomyCategory.PROJECT_OVERVIEW,
+            WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
+            WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
+        } and any(token in page_id for token in ("overview", "install", "quickstart", "setup")):
+            return True
+        return bool(tags & {"installation", "setup", "quickstart", "getting-started"})
+
+    def _evidence_has_api_routes(self, binding: PageEvidenceBinding | None) -> bool:
+        if binding is None:
+            return False
+        for candidate in binding.candidates:
+            path = str(getattr(candidate.span, "file_path", "") or "").replace("\\", "/").lower()
+            if "api/routes" in path:
+                return True
+        return False
+
+    def _handbook_cite_rules(self, input: ComposerInput) -> str:
+        page = input.page_plan
+        rules: list[str] = []
+        if self._is_handbook_overview_or_install(page):
+            rules.append(
+                "- 概述/安装页：README 证据的 `<cite>` 必须写在论断的同一行或下一行"
+                "（same-line / next-line），不要把 README 引用甩到段落很远的地方。"
+            )
+        if page.category == WikiTaxonomyCategory.API_REFERENCE and self._evidence_has_api_routes(
+            input.evidence_binding
+        ):
+            rules.append(
+                "- API 页：证据中已有 `api/routes` 文件时，正文必须至少有一条 `<cite>` "
+                "指向该路由模块（例如 `app/api/routes/...`），不能只引用 models、db 或 tests。"
+            )
+        return "\n".join(rules)
+
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         page = input.page_plan
         required_headings = [
@@ -504,13 +547,16 @@ class LLMPageComposer:
         product_description = context.get("product_description") or "（未解析到产品描述）"
         repository_name = context.get("repository_name") or input.context.repository_name
         api_quality_rules = ""
-        if page.category.value == "api_reference":
+        if page.category == WikiTaxonomyCategory.API_REFERENCE:
             api_quality_rules = (
                 "\nAPI 页面附加要求：\n"
                 "- 正文必须 prose-first，禁止把端点清单作为主体。\n"
                 "- 端点表格只能放在附录且需限量（只列关键端点）。\n"
                 "- 每个关键结论必须配 `<cite>`；证据不足时必须显式写「待确认」。\n"
             )
+        handbook_cite_rules = self._handbook_cite_rules(input)
+        if handbook_cite_rules:
+            handbook_cite_rules = handbook_cite_rules + "\n"
 
         return f"""请基于源码证据生成一篇中文 Repo Wiki Markdown 页面。
 
@@ -531,7 +577,7 @@ class LLMPageComposer:
 - 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
 - 至少保留 3 个 `<cite>` 引用，格式为仓库相对路径加行号范围，例如 `<cite>src/app.py:1-10</cite>`。
 {self._root_readme_cite_rule()}
-- 使用段落解释为主，列表只用于核心组件或检查项。
+{handbook_cite_rules}- 使用段落解释为主，列表只用于核心组件或检查项。
 - 如果证据不足，明确写”当前证据显示”，不要过度推断。
 - 简介必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
 {api_quality_rules}
