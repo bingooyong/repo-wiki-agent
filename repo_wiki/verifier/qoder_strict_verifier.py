@@ -12,6 +12,13 @@ from repo_wiki.evidence.citation_renderer import (
     is_placeholder_citation_ref,
     normalize_citation_ref,
 )
+from repo_wiki.orchestration.eval_layout import (
+    find_git_root,
+    ignored_dirty_roots,
+    is_git_dirty,
+    path_is_ignored_eval_output,
+    porcelain_status_relpath,
+)
 from repo_wiki.verifier.handbook import (
     contains_generator_meta,
     existing_readme_names,
@@ -1166,6 +1173,26 @@ class QoderLikeVerifierService(VerifierService):
                     )
 
         if readiness != "READY":
+            reason_texts = [str(item) for item in reasons] if isinstance(reasons, list) else []
+            non_dirty_reasons = [item for item in reason_texts if item != "target_dirty=true"]
+            isolated_output_only_dirty = (
+                not self._git_dirty(self.root)
+                and (target_dirty or "target_dirty=true" in reason_texts)
+                and not non_dirty_reasons
+            )
+            if isolated_output_only_dirty:
+                return CheckResult(
+                    name="qoder-manifest-readiness",
+                    status="PASS",
+                    message="Isolated eval output does not make the target dirty",
+                    details={
+                        "readiness_state": "READY",
+                        "target_dirty": False,
+                        "readiness_reasons": [],
+                        "ignored_stale_target_dirty": True,
+                    },
+                    gate_type=GateType.HARD,
+                )
             return CheckResult(
                 name="qoder-manifest-readiness",
                 status="WARN",
@@ -1178,7 +1205,7 @@ class QoderLikeVerifierService(VerifierService):
             name="qoder-manifest-readiness",
             status="PASS",
             message="Manifest readiness contract satisfied",
-            details={"readiness_state": readiness},
+            details={"readiness_state": readiness, "target_dirty": target_dirty},
             gate_type=GateType.HARD,
         )
 
@@ -2280,56 +2307,18 @@ class QoderLikeVerifierService(VerifierService):
         )
 
     def _ignored_dirty_roots(self, git_root: Path) -> list[Path]:
-        roots = [(git_root / ".repo-agent-eval").resolve()]
-        if self.isolated_output is not None:
-            roots.append(self.isolated_output.resolve())
-        return roots
+        return ignored_dirty_roots(git_root, self.isolated_output)
 
     @staticmethod
     def _porcelain_relpath(line: str) -> str:
-        if not line.strip():
-            return ""
-        payload = line[3:] if len(line) >= 4 else line.strip()
-        if " -> " in payload:
-            payload = payload.split(" -> ", 1)[1]
-        payload = payload.strip()
-        if len(payload) >= 2 and payload[0] == '"' and payload[-1] == '"':
-            payload = payload[1:-1].encode("utf-8").decode("unicode_escape")
-        return payload.replace("\\", "/")
+        return porcelain_status_relpath(line)
 
     def _path_is_ignored_output(self, git_root: Path, relpath: str) -> bool:
-        if not relpath:
-            return False
-        absolute = (git_root / relpath).resolve()
-        for ignored in self._ignored_dirty_roots(git_root):
-            if absolute == ignored or ignored in absolute.parents:
-                return True
-        posix = relpath.lstrip("./")
-        return posix == ".repo-agent-eval" or posix.startswith(".repo-agent-eval/")
+        return path_is_ignored_eval_output(git_root, relpath, self.isolated_output)
 
     def _git_dirty(self, path: Path) -> bool:
         """Return True if the repository has uncommitted changes outside isolated output."""
-        root = self._find_git_root(path)
-        if root is None:
-            return False
-        try:
-            result = subprocess.run(
-                ["git", "status", "--porcelain", "-uall"],
-                cwd=str(root),
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except Exception:
-            return False
-        for line in result.stdout.splitlines():
-            relpath = self._porcelain_relpath(line)
-            if not relpath:
-                continue
-            if self._path_is_ignored_output(root, relpath):
-                continue
-            return True
-        return False
+        return is_git_dirty(path, isolated_output=self.isolated_output)
 
     def _find_content_dir(self) -> Path | None:
         if self.root.exists() and self.root.is_dir() and self.root.name == "content":
@@ -2398,11 +2387,7 @@ class QoderLikeVerifierService(VerifierService):
         return value or None
 
     def _find_git_root(self, path: Path) -> Path | None:
-        start = path if path.is_dir() else path.parent
-        for candidate in [start, *start.parents]:
-            if (candidate / ".git").exists():
-                return candidate
-        return None
+        return find_git_root(path)
 
     def _manifest_commit(self, root: Path) -> str | None:
         candidates = [

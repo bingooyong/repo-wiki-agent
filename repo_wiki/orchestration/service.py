@@ -412,7 +412,7 @@ class RepoWikiService:
 
         target_head_before = get_git_commit_full(self.root)
         target_git_commit, target_revision_source = resolve_revision_with_fallback(self.root)
-        target_dirty = is_git_dirty(self.root)
+        target_dirty = is_git_dirty(self.root, isolated_output=eval_profile.root)
         info(f"qoder-like generation started run_id={run_id} root={self.root}")
 
         info("stage scan started")
