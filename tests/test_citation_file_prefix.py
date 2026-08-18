@@ -10,6 +10,7 @@ import json
 import re
 from pathlib import Path
 
+from repo_wiki.evidence.citation_renderer import normalize_citation_markup
 from repo_wiki.generator.composer import (
     ComposerContext,
     LLMPageComposer,
@@ -459,6 +460,35 @@ def test_readme_parenthetical_without_lines_is_dropped_not_invented(tmp_path: Pa
 
     _write_release_candidate(tmp_path, normalized)
     result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
+
+
+def test_ranged_parenthetical_cite_keeps_path_and_lines(tmp_path: Path) -> None:
+    """``app/foo.py:10-20 (symbol)`` must become ``app/foo.py:10-20``, not drop or invent."""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "foo.py").write_text("\n".join(f"line {i}" for i in range(1, 31)), encoding="utf-8")
+    (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+
+    assert (
+        normalize_citation_markup("<cite>app/foo.py:10-20 (symbol)</cite>")
+        == "<cite>app/foo.py:10-20</cite>"
+    )
+
+    composer = create_composer(workspace_root=tmp_path)
+    normalized = composer._normalize_markdown_response(
+        _overview_page("app/foo.py:10-20 (symbol)"),
+        "Project Overview",
+    )
+    assert "<cite>app/foo.py:10-20</cite>" in normalized
+    assert "(symbol)" not in normalized
+    assert not re.search(r"<cite>app/foo\.py:\d+-\d+\s+\(", normalized)
+
+    _write_release_candidate(tmp_path, normalized)
+    result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+    citation_check = _citation_targets_check(result)
+    assert citation_check["status"] == "PASS"
+    assert citation_check["details"]["invalid_count"] == 0
     assert "QODER_CITATION_INVALID" not in result.get("hard_gate_codes", [])
 
 

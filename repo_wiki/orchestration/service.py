@@ -1743,7 +1743,10 @@ class RepoWikiService:
         add_mermaid: bool,
         composition_context: Any | None = None,
     ) -> str:
-        from repo_wiki.evidence.citation_renderer import CitationRenderer
+        from repo_wiki.evidence.citation_renderer import (
+            CitationRenderer,
+            normalize_citation_markup,
+        )
         from repo_wiki.planner.schema import WikiTaxonomyCategory
 
         content = markdown.strip() or f"# {page.title}\n"
@@ -1852,7 +1855,9 @@ class RepoWikiService:
             for cite in cites[:needed]:
                 content += f"- {cite}\n"
 
-        return content.strip() + "\n"
+        # CiteBlock.render() and leftover LLM markup can still carry
+        # ``path:start-end (label)`` after composer normalize; strip before write.
+        return normalize_citation_markup(content, self.root).strip() + "\n"
 
     def _evidence_backed_api_endpoints(
         self,
