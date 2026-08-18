@@ -47,6 +47,10 @@ from repo_wiki.prompts.skeleton import (
     ArticleSkeleton,
     build_skeleton,
 )
+from repo_wiki.verifier.handbook import (
+    GENERATOR_META_REJECTION,
+    contains_generator_meta,
+)
 
 # =============================================================================
 # COMPOSER CONTRACTS AND RESULTS
@@ -758,6 +762,9 @@ class LLMPageComposer:
         # Skip this check for short content (may be from mock providers in tests)
         if len(content) > 150 and self._count_prose_chars(content) < 100:
             result.rejection_reason = "Insufficient prose content"
+
+        if not result.rejection_reason and contains_generator_meta(content):
+            result.rejection_reason = GENERATOR_META_REJECTION
 
         if (
             input.page_plan.page_id == INVENTORY_SERVICE_API_PAGE_ID

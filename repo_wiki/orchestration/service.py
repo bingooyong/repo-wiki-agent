@@ -1207,8 +1207,11 @@ class RepoWikiService:
             if output.rejected:
                 # Quality rejects after a successful HTTP 200 are page-local
                 # fallbacks, not provider outages. R10: 3× Insufficient prose
-                # must not consume the #49 circuit-break budget.
-                if output.rejection_reason != "Insufficient prose content":
+                # (and handbook generator-meta rejects) must not consume the
+                # #49 circuit-break budget.
+                from repo_wiki.verifier.handbook import is_page_local_quality_rejection
+
+                if not is_page_local_quality_rejection(output.rejection_reason):
                     note_provider_failure()
                 write_fallback(
                     page,
