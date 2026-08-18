@@ -1347,6 +1347,26 @@ class TestG005SecondRoundVerifierClosure:
         assert check.status == "PASS"
         assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
 
+    def test_github_actions_job_and_options_on_ops_page_are_not_product_services(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        content_dir = page.parent.parent
+        ops_page = content_dir / "部署运维.md"
+        ops_page.write_text(
+            "# 部署运维\n\n"
+            "The GitHub Actions job service uses postgres:11.5-alpine in conduit.yml.\n"
+            "The same workflow service options field sets --health-cmd pg_isready.\n"
+            "jobs, steps, needs, and runner tokens describe the workflow, not Conduit.\n"
+            "<cite>source:src/app.py:22</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+        offenders = check.details.get("offenders", [])
+        assert not any(
+            item.get("claim") in {"job", "options", "uses", "workflow"} for item in offenders
+        )
+
     def test_unmatched_app_module_service_claim_still_false_fact(self, tmp_path):
         run_dir, page, _ = self._write_complete_run(tmp_path)
         content_dir = page.parent.parent
@@ -1363,3 +1383,20 @@ class TestG005SecondRoundVerifierClosure:
         assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
         claims = [item.get("claim") for item in check.details.get("offenders", [])]
         assert any("ghost-ledger" in str(claim) for claim in claims)
+
+    def test_unmatched_articles_service_on_app_api_page_still_false_fact(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        content_dir = page.parent.parent
+        app_page = content_dir / "核心服务" / "articles-api.md"
+        app_page.parent.mkdir(parents=True)
+        app_page.write_text(
+            "# Articles API\n\n"
+            "The articles service stores posts and comments for Conduit readers.\n"
+            "<cite>source:src/app.py:24</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "FAIL"
+        assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
+        claims = [item.get("claim") for item in check.details.get("offenders", [])]
+        assert "articles" in claims

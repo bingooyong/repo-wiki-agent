@@ -114,7 +114,33 @@ class QoderLikeVerifierService(VerifierService):
     MIN_MERMAID_COVERAGE = 0.3
     MERMAID_CODE_BLOCK_PATTERN = re.compile(r"```mermaid\s*(.*?)```", re.IGNORECASE | re.DOTALL)
     _FASTAPI_AUTODOC_PATHS = frozenset({"/docs", "/redoc"})
-    _YAML_ACTIONS_NON_SERVICE_NAMES = frozenset({"options"})
+    _GITHUB_ACTIONS_RESERVED_SERVICE_NAMES = frozenset(
+        {
+            "job",
+            "jobs",
+            "step",
+            "steps",
+            "needs",
+            "options",
+            "services",
+            "runs",
+            "runner",
+            "workflow",
+            "matrix",
+            "cache",
+            "checkout",
+            "strategy",
+            "uses",
+            "image",
+            "container",
+        }
+    )
+    _ACTIONS_YAML_VOCAB_RE = re.compile(
+        r"github\s+actions|runs-on\b|workflow_dispatch|\bjobs\s*:|\bsteps\s*:|"
+        r"\bneeds\s*:|\bstrategy\s*:|\bmatrix\s*:|--health-cmd|\bactions/checkout|"
+        r"services\s*[.:].{0,120}options|\bpostgres:\d",
+        re.IGNORECASE | re.DOTALL,
+    )
     _CI_OPS_PAGE_HINTS = (
         "流水线",
         "部署",
@@ -1428,7 +1454,7 @@ class QoderLikeVerifierService(VerifierService):
                         )
             if inventories["services"]:
                 for service in self._extract_structured_name_claims(text, "service"):
-                    if self._is_github_actions_options_token(service, text, rel):
+                    if self._is_github_actions_reserved_service_token(service, text, rel):
                         continue
                     if service not in inventories["services"]:
                         offenders.append({"page": rel, "claim_type": "service", "claim": service})
@@ -1994,19 +2020,13 @@ class QoderLikeVerifierService(VerifierService):
         parts = [part for part in re.split(r"[^a-z0-9]+", lowered) if part]
         return "ci" in parts or "cd" in parts
 
-    def _is_github_actions_options_token(self, service: str, text: str, rel: str) -> bool:
-        """YAML/Actions ``services.*.options`` is not a product service named options."""
-        if service.strip("`").lower() != "options":
+    def _is_github_actions_reserved_service_token(self, service: str, text: str, rel: str) -> bool:
+        """Workflow reserved words are not product services on ops/CI or Actions YAML prose."""
+        if service.strip("`").lower() not in self._GITHUB_ACTIONS_RESERVED_SERVICE_NAMES:
             return False
         if self._is_ci_ops_page(rel):
             return True
-        return bool(
-            re.search(
-                r"services\s*[.:].{0,120}options|options:\s|--health-cmd|github\s+actions",
-                text,
-                flags=re.IGNORECASE | re.DOTALL,
-            )
-        )
+        return bool(self._ACTIONS_YAML_VOCAB_RE.search(text))
 
     def _load_structured_unidentified_warnings(self, meta_root: Path) -> set[Any]:
         warnings: set[Any] = set()
