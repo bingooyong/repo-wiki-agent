@@ -21,7 +21,7 @@ SYSTEM_PROMPT_FRAGMENT = """你是一个技术文档生成助手，专注于生�
 
 1. **Markdown格式**: 使用标准Markdown语法，包括标题、列表、代码块、表格
 2. **中文优先**: 中文技术术语保持中文，英文术语保留英文
-3. **证据引用**: 所有事实性声明必须包含<cite>引用标记</cite>
+3. **证据引用**: 所有事实性声明必须包含<cite>引用标记</cite>，写在该句同一行或下一行
 4. **禁止幻觉**: 不要生成未经源代码验证的信息
 
 ## 证据引用格式
@@ -114,7 +114,7 @@ Model Count: {model_count}
 1. DO NOT use generic phrases like "这是一个基于" or "传统文档维护面临的主要挑战包括"
 2. DO NOT mention modules not present in the module inventory
 3. DO NOT claim capabilities not verified by source code
-4. All factual claims MUST have <cite> citation
+4. All factual claims MUST have <cite> citation on the same line or the next line (同一行或下一行)
 5. Repository name and specifics must appear in content
 6. README spans MUST place `<cite>` on the same line or the next line (同一行或下一行)
 
@@ -122,7 +122,7 @@ Model Count: {model_count}
 
 - Prose density: At least 50% prose vs list/table content
 - Average sentence length: 12+ words
-- Avoid bullet-only pages
+- Avoid bullet-only pages; lists do not count toward the composer prose floor
 - Include explanatory prose between sections
 """
 
@@ -427,7 +427,7 @@ Monitoring: {monitoring_config}
 
 1. DO NOT use generic phrases like "生产环境" or "建议使用"
 2. DO NOT describe configuration not in source
-3. All config references MUST have file citations
+3. All config references MUST have file citations on the same line or the next line (同一行或下一行)
 4. Version info must be locked to actual versions
 
 ### Style Guidelines
@@ -435,6 +435,7 @@ Monitoring: {monitoring_config}
 - Prose density: At least 35% prose
 - Step-by-step procedures with explanation
 - Command examples with context
+- Avoid bullet-only pages; lists do not count toward the composer prose floor
 """
 
 # =============================================================================

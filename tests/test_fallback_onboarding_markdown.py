@@ -162,3 +162,27 @@ def test_empty_binding_has_no_jargon_and_invents_no_paths() -> None:
     assert "app/core/security.py" not in markdown
     assert "<cite>" not in markdown
     assert "无法" in markdown or "不能" in markdown
+
+
+def test_troubleshooting_fallback_is_readable_onboarding_stub() -> None:
+    service = _service()
+    page = _page(
+        page_id="database-issues",
+        title="数据库问题",
+        category=WikiTaxonomyCategory.TROUBLESHOOTING,
+    )
+    binding = _binding(
+        file_path="app/core/settings.py",
+        span_text="DATABASE_URL = postgres://user:pass@localhost:5432/app",
+        symbol="database_url",
+        line_end=8,
+    )
+
+    markdown = service._fallback_markdown_for_failed_page(page, binding)
+
+    _assert_no_generator_jargon(markdown)
+    _assert_prose_floor(service, markdown)
+    assert "app/core/settings.py" in markdown
+    assert "<cite>app/core/settings.py:" in markdown
+    assert "DATABASE_URL" in markdown
+    assert "这是什么" in markdown or "定位" in markdown

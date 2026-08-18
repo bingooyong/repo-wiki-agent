@@ -91,3 +91,47 @@ def test_security_ranks_authentication_over_readme() -> None:
         _span("app/api/routes/authentication.py", symbol="login", span_text="def login()"),
     )
     assert api_routes >= api_readme
+
+
+def test_configuration_ranks_settings_over_unrelated_tests() -> None:
+    page = _page("configuration", "配置指南", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS)
+    settings_score, _ = score_evidence_for_page(
+        page,
+        _span(
+            "app/core/settings.py",
+            symbol="database_url",
+            span_text="DATABASE_URL = postgres://",
+        ),
+    )
+    unrelated_score, _ = score_evidence_for_page(
+        page, _span("tests/test_unrelated.py", symbol="test_x", span_text="assert True")
+    )
+    assert settings_score > unrelated_score
+
+
+def test_database_issues_ranks_settings_over_unrelated_tests() -> None:
+    page = _page("database-issues", "数据库问题", WikiTaxonomyCategory.TROUBLESHOOTING)
+    settings_score, _ = score_evidence_for_page(
+        page,
+        _span(
+            "app/core/settings.py",
+            symbol="database_url",
+            span_text="DATABASE_URL = postgres://",
+        ),
+    )
+    unrelated_score, _ = score_evidence_for_page(
+        page, _span("tests/test_unrelated.py", symbol="test_x", span_text="assert True")
+    )
+    assert settings_score > unrelated_score
+
+
+def test_thin_api_page_ranks_routes_over_readme() -> None:
+    page = _page("python-service-apis", "Python服务API", WikiTaxonomyCategory.API_REFERENCE)
+    routes_score, _ = score_evidence_for_page(
+        page,
+        _span("app/api/routes/articles.py", symbol="router", span_text="def create_article()"),
+    )
+    readme_score, _ = score_evidence_for_page(
+        page, _span("README.rst", symbol="Quickstart", span_text="docker compose DATABASE_URL")
+    )
+    assert routes_score > readme_score

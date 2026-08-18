@@ -326,54 +326,31 @@ class LLMPageComposer:
         page_id = input.page_plan.page_id
 
         try:
-            # Build prompt context
             context = self._build_context(input)
+            prompt = self._build_compose_prompt(input, context)
+            prompt_tokens = 0
+            completion_tokens = 0
+            total_tokens = 0
+            last_rejected: ComposerOutput | None = None
 
-            if self._use_compact_prompt():
-                prompt = self._build_compact_prompt(input, context)
-            else:
-                # Render prompt fragment
-                fragment_name = input.page_plan.category.value.lower().replace(" ", "-")
-                try:
-                    prompt = render_prompt_fragment(fragment_name, context)
-                except ValueError:
-                    # Fallback to system fragment
-                    prompt = get_prompt_fragment("system") + "\n\n" + context.get("content", "")
-
-                # Add evidence context to prompt
-                if input.evidence_binding and input.evidence_binding.candidates:
-                    evidence_context = self._build_evidence_context(input.evidence_binding)
-                    prompt = prompt + "\n\n## Evidence Context\n" + evidence_context
-
-                # Add skeleton guidance
-                skeleton_md = input.skeleton.render_skeleton_markdown()
-                prompt = prompt + "\n\n## Article Structure\n" + skeleton_md
-
-            # Call LLM
-            response = await self._call_llm(prompt, input.page_plan.title)
-            response_content = self._normalize_markdown_response(
-                response.content, input.page_plan.title
-            )
-            usage = response.usage or {}
-            prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
-            completion_tokens = int(usage.get("completion_tokens", 0) or 0)
-            total_tokens = int(usage.get("total_tokens", 0) or 0)
-
-            # Validate output
-            validation_result = self._validate_output(
-                response_content,
-                input,
-            )
-            tokens_used = total_tokens or validation_result.tokens_used
-
-            if validation_result.rejected:
-                return ComposerOutput(
+            for attempt in range(2):
+                response = await self._call_llm(prompt, input.page_plan.title)
+                response_content = self._normalize_markdown_response(
+                    response.content, input.page_plan.title
+                )
+                usage = response.usage or {}
+                prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
+                completion_tokens += int(usage.get("completion_tokens", 0) or 0)
+                total_tokens += int(usage.get("total_tokens", 0) or 0)
+                validation_result = self._validate_output(response_content, input)
+                tokens_used = total_tokens or validation_result.tokens_used
+                output = ComposerOutput(
                     page_id=page_id,
                     markdown=response_content,
                     citations_preserved=validation_result.citations_preserved,
                     headings_preserved=validation_result.headings_preserved,
                     evidence_count=validation_result.evidence_count,
-                    rejected=True,
+                    rejected=validation_result.rejected,
                     rejection_reason=validation_result.rejection_reason,
                     tokens_used=tokens_used,
                     prompt_tokens=prompt_tokens,
@@ -383,23 +360,18 @@ class LLMPageComposer:
                     low_confidence=validation_result.low_confidence,
                     uncertainty_reasons=validation_result.uncertainty_reasons,
                 )
+                if not output.rejected:
+                    return output
+                last_rejected = output
+                if (
+                    attempt == 0
+                    and validation_result.rejection_reason == "Insufficient prose content"
+                ):
+                    prompt = self._build_prose_recovery_prompt(input, context, response_content)
+                    continue
+                return output
 
-            return ComposerOutput(
-                page_id=page_id,
-                markdown=response_content,
-                citations_preserved=validation_result.citations_preserved,
-                headings_preserved=validation_result.headings_preserved,
-                evidence_count=validation_result.evidence_count,
-                rejected=False,
-                rejection_reason=None,
-                tokens_used=tokens_used,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                provider=self.provider_name,
-                model=self.model_name,
-                low_confidence=validation_result.low_confidence,
-                uncertainty_reasons=validation_result.uncertainty_reasons,
-            )
+            return last_rejected or output
 
         except Exception as e:
             return ComposerOutput(
@@ -456,6 +428,34 @@ class LLMPageComposer:
 
         return context
 
+    def _build_compose_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
+        if self._use_compact_prompt():
+            return self._build_compact_prompt(input, context)
+        fragment_name = input.page_plan.category.value.lower().replace(" ", "-")
+        try:
+            prompt = render_prompt_fragment(fragment_name, context)
+        except ValueError:
+            prompt = get_prompt_fragment("system") + "\n\n" + context.get("content", "")
+        if input.evidence_binding and input.evidence_binding.candidates:
+            prompt = (
+                prompt
+                + "\n\n## Evidence Context\n"
+                + self._build_evidence_context(input.evidence_binding)
+            )
+        skeleton_md = input.skeleton.render_skeleton_markdown()
+        return prompt + "\n\n## Article Structure\n" + skeleton_md
+
+    def _build_prose_recovery_prompt(
+        self, input: ComposerInput, context: dict[str, Any], previous: str
+    ) -> str:
+        base = self._build_compose_prompt(input, context)
+        return (
+            f"{base}\n\n上次草稿几乎全是列表或标题，段落 prose 不足。"
+            "请重写为段落为主的中文 Markdown：列表只能作附录检查项，不能充当正文；"
+            "每个事实句的 `<cite>` 必须写在该句同一行或下一行。不要解释过程。\n\n"
+            f"上次草稿：\n{previous[:2000]}\n"
+        )
+
     def _build_evidence_context(self, binding: PageEvidenceBinding) -> str:
         """Build evidence context string from binding."""
         if not binding.candidates:
@@ -465,7 +465,7 @@ class LLMPageComposer:
         for i, candidate in enumerate(binding.candidates[:8]):  # Limit to 8
             span = candidate.span
             symbol_info = f" (symbol: {span.symbol})" if span.symbol else ""
-            snippet = self._compact_snippet(getattr(span, "span_text", "") or "")
+            snippet = self._compact_snippet(getattr(span, "span_text", "") or "", max_chars=320)
             if snippet:
                 lines.append(
                     f"- {span.file_path}:{span.line_start}-{span.line_end}{symbol_info}: {snippet}"
@@ -526,7 +526,12 @@ class LLMPageComposer:
 
     def _handbook_cite_rules(self, input: ComposerInput) -> str:
         page = input.page_plan
-        rules: list[str] = []
+        rules: list[str] = [
+            "- 每个事实句的 `<cite>` 必须写在该句同一行或下一行（同行 / 下一行），"
+            "不要把引用只堆在文末「源码引用」列表里。",
+            "- 正文必须用段落解释；列表只用于核心组件或检查项。"
+            "列表行不计入 prose 下限，不要用子弹列表充当整页正文。",
+        ]
         if self._is_handbook_overview_or_install(page):
             rules.append(
                 "- 概述/安装页：README 证据的 `<cite>` 必须写在论断的同一行或下一行"

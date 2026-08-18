@@ -310,7 +310,11 @@ ENTITY_PAGE_CONTRACT = PagePromptContract(
 
 OPS_PAGE_CONTRACT = PagePromptContract(
     page_type=PagePromptType.OPS,
-    description="Operations page covering deployment, configuration, monitoring",
+    description=(
+        "Operations page covering deployment, configuration, monitoring. "
+        "Factual claims require same-line or next-line <cite> (同一行或下一行). "
+        "Pages must be paragraph-first; list-only bodies fail the composer prose floor."
+    ),
     heading_structure=(
         HeadingRequirement(1, "# 部署运维"),
         HeadingRequirement(2, "## 环境配置"),

@@ -586,6 +586,18 @@ def test_api_compact_prompt_requires_routes_cite_when_routes_evidence_exists() -
     assert "app/api/routes" in prompt
 
 
+def test_ops_compact_prompt_requires_adjacent_cites_and_paragraph_prose() -> None:
+    from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+    prompt = _handbook_compact_prompt(
+        _handbook_page("configuration", "配置指南", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS)
+    )
+    assert "<cite>" in prompt
+    assert "同行" in prompt or "同一行" in prompt or "下一行" in prompt
+    assert "列表" in prompt
+    assert "段落" in prompt or "prose" in prompt.lower()
+
+
 def test_citation_fact_coverage_window_unchanged() -> None:
     from pathlib import Path
 

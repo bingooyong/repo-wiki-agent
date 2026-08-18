@@ -261,3 +261,66 @@ async def test_compose_page_does_not_retry_nonempty_content(
     assert output.rejected is False
     assert "LLM composer did not return content" not in output.markdown
     assert provider.call_count == 1
+
+
+LIST_HEAVY_MARKDOWN = """# Sample Page
+
+## 简介
+
+- bullet one with extra words for length and a fake endpoint list
+- bullet two with extra words for length and a fake endpoint list
+- bullet three with extra words for length and a fake endpoint list
+- bullet four with extra words for length and a fake endpoint list
+- bullet five with extra words for length and a fake endpoint list
+- bullet six with extra words for length and a fake endpoint list
+- bullet seven with extra words for length and a fake endpoint list
+- bullet eight with extra words for length and a fake endpoint list
+"""
+
+PARAGRAPH_MARKDOWN = """# Sample Page
+
+## 简介
+
+This page explains how the FastAPI service authenticates requests and stores articles.
+The implementation lives in the application package and is described with paragraph prose
+rather than a bullet dump so the composer prose floor can pass. Readers should start at
+the settings module, then follow the request path into the route handlers.
+"""
+
+
+def _list_heavy_response() -> ChatResponse:
+    return ChatResponse(content=LIST_HEAVY_MARKDOWN, model="mock-gpt")
+
+
+def _paragraph_response() -> ChatResponse:
+    return ChatResponse(content=PARAGRAPH_MARKDOWN, model="mock-gpt")
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_insufficient_prose_once(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_list_heavy_response(), _paragraph_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_compose_page_rejects_insufficient_prose_after_one_recovery(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_list_heavy_response(), _list_heavy_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is True
+    assert output.rejection_reason == "Insufficient prose content"
+    assert provider.call_count == 2

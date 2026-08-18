@@ -543,7 +543,7 @@ async def test_insufficient_prose_rejects_do_not_trip_circuit_breaker(
     root.mkdir()
     output_dir = compose_env / "run"
     output_dir.mkdir()
-    provider = InsufficientProseThenHealthyProvider(reject_count=3)
+    provider = InsufficientProseThenHealthyProvider(reject_count=6)
     service = _service(root)
     _install_provider(monkeypatch, service, provider)
 
@@ -570,7 +570,7 @@ async def test_insufficient_prose_rejects_do_not_trip_circuit_breaker(
 
     assert llm["max_provider_failures"] == 3
     assert llm["provider_disabled_after_failures"] is False
-    assert provider.call_count == PAGE_COUNT
+    assert provider.call_count == PAGE_COUNT + 3
     assert llm["llm_call_count"] == PAGE_COUNT
     assert llm["fallback_page_count"] == 3
     assert len(prose_rejects) == 3

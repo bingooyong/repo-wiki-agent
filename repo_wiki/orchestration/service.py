@@ -1634,9 +1634,9 @@ class RepoWikiService:
     def _fallback_topic_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:
         snippets = self._fallback_snippet_paragraphs(evidence)
         lines = [
-            "## 说明",
+            "## 这是什么",
             "",
-            f"「{title}」根据仓库中的相关文件整理，供接手代码的人定位实现。",
+            f"「{title}」面向接手仓库的人，用来定位这个主题在仓库里的实现。",
             "下面列出可核对位置，并摘录片段中的原话。本页不解释文档是如何生成的。",
             "",
         ]
@@ -1836,8 +1836,15 @@ class RepoWikiService:
         citation_renderer = CitationRenderer(workspace_root=self.root)
         cites: list[str] = []
         if binding and binding.candidates:
-            for candidate in binding.candidates[:6]:
+            for candidate in binding.candidates[:8]:
                 cites.append(citation_renderer.render_cite_block_from_candidate(candidate))
+
+        content = self._strip_broken_local_markdown_links(content)
+        content = self._ensure_minimum_prose_density(content, page)
+        if cites:
+            from repo_wiki.generator.adjacent_cites import attach_adjacent_cites
+
+            content = attach_adjacent_cites(content, cites)
 
         existing_cites = len(self._CITE_PATTERN.findall(content))
         needed = max(0, 3 - existing_cites)
@@ -1845,9 +1852,6 @@ class RepoWikiService:
             content += "\n\n## 源码引用\n\n"
             for cite in cites[:needed]:
                 content += f"- {cite}\n"
-
-        content = self._strip_broken_local_markdown_links(content)
-        content = self._ensure_minimum_prose_density(content, page)
 
         return content.strip() + "\n"
 
