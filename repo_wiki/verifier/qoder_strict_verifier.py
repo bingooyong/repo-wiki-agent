@@ -12,6 +12,16 @@ from repo_wiki.evidence.citation_renderer import (
     is_placeholder_citation_ref,
     normalize_citation_ref,
 )
+from repo_wiki.verifier.handbook import (
+    contains_generator_meta,
+    existing_readme_names,
+    find_matching_pages,
+    has_api_routes_citation,
+    has_readme_citation,
+    install_run_clue_count,
+    iter_markdown_pages,
+    overview_identity_satisfied,
+)
 from repo_wiki.verifier.service import CheckResult, GateType, SeverityThreshold, VerifierService
 
 
@@ -55,6 +65,10 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_OWNER_COVERAGE_MISSING",
         "QODER_CONFLICT_ARTIFACT_MISSING",
         "QODER_CONFLICT_ARTIFACT_INVALID",
+        "QODER_HANDBOOK_GENERATOR_META",
+        "QODER_HANDBOOK_OVERVIEW_IDENTITY",
+        "QODER_HANDBOOK_INSTALL_RUN",
+        "QODER_HANDBOOK_API_ROUTE_FILE",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
         "UNSUPPORTED_DOC_CLAIM",
@@ -134,6 +148,10 @@ class QoderLikeVerifierService(VerifierService):
             self._check_qoder_prose_density(),
             self._check_qoder_stale_commit(),
             self._check_qoder_dirty_worktree(),
+            self._check_qoder_handbook_generator_meta(),
+            self._check_qoder_handbook_overview_identity(),
+            self._check_qoder_handbook_install_run(),
+            self._check_qoder_handbook_api_route_file(),
         ]
 
         hard_failures = [c for c in checks if c.is_hard_gate_failure()]
@@ -2025,6 +2043,131 @@ class QoderLikeVerifierService(VerifierService):
             message="Target repository worktree is clean",
             details={},
             gate_type=GateType.HARD,
+        )
+
+    def _handbook_repo_root(self) -> Path:
+        git_root = self._find_git_root(self.root)
+        if git_root is not None:
+            return git_root
+        readme_names = ("README.md", "README.rst", "README.txt", "README")
+        for candidate in [self.root, *self.root.parents]:
+            if any((candidate / name).is_file() for name in readme_names):
+                return candidate
+        return self.root
+
+    def _handbook_pass(
+        self, name: str, message: str, details: dict[str, Any] | None = None
+    ) -> CheckResult:
+        return CheckResult(
+            name=name,
+            status="PASS",
+            message=message,
+            details=details or {},
+            gate_type=GateType.HARD,
+        )
+
+    def _handbook_fail(
+        self, name: str, reason_code: str, message: str, details: dict[str, Any] | None = None
+    ) -> CheckResult:
+        return CheckResult(
+            name=name,
+            status="FAIL",
+            message=message,
+            details=details or {},
+            reason_code=reason_code,
+            gate_type=GateType.HARD,
+        )
+
+    def _check_qoder_handbook_generator_meta(self) -> CheckResult:
+        pages = iter_markdown_pages(self._find_content_dir())
+        if not pages:
+            return self._skip_check("qoder-handbook-generator-meta", "No markdown pages")
+        hits: list[str] = []
+        for page in pages:
+            text = page.read_text(encoding="utf-8", errors="ignore")
+            if contains_generator_meta(text):
+                hits.append(page.as_posix())
+        if hits:
+            return self._handbook_fail(
+                "qoder-handbook-generator-meta",
+                "QODER_HANDBOOK_GENERATOR_META",
+                "Wiki pages contain handbook generator meta content",
+                {"pages": hits[:20]},
+            )
+        return self._handbook_pass(
+            "qoder-handbook-generator-meta",
+            "No generator meta phrases in markdown pages",
+        )
+
+    def _check_qoder_handbook_overview_identity(self) -> CheckResult:
+        pages = find_matching_pages(self._find_content_dir(), ("project-overview", "项目概述"))
+        if not pages:
+            return self._skip_check("qoder-handbook-overview-identity", "Overview page absent")
+        repo_root = self._handbook_repo_root()
+        missing = [
+            page.as_posix()
+            for page in pages
+            if not overview_identity_satisfied(
+                page.read_text(encoding="utf-8", errors="ignore"), repo_root
+            )
+        ]
+        if missing:
+            return self._handbook_fail(
+                "qoder-handbook-overview-identity",
+                "QODER_HANDBOOK_OVERVIEW_IDENTITY",
+                "Overview page missing repository product identity",
+                {"pages": missing},
+            )
+        return self._handbook_pass(
+            "qoder-handbook-overview-identity",
+            "Overview page includes repository product identity",
+        )
+
+    def _check_qoder_handbook_install_run(self) -> CheckResult:
+        pages = find_matching_pages(
+            self._find_content_dir(), ("installation", "安装指南", "安装与配置")
+        )
+        if not pages:
+            return self._skip_check("qoder-handbook-install-run", "Installation page absent")
+        repo_root = self._handbook_repo_root()
+        readme_names = existing_readme_names(repo_root)
+        offenders: list[str] = []
+        for page in pages:
+            text = page.read_text(encoding="utf-8", errors="ignore")
+            clues = install_run_clue_count(text)
+            if clues < 2 or not has_readme_citation(text, readme_names):
+                offenders.append(page.as_posix())
+        if offenders:
+            return self._handbook_fail(
+                "qoder-handbook-install-run",
+                "QODER_HANDBOOK_INSTALL_RUN",
+                "Installation page missing runnable clues or README citation",
+                {"pages": offenders},
+            )
+        return self._handbook_pass(
+            "qoder-handbook-install-run",
+            "Installation page includes runnable clues and README citation",
+        )
+
+    def _check_qoder_handbook_api_route_file(self) -> CheckResult:
+        pages = find_matching_pages(self._find_content_dir(), ("core-service-apis", "核心服务api"))
+        if not pages:
+            return self._skip_check("qoder-handbook-api-route-file", "Core API page absent")
+        missing = [
+            page.as_posix()
+            for page in pages
+            if not has_api_routes_citation(page.read_text(encoding="utf-8", errors="ignore"))
+        ]
+        if missing:
+            return self._handbook_fail(
+                "qoder-handbook-api-route-file",
+                "QODER_HANDBOOK_API_ROUTE_FILE",
+                "API page missing citation to api/routes",
+                {"pages": missing},
+            )
+        return self._handbook_pass(
+            "qoder-handbook-api-route-file",
+            "API page cites api/routes implementation files",
         )
 
     def _git_dirty(self, path: Path) -> bool:
