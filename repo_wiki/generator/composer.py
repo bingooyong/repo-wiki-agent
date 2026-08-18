@@ -66,6 +66,8 @@ from repo_wiki.verifier.handbook import (
     contains_generator_meta,
     has_unclosed_fence,
     is_page_timeout_rejection,
+    is_transient_server_error,
+    page_server_error_rejection,
     page_timeout_rejection,
 )
 
@@ -382,28 +384,49 @@ class LLMPageComposer:
                         continue
                     return last_rejected
                 except RetryableError as exc:
-                    if getattr(exc, "code", None) != ErrorCode.EMPTY_CONTENT:
-                        raise
-                    last_rejected = ComposerOutput(
-                        page_id=page_id,
-                        markdown="",
-                        citations_preserved=False,
-                        headings_preserved=False,
-                        evidence_count=0,
-                        rejected=True,
-                        rejection_reason=EMPTY_CONTENT_REJECTION,
-                        tokens_used=total_tokens,
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        provider=self.provider_name,
-                        model=self.model_name,
-                        low_confidence=False,
-                        uncertainty_reasons=[],
-                    )
-                    if attempt == 0:
-                        prompt = self._build_prose_recovery_prompt(input, context, "")
-                        continue
-                    return last_rejected
+                    if getattr(exc, "code", None) == ErrorCode.EMPTY_CONTENT:
+                        last_rejected = ComposerOutput(
+                            page_id=page_id,
+                            markdown="",
+                            citations_preserved=False,
+                            headings_preserved=False,
+                            evidence_count=0,
+                            rejected=True,
+                            rejection_reason=EMPTY_CONTENT_REJECTION,
+                            tokens_used=total_tokens,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            provider=self.provider_name,
+                            model=self.model_name,
+                            low_confidence=False,
+                            uncertainty_reasons=[],
+                        )
+                        if attempt == 0:
+                            prompt = self._build_prose_recovery_prompt(input, context, "")
+                            continue
+                        return last_rejected
+                    if is_transient_server_error(exc):
+                        last_rejected = ComposerOutput(
+                            page_id=page_id,
+                            markdown="",
+                            citations_preserved=False,
+                            headings_preserved=False,
+                            evidence_count=0,
+                            rejected=True,
+                            rejection_reason=page_server_error_rejection(exc),
+                            tokens_used=total_tokens,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            provider=self.provider_name,
+                            model=self.model_name,
+                            low_confidence=False,
+                            uncertainty_reasons=[],
+                        )
+                        if attempt == 0:
+                            prompt = self._build_prose_recovery_prompt(input, context, "")
+                            continue
+                        return last_rejected
+                    raise
 
                 response_content = self._normalize_markdown_response(
                     response.content, input.page_plan.title

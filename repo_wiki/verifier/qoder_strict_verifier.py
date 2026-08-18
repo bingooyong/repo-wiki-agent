@@ -1471,7 +1471,9 @@ class QoderLikeVerifierService(VerifierService):
                 ):
                     if fastapi_app and self._is_fastapi_framework_docs_path(api_path):
                         continue
-                    if (method.upper(), api_path) not in inventories["apis"]:
+                    if not self._api_claim_in_inventory(
+                        method.upper(), api_path, inventories["apis"]
+                    ):
                         offenders.append(
                             {
                                 "page": rel,
@@ -2002,6 +2004,22 @@ class QoderLikeVerifierService(VerifierService):
         if path != "/" and path.endswith("/"):
             return path.rstrip("/")
         return path
+
+    def _api_path_slot_key(self, path: str) -> str:
+        """Treat `{id}` and `{project_id}` as the same path slot."""
+        normalized = self._normalize_claimed_api_path(path)
+        return re.sub(r"\{[^}/]+\}", "{}", normalized)
+
+    def _api_claim_in_inventory(self, method: str, path: str, apis: set[tuple[str, str]]) -> bool:
+        method = method.upper()
+        claimed = self._normalize_claimed_api_path(path)
+        if (method, path) in apis or (method, claimed) in apis:
+            return True
+        claimed_key = self._api_path_slot_key(claimed)
+        return any(
+            inv_method == method and self._api_path_slot_key(inv_path) == claimed_key
+            for inv_method, inv_path in apis
+        )
 
     def _is_fastapi_framework_docs_path(self, path: str) -> bool:
         """FastAPI auto-docs URLs are framework-generated, not scanned route files."""

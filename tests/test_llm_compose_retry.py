@@ -210,7 +210,8 @@ async def test_compose_page_rejects_after_retries_exhausted(
 
     assert output.rejected is True
     assert "529" in (output.rejection_reason or "")
-    assert provider.call_count == RetryConfig().max_retries + 1
+    # Inner HTTP retries, then one page-local compact rewrite with the same budget.
+    assert provider.call_count == 2 * (RetryConfig().max_retries + 1)
     assert provider.call_count <= 20
 
 

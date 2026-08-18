@@ -16,6 +16,7 @@ GENERATOR_META_REJECTION = "Handbook generator meta content"
 EMPTY_CONTENT_REJECTION = "Empty LLM assistant content"
 UNCLOSED_FENCE_REJECTION = "Unclosed fenced code block"
 PAGE_TIMEOUT_REJECTION_PREFIX = "LLM page timeout after"
+PAGE_SERVER_ERROR_REJECTION_PREFIX = "LLM page server error"
 
 _PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
     {
@@ -75,11 +76,36 @@ def page_timeout_rejection(seconds: float) -> str:
     return f"{PAGE_TIMEOUT_REJECTION_PREFIX} {seconds:.1f}s"
 
 
+def is_page_server_error_rejection(reason: str | None) -> bool:
+    """True for ``LLM page server error 529: ...`` page-local rewrites."""
+    return bool(reason) and reason.startswith(PAGE_SERVER_ERROR_REJECTION_PREFIX)
+
+
+def page_server_error_rejection(exc: BaseException) -> str:
+    details = getattr(exc, "details", None) or {}
+    status = details.get("status") if isinstance(details, dict) else None
+    status_bit = f" {status}" if status is not None else ""
+    return f"{PAGE_SERVER_ERROR_REJECTION_PREFIX}{status_bit}: {exc}"
+
+
+def is_transient_server_error(exc: BaseException) -> bool:
+    """HTTP 5xx / MiniMax 529 after inner retries: rewrite that page, do not melt the run."""
+    code = str(getattr(exc, "code", "") or "")
+    if code.endswith("SERVER_ERROR") or code == "SERVER_ERROR":
+        return True
+    details = getattr(exc, "details", None) or {}
+    status = details.get("status") if isinstance(details, dict) else None
+    try:
+        return int(status) in {500, 502, 503, 504, 529}
+    except (TypeError, ValueError):
+        return False
+
+
 def is_page_local_quality_rejection(reason: str | None) -> bool:
-    """Quality rejects after HTTP 200, or a page LLM timeout, are not provider outages."""
+    """Quality rejects after HTTP 200, or a page LLM timeout/529, are not provider outages."""
     if reason in _PAGE_LOCAL_QUALITY_REJECTIONS:
         return True
-    return is_page_timeout_rejection(reason)
+    return is_page_timeout_rejection(reason) or is_page_server_error_rejection(reason)
 
 
 def iter_markdown_pages(content_dir: Path | None) -> list[Path]:

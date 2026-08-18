@@ -1330,6 +1330,31 @@ class TestG005SecondRoundVerifierClosure:
         claims = [item.get("claim") for item in check.details.get("offenders", [])]
         assert "GET /api/does-not-exist" in claims
 
+    def test_path_param_name_alias_matches_inventory(self, tmp_path):
+        run_dir, page, meta_dir = self._write_complete_run(tmp_path)
+        (meta_dir / "api-inventory.json").write_text(
+            json.dumps(
+                {
+                    "endpoints": [
+                        {"method": "GET", "path": "/health", "public": True},
+                        {"method": "DELETE", "path": "/api/articles/{slug}"},
+                        {"method": "POST", "path": "/projects/{project_id}/run-volume"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        page.write_text(
+            page.read_text(encoding="utf-8")
+            + "\nDELETE /api/articles/{slug} removes a published article.\n"
+            + "POST /projects/{id}/run-volume starts volume generation.\n"
+            + "<cite>source:src/app.py:22</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+
     def test_github_actions_service_options_is_not_a_product_service(self, tmp_path):
         run_dir, page, _ = self._write_complete_run(tmp_path)
         content_dir = page.parent.parent
