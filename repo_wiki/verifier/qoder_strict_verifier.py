@@ -113,13 +113,20 @@ class QoderLikeVerifierService(VerifierService):
     MIN_MERMAID_COVERAGE = 0.3
     MERMAID_CODE_BLOCK_PATTERN = re.compile(r"```mermaid\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 
-    def __init__(self, root: Path, retrieval_service=None, strict: bool = True) -> None:
+    def __init__(
+        self,
+        root: Path,
+        retrieval_service=None,
+        strict: bool = True,
+        isolated_output: Path | str | None = None,
+    ) -> None:
         super().__init__(
             root,
             retrieval_service,
             severity_thresholds=QoderLikeSeverityThreshold(warn_on_soft=not strict),
         )
         self.strict = strict
+        self.isolated_output = Path(isolated_output).resolve() if isolated_output else None
 
     def verify(self, ci: bool = True) -> dict[str, Any]:
         checks: list[CheckResult] = [
@@ -2170,22 +2177,57 @@ class QoderLikeVerifierService(VerifierService):
             "API page cites api/routes implementation files",
         )
 
+    def _ignored_dirty_roots(self, git_root: Path) -> list[Path]:
+        roots = [(git_root / ".repo-agent-eval").resolve()]
+        if self.isolated_output is not None:
+            roots.append(self.isolated_output.resolve())
+        return roots
+
+    @staticmethod
+    def _porcelain_relpath(line: str) -> str:
+        if not line.strip():
+            return ""
+        payload = line[3:] if len(line) >= 4 else line.strip()
+        if " -> " in payload:
+            payload = payload.split(" -> ", 1)[1]
+        payload = payload.strip()
+        if len(payload) >= 2 and payload[0] == '"' and payload[-1] == '"':
+            payload = payload[1:-1].encode("utf-8").decode("unicode_escape")
+        return payload.replace("\\", "/")
+
+    def _path_is_ignored_output(self, git_root: Path, relpath: str) -> bool:
+        if not relpath:
+            return False
+        absolute = (git_root / relpath).resolve()
+        for ignored in self._ignored_dirty_roots(git_root):
+            if absolute == ignored or ignored in absolute.parents:
+                return True
+        posix = relpath.lstrip("./")
+        return posix == ".repo-agent-eval" or posix.startswith(".repo-agent-eval/")
+
     def _git_dirty(self, path: Path) -> bool:
-        """Return True if the repository has uncommitted changes or untracked files."""
+        """Return True if the repository has uncommitted changes outside isolated output."""
         root = self._find_git_root(path)
         if root is None:
             return False
         try:
             result = subprocess.run(
-                ["git", "status", "--porcelain"],
+                ["git", "status", "--porcelain", "-uall"],
                 cwd=str(root),
                 capture_output=True,
                 text=True,
                 check=True,
             )
-            return bool(result.stdout.strip())
         except Exception:
             return False
+        for line in result.stdout.splitlines():
+            relpath = self._porcelain_relpath(line)
+            if not relpath:
+                continue
+            if self._path_is_ignored_output(root, relpath):
+                continue
+            return True
+        return False
 
     def _find_content_dir(self) -> Path | None:
         if self.root.exists() and self.root.is_dir() and self.root.name == "content":
@@ -2313,10 +2355,19 @@ class QoderLikeVerifierService(VerifierService):
         return None
 
 
-def create_qoder_like_verifier(root: Path, strict: bool = True) -> QoderLikeVerifierService:
-    return QoderLikeVerifierService(root, strict=strict)
+def create_qoder_like_verifier(
+    root: Path,
+    strict: bool = True,
+    isolated_output: Path | str | None = None,
+) -> QoderLikeVerifierService:
+    return QoderLikeVerifierService(root, strict=strict, isolated_output=isolated_output)
 
 
-def verify_qoder_like(root: Path, ci: bool = True, strict: bool = True) -> dict[str, Any]:
-    verifier = create_qoder_like_verifier(root, strict)
+def verify_qoder_like(
+    root: Path,
+    ci: bool = True,
+    strict: bool = True,
+    isolated_output: Path | str | None = None,
+) -> dict[str, Any]:
+    verifier = create_qoder_like_verifier(root, strict, isolated_output=isolated_output)
     return verifier.verify(ci=ci)

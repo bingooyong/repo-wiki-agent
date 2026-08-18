@@ -580,8 +580,10 @@ def verify_command(
     if profile == "qoder-like":
         from repo_wiki.verifier.qoder_strict_verifier import verify_qoder_like
 
-        verify_root = _resolve_verify_root(Path(cfg.project.root), output)
-        result = verify_qoder_like(verify_root, ci=ci, strict=True)
+        project_root = Path(cfg.project.root)
+        verify_root = _resolve_verify_root(project_root, output)
+        isolated_output = _resolve_isolated_output(project_root, output)
+        result = verify_qoder_like(verify_root, ci=ci, strict=True, isolated_output=isolated_output)
         result["verify_root"] = str(verify_root)
         if ci:
             strict_report_path = _persist_qoder_strict_report(verify_root, result)
@@ -1220,6 +1222,20 @@ class _temporary_env:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def _resolve_isolated_output(project_root: Path, output: str | None) -> Path:
+    """Return the isolated wiki output directory that must not count as dirty."""
+    default = (project_root / ".repo-agent-eval").resolve()
+    if not output:
+        return default
+    raw = Path(output)
+    resolved = raw.resolve() if raw.exists() else (project_root / output).resolve()
+    try:
+        resolved.relative_to(default)
+        return default
+    except ValueError:
+        return resolved
 
 
 def _resolve_verify_root(project_root: Path, output: str | None) -> Path:
