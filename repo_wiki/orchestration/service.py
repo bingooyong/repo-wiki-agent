@@ -34,12 +34,15 @@ from repo_wiki.orchestration.runtime_store import (
 from repo_wiki.retrieval.service import RetrievalService
 from repo_wiki.scanner.artifacts import has_frontend_wiki_surface, write_source_of_truth
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
+from repo_wiki.verifier.handbook import GENERATOR_META_REJECTION
 from repo_wiki.verifier.service import VerifierService
 
 if TYPE_CHECKING:
     from repo_wiki.evidence.ranking import PageEvidenceBinding
     from repo_wiki.llm.config import LLMProviderConfig
     from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
+
+_PAGE_LOCAL_QUALITY_REJECTIONS = frozenset({"Insufficient prose content", GENERATOR_META_REJECTION})
 
 
 def _packaged_template_root() -> Path:
@@ -1209,9 +1212,7 @@ class RepoWikiService:
                 # fallbacks, not provider outages. R10: 3× Insufficient prose
                 # (and handbook generator-meta rejects) must not consume the
                 # #49 circuit-break budget.
-                from repo_wiki.verifier.handbook import is_page_local_quality_rejection
-
-                if not is_page_local_quality_rejection(output.rejection_reason):
+                if output.rejection_reason not in _PAGE_LOCAL_QUALITY_REJECTIONS:
                     note_provider_failure()
                 write_fallback(
                     page,

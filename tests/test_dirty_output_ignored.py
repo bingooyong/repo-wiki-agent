@@ -25,7 +25,7 @@ def _init_repo(repo: Path) -> None:
     _git(repo, "commit", "-m", "init")
 
 
-def test_isolated_output_only_is_not_dirty(tmp_path: Path) -> None:
+def test_output_only_dirty_passes(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     output = tmp_path / ".repo-agent-eval"
     run_content = output / "runs" / "r1" / "content"
@@ -41,7 +41,7 @@ def test_isolated_output_only_is_not_dirty(tmp_path: Path) -> None:
     assert "QODER_DIRTY_WORKTREE" not in result.get("hard_gate_codes", [])
 
 
-def test_extra_source_file_still_fails_dirty(tmp_path: Path) -> None:
+def test_extra_app_secret_still_fails(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     output = tmp_path / ".repo-agent-eval"
     (output / "runs" / "r1").mkdir(parents=True)

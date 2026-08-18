@@ -45,7 +45,7 @@ def test_overview_ranks_readme_settings_and_main() -> None:
         page, _span("app/main.py", symbol="app", span_text="FastAPI()")
     )
     unrelated_score, _ = score_evidence_for_page(
-        page, _span("tests/test_unrelated.py", symbol="test_x", span_text="assert True")
+        page, _span("app/models/article.py", symbol="Article", span_text="class Article")
     )
     assert readme_score > unrelated_score
     assert settings_score > unrelated_score

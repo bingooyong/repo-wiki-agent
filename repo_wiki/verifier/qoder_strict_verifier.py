@@ -155,10 +155,10 @@ class QoderLikeVerifierService(VerifierService):
             self._check_qoder_prose_density(),
             self._check_qoder_stale_commit(),
             self._check_qoder_dirty_worktree(),
-            self._check_qoder_handbook_generator_meta(),
-            self._check_qoder_handbook_overview_identity(),
-            self._check_qoder_handbook_install_run(),
-            self._check_qoder_handbook_api_route_file(),
+            self._check_handbook_generator_meta(),
+            self._check_handbook_overview_identity(),
+            self._check_handbook_install_run(),
+            self._check_handbook_api_route_file(),
         ]
 
         hard_failures = [c for c in checks if c.is_hard_gate_failure()]
@@ -2085,7 +2085,7 @@ class QoderLikeVerifierService(VerifierService):
             gate_type=GateType.HARD,
         )
 
-    def _check_qoder_handbook_generator_meta(self) -> CheckResult:
+    def _check_handbook_generator_meta(self) -> CheckResult:
         pages = iter_markdown_pages(self._find_content_dir())
         if not pages:
             return self._skip_check("qoder-handbook-generator-meta", "No markdown pages")
@@ -2106,7 +2106,7 @@ class QoderLikeVerifierService(VerifierService):
             "No generator meta phrases in markdown pages",
         )
 
-    def _check_qoder_handbook_overview_identity(self) -> CheckResult:
+    def _check_handbook_overview_identity(self) -> CheckResult:
         pages = find_matching_pages(self._find_content_dir(), ("project-overview", "项目概述"))
         if not pages:
             return self._skip_check("qoder-handbook-overview-identity", "Overview page absent")
@@ -2130,7 +2130,7 @@ class QoderLikeVerifierService(VerifierService):
             "Overview page includes repository product identity",
         )
 
-    def _check_qoder_handbook_install_run(self) -> CheckResult:
+    def _check_handbook_install_run(self) -> CheckResult:
         pages = find_matching_pages(
             self._find_content_dir(), ("installation", "安装指南", "安装与配置")
         )
@@ -2156,7 +2156,7 @@ class QoderLikeVerifierService(VerifierService):
             "Installation page includes runnable clues and README citation",
         )
 
-    def _check_qoder_handbook_api_route_file(self) -> CheckResult:
+    def _check_handbook_api_route_file(self) -> CheckResult:
         pages = find_matching_pages(self._find_content_dir(), ("core-service-apis", "核心服务api"))
         if not pages:
             return self._skip_check("qoder-handbook-api-route-file", "Core API page absent")

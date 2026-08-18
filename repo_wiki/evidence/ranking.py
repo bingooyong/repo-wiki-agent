@@ -39,6 +39,7 @@ _ONBOARDING_OVERVIEW_INSTALL_IDS = frozenset(
     {
         "project-overview",
         "installation",
+        "quick-start",
         "quickstart",
         "getting-started",
     }
@@ -298,9 +299,11 @@ def _is_overview_or_install_page(page: WikiPagePlan) -> bool:
         WikiTaxonomyCategory.PROJECT_OVERVIEW,
         WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
         WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
-    } and any(token in page_id for token in ("overview", "install", "quickstart", "setup")):
+    } and any(
+        token in page_id for token in ("overview", "install", "quick-start", "quickstart", "setup")
+    ):
         return True
-    return bool(tags & {"installation", "setup", "quickstart", "getting-started"})
+    return bool(tags & {"installation", "setup", "quick-start", "quickstart", "getting-started"})
 
 
 def _is_security_onboarding_page(page: WikiPagePlan) -> bool:

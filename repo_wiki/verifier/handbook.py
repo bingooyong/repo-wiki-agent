@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-HANDBOOK_META_PHRASES = (
+HANDBOOK_META_PHRASES: tuple[str, ...] = (
     "fallback composer",
     "repo-agent",
     "该页面对应",
@@ -39,11 +39,7 @@ def contains_generator_meta(markdown: str) -> bool:
     if not markdown:
         return False
     lowered = markdown.lower()
-    for phrase in HANDBOOK_META_PHRASES:
-        needle = phrase.lower()
-        if needle in lowered:
-            return True
-    return False
+    return any(phrase.lower() in lowered for phrase in HANDBOOK_META_PHRASES)
 
 
 def is_page_local_quality_rejection(reason: str | None) -> bool:

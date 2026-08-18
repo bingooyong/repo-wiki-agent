@@ -494,15 +494,26 @@ class LLMPageComposer:
     def _is_handbook_overview_or_install(self, page: WikiPagePlan) -> bool:
         page_id = (page.page_id or "").lower()
         tags = {str(tag).lower() for tag in (page.tags or [])}
-        if page_id in {"project-overview", "installation", "quickstart", "getting-started"}:
+        if page_id in {
+            "project-overview",
+            "installation",
+            "quick-start",
+            "quickstart",
+            "getting-started",
+        }:
             return True
         if page.category in {
             WikiTaxonomyCategory.PROJECT_OVERVIEW,
             WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
             WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
-        } and any(token in page_id for token in ("overview", "install", "quickstart", "setup")):
+        } and any(
+            token in page_id
+            for token in ("overview", "install", "quick-start", "quickstart", "setup")
+        ):
             return True
-        return bool(tags & {"installation", "setup", "quickstart", "getting-started"})
+        return bool(
+            tags & {"installation", "setup", "quick-start", "quickstart", "getting-started"}
+        )
 
     def _evidence_has_api_routes(self, binding: PageEvidenceBinding | None) -> bool:
         if binding is None:
