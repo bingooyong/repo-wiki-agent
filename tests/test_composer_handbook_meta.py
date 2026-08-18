@@ -159,4 +159,5 @@ async def test_generator_meta_rejection_is_page_local_like_insufficient_prose(
     assert not disabled_reasons
     assert is_page_local_quality_rejection("Insufficient prose content") is True
     assert is_page_local_quality_rejection(GENERATOR_META_REJECTION) is True
+    assert is_page_local_quality_rejection("Empty LLM assistant content") is True
     assert is_page_local_quality_rejection("Composition error: 529") is False

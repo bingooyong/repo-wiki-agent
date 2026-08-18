@@ -31,9 +31,9 @@ def test_contains_generator_meta_ignores_innocent_readme() -> None:
 
 
 def _write_page(root: Path, name: str, body: str) -> None:
-    content = root / "content"
-    content.mkdir(parents=True, exist_ok=True)
-    (content / name).write_text(body, encoding="utf-8")
+    path = root / "content" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
 
 
 def test_handbook_hard_codes_are_registered_strict(tmp_path: Path) -> None:
@@ -103,6 +103,40 @@ def test_overview_identity_passes_with_identity(tmp_path: Path) -> None:
     )
     result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_overview_identity()
     assert result.status == "PASS"
+
+
+def test_overview_identity_ignores_key_features_sibling_under_overview_folder(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "README.md").write_text(
+        "Conduit is a RealWorld FastAPI backend.\n", encoding="utf-8"
+    )
+    _write_page(
+        tmp_path,
+        "项目概述/项目概述.md",
+        "# 项目概述\n\nConduit 是 RealWorld 规范的 FastAPI 后端。\n",
+    )
+    _write_page(
+        tmp_path,
+        "项目概述/核心功能特性/核心功能特性.md",
+        "# 核心功能特性\n\n本页目前无法根据仓库内容写成可用说明。\n",
+    )
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_overview_identity()
+    assert result.status == "PASS"
+    assert result.reason_code != "QODER_HANDBOOK_OVERVIEW_IDENTITY"
+
+
+def test_overview_identity_skips_when_only_key_features_under_overview_folder(
+    tmp_path: Path,
+) -> None:
+    _write_page(
+        tmp_path,
+        "项目概述/核心功能特性/核心功能特性.md",
+        "# 核心功能特性\n\n没有身份陈述。\n",
+    )
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_overview_identity()
+    assert result.status == "PASS"
+    assert result.reason_code != "QODER_HANDBOOK_OVERVIEW_IDENTITY" or "Skip" in result.message
 
 
 def test_install_run_fails_without_run_clues(tmp_path: Path) -> None:

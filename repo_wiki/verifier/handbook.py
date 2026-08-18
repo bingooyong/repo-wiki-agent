@@ -13,11 +13,13 @@ HANDBOOK_META_PHRASES: tuple[str, ...] = (
 )
 
 GENERATOR_META_REJECTION = "Handbook generator meta content"
+EMPTY_CONTENT_REJECTION = "Empty LLM assistant content"
 
 _PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
     {
         "Insufficient prose content",
         GENERATOR_META_REJECTION,
+        EMPTY_CONTENT_REJECTION,
     }
 )
 
@@ -54,8 +56,13 @@ def iter_markdown_pages(content_dir: Path | None) -> list[Path]:
 
 
 def page_matches(path: Path, tokens: tuple[str, ...]) -> bool:
-    blob = f"{path.stem} {path.as_posix()}".replace("\\", "/").lower()
-    return any(token.lower() in blob for token in tokens)
+    """Match the page file stem, not a parent folder name.
+
+    Overview identity must target ``项目概述.md`` / ``project-overview.md``, not
+    siblings such as ``项目概述/核心功能特性/核心功能特性.md``.
+    """
+    stem = path.stem.replace("\\", "/").lower()
+    return any(token.lower() == stem for token in tokens)
 
 
 def find_matching_pages(content_dir: Path | None, tokens: tuple[str, ...]) -> list[Path]:

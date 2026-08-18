@@ -244,7 +244,7 @@ async def test_compose_page_rejects_after_empty_content_retries_exhausted(
         output.rejected is False and "LLM composer did not return content" in output.markdown
     )
     assert "LLM composer did not return content" not in output.markdown
-    assert provider.call_count == RetryConfig().max_retries + 1
+    assert provider.call_count == 2 * (RetryConfig().max_retries + 1)
     assert provider.call_count <= 20
 
 
@@ -324,3 +324,76 @@ async def test_compose_page_rejects_insufficient_prose_after_one_recovery(
     assert output.rejected is True
     assert output.rejection_reason == "Insufficient prose content"
     assert provider.call_count == 2
+
+
+FENCE_HEAVY_MARKDOWN = """# Sample Page
+
+## 简介
+
+```python
+from app.core import settings
+DATABASE_URL = settings.database_url
+def get_current_user(authorization: str = Header(...)):
+    token = authorization.removeprefix("Token ")
+    return lookup_user_by_api_token(token)
+```
+
+```python
+router = APIRouter()
+@router.post("/articles")
+def create_article():
+    return {"ok": True}
+```
+"""
+
+
+def _fence_heavy_response() -> ChatResponse:
+    return ChatResponse(content=FENCE_HEAVY_MARKDOWN, model="mock-gpt")
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_empty_content_with_paragraph_rewrite(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider(
+        [_empty_response("") for _ in range(RetryConfig().max_retries + 1)]
+        + [_paragraph_response()]
+    )
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == RetryConfig().max_retries + 2
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_fence_heavy_insufficient_prose_once(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_fence_heavy_response(), _paragraph_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == 2
+
+
+def test_prose_recovery_prompt_forbids_evidence_fences(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+) -> None:
+    composer = create_composer()
+    prompt = composer._build_prose_recovery_prompt(
+        build_composer_input(sample_page, None, sample_context),
+        composer._build_context(build_composer_input(sample_page, None, sample_context)),
+        FENCE_HEAVY_MARKDOWN,
+    )
+    assert "代码" in prompt or "围栏" in prompt or "fence" in prompt.lower()
+    assert "段落" in prompt
+    assert "def get_current_user" not in prompt

@@ -618,11 +618,11 @@ async def test_three_consecutive_529s_still_trip_circuit_breaker(
 
 
 @pytest.mark.asyncio
-async def test_three_consecutive_empty_content_failures_still_trip_circuit_breaker(
+async def test_empty_content_rejects_do_not_trip_circuit_breaker(
     compose_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#49: three empty-content provider failures still disable later LLM calls."""
+    """Empty assistant content is page-local, like insufficient prose, not a 529 outage."""
     monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
     root = compose_env / "repo"
     root.mkdir()
@@ -639,19 +639,19 @@ async def test_three_consecutive_empty_content_failures_still_trip_circuit_break
         output_dir=output_dir,
     )
     llm = result["llm"]
-
-    assert llm["max_provider_failures"] == 3
-    assert llm["provider_disabled_after_failures"] is True
-    assert provider.call_count == 3
-    assert provider.call_count < PAGE_COUNT
-    assert llm["fallback_page_count"] == PAGE_COUNT
     disabled_reasons = [
         reason
         for meta in result["page_metadata"]
         for reason in meta["reasons"]
         if "provider disabled after" in reason
     ]
-    assert disabled_reasons
+
+    assert llm["max_provider_failures"] == 3
+    assert llm["provider_disabled_after_failures"] is False
+    assert provider.call_count == PAGE_COUNT * 2
+    assert llm["llm_call_count"] == PAGE_COUNT
+    assert llm["fallback_page_count"] == PAGE_COUNT
+    assert not disabled_reasons
 
 
 @pytest.mark.asyncio

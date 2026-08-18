@@ -30,7 +30,14 @@ from repo_wiki.evidence.citation_renderer import (
 )
 from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.llm.config import LLMProviderConfig
-from repo_wiki.llm.models import ChatMessage, ChatRequest, ChatResponse, LLMProvider
+from repo_wiki.llm.models import (
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    ErrorCode,
+    LLMProvider,
+    RetryableError,
+)
 from repo_wiki.llm.providers import create_mock_provider
 from repo_wiki.llm.retry import chat_with_retry
 from repo_wiki.planner.schema import (
@@ -52,8 +59,16 @@ from repo_wiki.prompts.skeleton import (
     build_skeleton,
 )
 from repo_wiki.verifier.handbook import (
+    EMPTY_CONTENT_REJECTION,
     GENERATOR_META_REJECTION,
     contains_generator_meta,
+)
+
+_PROSE_RECOVERY_REASONS = frozenset(
+    {
+        "Insufficient prose content",
+        EMPTY_CONTENT_REJECTION,
+    }
 )
 
 # =============================================================================
@@ -334,7 +349,32 @@ class LLMPageComposer:
             last_rejected: ComposerOutput | None = None
 
             for attempt in range(2):
-                response = await self._call_llm(prompt, input.page_plan.title)
+                try:
+                    response = await self._call_llm(prompt, input.page_plan.title)
+                except RetryableError as exc:
+                    if getattr(exc, "code", None) != ErrorCode.EMPTY_CONTENT:
+                        raise
+                    last_rejected = ComposerOutput(
+                        page_id=page_id,
+                        markdown="",
+                        citations_preserved=False,
+                        headings_preserved=False,
+                        evidence_count=0,
+                        rejected=True,
+                        rejection_reason=EMPTY_CONTENT_REJECTION,
+                        tokens_used=total_tokens,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        low_confidence=False,
+                        uncertainty_reasons=[],
+                    )
+                    if attempt == 0:
+                        prompt = self._build_prose_recovery_prompt(input, context, "")
+                        continue
+                    return last_rejected
+
                 response_content = self._normalize_markdown_response(
                     response.content, input.page_plan.title
                 )
@@ -363,10 +403,7 @@ class LLMPageComposer:
                 if not output.rejected:
                     return output
                 last_rejected = output
-                if (
-                    attempt == 0
-                    and validation_result.rejection_reason == "Insufficient prose content"
-                ):
+                if attempt == 0 and validation_result.rejection_reason in _PROSE_RECOVERY_REASONS:
                     prompt = self._build_prose_recovery_prompt(input, context, response_content)
                     continue
                 return output
@@ -445,15 +482,28 @@ class LLMPageComposer:
         skeleton_md = input.skeleton.render_skeleton_markdown()
         return prompt + "\n\n## Article Structure\n" + skeleton_md
 
+    def _strip_fenced_blocks(self, markdown: str) -> str:
+        lines: list[str] = []
+        in_fence = False
+        for line in markdown.splitlines():
+            if line.strip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if not in_fence:
+                lines.append(line)
+        return "\n".join(lines).strip()
+
     def _build_prose_recovery_prompt(
         self, input: ComposerInput, context: dict[str, Any], previous: str
     ) -> str:
         base = self._build_compose_prompt(input, context)
+        previous_for_prompt = self._strip_fenced_blocks(previous)[:2000]
         return (
-            f"{base}\n\n上次草稿几乎全是列表或标题，段落 prose 不足。"
+            f"{base}\n\n上次草稿段落 prose 不足，或助手返回了空正文。"
             "请重写为段落为主的中文 Markdown：列表只能作附录检查项，不能充当正文；"
+            "禁止把证据原文整段放进 Markdown 代码围栏（```）；围栏不能替代正文。"
             "每个事实句的 `<cite>` 必须写在该句同一行或下一行。不要解释过程。\n\n"
-            f"上次草稿：\n{previous[:2000]}\n"
+            f"上次草稿（已去掉代码围栏）：\n{previous_for_prompt or '（空）'}\n"
         )
 
     def _build_evidence_context(self, binding: PageEvidenceBinding) -> str:
@@ -531,6 +581,7 @@ class LLMPageComposer:
             "不要把引用只堆在文末「源码引用」列表里。",
             "- 正文必须用段落解释；列表只用于核心组件或检查项。"
             "列表行不计入 prose 下限，不要用子弹列表充当整页正文。",
+            "- 不要把证据原文整段放进 Markdown 代码围栏；围栏不能替代段落正文。",
         ]
         if self._is_handbook_overview_or_install(page):
             rules.append(
