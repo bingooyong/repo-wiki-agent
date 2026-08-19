@@ -183,6 +183,56 @@ def test_current_doc_mismatch_still_blocks_and_codes_stay_hard() -> None:
         assert code in threshold.STRICT_HARD_CODES
 
 
+def test_pascalcase_framework_names_are_not_product_conflicts(tmp_path: Path) -> None:
+    """FastAPI/SQLModel in current docs are libraries; GhostService still conflicts."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "AI_Novel_Agent_PRD_Architecture.md").write_text(
+        "# Architecture\n"
+        "Runtime is FastAPI with SQLModel persistence.\n"
+        "GhostService is the product service.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text(
+        "# ai-open-writing\nBuilt with `FastAPI` and `SQLModel`.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("app = True\n", encoding="utf-8")
+
+    inv = scan_repository_docs_inventory(
+        tmp_path, _source_inventory(), incremental=False, persist_cache=False
+    )
+    by_path = {doc["path"]: doc for doc in inv["documents"]}
+
+    readme = by_path["README.md"]
+    assert "fastapi" not in readme["conflicting_claims"]
+    assert "sqlmodel" not in readme["conflicting_claims"]
+
+    architecture = by_path["docs/AI_Novel_Agent_PRD_Architecture.md"]
+    assert architecture["doc_type"] == "architecture"
+    assert "fastapi" not in architecture["conflicting_claims"]
+    assert "sqlmodel" not in architecture["conflicting_claims"]
+    assert any(claim.endswith("service") for claim in architecture["conflicting_claims"])
+
+    report = resolve_source_docs_conflicts(_source_inventory(), inv)
+    unresolved = report["deferred_items"] + report["flagged_items"]
+    library_hits = [
+        item
+        for item in unresolved
+        if any(token in item.get("evidence", []) for token in ("fastapi", "sqlmodel"))
+    ]
+    assert library_hits == []
+    assert unresolved
+    assert all(item["doc_path"] == "docs/AI_Novel_Agent_PRD_Architecture.md" for item in unresolved)
+    assert {item["reason_code"] for item in unresolved} & {
+        SOURCE_DOC_MISMATCH,
+        MISSING_SOURCE_CONFIRMATION,
+    }
+
+    verifier = QoderLikeVerifierService(tmp_path, strict=True)
+    assert verifier._count_unresolved_conflicts(report) == len(unresolved)
+
+
 def test_fastapi_leftover_readme_tokens_are_not_stale(tmp_path: Path) -> None:
     (tmp_path / "README.rst").write_text(
         "Conduit\n"

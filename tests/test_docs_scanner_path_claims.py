@@ -151,6 +151,25 @@ def test_extract_claims_skips_library_tokens_and_non_source_refs() -> None:
     assert "mock-model" not in names
 
 
+def test_inventory_shaped_name_excludes_whole_token_libraries() -> None:
+    """PascalCase framework names are not product OrdersAPI / AnnalsModel."""
+    for token in ("FastAPI", "SQLModel", "fastapi", "sqlmodel", "FASTAPI", "SqlModel"):
+        assert ds._is_inventory_shaped_name(token) is False, token
+    assert ds._is_inventory_shaped_name("GhostService") is True
+    assert ds._is_inventory_shaped_name("AnnalsModel") is True
+    assert ds._is_inventory_shaped_name("orders-service") is True
+    assert ds._is_inventory_shaped_name("OrdersAPI") is True
+
+
+def test_extract_claims_skips_pascalcase_framework_names() -> None:
+    names, _path_like = _extract_claims(
+        "The stack is FastAPI plus `SQLModel`. GhostService remains.\n"
+    )
+    assert "fastapi" not in names
+    assert "sqlmodel" not in names
+    assert "ghostservice" in names
+
+
 def test_casefold_existing_doc_is_not_stale(tmp_path: Path) -> None:
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "AI_Novel_Agent_PRD_Architecture.md").write_text(

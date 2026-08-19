@@ -259,6 +259,8 @@ _PLANNING_FILENAMES = frozenset({"handoff.md", "verification-report.md"})
 _PLANNING_DIR_PARTS = frozenset({".omc", ".superpowers", "superpowers", "sdd"})
 _CAMEL_INVENTORY_NAME = re.compile(r"[A-Z][A-Za-z0-9]*(?:Service|Model|API|Api|Router)$")
 _SNAKE_KEBAB_INVENTORY_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*[-_](?:service|api|router)$")
+# Whole-token libraries whose names happen to end with API/Model (not *Service).
+_LIBRARY_INVENTORY_TOKENS = frozenset({"fastapi", "sqlmodel"})
 _SOURCE_DIR_PREFIXES = ("src/", "app/", "repo_wiki/", "docs/", "tests/")
 _SOURCE_FILE_EXTS = frozenset(
     {
@@ -372,6 +374,8 @@ def _is_inventory_shaped_name(token: str) -> bool:
     """True for product service/API/model/router names, not library identifiers."""
     t = token.strip()
     if len(t) < 4:
+        return False
+    if t.casefold() in _LIBRARY_INVENTORY_TOKENS:
         return False
     if _CAMEL_INVENTORY_NAME.search(t):
         return True
