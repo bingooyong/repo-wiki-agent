@@ -75,6 +75,24 @@ class ConflictItem:
         }
 
 
+def _is_historical_doc(doc: dict[str, Any]) -> bool:
+    """Planning/changelog docs and already-historical items do not block READY."""
+    doc_type = str(doc.get("doc_type", "")).lower()
+    authority = str(doc.get("authority_level", "")).lower()
+    classification = str(doc.get("classification", "")).lower()
+    return (
+        doc_type in {"planning", "changelog"}
+        or authority == "historical"
+        or classification == "historical"
+    )
+
+
+def _status_for_doc(doc: dict[str, Any], blocking_status: str) -> tuple[str, str]:
+    if _is_historical_doc(doc):
+        return "resolved", "historical"
+    return blocking_status, "待确认"
+
+
 def resolve_source_docs_conflicts(
     source_inventory: dict[str, Any],
     docs_inventory: dict[str, Any],
@@ -98,23 +116,25 @@ def resolve_source_docs_conflicts(
         doc_type = str(doc.get("doc_type", "overview")).lower()
 
         if stale_refs:
+            status, classification = _status_for_doc(doc, "flagged")
             items.append(
                 ConflictItem(
                     doc_path=path,
                     reason_code=STALE_DOC_REFERENCE,
-                    status="flagged",
-                    classification="待确认",
+                    status=status,
+                    classification=classification,
                     message="Doc references source artifacts that no longer exist.",
                     evidence=stale_refs,
                 )
             )
         if conflicting_claims:
+            status, classification = _status_for_doc(doc, "deferred")
             items.append(
                 ConflictItem(
                     doc_path=path,
                     reason_code=SOURCE_DOC_MISMATCH,
-                    status="deferred",
-                    classification="待确认",
+                    status=status,
+                    classification=classification,
                     message="Doc claims conflict with current source inventory facts.",
                     evidence=conflicting_claims,
                 )
@@ -126,7 +146,7 @@ def resolve_source_docs_conflicts(
                 ConflictItem(
                     doc_path=path,
                     reason_code=UNSUPPORTED_DOC_CLAIM,
-                    status="flagged",
+                    status="resolved",
                     classification="historical",
                     message="Historical/planning claim is not suitable as current implementation fact.",
                     evidence=conflicting_claims or stale_refs or [path],
@@ -136,12 +156,13 @@ def resolve_source_docs_conflicts(
         # Feature claim without source confirmation.
         for claim in conflicting_claims:
             if claim.lower() not in source_tokens:
+                status, classification = _status_for_doc(doc, "deferred")
                 items.append(
                     ConflictItem(
                         doc_path=path,
                         reason_code=MISSING_SOURCE_CONFIRMATION,
-                        status="deferred",
-                        classification="待确认",
+                        status=status,
+                        classification=classification,
                         message="Doc feature claim has no source confirmation.",
                         evidence=[claim],
                     )

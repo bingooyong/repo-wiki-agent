@@ -1243,6 +1243,50 @@ class TestG005SecondRoundVerifierClosure:
         result = QoderLikeVerifierService(run_dir, strict=True).verify(ci=True)
         assert "QODER_UNRESOLVED_FACT_CONFLICT" in result.get("hard_gate_codes", [])
 
+    def test_unresolved_conflict_count_does_not_double_summary_and_items(self, tmp_path):
+        payload = {
+            "schema_version": "source-docs-conflict-resolver-v1",
+            "summary": {
+                "resolved_count": 0,
+                "deferred_count": 31,
+                "flagged_count": 42,
+                "total_items": 73,
+            },
+            "resolved_items": [],
+            "deferred_items": [{"id": f"d{i}", "status": "deferred"} for i in range(31)],
+            "flagged_items": [{"id": f"f{i}", "status": "flagged"} for i in range(42)],
+        }
+        verifier = QoderLikeVerifierService(tmp_path, strict=True)
+        assert verifier._count_unresolved_conflicts(payload) == 73
+
+    def test_identical_reports_and_meta_conflict_copies_count_once(self, tmp_path):
+        run_dir, _, meta_dir = self._write_complete_run(tmp_path)
+        payload = {
+            "schema_version": "source-docs-conflict-resolver-v1",
+            "summary": {
+                "resolved_count": 0,
+                "deferred_count": 31,
+                "flagged_count": 42,
+                "total_items": 73,
+            },
+            "resolved_items": [],
+            "deferred_items": [{"id": f"d{i}", "status": "deferred"} for i in range(31)],
+            "flagged_items": [{"id": f"f{i}", "status": "flagged"} for i in range(42)],
+        }
+        encoded = json.dumps(payload)
+        (meta_dir / "source-docs-conflicts.json").write_text(encoded, encoding="utf-8")
+        reports = run_dir / "reports"
+        reports.mkdir(exist_ok=True)
+        (reports / "source-docs-conflicts.json").write_text(encoded, encoding="utf-8")
+        check = QoderLikeVerifierService(
+            run_dir, strict=True
+        )._check_qoder_unresolved_fact_conflicts()
+        assert check.status == "FAIL"
+        assert check.reason_code == "QODER_UNRESOLVED_FACT_CONFLICT"
+        artifacts = check.details.get("artifacts") or []
+        assert len(artifacts) == 1
+        assert artifacts[0]["unresolved_count"] == 73
+
     def test_owner_gap_fails_but_structured_unidentified_warning_passes(self, tmp_path):
         gap_dir, page, _ = self._write_complete_run(tmp_path / "gap")
         page.write_text(

@@ -1341,6 +1341,7 @@ class QoderLikeVerifierService(VerifierService):
             "source-docs-conflicts.json"
         ) + self._candidate_artifact_paths("fact-conflicts.json")
         seen: set[Path] = set()
+        seen_payloads: set[str] = set()
         found_canonical_artifact = False
         unresolved: list[dict[str, Any]] = []
         for path in paths:
@@ -1362,6 +1363,10 @@ class QoderLikeVerifierService(VerifierService):
                     reason_code="QODER_CONFLICT_ARTIFACT_INVALID",
                     gate_type=GateType.HARD,
                 )
+            fingerprint = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+            if fingerprint in seen_payloads:
+                continue
+            seen_payloads.add(fingerprint)
             count = self._count_unresolved_conflicts(payload)
             if count:
                 unresolved.append({"path": str(path), "unresolved_count": count})
@@ -1392,17 +1397,14 @@ class QoderLikeVerifierService(VerifierService):
         )
 
     def _count_unresolved_conflicts(self, payload: dict[str, Any]) -> int:
-        summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
-        count = 0
-        if isinstance(summary, dict):
-            for key in (
-                "deferred_count",
-                "flagged_count",
-                "unresolved_count",
-                "critical_unresolved_count",
-                "critical_conflict_count",
-            ):
-                count += int(summary.get(key, 0) or 0)
+        """Count each unresolved item once.
+
+        Canonical reports populate both summary counts and item lists. Adding
+        those together double-counts the same deferred/flagged rows.
+        """
+        if not isinstance(payload, dict):
+            return 0
+        list_count = 0
         for key in (
             "deferred_items",
             "flagged_items",
@@ -1410,12 +1412,12 @@ class QoderLikeVerifierService(VerifierService):
             "critical_items",
             "conflicts",
         ):
-            value = payload.get(key) if isinstance(payload, dict) else None
+            value = payload.get(key)
             if not isinstance(value, list):
                 continue
             for item in value:
                 if not isinstance(item, dict):
-                    count += 1
+                    list_count += 1
                     continue
                 status = str(item.get("status") or item.get("state") or "").lower()
                 severity = str(item.get("severity") or item.get("level") or "").lower()
@@ -1424,8 +1426,21 @@ class QoderLikeVerifierService(VerifierService):
                     or status in {"unresolved", "deferred", "flagged", "open"}
                     or severity == "critical"
                 ):
-                    count += 1
-        return count
+                    list_count += 1
+        summary = payload.get("summary", {})
+        summary_count = 0
+        extra_count = 0
+        if isinstance(summary, dict):
+            summary_count = int(summary.get("deferred_count", 0) or 0) + int(
+                summary.get("flagged_count", 0) or 0
+            )
+            for key in (
+                "unresolved_count",
+                "critical_unresolved_count",
+                "critical_conflict_count",
+            ):
+                extra_count += int(summary.get(key, 0) or 0)
+        return max(list_count, summary_count, extra_count)
 
     def _check_qoder_critical_false_facts(self) -> CheckResult:
         content_dir = self._find_content_dir()

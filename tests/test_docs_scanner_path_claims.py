@@ -102,3 +102,66 @@ def test_repo_path_exists_oserror_on_plausible_path_is_missing(tmp_path: Path, m
 
     monkeypatch.setattr(Path, "exists", wrapped)
     assert ds._repo_path_exists(tmp_path, "src/flask/app.py") is False
+
+
+def test_source_file_claim_rejects_slugs_git_refs_and_dotted_paths() -> None:
+    assert ds._is_source_file_claim("src/flask/app.py")
+    assert ds._is_source_file_claim("docs/ai_novel_agent_prd_architecture.md")
+    assert not ds._is_source_file_claim("bingooyong/ai-open-writing")
+    assert not ds._is_source_file_claim("origin/main")
+    assert not ds._is_source_file_claim("feat/annals-chronotope")
+    assert not ds._is_source_file_claim("353bcab..58c89e5")
+    assert not ds._is_source_file_claim("ctx.annals.applicable")
+    assert not ds._is_source_file_claim("sqlmodel.metadata.create_all")
+    assert not ds._is_source_file_claim("package.annals")
+    assert not ds._is_source_file_claim("16000/16000")
+    assert not ds._is_source_file_claim("novel.db")
+    assert not ds._is_source_file_claim(".env")
+    assert not ds._is_source_file_claim("/docs")
+    assert not ds._is_source_file_claim("/redoc")
+    assert not ds._is_source_file_claim("workflows/Tests/badge.svg")
+
+
+def test_extract_claims_skips_library_tokens_and_non_source_refs() -> None:
+    text = (
+        "Clone `bingooyong/ai-open-writing` from `origin/main` on "
+        "`feat/annals-chronotope` covering `353bcab..58c89e5`.\n"
+        "Use `sqlmodel`, `creative_model`, and `mock-model` with "
+        "`ctx.annals.applicable` and `sqlmodel.metadata.create_all`.\n"
+        "Copy `.env`, open `/docs` and `/redoc`, and store `novel.db`.\n"
+        "Progress `16000/16000`. See `src/ghost/service.py` and FutureService.\n"
+    )
+    names, path_like = _extract_claims(text)
+    assert "src/ghost/service.py" in path_like
+    assert "futureservice" in names
+    assert "bingooyong/ai-open-writing" not in path_like
+    assert "origin/main" not in path_like
+    assert "feat/annals-chronotope" not in path_like
+    assert "353bcab..58c89e5" not in path_like
+    assert "ctx.annals.applicable" not in path_like
+    assert "sqlmodel.metadata.create_all" not in path_like
+    assert "package.annals" not in path_like
+    assert "16000/16000" not in path_like
+    assert "novel.db" not in path_like
+    assert ".env" not in path_like
+    assert "/docs" not in path_like
+    assert "/redoc" not in path_like
+    assert "sqlmodel" not in names
+    assert "creative_model" not in names
+    assert "mock-model" not in names
+
+
+def test_casefold_existing_doc_is_not_stale(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "AI_Novel_Agent_PRD_Architecture.md").write_text(
+        "# Architecture\n", encoding="utf-8"
+    )
+    (tmp_path / "README.md").write_text(
+        "See `docs/ai_novel_agent_prd_architecture.md`.\n",
+        encoding="utf-8",
+    )
+    inv = scan_repository_docs_inventory(
+        tmp_path, _source_inventory(), incremental=False, persist_cache=False
+    )
+    readme = next(d for d in inv["documents"] if d["path"].endswith("README.md"))
+    assert "docs/ai_novel_agent_prd_architecture.md" not in readme["stale_references"]
