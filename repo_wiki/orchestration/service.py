@@ -34,7 +34,60 @@ from repo_wiki.orchestration.runtime_store import (
 from repo_wiki.retrieval.service import RetrievalService
 from repo_wiki.scanner.artifacts import has_frontend_wiki_surface, write_source_of_truth
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
+from repo_wiki.verifier.handbook import is_page_local_quality_rejection
 from repo_wiki.verifier.service import VerifierService
+
+_INSTALL_FENCE_COMMAND_PATTERNS = (
+    re.compile(r"docker(?:-|\s+)compose(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\buv\s+sync\b", re.I),
+    re.compile(r"\buv\s+run(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bnpm\s+install(?:\s+[A-Za-z0-9_@/-]+){0,4}", re.I),
+    re.compile(r"\bnpx\s+[A-Za-z0-9_@/-]+", re.I),
+    re.compile(r"\byarn\s+(?:install|dev|build)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bpnpm\s+(?:install|dev)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bpip(?:3)?\s+install(?:\s+[A-Za-z0-9_\[\]'\"=-]+){0,4}", re.I),
+    re.compile(r"\bpoetry\s+(?:install|run)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+)
+_INSTALL_ENV_CLUE_PATTERNS = (
+    re.compile(r"\bDATABASE_URL\b", re.I),
+    re.compile(r"\bPOSTGRES(?:QL)?\b", re.I),
+    re.compile(r"\bSQLITE3?\b", re.I),
+    re.compile(r"\bdocker(?:-|\s+)compose\b", re.I),
+    re.compile(r"\buv\s+sync\b", re.I),
+    re.compile(r"\bnpm\s+install\b", re.I),
+    re.compile(r"\bpip(?:3)?\s+install\b", re.I),
+    re.compile(r"\bpoetry\s+(?:install|run)\b", re.I),
+)
+
+
+def _fallback_install_env_clues(
+    snippets: list[str],
+    commands: list[str],
+    evidence: dict[str, Any],
+    binding: Any | None,
+) -> str:
+    blob_parts = [" ".join(snippets), " ".join(commands)]
+    for item in evidence.get("snippets") or []:
+        blob_parts.append(str(item.get("summary") or ""))
+    if binding and getattr(binding, "candidates", None):
+        for candidate in binding.candidates[:12]:
+            span = getattr(candidate, "span", None)
+            blob_parts.append(str(getattr(span, "span_text", "") or ""))
+    blob = "\n".join(blob_parts)
+    found: list[str] = []
+    seen: set[str] = set()
+    for pattern in _INSTALL_ENV_CLUE_PATTERNS:
+        match = pattern.search(blob)
+        if not match:
+            continue
+        token = " ".join(match.group(0).split())
+        key = token.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(token)
+    return "、".join(found)
+
 
 if TYPE_CHECKING:
     from repo_wiki.evidence.ranking import PageEvidenceBinding
@@ -411,7 +464,7 @@ class RepoWikiService:
 
         target_head_before = get_git_commit_full(self.root)
         target_git_commit, target_revision_source = resolve_revision_with_fallback(self.root)
-        target_dirty = is_git_dirty(self.root)
+        target_dirty = is_git_dirty(self.root, isolated_output=eval_profile.root)
         info(f"qoder-like generation started run_id={run_id} root={self.root}")
 
         info("stage scan started")
@@ -1155,9 +1208,11 @@ class RepoWikiService:
                 f"page_id={page.page_id} title={page.title}"
             )
             try:
+                # Envelope covers the original call plus one rewrite at the same
+                # per-call timeout. This does not raise the 180s page timeout.
                 output = await asyncio.wait_for(
                     composer.compose_page(job["input_data"]),
-                    timeout=page_timeout_seconds,
+                    timeout=page_timeout_seconds * 2 + 1.0,
                 )
                 info(
                     "llm page completed "
@@ -1196,7 +1251,8 @@ class RepoWikiService:
             page_idx = job["page_idx"]
 
             if result["status"] == "error":
-                note_provider_failure()
+                if not is_page_local_quality_rejection(str(result.get("reason") or "")):
+                    note_provider_failure()
                 write_fallback(page, binding, page_idx, str(result["reason"]))
                 return
 
@@ -1205,10 +1261,9 @@ class RepoWikiService:
             actual_tokens += output.tokens_used
 
             if output.rejected:
-                # Quality rejects after a successful HTTP 200 are page-local
-                # fallbacks, not provider outages. R10: 3× Insufficient prose
-                # must not consume the #49 circuit-break budget.
-                if output.rejection_reason != "Insufficient prose content":
+                # Quality rejects after a successful HTTP 200, and page LLM
+                # timeouts, are page-local fallbacks, not provider outages.
+                if not is_page_local_quality_rejection(output.rejection_reason):
                     note_provider_failure()
                 write_fallback(
                     page,
@@ -1479,143 +1534,371 @@ class RepoWikiService:
         )
         cache.record_regenerated_page()
 
+    def _fallback_cite(self, item: dict[str, Any]) -> str:
+        path = str(item.get("path") or "").strip()
+        if not path:
+            return ""
+        start = int(item.get("line_start") or 1)
+        end = int(item.get("line_end") or start)
+        if end != start:
+            return f"<cite>{path}:{start}-{end}</cite>"
+        return f"<cite>{path}:{start}</cite>"
+
+    def _fallback_page_blob(self, page: Any) -> str:
+        return " ".join(
+            [
+                str(getattr(page, "title", "") or ""),
+                str(getattr(page, "page_id", "") or ""),
+                " ".join(str(tag) for tag in (getattr(page, "tags", None) or [])),
+            ]
+        ).lower()
+
+    def _fallback_is_onboarding_page(self, page: Any) -> bool:
+        from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+        category = getattr(page, "category", None)
+        if category in {
+            WikiTaxonomyCategory.PROJECT_OVERVIEW,
+            WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
+            WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
+        }:
+            return True
+        blob = self._fallback_page_blob(page)
+        return any(
+            token in blob
+            for token in ("install", "安装", "quickstart", "快速开始", "getting-started", "setup")
+        )
+
+    def _fallback_is_install_page(self, page: Any) -> bool:
+        blob = self._fallback_page_blob(page)
+        return any(
+            token in blob
+            for token in (
+                "install",
+                "安装",
+                "quick-start",
+                "quickstart",
+                "quick_start",
+                "getting-started",
+                "setup",
+            )
+        )
+
+    def _fallback_empty_notice(self, title: str) -> list[str]:
+        return [
+            f"本页目前无法根据仓库内容写成可用的「{title}」说明。",
+            "",
+            "当前没有匹配到与本主题相关的文档或源码片段，因此这里不能描述项目是什么、怎样安装，"
+            "或怎样做访问控制。本页也不会列出并不存在于仓库证据中的文件路径。",
+            "",
+            "接手仓库的人需要先在仓库根目录自行查看现有文档、启动配置和源码。"
+            "在找到可核对的文件之前，请不要把本页当成安装、运行或安全方面的事实来源。",
+            "",
+            "这里留空是为了避免用其他项目的安装步骤或合规套话充数，而不是因为主题不重要。",
+        ]
+
+    def _fallback_snippet_paragraphs(
+        self, evidence: dict[str, Any], *, limit: int = 4
+    ) -> list[str]:
+        lines: list[str] = []
+        for item in (evidence.get("snippets") or [])[:limit]:
+            path = str(item.get("path") or "").strip()
+            summary = str(item.get("summary") or "").strip()
+            if not path or not summary:
+                continue
+            cite = self._fallback_cite(item)
+            symbol = str(item.get("symbol") or "").strip()
+            if symbol:
+                intro = f"仓库文件 `{path}` 中与 `{symbol}` 相关的原文如下。"
+            else:
+                intro = f"仓库文件 `{path}` 中的相关说明如下。"
+            if cite:
+                intro = f"{intro} {cite}"
+            lines.extend([intro, "", summary, ""])
+        return lines
+
+    def _fallback_related_files_section(self, evidence: dict[str, Any]) -> list[str]:
+        files = evidence.get("files") or []
+        if not files:
+            return []
+        lines = [
+            "## 可核对的文件",
+            "",
+            "下面这些路径来自本页已经绑定到的仓库文件，打开即可看到完整上下文。",
+            "",
+        ]
+        for item in files[:6]:
+            cite = self._fallback_cite(item)
+            symbol = str(item.get("symbol") or "").strip()
+            if not cite:
+                continue
+            if symbol:
+                lines.append(f"- {cite}（`{symbol}`）")
+            else:
+                lines.append(f"- {cite}")
+        lines.extend(
+            [
+                "",
+                "这些引用只用于跳转到仓库内的真实位置，并不表示本页对未摘录的内容做了额外推断。",
+                "",
+            ]
+        )
+        return lines
+
+    def _fallback_onboarding_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:
+        snippets = self._fallback_snippet_paragraphs(evidence)
+        lines = [
+            "## 这是什么",
+            "",
+            f"「{title}」面向刚接手本仓库的读者，说明这个项目是做什么的，以及怎样在本地跑起来。",
+            "下面只复述仓库文档和源码里已经出现的内容，不补充仓库之外的通用安装或架构说法。",
+            "",
+        ]
+        if snippets:
+            lines.extend(
+                [
+                    "根据仓库文档，项目说明与启动方式如下。",
+                    "",
+                    *snippets,
+                    "## 如何运行",
+                    "",
+                    "启动、依赖和测试步骤以上面的文档摘录为准。"
+                    "请按原文中的命令、环境变量和依赖核对本地环境，本页不另写一套未出现在仓库文档里的安装步骤。",
+                    "",
+                    "如果摘录是英文，含义仍以原文为准；中文段落只帮助定位该看哪一段。",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(self._fallback_empty_notice(title))
+            lines.append("")
+        lines.extend(self._fallback_related_files_section(evidence))
+        return lines
+
+    def _fallback_security_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:
+        snippets = self._fallback_snippet_paragraphs(evidence)
+        lines = [
+            "## 当前仓库里能看到的控制",
+            "",
+            f"「{title}」只描述源码或配置里实际出现的认证、授权或访问控制，"
+            "不套用通用合规清单，也不对未出现的审计、加密或认证框架下结论。",
+            "",
+        ]
+        if snippets:
+            lines.extend(
+                [
+                    "与本页相关的实现摘录如下。请按原文理解请求头、令牌或权限检查，不要把未出现的合规要求写进本页。",
+                    "",
+                    *snippets,
+                    "阅读时以引用文件中的实现为准。本页没有额外的安全承诺。",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(self._fallback_empty_notice(title))
+            lines.append("")
+        lines.extend(self._fallback_related_files_section(evidence))
+        return lines
+
+    def _fallback_topic_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:
+        snippets = self._fallback_snippet_paragraphs(evidence)
+        lines = [
+            "## 这是什么",
+            "",
+            f"「{title}」面向接手仓库的人，用来定位这个主题在仓库里的实现。",
+            "下面列出可核对位置，并摘录片段中的原话。本页不解释文档是如何生成的。",
+            "",
+        ]
+        if snippets:
+            lines.extend(snippets)
+        else:
+            lines.extend(self._fallback_empty_notice(title))
+            lines.append("")
+        lines.extend(self._fallback_related_files_section(evidence))
+        return lines
+
     def _fallback_markdown_for_failed_page(self, page: Any, binding: Any | None) -> str:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
 
         evidence = self._summarize_evidence_for_fallback(binding)
-        modules = ", ".join(evidence["modules"][:5]) if evidence["modules"] else "仓库根模块"
-        symbols = "、".join(evidence["symbols"][:6]) if evidence["symbols"] else page.title
-        file_count = len(evidence["files"])
+        title = str(getattr(page, "title", "") or "仓库说明")
+        if self._fallback_is_install_page(page):
+            body = self._fallback_install_markdown(title, evidence, binding)
+        elif self._fallback_is_onboarding_page(page):
+            body = self._fallback_onboarding_markdown(title, evidence)
+        elif getattr(page, "category", None) == WikiTaxonomyCategory.SECURITY_COMPLIANCE:
+            body = self._fallback_security_markdown(title, evidence)
+        else:
+            body = self._fallback_topic_markdown(title, evidence)
+        return "\n".join([f"# {title}", "", *body]).strip() + "\n"
 
-        category_intro = {
-            WikiTaxonomyCategory.PROJECT_OVERVIEW: "本页从项目定位、关键能力和入口文件解释仓库整体形态。",
-            WikiTaxonomyCategory.ARCHITECTURE_DESIGN: "本页从模块边界、调用关系和数据流解释系统架构。",
-            WikiTaxonomyCategory.CORE_SERVICES: "本页聚焦服务职责、核心组件和上下游协作。",
-            WikiTaxonomyCategory.PYTHON_SERVICES: "本页聚焦 Python 服务的运行入口、依赖和处理流程。",
-            WikiTaxonomyCategory.FRONTEND_APPLICATIONS: "本页聚焦前端应用结构、页面职责和后端接口依赖。",
-            WikiTaxonomyCategory.DATA_MODELS: "本页聚焦实体族、服务模型和持久化结构。",
-            WikiTaxonomyCategory.API_REFERENCE: "本页聚焦 API 服务族、调用约定和错误处理边界。",
-            WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS: "本页聚焦部署配置、运行环境和运维检查点。",
-            WikiTaxonomyCategory.DEVELOPMENT_GUIDE: "本页聚焦开发入口、命令约定和本地调试路径。",
-            WikiTaxonomyCategory.SECURITY_COMPLIANCE: "本页聚焦认证授权、审计记录和安全控制点。",
-            WikiTaxonomyCategory.TROUBLESHOOTING: "本页聚焦常见故障、定位线索和恢复策略。",
-        }.get(page.category, "本页基于仓库证据解释对应主题。")
+    def _fallback_readme_citation(self, evidence: dict[str, Any]) -> str:
+        from repo_wiki.verifier.handbook import _README_NAMES
 
+        for item in evidence.get("files") or []:
+            path = str(item.get("path") or "").strip()
+            if Path(path).name.lower() in {name.lower() for name in _README_NAMES}:
+                cite = self._fallback_cite(item)
+                if cite:
+                    return cite
+        for name in _README_NAMES:
+            if (self.root / name).is_file():
+                return f"<cite>{name}:1</cite>"
+        return ""
+
+    def _fallback_install_source_texts(
+        self, evidence: dict[str, Any], binding: Any | None, *, include_root_readme: bool
+    ) -> list[str]:
+        from repo_wiki.verifier.handbook import read_readme_text
+
+        texts: list[str] = []
+        if binding and getattr(binding, "candidates", None):
+            for candidate in binding.candidates[:12]:
+                span = getattr(candidate, "span", None)
+                text = str(getattr(span, "span_text", "") or "")
+                if text.strip():
+                    texts.append(text)
+        for item in evidence.get("snippets") or []:
+            summary = str(item.get("summary") or "").strip()
+            if summary:
+                texts.append(summary)
+        if include_root_readme:
+            readme = read_readme_text(self.root)
+            if readme.strip():
+                texts.append(readme)
+        return texts
+
+    def _fallback_collect_install_commands(self, texts: list[str]) -> list[str]:
+        commands: list[str] = []
+        seen: set[str] = set()
+        for text in texts:
+            for raw_line in text.splitlines() or [text]:
+                line = raw_line.strip().lstrip("$").strip()
+                if not line or line.startswith("#") or line.startswith(".."):
+                    continue
+                for pattern in _INSTALL_FENCE_COMMAND_PATTERNS:
+                    match = pattern.search(line)
+                    if not match:
+                        continue
+                    command = " ".join(match.group(0).split()).rstrip(".,;:)")
+                    if not command or len(command) > 120:
+                        continue
+                    key = command.casefold()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    commands.append(command)
+                    if len(commands) >= 6:
+                        return commands
+        return commands
+
+    def _fallback_install_run_commands(
+        self, evidence: dict[str, Any], binding: Any | None
+    ) -> list[str]:
+        bound = self._fallback_collect_install_commands(
+            self._fallback_install_source_texts(evidence, binding, include_root_readme=False)
+        )
+        if bound:
+            return bound
+        return self._fallback_collect_install_commands(
+            self._fallback_install_source_texts(evidence, binding, include_root_readme=True)
+        )
+
+    def _fallback_install_markdown(
+        self, title: str, evidence: dict[str, Any], binding: Any | None
+    ) -> list[str]:
+        snippets = self._fallback_snippet_paragraphs(evidence)
+        commands = self._fallback_install_run_commands(evidence, binding)
+        readme_cite = self._fallback_readme_citation(evidence)
+        cite_bit = f" {readme_cite}" if readme_cite else ""
+        env_clues = _fallback_install_env_clues(snippets, commands, evidence, binding)
         lines = [
-            f"# {page.title}",
+            "## 这是什么",
             "",
-            "## 简介",
-            "",
-            f"{category_intro} 该页面对应 `{page.page_id}`，当前由 repo-agent 的证据驱动 fallback composer 生成。",
-            f"生成器从 {file_count} 个相关源文件中抽取候选证据，重点覆盖 `{modules}` 等范围。",
-            "与普通索引页不同，本页会把证据位置、组件职责、调用边界和维护风险组织成可阅读的专题说明。",
-            "",
-            "## 项目结构",
-            "",
-            f"围绕 **{page.title}**，当前仓库中最相关的代码集中在 `{modules}`。",
-            f"证据排名显示，`{symbols}` 是阅读该主题时优先关注的符号或配置点。",
-            "这些文件共同构成页面主题的事实来源：上层说明只描述能被源码片段或配置片段支撑的内容。",
-            "",
-            "## 核心组件",
+            f"「{title}」面向刚接手本仓库的读者，按本页把项目安装并在本地跑起来。",
+            "下面只复述仓库文档里已经出现的依赖、命令和环境变量，不另写一套未出现在仓库里的步骤。",
+            f"核对原文时以入口文档为准。{cite_bit}".rstrip(),
             "",
         ]
-
-        if evidence["files"]:
-            for item in evidence["files"][:6]:
-                lines.append(
-                    f"- `{item['path']}`：关联符号 `{item['symbol']}`，覆盖第 {item['line_start']}-{item['line_end']} 行。"
-                )
+        if snippets:
+            lines.extend(
+                [
+                    "根据仓库文档，项目说明与启动方式如下。",
+                    "",
+                    *snippets,
+                ]
+            )
         else:
-            lines.append("- 当前页面没有匹配到高置信源码片段，后续需要补充扫描规则或页面规划规则。")
-
+            lines.extend(self._fallback_empty_notice(title))
+            lines.append("")
         lines.extend(
             [
+                "## 环境要求",
                 "",
-                "## 详细组件分析",
-                "",
-                "从证据片段看，本主题的实现通常不是单点文件完成，而是由入口、配置、模型和服务逻辑共同支撑。",
-                "阅读时应先确认入口文件，再追踪模型和服务层的引用关系，最后查看部署或测试文件中的运行约束。",
-                "如果某个符号同时出现在多个服务目录中，应优先把它理解为跨服务契约，而不是孤立类或函数。",
+                "动手前先对照仓库文档里写到的运行时、包管理器和外部依赖。"
+                "本页不补充文档没有出现的版本号或服务。",
                 "",
             ]
         )
-
-        for item in evidence["snippets"][:4]:
+        if env_clues:
+            lines.extend([f"当前证据里出现的环境线索：{env_clues}。", ""])
+        else:
             lines.extend(
                 [
-                    f"### {item['symbol']}",
-                    "",
-                    f"`{item['path']}` 的片段显示：{item['summary']}",
-                    "该证据用于限定本文的描述范围，避免生成与仓库无关的通用说明。",
+                    "当前证据没有单独列出环境版本；请打开根目录 README 核对语言、数据库和依赖。",
                     "",
                 ]
             )
-
-        if page.category == WikiTaxonomyCategory.API_REFERENCE:
+        lines.extend(["## 安装步骤", ""])
+        if commands:
             lines.extend(
                 [
-                    "## 依赖关系分析",
+                    "按仓库文档中的命令安装依赖并准备运行环境：",
                     "",
-                    "API 页面需要同时关注 controller/router、请求响应模型、认证拦截器和错误处理路径。",
-                    "服务族的 GET、POST、PUT、PATCH、DELETE 方法应被放在同一个业务流程中理解，避免只输出端点清单。",
-                    "当接口返回结构依赖 DTO 或 Entity 时，页面应跳转阅读对应的数据模型页，以确认字段生命周期和兼容性约束。",
-                    "",
-                    "## 性能考虑",
-                    "",
-                    "接口性能主要受鉴权、序列化、数据库访问和外部服务调用影响。若证据中出现批处理、分页或异步任务，"
-                    "应优先检查限流、超时和幂等策略。缺少这些约束时，后续实现需要补充 API 治理说明。",
-                    "",
-                ]
-            )
-        elif page.category == WikiTaxonomyCategory.DATA_MODELS:
-            lines.extend(
-                [
-                    "## 依赖关系分析",
-                    "",
-                    "数据模型页面需要区分核心实体、传输 DTO、配置 Schema 和迁移脚本。"
-                    "同名模型如果跨服务出现，应按业务语义归并，而不是把每个类都作为独立核心实体。",
-                    "字段解释应优先引用 Entity、migration 或 OpenAPI schema 中的来源。",
-                    "",
-                    "## 性能考虑",
-                    "",
-                    "模型性能关注索引、主键、外键、JSON 字段和序列化成本。"
-                    "当页面证据只来自 DTO 而缺少数据库定义时，应把该模型标记为服务边界模型，而不是持久化实体。",
+                    "```bash",
+                    *commands,
+                    "```",
                     "",
                 ]
             )
         else:
             lines.extend(
                 [
-                    "## 依赖关系分析",
-                    "",
-                    "该主题的依赖关系应从文件路径、符号引用和服务目录共同判断。"
-                    "如果证据集中在单一服务，说明该页面偏向服务内部知识；如果证据分布在多个服务，说明它更接近平台级能力。",
-                    "后续变更时，应优先检查这些证据文件是否发生修改，并据此决定页面是否需要增量重生成。",
-                    "",
-                    "## 性能考虑",
-                    "",
-                    "性能风险主要来自跨服务调用、批处理任务、扫描范围和运行时缓存。"
-                    "当页面涉及生成、索引或验证流程时，应额外关注是否存在全量重跑、重复 IO 或无法恢复的长任务。",
+                    "当前证据没有列出可复制的安装命令。请先打开根目录 README，"
+                    "按原文中的包管理器或容器步骤执行，不要用其他项目的安装命令充数。",
                     "",
                 ]
             )
-
+        lines.extend(["## 启动与验证", ""])
+        if commands:
+            lines.extend(
+                [
+                    "安装完成后用同一组仓库文档命令启动，并按原文检查服务是否起来。",
+                    "",
+                    "```bash",
+                    commands[0],
+                    "```",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "当前没有可复制的启动命令。启动方式以入口文档为准，本页不编造端口或健康检查。",
+                    "",
+                ]
+            )
         lines.extend(
             [
-                "## 故障排查指南",
+                "## 常见问题",
                 "",
-                "排查该主题时，建议按三步执行：先确认页面引用的文件是否仍存在，再检查相关符号是否改名或迁移，"
-                "最后对照运行命令、测试用例和配置文件确认行为是否发生变化。",
-                "如果生成结果与人工理解不一致，应优先扩展 evidence ranking，而不是只修改模板文案。",
+                "如果命令失败，先核对接线文档里的环境变量和依赖是否与当前机器一致，"
+                "再回到引用文件查看完整上下文。本页不把其他仓库的排错步骤写进来。",
                 "",
-                "## 结论",
-                "",
-                f"`{page.title}` 是当前仓库知识树中的一个可追溯专题页。"
-                "本页已提供源码证据、结构解释和维护检查点，可用于 IDE 插件浏览、人工验收和后续增量生成。",
             ]
         )
-
-        return "\n".join(lines)
+        lines.extend(self._fallback_related_files_section(evidence))
+        return lines
 
     def _summarize_evidence_for_fallback(self, binding: Any | None) -> dict[str, Any]:
         summary: dict[str, Any] = {
@@ -1661,6 +1944,8 @@ class RepoWikiService:
                         "path": path,
                         "symbol": symbol,
                         "summary": text,
+                        "line_start": getattr(span, "line_start", 1),
+                        "line_end": getattr(span, "line_end", 1),
                     }
                 )
 
@@ -1671,8 +1956,8 @@ class RepoWikiService:
         cleaned = re.sub(r"\s+", " ", cleaned)
         if not cleaned:
             return ""
-        if len(cleaned) > 180:
-            return cleaned[:177].rstrip() + "..."
+        if len(cleaned) > 360:
+            return cleaned[:357].rstrip() + "..."
         return cleaned
 
     def _page_requires_hard_mermaid(self, page: Any) -> bool:
@@ -1698,7 +1983,10 @@ class RepoWikiService:
         add_mermaid: bool,
         composition_context: Any | None = None,
     ) -> str:
-        from repo_wiki.evidence.citation_renderer import CitationRenderer
+        from repo_wiki.evidence.citation_renderer import (
+            CitationRenderer,
+            normalize_citation_markup,
+        )
         from repo_wiki.planner.schema import WikiTaxonomyCategory
 
         content = markdown.strip() or f"# {page.title}\n"
@@ -1790,8 +2078,15 @@ class RepoWikiService:
         citation_renderer = CitationRenderer(workspace_root=self.root)
         cites: list[str] = []
         if binding and binding.candidates:
-            for candidate in binding.candidates[:6]:
+            for candidate in binding.candidates[:8]:
                 cites.append(citation_renderer.render_cite_block_from_candidate(candidate))
+
+        content = self._strip_broken_local_markdown_links(content)
+        content = self._ensure_minimum_prose_density(content, page)
+        if cites:
+            from repo_wiki.generator.adjacent_cites import attach_adjacent_cites
+
+            content = attach_adjacent_cites(content, cites)
 
         existing_cites = len(self._CITE_PATTERN.findall(content))
         needed = max(0, 3 - existing_cites)
@@ -1800,10 +2095,9 @@ class RepoWikiService:
             for cite in cites[:needed]:
                 content += f"- {cite}\n"
 
-        content = self._strip_broken_local_markdown_links(content)
-        content = self._ensure_minimum_prose_density(content, page)
-
-        return content.strip() + "\n"
+        # CiteBlock.render() and leftover LLM markup can still carry
+        # ``path:start-end (label)`` after composer normalize; strip before write.
+        return normalize_citation_markup(content, self.root).strip() + "\n"
 
     def _evidence_backed_api_endpoints(
         self,
@@ -2123,7 +2417,7 @@ class RepoWikiService:
             paragraph = (
                 f"\n{page.title} 的阅读重点不是罗列文件，而是把源码证据、模块职责、调用边界和维护风险串联起来。"
                 "读者可以先查看目录确认主题范围，再根据源码引用定位实现位置，最后结合架构图或 schema 摘要判断变更影响。"
-                "如果页面来自 fallback 生成链路，它仍然保留证据绑定结果，但需要在后续优化中用真实 LLM 叙述替换保守说明。"
+                "阅读时请对照文中的源码引用核对实现，不要把未引用的通用说法当成本仓库事实。"
             )
             content += paragraph
             prose = self._count_prose_chars(content)

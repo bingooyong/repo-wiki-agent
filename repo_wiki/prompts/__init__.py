@@ -39,8 +39,9 @@ from repo_wiki.prompts.skeleton import (
     DEVELOPMENT_HEADING_CONTRACT,
     ENTITY_HEADING_CONTRACT,
     HEADING_CONTRACTS,
-    OPS_HEADING_CONTRACT,
     # Pre-defined contracts
+    INSTALL_HEADING_CONTRACT,
+    OPS_HEADING_CONTRACT,
     OVERVIEW_HEADING_CONTRACT,
     # Section keys
     SECTION_KEYS,
@@ -90,6 +91,7 @@ __all__ = [
     "HeadingSection",
     "HeadingContract",
     "OVERVIEW_HEADING_CONTRACT",
+    "INSTALL_HEADING_CONTRACT",
     "SERVICE_HEADING_CONTRACT",
     "API_HEADING_CONTRACT",
     "DATA_HEADING_CONTRACT",

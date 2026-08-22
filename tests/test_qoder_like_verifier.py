@@ -1243,6 +1243,50 @@ class TestG005SecondRoundVerifierClosure:
         result = QoderLikeVerifierService(run_dir, strict=True).verify(ci=True)
         assert "QODER_UNRESOLVED_FACT_CONFLICT" in result.get("hard_gate_codes", [])
 
+    def test_unresolved_conflict_count_does_not_double_summary_and_items(self, tmp_path):
+        payload = {
+            "schema_version": "source-docs-conflict-resolver-v1",
+            "summary": {
+                "resolved_count": 0,
+                "deferred_count": 31,
+                "flagged_count": 42,
+                "total_items": 73,
+            },
+            "resolved_items": [],
+            "deferred_items": [{"id": f"d{i}", "status": "deferred"} for i in range(31)],
+            "flagged_items": [{"id": f"f{i}", "status": "flagged"} for i in range(42)],
+        }
+        verifier = QoderLikeVerifierService(tmp_path, strict=True)
+        assert verifier._count_unresolved_conflicts(payload) == 73
+
+    def test_identical_reports_and_meta_conflict_copies_count_once(self, tmp_path):
+        run_dir, _, meta_dir = self._write_complete_run(tmp_path)
+        payload = {
+            "schema_version": "source-docs-conflict-resolver-v1",
+            "summary": {
+                "resolved_count": 0,
+                "deferred_count": 31,
+                "flagged_count": 42,
+                "total_items": 73,
+            },
+            "resolved_items": [],
+            "deferred_items": [{"id": f"d{i}", "status": "deferred"} for i in range(31)],
+            "flagged_items": [{"id": f"f{i}", "status": "flagged"} for i in range(42)],
+        }
+        encoded = json.dumps(payload)
+        (meta_dir / "source-docs-conflicts.json").write_text(encoded, encoding="utf-8")
+        reports = run_dir / "reports"
+        reports.mkdir(exist_ok=True)
+        (reports / "source-docs-conflicts.json").write_text(encoded, encoding="utf-8")
+        check = QoderLikeVerifierService(
+            run_dir, strict=True
+        )._check_qoder_unresolved_fact_conflicts()
+        assert check.status == "FAIL"
+        assert check.reason_code == "QODER_UNRESOLVED_FACT_CONFLICT"
+        artifacts = check.details.get("artifacts") or []
+        assert len(artifacts) == 1
+        assert artifacts[0]["unresolved_count"] == 73
+
     def test_owner_gap_fails_but_structured_unidentified_warning_passes(self, tmp_path):
         gap_dir, page, _ = self._write_complete_run(tmp_path / "gap")
         page.write_text(
@@ -1293,3 +1337,256 @@ class TestG005SecondRoundVerifierClosure:
         )
         result = QoderLikeVerifierService(run_dir, strict=True).verify(ci=True)
         assert "QODER_CRITICAL_FALSE_FACT" in result.get("hard_gate_codes", [])
+
+    def test_fastapi_readme_docs_urls_are_not_missing_inventory_routes(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        (run_dir / "README.md").write_text(
+            "# Conduit\n\nFastAPI RealWorld example.\n"
+            "Interactive API docs are at /docs and ReDoc at /redoc.\n",
+            encoding="utf-8",
+        )
+        page.write_text(
+            page.read_text(encoding="utf-8")
+            + "\nOperators open GET /docs and GET /redoc for the auto-generated schema.\n"
+            + "The same FastAPI process also serves /docs and /redoc without route files.\n"
+            + "<cite>source:src/app.py:20</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+
+    def test_fastapi_unmatched_api_claim_still_false_fact(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        (run_dir / "README.md").write_text(
+            "# Conduit\n\nFastAPI RealWorld example. Docs live at /docs.\n",
+            encoding="utf-8",
+        )
+        page.write_text(
+            page.read_text(encoding="utf-8")
+            + "\nGET /api/does-not-exist is a product route.\n"
+            + "<cite>source:src/app.py:21</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "FAIL"
+        assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
+        claims = [item.get("claim") for item in check.details.get("offenders", [])]
+        assert "GET /api/does-not-exist" in claims
+
+    def test_path_param_name_alias_matches_inventory(self, tmp_path):
+        run_dir, page, meta_dir = self._write_complete_run(tmp_path)
+        (meta_dir / "api-inventory.json").write_text(
+            json.dumps(
+                {
+                    "endpoints": [
+                        {"method": "GET", "path": "/health", "public": True},
+                        {"method": "DELETE", "path": "/api/articles/{slug}"},
+                        {"method": "POST", "path": "/projects/{project_id}/run-volume"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        page.write_text(
+            page.read_text(encoding="utf-8")
+            + "\nDELETE /api/articles/{slug} removes a published article.\n"
+            + "POST /projects/{id}/run-volume starts volume generation.\n"
+            + "<cite>source:src/app.py:22</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+
+    def test_api_mount_prefix_claim_matches_inventory(self, tmp_path):
+        run_dir, page, meta_dir = self._write_complete_run(tmp_path)
+        (meta_dir / "api-inventory.json").write_text(
+            json.dumps(
+                {
+                    "endpoints": [
+                        {"method": "GET", "path": "/health", "public": True},
+                        {"method": "POST", "path": "/api/users/login"},
+                        {"method": "POST", "path": "/api/users"},
+                        {"method": "POST", "path": "/api/profiles/{username}/follow"},
+                        {"method": "GET", "path": "/api/articles/feed"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        page.write_text(
+            page.read_text(encoding="utf-8")
+            + "\nPOST /users/login authenticates a Conduit user.\n"
+            + "POST /users registers a new account.\n"
+            + "POST /profiles/{username}/follow subscribes to another author.\n"
+            + "GET /articles/feed returns the authenticated home feed.\n"
+            + "POST /api/users/login is the same mounted login route.\n"
+            + "<cite>source:src/app.py:22</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+
+    def test_api_mount_prefix_missing_route_still_false_fact(self, tmp_path):
+        run_dir, page, meta_dir = self._write_complete_run(tmp_path)
+        (meta_dir / "api-inventory.json").write_text(
+            json.dumps(
+                {
+                    "endpoints": [
+                        {"method": "GET", "path": "/health", "public": True},
+                        {"method": "POST", "path": "/api/users/login"},
+                        {"method": "POST", "path": "/api/users"},
+                        {"method": "POST", "path": "/api/profiles/{username}/follow"},
+                        {"method": "GET", "path": "/api/articles/feed"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        page.write_text(
+            page.read_text(encoding="utf-8")
+            + "\nPOST /users/does-not-exist is a product route.\n"
+            + "GET /profiles/{username}/follow is the wrong method.\n"
+            + "<cite>source:src/app.py:23</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "FAIL"
+        assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
+        claims = [item.get("claim") for item in check.details.get("offenders", [])]
+        assert "POST /users/does-not-exist" in claims
+        assert "GET /profiles/{username}/follow" in claims
+
+    def test_api_claim_in_inventory_mount_prefix_and_trailing_param(self, tmp_path):
+        verifier = QoderLikeVerifierService(tmp_path, strict=True)
+        apis = {
+            ("POST", "/api/users/login"),
+            ("POST", "/api/users"),
+            ("POST", "/api/profiles/{username}/follow"),
+            ("GET", "/api/articles/feed"),
+        }
+        assert verifier._api_claim_in_inventory("POST", "/users/login", apis)
+        assert verifier._api_claim_in_inventory("POST", "/api/users/login", apis)
+        assert verifier._api_claim_in_inventory("POST", "/users", apis)
+        assert verifier._api_claim_in_inventory("GET", "/articles/feed", apis)
+        assert verifier._api_claim_in_inventory("POST", "/profiles/{username}/follow", apis)
+        assert verifier._api_claim_in_inventory("POST", "/api/profiles/{username}/follow", apis)
+        assert not verifier._api_claim_in_inventory("POST", "/users/does-not-exist", apis)
+        assert not verifier._api_claim_in_inventory("GET", "/users/login", apis)
+        assert not verifier._api_claim_in_inventory("POST", "/users/login/extra", apis)
+
+    def test_github_actions_service_options_is_not_a_product_service(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        content_dir = page.parent.parent
+        ci_page = content_dir / "部署运维" / "CI／CD流水线.md"
+        ci_page.parent.mkdir(parents=True)
+        ci_page.write_text(
+            "# CI/CD\n\n"
+            "GitHub Actions service options run the Postgres healthcheck.\n"
+            "A bare options token on this CI page is the compose healthcheck flag.\n"
+            "```yaml\nservices:\n  postgres:\n    options: --health-cmd pg_isready\n```\n"
+            "<cite>source:src/app.py:22</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+
+    def test_github_actions_job_and_options_on_ops_page_are_not_product_services(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        content_dir = page.parent.parent
+        ops_page = content_dir / "部署运维.md"
+        ops_page.write_text(
+            "# 部署运维\n\n"
+            "The GitHub Actions job service uses postgres:11.5-alpine in conduit.yml.\n"
+            "The same workflow service options field sets --health-cmd pg_isready.\n"
+            "jobs, steps, needs, and runner tokens describe the workflow, not Conduit.\n"
+            "<cite>source:src/app.py:22</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+        offenders = check.details.get("offenders", [])
+        assert not any(
+            item.get("claim") in {"job", "options", "uses", "workflow"} for item in offenders
+        )
+
+    def test_unmatched_app_module_service_claim_still_false_fact(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        content_dir = page.parent.parent
+        app_page = content_dir / "核心服务" / "用户服务.md"
+        app_page.parent.mkdir(parents=True)
+        app_page.write_text(
+            "# 用户服务\n\n"
+            "The ghost-ledger service handles account authentication for Conduit.\n"
+            "<cite>source:src/app.py:23</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "FAIL"
+        assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
+        claims = [item.get("claim") for item in check.details.get("offenders", [])]
+        assert any("ghost-ledger" in str(claim) for claim in claims)
+
+    def test_unmatched_articles_service_on_app_api_page_still_false_fact(self, tmp_path):
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        content_dir = page.parent.parent
+        app_page = content_dir / "核心服务" / "articles-api.md"
+        app_page.parent.mkdir(parents=True)
+        app_page.write_text(
+            "# Articles API\n\n"
+            "The articles service stores posts and comments for Conduit readers.\n"
+            "<cite>source:src/app.py:24</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "FAIL"
+        assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
+        claims = [item.get("claim") for item in check.details.get("offenders", [])]
+        assert "articles" in claims
+
+    def test_scanner_alias_source_inventory_is_not_missing_required_inventories(self, tmp_path):
+        """api_surfaces/data_models/kind-only services must populate required inventories."""
+        run_dir, _, meta_dir = self._write_complete_run(tmp_path)
+        for path in meta_dir.glob("*inventory*.json"):
+            if path.name != "source-inventory.json":
+                path.unlink()
+        service_registry = meta_dir / "service-registry.json"
+        if service_registry.exists():
+            service_registry.unlink()
+        (meta_dir / "source-inventory.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "repo_agent.source_inventory/1.0",
+                    "services": [
+                        {
+                            "kind": "python_fastapi_app",
+                            "evidence_path": "app/main.py",
+                        }
+                    ],
+                    "api_surfaces": [
+                        {"method": "POST", "path": "/api/users/login"},
+                        {"method": "GET", "path": "/api/articles"},
+                    ],
+                    "data_models": [{"name": "User"}],
+                    "relationships": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        verifier = QoderLikeVerifierService(run_dir, strict=True)
+        inventories = verifier._load_structured_inventory_sets()
+        missing = [
+            name
+            for name in ("sources", "apis", "services", "models", "runtimes")
+            if not inventories[name]
+        ]
+        assert missing == [], missing
+        assert ("POST", "/api/users/login") in inventories["apis"]
+        assert "User" in inventories["models"]
+        assert "app/main.py" in inventories["runtimes"]
+        result = verifier.verify(ci=True)
+        assert "QODER_REQUIRED_INVENTORY_MISSING" not in result.get("hard_gate_codes", [])

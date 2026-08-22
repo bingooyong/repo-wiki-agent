@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from repo_wiki.generator.composer import create_composer
+from repo_wiki.generator.composer import (
+    EMPTY_COMPOSER_STUB_PHRASE,
+    create_composer,
+    is_empty_composer_markdown,
+)
 from repo_wiki.verifier.qoder_strict_verifier import QoderLikeSeverityThreshold
 
 
@@ -70,3 +74,21 @@ def test_qoder_page_dump_remains_hard() -> None:
     """Do not weaken QODER_PAGE_DUMP to hide leftover think dumps."""
     threshold = QoderLikeSeverityThreshold()
     assert threshold.is_blocking("QODER_PAGE_DUMP") is True
+
+
+def test_think_only_normalize_is_empty_not_pass_stub() -> None:
+    """Think-only LLM output must not become the historic titled stub."""
+    composer = create_composer()
+    raw = "<think>\n" + ("planning the install page. " * 40) + "\n</think>\n"
+    page = composer._normalize_markdown_response(raw, "安装指南")
+
+    assert page == ""
+    assert EMPTY_COMPOSER_STUB_PHRASE not in page
+    assert is_empty_composer_markdown(page)
+
+
+def test_historic_empty_stub_is_empty_content() -> None:
+    stub = f"# 安装指南\n\n{EMPTY_COMPOSER_STUB_PHRASE}."
+    assert is_empty_composer_markdown(stub)
+    assert is_empty_composer_markdown("")
+    assert not is_empty_composer_markdown("# 安装指南\n\n设置 DATABASE_URL 后启动。\n")

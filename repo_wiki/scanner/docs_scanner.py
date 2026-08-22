@@ -255,8 +255,100 @@ def _flatten_source_tokens(source_inventory: dict[str, Any]) -> tuple[set[str], 
     return names, paths
 
 
+_PLANNING_FILENAMES = frozenset({"handoff.md", "verification-report.md"})
+_PLANNING_DIR_PARTS = frozenset({".omc", ".superpowers", "superpowers", "sdd"})
+_CAMEL_INVENTORY_NAME = re.compile(r"[A-Z][A-Za-z0-9]*(?:Service|Model|API|Api|Router)$")
+_SNAKE_KEBAB_INVENTORY_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*[-_](?:service|api|router)$")
+# Whole-token libraries whose names happen to end with API/Model (not *Service).
+_LIBRARY_INVENTORY_TOKENS = frozenset({"fastapi", "sqlmodel"})
+_SOURCE_DIR_PREFIXES = ("src/", "app/", "repo_wiki/", "docs/", "tests/")
+_SOURCE_FILE_EXTS = frozenset(
+    {
+        ".py",
+        ".pyi",
+        ".pyx",
+        ".md",
+        ".markdown",
+        ".rst",
+        ".txt",
+        ".adoc",
+        ".asciidoc",
+        ".json",
+        ".yml",
+        ".yaml",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".conf",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".mjs",
+        ".cjs",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".kts",
+        ".c",
+        ".h",
+        ".cc",
+        ".cpp",
+        ".hpp",
+        ".cs",
+        ".rb",
+        ".php",
+        ".swift",
+        ".sql",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".xml",
+        ".html",
+        ".css",
+        ".scss",
+        ".vue",
+        ".svelte",
+        ".proto",
+        ".graphql",
+        ".lock",
+    }
+)
+_NON_SOURCE_FILE_EXTS = frozenset(
+    {
+        ".env",
+        ".db",
+        ".sqlite",
+        ".sqlite3",
+        ".svg",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".ico",
+        ".pdf",
+        ".zip",
+    }
+)
+_GIT_REMOTE_FIRST = frozenset({"origin", "upstream", "head"})
+
+
+def _is_planning_doc_path(rel: str) -> bool:
+    """True for agent/planning trees that are not current product docs."""
+    r = _normalize_rel_path(rel).lower()
+    name = Path(r).name
+    if name in _PLANNING_FILENAMES:
+        return True
+    parts = Path(r).parts
+    return any(part in _PLANNING_DIR_PARTS for part in parts)
+
+
 def _classify_doc_type(rel: str, text: str) -> str:
-    r = rel.lower()
+    r = rel.lower().replace("\\", "/")
+    if _is_planning_doc_path(rel):
+        return "planning"
     if Path(rel).name.lower().startswith("readme"):
         return "readme"
     if "changelog" in r or "release-notes" in r:
@@ -276,6 +368,43 @@ def _classify_doc_type(rel: str, text: str) -> str:
     if re.search(r"^#\s*api\b", text, flags=re.I | re.M):
         return "api"
     return "overview"
+
+
+def _is_inventory_shaped_name(token: str) -> bool:
+    """True for product service/API/model/router names, not library identifiers."""
+    t = token.strip()
+    if len(t) < 4:
+        return False
+    if t.casefold() in _LIBRARY_INVENTORY_TOKENS:
+        return False
+    if _CAMEL_INVENTORY_NAME.search(t):
+        return True
+    return _SNAKE_KEBAB_INVENTORY_NAME.search(t) is not None
+
+
+def _is_source_file_claim(value: str) -> bool:
+    """True when a claim looks like a repo-relative source/doc file, not a slug/ref."""
+    raw = value.strip().replace("\\", "/")
+    if not raw or not _is_plausible_rel_path(raw):
+        return False
+    if raw.startswith("/") or raw.startswith("~") or "://" in raw:
+        return False
+    if ".." in raw:
+        return False
+    parts = [p for p in raw.split("/") if p]
+    if not parts or all(p.isdigit() for p in parts):
+        return False
+    if parts[0].lower() in _GIT_REMOTE_FIRST:
+        return False
+    suffix = Path(parts[-1]).suffix.lower()
+    if suffix in _NON_SOURCE_FILE_EXTS:
+        return False
+    lowered = raw.lower()
+    if any(lowered.startswith(prefix) for prefix in _SOURCE_DIR_PREFIXES):
+        return True
+    if "/" not in raw:
+        return suffix in _SOURCE_FILE_EXTS
+    return suffix in _SOURCE_FILE_EXTS
 
 
 def _authority_for_type(doc_type: str) -> tuple[str, float]:
@@ -302,6 +431,11 @@ def _specificity(text: str) -> float:
 
 
 _PLAUSIBLE_REL_PATH = re.compile(r"^[A-Za-z0-9_./\\-]+$")
+_HTTP_URL = re.compile(r"https?://[^\s<>\]`'\"|]+", re.IGNORECASE)
+# Do not treat `example-app/blob/...` GitHub URL tails as repo path `app/blob/...`.
+_REPO_REL_PATH_PREFIX = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:src|app|repo_wiki|docs|tests)/[A-Za-z0-9_./-]+"
+)
 
 
 def _is_plausible_rel_path(value: str) -> bool:
@@ -310,9 +444,38 @@ def _is_plausible_rel_path(value: str) -> bool:
         return False
     if "\0" in value or "\n" in value or "\r" in value:
         return False
+    if value.startswith("/") or value.startswith("\\"):
+        return False
+    if ".." in value:
+        return False
     if not _PLAUSIBLE_REL_PATH.fullmatch(value):
         return False
     return "/" in value or "\\" in value or "." in value
+
+
+def _repo_path_exists_casefold(repo_root: Path, rel: str) -> bool:
+    """Walk path components case-insensitively; ambiguous matches are missing."""
+    current = repo_root
+    for part in Path(rel).parts:
+        if not current.is_dir():
+            return False
+        try:
+            children = list(current.iterdir())
+        except OSError:
+            return False
+        exact = [child for child in children if child.name == part]
+        if len(exact) == 1:
+            current = exact[0]
+            continue
+        folded = part.casefold()
+        matches = [child for child in children if child.name.casefold() == folded]
+        if len(matches) != 1:
+            return False
+        current = matches[0]
+    try:
+        return current.exists()
+    except OSError:
+        return False
 
 
 def _repo_path_exists(repo_root: Path, rel: str) -> bool:
@@ -320,7 +483,12 @@ def _repo_path_exists(repo_root: Path, rel: str) -> bool:
     if not _is_plausible_rel_path(rel):
         return False
     try:
-        return (repo_root / rel).exists()
+        if (repo_root / rel).exists():
+            return True
+    except OSError:
+        return False
+    try:
+        return _repo_path_exists_casefold(repo_root, rel)
     except OSError:
         return False
 
@@ -328,16 +496,18 @@ def _repo_path_exists(repo_root: Path, rel: str) -> bool:
 def _extract_claims(text: str) -> tuple[set[str], set[str]]:
     service_like: set[str] = set()
     path_like: set[str] = set()
-    for m in re.findall(r"`([^`]+)`", text):
-        if _is_plausible_rel_path(m):
+    text_without_urls = _HTTP_URL.sub(" ", text)
+    for m in re.findall(r"`([^`]+)`", text_without_urls):
+        if _is_source_file_claim(m):
             path_like.add(m.lower())
         for token in re.findall(r"[A-Za-z_][A-Za-z0-9_-]{2,}", m):
+            if _is_inventory_shaped_name(token):
+                service_like.add(token.lower())
+    for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_-]{2,}\b", text_without_urls):
+        if _is_inventory_shaped_name(token):
             service_like.add(token.lower())
-    for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_-]{2,}\b", text):
-        if token.lower().endswith(("service", "api", "model", "router")):
-            service_like.add(token.lower())
-    for p in re.findall(r"\b(?:src|app|repo_wiki|docs|tests)/[A-Za-z0-9_./-]+\b", text):
-        if _is_plausible_rel_path(p):
+    for p in _REPO_REL_PATH_PREFIX.findall(text_without_urls):
+        if _is_source_file_claim(p):
             path_like.add(p.lower())
     return service_like, path_like
 
@@ -580,7 +750,9 @@ class DocumentationScanner:
                 [
                     p
                     for p in claim_paths
-                    if p not in paths and not _repo_path_exists(self.repo_root, p)
+                    if p not in paths
+                    and _is_source_file_claim(p)
+                    and not _repo_path_exists(self.repo_root, p)
                 ]
             )
             conflicting_claims = sorted(

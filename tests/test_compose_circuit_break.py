@@ -23,6 +23,7 @@ from repo_wiki.llm.models import (
     ChatResponse,
     ErrorCode,
     LLMProvider,
+    NonRetryableError,
     ProviderCapabilities,
     RetryableError,
 )
@@ -81,6 +82,14 @@ def _retryable_529() -> RetryableError:
     )
 
 
+def _auth_1004() -> NonRetryableError:
+    return NonRetryableError(
+        message="Authentication failed: 1004",
+        code=ErrorCode.AUTH_FAILURE,
+        details={"status": 1004},
+    )
+
+
 def _success_response() -> ChatResponse:
     return ChatResponse(content=SUCCESS_MARKDOWN, model="mock-gpt")
 
@@ -130,6 +139,54 @@ class CircuitBreak529Provider(LLMProvider):
                 self._fail_fast_gate.set()
             await self._fail_fast_gate.wait()
             raise _retryable_529()
+        self._hang_count += 1
+        await request_never_returns()
+        raise AssertionError("hang path must be cancelled, not return")
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
+class CircuitBreakAuthProvider(LLMProvider):
+    """Immediate auth 1004 for a budget of calls, then hang (cancelled by page timeout)."""
+
+    def __init__(self, fail_fast_limit: int) -> None:
+        self._fail_fast_limit = fail_fast_limit
+        self._call_count = 0
+        self._hang_count = 0
+        self._fail_fast_started = 0
+        self._fail_fast_gate = asyncio.Event()
+        self._config = LLMProviderConfig(
+            provider="mock",
+            model="mock-gpt",
+            timeout=PAGE_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+
+    @property
+    def name(self) -> str:
+        return "circuit-break-auth-1004-fake"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities()
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    @property
+    def hang_count(self) -> int:
+        return self._hang_count
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        self._call_count += 1
+        if self._call_count <= self._fail_fast_limit:
+            self._fail_fast_started += 1
+            if self._fail_fast_started >= self._fail_fast_limit:
+                self._fail_fast_gate.set()
+            await self._fail_fast_gate.wait()
+            raise _auth_1004()
         self._hang_count += 1
         await request_never_returns()
         raise AssertionError("hang path must be cancelled, not return")
@@ -210,7 +267,7 @@ class InsufficientProseThenHealthyProvider(LLMProvider):
 
 
 class Always529Provider(LLMProvider):
-    """Immediate 529 on every chat — a real provider-outage signal."""
+    """Immediate 529 on every chat — page-local rewrite, not a run-wide outage."""
 
     def __init__(self) -> None:
         self._call_count = 0
@@ -236,6 +293,38 @@ class Always529Provider(LLMProvider):
     async def chat(self, request: ChatRequest) -> ChatResponse:
         self._call_count += 1
         raise _retryable_529()
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
+class AlwaysAuth1004Provider(LLMProvider):
+    """Immediate MiniMax-style auth 1004 on every chat — hard provider disable."""
+
+    def __init__(self) -> None:
+        self._call_count = 0
+        self._config = LLMProviderConfig(
+            provider="mock",
+            model="mock-gpt",
+            timeout=PAGE_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+
+    @property
+    def name(self) -> str:
+        return "always-auth-1004-fake"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities()
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        self._call_count += 1
+        raise _auth_1004()
 
     def validate_config(self) -> list[tuple[str, str | None, str]]:
         return []
@@ -268,6 +357,41 @@ class AlwaysEmptyContentProvider(LLMProvider):
     async def chat(self, request: ChatRequest) -> ChatResponse:
         self._call_count += 1
         return ChatResponse(content="", model="mock-gpt")
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
+class TimeoutOnceThenHealthyProvider(LLMProvider):
+    """First chat hangs; the rewrite call and later pages succeed."""
+
+    def __init__(self) -> None:
+        self._call_count = 0
+        self._config = LLMProviderConfig(
+            provider="mock",
+            model="mock-gpt",
+            timeout=PAGE_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+
+    @property
+    def name(self) -> str:
+        return "timeout-once-fake"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities()
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        self._call_count += 1
+        if self._call_count == 1:
+            await request_never_returns()
+            raise AssertionError("timeout path must be cancelled, not return")
+        return _success_response()
 
     def validate_config(self) -> list[tuple[str, str | None, str]]:
         return []
@@ -435,7 +559,7 @@ async def test_circuit_break_skips_remaining_pages_without_timeout_wait(
     root.mkdir()
     output_dir = compose_env / "run"
     output_dir.mkdir()
-    provider = CircuitBreak529Provider(fail_fast_limit=MAX_FAILURES)
+    provider = CircuitBreakAuthProvider(fail_fast_limit=MAX_FAILURES)
     service = _service(root)
     _install_provider(monkeypatch, service, provider)
 
@@ -504,6 +628,46 @@ async def test_healthy_provider_composes_all_pages(
 
 
 @pytest.mark.asyncio
+async def test_page_529_then_rewrite_is_not_degraded(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One page 529 is a page-local rewrite, not a DEGRADED fallback or circuit-break."""
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    provider = Single529ThenHealthyProvider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, provider)
+
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+    states = [meta["quality_state"] for meta in result["page_metadata"]]
+    modes = [meta["generation_mode"] for meta in result["page_metadata"]]
+    disabled_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "provider disabled after" in reason
+    ]
+
+    assert llm["provider_disabled_after_failures"] is False
+    assert llm["fallback_page_count"] == 0
+    assert "DEGRADED" not in states
+    assert modes.count("fallback") == 0
+    assert modes.count("llm") == PAGE_COUNT
+    assert not disabled_reasons
+    assert provider.call_count == PAGE_COUNT + 1
+    assert llm["llm_call_count"] == PAGE_COUNT
+
+
+@pytest.mark.asyncio
 async def test_single_529_does_not_disable_provider(
     compose_env: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -526,10 +690,10 @@ async def test_single_529_does_not_disable_provider(
     modes = [meta["generation_mode"] for meta in result["page_metadata"]]
 
     assert llm["provider_disabled_after_failures"] is False
-    assert llm["fallback_page_count"] == 1
-    assert modes.count("fallback") == 1
-    assert modes.count("llm") == PAGE_COUNT - 1
-    assert provider.call_count == PAGE_COUNT
+    assert llm["fallback_page_count"] == 0
+    assert modes.count("fallback") == 0
+    assert modes.count("llm") == PAGE_COUNT
+    assert provider.call_count == PAGE_COUNT + 1
 
 
 @pytest.mark.asyncio
@@ -543,7 +707,7 @@ async def test_insufficient_prose_rejects_do_not_trip_circuit_breaker(
     root.mkdir()
     output_dir = compose_env / "run"
     output_dir.mkdir()
-    provider = InsufficientProseThenHealthyProvider(reject_count=3)
+    provider = InsufficientProseThenHealthyProvider(reject_count=6)
     service = _service(root)
     _install_provider(monkeypatch, service, provider)
 
@@ -570,7 +734,7 @@ async def test_insufficient_prose_rejects_do_not_trip_circuit_breaker(
 
     assert llm["max_provider_failures"] == 3
     assert llm["provider_disabled_after_failures"] is False
-    assert provider.call_count == PAGE_COUNT
+    assert provider.call_count == PAGE_COUNT + 3
     assert llm["llm_call_count"] == PAGE_COUNT
     assert llm["fallback_page_count"] == 3
     assert len(prose_rejects) == 3
@@ -580,17 +744,56 @@ async def test_insufficient_prose_rejects_do_not_trip_circuit_breaker(
 
 
 @pytest.mark.asyncio
-async def test_three_consecutive_529s_still_trip_circuit_breaker(
+async def test_page_529_twice_stays_degraded_without_circuit_break(
     compose_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#49: three real provider 529s still consume the failure budget."""
+    """Two 529s on a page stay DEGRADED and must not disable sibling LLM pages."""
     monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
     root = compose_env / "repo"
     root.mkdir()
     output_dir = compose_env / "run"
     output_dir.mkdir()
     provider = Always529Provider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, provider)
+
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+    states = [meta["quality_state"] for meta in result["page_metadata"]]
+    disabled_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "provider disabled after" in reason
+    ]
+
+    assert llm["max_provider_failures"] == 3
+    assert llm["provider_disabled_after_failures"] is False
+    assert provider.call_count == PAGE_COUNT * 2
+    assert llm["llm_call_count"] == PAGE_COUNT
+    assert llm["fallback_page_count"] == PAGE_COUNT
+    assert states == ["DEGRADED"] * PAGE_COUNT
+    assert not disabled_reasons
+
+
+@pytest.mark.asyncio
+async def test_auth_1004_still_trips_circuit_breaker(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hard auth disable (MiniMax 1004) still consumes the failure budget."""
+    monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    provider = AlwaysAuth1004Provider()
     service = _service(root)
     _install_provider(monkeypatch, service, provider)
 
@@ -618,11 +821,11 @@ async def test_three_consecutive_529s_still_trip_circuit_breaker(
 
 
 @pytest.mark.asyncio
-async def test_three_consecutive_empty_content_failures_still_trip_circuit_breaker(
+async def test_empty_content_rejects_do_not_trip_circuit_breaker(
     compose_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#49: three empty-content provider failures still disable later LLM calls."""
+    """Empty assistant content is page-local, like insufficient prose, not a 529 outage."""
     monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
     root = compose_env / "repo"
     root.mkdir()
@@ -639,27 +842,73 @@ async def test_three_consecutive_empty_content_failures_still_trip_circuit_break
         output_dir=output_dir,
     )
     llm = result["llm"]
-
-    assert llm["max_provider_failures"] == 3
-    assert llm["provider_disabled_after_failures"] is True
-    assert provider.call_count == 3
-    assert provider.call_count < PAGE_COUNT
-    assert llm["fallback_page_count"] == PAGE_COUNT
     disabled_reasons = [
         reason
         for meta in result["page_metadata"]
         for reason in meta["reasons"]
         if "provider disabled after" in reason
     ]
-    assert disabled_reasons
+
+    assert llm["max_provider_failures"] == 3
+    assert llm["provider_disabled_after_failures"] is False
+    assert provider.call_count == PAGE_COUNT * 2
+    assert llm["llm_call_count"] == PAGE_COUNT
+    assert llm["fallback_page_count"] == PAGE_COUNT
+    assert not disabled_reasons
 
 
 @pytest.mark.asyncio
-async def test_three_consecutive_timeouts_still_trip_circuit_breaker(
+async def test_page_timeout_then_rewrite_is_not_degraded(
     compose_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#49: three page timeouts still disable later LLM calls."""
+    """One page timeout is a page-local rewrite, not a DEGRADED fallback."""
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    provider = TimeoutOnceThenHealthyProvider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, provider)
+
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+    states = [meta["quality_state"] for meta in result["page_metadata"]]
+    modes = [meta["generation_mode"] for meta in result["page_metadata"]]
+    timeout_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "LLM page timeout" in reason
+    ]
+    disabled_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "provider disabled after" in reason
+    ]
+
+    assert llm["provider_disabled_after_failures"] is False
+    assert llm["fallback_page_count"] == 0
+    assert "DEGRADED" not in states
+    assert modes.count("fallback") == 0
+    assert not timeout_reasons
+    assert not disabled_reasons
+    assert provider.call_count == PAGE_COUNT + 1
+    assert llm["llm_call_count"] == PAGE_COUNT
+
+
+@pytest.mark.asyncio
+async def test_page_timeout_twice_stays_degraded_without_circuit_break(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two timeouts on a page stay DEGRADED and must not disable sibling LLM pages."""
     monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
     root = compose_env / "repo"
     root.mkdir()
@@ -676,16 +925,24 @@ async def test_three_consecutive_timeouts_still_trip_circuit_breaker(
         output_dir=output_dir,
     )
     llm = result["llm"]
-
-    assert llm["max_provider_failures"] == 3
-    assert llm["provider_disabled_after_failures"] is True
-    assert provider.call_count == 3
-    assert provider.call_count < PAGE_COUNT
-    assert llm["fallback_page_count"] == PAGE_COUNT
+    states = [meta["quality_state"] for meta in result["page_metadata"]]
+    timeout_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "LLM page timeout" in reason
+    ]
     disabled_reasons = [
         reason
         for meta in result["page_metadata"]
         for reason in meta["reasons"]
         if "provider disabled after" in reason
     ]
-    assert disabled_reasons
+
+    assert llm["max_provider_failures"] == 3
+    assert llm["provider_disabled_after_failures"] is False
+    assert provider.call_count == PAGE_COUNT * 2
+    assert llm["fallback_page_count"] == PAGE_COUNT
+    assert states == ["DEGRADED"] * PAGE_COUNT
+    assert timeout_reasons
+    assert not disabled_reasons
