@@ -195,14 +195,60 @@ def repo_run_clue_names(repo_root: Path) -> tuple[str, ...]:
     return tuple(name for name, pattern in _INSTALL_CLUE_PATTERNS if pattern.search(blob))
 
 
+def _install_clue_patterns(
+    repo_root: Path | None = None,
+) -> tuple[tuple[str, re.Pattern[str]], ...]:
+    if repo_root is None:
+        return _INSTALL_CLUE_PATTERNS
+    present = set(repo_run_clue_names(repo_root))
+    return tuple(item for item in _INSTALL_CLUE_PATTERNS if item[0] in present)
+
+
 def install_run_clue_count(markdown: str, repo_root: Path | None = None) -> int:
     """Count how-to-run clues on a page, preferring this repo's README/scripts."""
-    if repo_root is None:
-        patterns = _INSTALL_CLUE_PATTERNS
-    else:
-        present = set(repo_run_clue_names(repo_root))
-        patterns = tuple(item for item in _INSTALL_CLUE_PATTERNS if item[0] in present)
-    return sum(1 for _name, pattern in patterns if pattern.search(markdown))
+    return sum(
+        1 for _name, pattern in _install_clue_patterns(repo_root) if pattern.search(markdown)
+    )
+
+
+def iter_fenced_code_bodies(markdown: str) -> list[str]:
+    """Return fenced code bodies, skipping mermaid diagrams."""
+    bodies: list[str] = []
+    in_fence = False
+    lang = ""
+    buf: list[str] = []
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            if not in_fence:
+                in_fence = True
+                info = stripped[3:].strip()
+                lang = info.split()[0].lower() if info else ""
+                buf = []
+            else:
+                if lang != "mermaid":
+                    bodies.append("\n".join(buf))
+                in_fence = False
+                lang = ""
+                buf = []
+            continue
+        if in_fence:
+            buf.append(line)
+    return bodies
+
+
+def has_fenced_install_run_command(markdown: str, repo_root: Path | None = None) -> bool:
+    """True when at least one fenced block body matches an install/run clue.
+
+    Inline backticks such as `` `uv sync` `` do not count.
+    """
+    patterns = _install_clue_patterns(repo_root)
+    if not patterns:
+        return False
+    for body in iter_fenced_code_bodies(markdown):
+        if any(pattern.search(body) for _name, pattern in patterns):
+            return True
+    return False
 
 
 def has_readme_citation(markdown: str, readme_names: tuple[str, ...]) -> bool:

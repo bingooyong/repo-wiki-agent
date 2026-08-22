@@ -541,6 +541,62 @@ def _handbook_compact_prompt(page, binding=None) -> str:
     return composer._build_compact_prompt(composer_input, composer._build_context(composer_input))
 
 
+def test_install_compact_prompt_uses_handbook_outline_not_essay() -> None:
+    from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+    prompt = _handbook_compact_prompt(
+        _handbook_page("installation", "安装指南", WikiTaxonomyCategory.PROJECT_OVERVIEW)
+    )
+    assert "## 这是什么" in prompt
+    assert "## 环境要求" in prompt
+    assert "## 安装步骤" in prompt
+    assert "## 启动与验证" in prompt
+    assert "## 常见问题" in prompt
+    assert "```bash" in prompt or "```sh" in prompt
+    assert "编号" in prompt
+    assert "## 详细分析" not in prompt
+    assert "## 性能考虑" not in prompt
+    assert "## 结论" not in prompt
+    assert "简介必须使用" not in prompt
+    assert "产品身份" in prompt
+    assert "README" in prompt and "<cite>" in prompt
+
+
+def test_quickstart_compact_prompt_uses_handbook_outline() -> None:
+    from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+    prompt = _handbook_compact_prompt(
+        _handbook_page("quick-start", "快速开始", WikiTaxonomyCategory.PROJECT_OVERVIEW)
+    )
+    assert "## 安装步骤" in prompt
+    assert "## 详细分析" not in prompt
+
+
+def test_build_composer_input_uses_install_skeleton_for_install_page() -> None:
+    from repo_wiki.generator.composer import build_composer_input
+    from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+    page = _handbook_page("installation", "安装指南", WikiTaxonomyCategory.PROJECT_OVERVIEW)
+    composer_input = build_composer_input(page, None, _handbook_context())
+    assert composer_input.skeleton.page_type == "install"
+    heading_keys = [section.key for section in composer_input.skeleton.headings]
+    assert "安装步骤" in heading_keys
+    assert "详细分析" not in heading_keys
+    assert "简介" not in heading_keys
+
+
+def test_api_compact_prompt_keeps_essay_outline() -> None:
+    from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+    prompt = _handbook_compact_prompt(
+        _handbook_page("core-service-apis", "核心服务API", WikiTaxonomyCategory.API_REFERENCE)
+    )
+    assert "## 详细分析" in prompt
+    assert "## 性能考虑" in prompt
+    assert "## 结论" in prompt
+    assert "## 安装步骤" not in prompt
+
+
 def test_overview_compact_prompt_requires_readme_same_line_cite() -> None:
     from repo_wiki.planner.schema import WikiTaxonomyCategory
 
@@ -549,6 +605,8 @@ def test_overview_compact_prompt_requires_readme_same_line_cite() -> None:
     )
     assert "README" in prompt and "<cite>" in prompt
     assert "同行" in prompt or "同一行" in prompt or "下一行" in prompt
+    assert "## 这是什么" in prompt
+    assert "## 详细分析" not in prompt
 
 
 def test_api_compact_prompt_requires_routes_cite_when_routes_evidence_exists() -> None:

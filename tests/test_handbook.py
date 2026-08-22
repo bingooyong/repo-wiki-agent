@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from repo_wiki.verifier.handbook import contains_generator_meta
+from repo_wiki.verifier.handbook import contains_generator_meta, has_fenced_install_run_command
 from repo_wiki.verifier.qoder_strict_verifier import (
     QoderLikeSeverityThreshold,
     QoderLikeVerifierService,
@@ -14,8 +14,14 @@ HANDBOOK_HARD_CODES = (
     "QODER_HANDBOOK_GENERATOR_META",
     "QODER_HANDBOOK_OVERVIEW_IDENTITY",
     "QODER_HANDBOOK_INSTALL_RUN",
+    "QODER_HANDBOOK_INSTALL_FENCE",
     "QODER_HANDBOOK_API_ROUTE_FILE",
 )
+
+
+def test_has_fenced_install_run_command_ignores_inline_backticks() -> None:
+    assert has_fenced_install_run_command("先 `uv sync` 再启动。") is False
+    assert has_fenced_install_run_command("# 安装\n\n```bash\nuv sync\n```\n") is True
 
 
 def test_contains_generator_meta_detects_fallback_composer() -> None:
@@ -48,6 +54,7 @@ def test_handbook_hard_codes_are_registered_strict(tmp_path: Path) -> None:
     assert "qoder-handbook-generator-meta" in names
     assert "qoder-handbook-overview-identity" in names
     assert "qoder-handbook-install-run" in names
+    assert "qoder-handbook-install-fence" in names
     assert "qoder-handbook-api-route-file" in names
 
 
@@ -214,6 +221,44 @@ def test_install_run_passes_with_uv_and_npm_from_readme(tmp_path: Path) -> None:
     result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_install_run()
     assert result.status == "PASS"
     assert result.reason_code != "QODER_HANDBOOK_INSTALL_RUN"
+
+
+def test_install_fence_fails_with_only_inline_backticks(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text(
+        "# Novel Agent\n\n```bash\nuv sync\nuv run novel serve\ncd writing-desk && npm install\n```\n",
+        encoding="utf-8",
+    )
+    _write_page(
+        tmp_path,
+        "installation.md",
+        "# 安装指南\n\n先 `uv sync`，再 `npm install` 启动 writing-desk。"
+        " <cite>README.md:3-8</cite>\n",
+    )
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_install_fence()
+    assert result.status == "FAIL"
+    assert result.reason_code == "QODER_HANDBOOK_INSTALL_FENCE"
+
+
+def test_install_fence_passes_with_fenced_uv_sync(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text(
+        "# Novel Agent\n\n```bash\nuv sync\nuv run novel serve\ncd writing-desk && npm install\n```\n",
+        encoding="utf-8",
+    )
+    _write_page(
+        tmp_path,
+        "installation.md",
+        "# 安装指南\n\n先同步依赖。 <cite>README.md:3-8</cite>\n\n```bash\nuv sync\n```\n",
+    )
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_install_fence()
+    assert result.status == "PASS"
+    assert result.reason_code != "QODER_HANDBOOK_INSTALL_FENCE"
+
+
+def test_install_fence_skips_when_absent(tmp_path: Path) -> None:
+    _write_page(tmp_path, "unrelated.md", "# Other\n")
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_install_fence()
+    assert result.status == "PASS"
+    assert result.reason_code != "QODER_HANDBOOK_INSTALL_FENCE" or "Skip" in result.message
 
 
 def test_install_run_fails_when_page_only_says_clone(tmp_path: Path) -> None:

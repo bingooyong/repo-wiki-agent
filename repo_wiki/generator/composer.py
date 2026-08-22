@@ -79,6 +79,82 @@ _PROSE_RECOVERY_REASONS = frozenset(
     }
 )
 
+_HANDBOOK_ONBOARDING_PAGE_IDS = frozenset(
+    {
+        "project-overview",
+        "installation",
+        "quick-start",
+        "quickstart",
+        "getting-started",
+    }
+)
+_HANDBOOK_ONBOARDING_HEADINGS = (
+    "## 这是什么",
+    "## 环境要求",
+    "## 安装步骤",
+    "## 启动与验证",
+    "## 常见问题",
+)
+_HANDBOOK_ONBOARDING_STRUCTURE = """推荐结构：
+## 这是什么
+用产品身份说明仓库是什么、读者按本页做完后能得到什么。不要用仓库 slug 或通用 api-server 表述代替产品名。
+
+## 环境要求
+列出仓库文档里出现的运行时、语言版本、包管理器和外部依赖。证据不足时写「当前证据显示」。
+
+## 安装步骤
+使用编号步骤。每一步若涉及命令，必须给出可复制的 ```bash 或 ```sh 围栏，不要只把命令写在行内反引号里。
+
+## 启动与验证
+给出启动命令和如何确认服务已起来（同样优先围栏命令）。
+
+## 常见问题
+只写仓库证据里能核对的失败点或配置坑。不要写「详细分析」「性能考虑」「结论」。
+"""
+_ESSAY_RECOMMENDED_STRUCTURE = """推荐结构：
+## 简介
+说明本页主题在仓库中的职责和边界。
+
+## 项目结构
+说明相关目录、文件和模块如何组织。
+
+## 核心组件
+按证据列出关键类、函数、配置或 API。
+
+## 详细分析
+解释调用关系、数据流或模型关系。
+
+## 依赖关系分析
+说明上下游依赖与变更影响。
+
+## 性能考虑
+指出可能的性能、缓存、批处理或 IO 风险。
+
+## 故障排查指南
+给出基于源码位置的排查步骤。
+
+## 结论
+总结该页面对理解仓库的价值。
+"""
+
+
+def is_handbook_onboarding_page(page: WikiPagePlan) -> bool:
+    """True for overview / install / quick-start / setup handbook pages."""
+    page_id = (page.page_id or "").lower()
+    tags = {str(tag).lower() for tag in (page.tags or [])}
+    if page_id in _HANDBOOK_ONBOARDING_PAGE_IDS:
+        return True
+    if page.category in {
+        WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
+        WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
+    } and any(
+        token in page_id for token in ("overview", "install", "quick-start", "quickstart", "setup")
+    ):
+        return True
+    return bool(tags & {"installation", "setup", "quick-start", "quickstart", "getting-started"})
+
+
 # =============================================================================
 # COMPOSER CONTRACTS AND RESULTS
 # =============================================================================
@@ -574,13 +650,24 @@ class LLMPageComposer:
         compact_evidence = self._build_compact_recovery_evidence(input.evidence_binding)
         previous_for_prompt = self._strip_fenced_blocks(previous)[:1200]
         product = (context.get("product_description") or "").strip() or "（未解析到产品描述）"
+        if is_handbook_onboarding_page(input.page_plan):
+            fence_rule = (
+                "禁止把源码证据原文整段放进 Markdown 代码围栏（```）；"
+                "安装/运行命令必须保留或补成可复制的 ```bash 或 ```sh 围栏，不要只写行内反引号；"
+                "禁止 mermaid 堆砌替代正文；围栏必须成对闭合。\n"
+                "安装步骤用编号列表；每一步若有命令，该步必须含独立围栏。"
+            )
+        else:
+            fence_rule = (
+                "禁止把证据原文整段放进 Markdown 代码围栏（```）；"
+                "禁止 mermaid 或围栏堆砌替代正文；围栏必须成对闭合。\n"
+                "列表只能作附录检查项，不能充当正文。"
+            )
         return (
             f"请重写 Wiki 页「{title}」为段落为主的中文 Markdown。\n"
             f"产品身份：{product}\n"
             "禁止空回复，不要返回空正文；必须写出至少两段可读段落，不能只回标题或空白。\n"
-            "禁止把证据原文整段放进 Markdown 代码围栏（```）；"
-            "禁止 mermaid 或围栏堆砌替代正文；围栏必须成对闭合。\n"
-            "列表只能作附录检查项，不能充当正文。"
+            f"{fence_rule}"
             "每个事实句的 `<cite>` 必须写在该句同一行或下一行。不要解释过程。\n\n"
             f"精简证据（仅路径与短摘录，不要复述源码围栏）：\n{compact_evidence}\n\n"
             f"上次草稿（已去掉代码围栏与 mermaid）：\n{previous_for_prompt or '（空）'}\n"
@@ -622,28 +709,7 @@ class LLMPageComposer:
         )
 
     def _is_handbook_overview_or_install(self, page: WikiPagePlan) -> bool:
-        page_id = (page.page_id or "").lower()
-        tags = {str(tag).lower() for tag in (page.tags or [])}
-        if page_id in {
-            "project-overview",
-            "installation",
-            "quick-start",
-            "quickstart",
-            "getting-started",
-        }:
-            return True
-        if page.category in {
-            WikiTaxonomyCategory.PROJECT_OVERVIEW,
-            WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
-            WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
-        } and any(
-            token in page_id
-            for token in ("overview", "install", "quick-start", "quickstart", "setup")
-        ):
-            return True
-        return bool(
-            tags & {"installation", "setup", "quick-start", "quickstart", "getting-started"}
-        )
+        return is_handbook_onboarding_page(page)
 
     def _evidence_has_api_routes(self, binding: PageEvidenceBinding | None) -> bool:
         if binding is None:
@@ -656,18 +722,27 @@ class LLMPageComposer:
 
     def _handbook_cite_rules(self, input: ComposerInput) -> str:
         page = input.page_plan
-        rules: list[str] = [
-            "- 每个事实句的 `<cite>` 必须写在该句同一行或下一行（同行 / 下一行），"
-            "不要把引用只堆在文末「源码引用」列表里。",
-            "- 正文必须用段落解释；列表只用于核心组件或检查项。"
-            "列表行不计入 prose 下限，不要用子弹列表充当整页正文。",
-            "- 不要把证据原文整段放进 Markdown 代码围栏；围栏不能替代段落正文。",
-        ]
-        if self._is_handbook_overview_or_install(page):
-            rules.append(
+        onboarding = is_handbook_onboarding_page(page)
+        if onboarding:
+            rules: list[str] = [
+                "- 每个事实句的 `<cite>` 必须写在该句同一行或下一行（同行 / 下一行），"
+                "不要把引用只堆在文末「源码引用」列表里。",
+                "- 正文必须用段落解释；安装步骤用编号列表，不要用子弹列表充当整页正文。"
+                "列表行不计入 prose 下限。",
+                "- 不要把源码证据原文整段放进 Markdown 代码围栏。"
+                "安装/运行命令必须写成可复制的 ```bash 或 ```sh 围栏，"
+                "禁止只把命令写在行内反引号里；围栏不能替代段落说明。",
                 "- 概述/安装页：README 证据的 `<cite>` 必须写在论断的同一行或下一行"
-                "（same-line / next-line），不要把 README 引用甩到段落很远的地方。"
-            )
+                "（same-line / next-line），不要把 README 引用甩到段落很远的地方。",
+            ]
+        else:
+            rules = [
+                "- 每个事实句的 `<cite>` 必须写在该句同一行或下一行（同行 / 下一行），"
+                "不要把引用只堆在文末「源码引用」列表里。",
+                "- 正文必须用段落解释；列表只用于核心组件或检查项。"
+                "列表行不计入 prose 下限，不要用子弹列表充当整页正文。",
+                "- 不要把证据原文整段放进 Markdown 代码围栏；围栏不能替代段落正文。",
+            ]
         if page.category == WikiTaxonomyCategory.API_REFERENCE and self._evidence_has_api_routes(
             input.evidence_binding
         ):
@@ -679,10 +754,23 @@ class LLMPageComposer:
 
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         page = input.page_plan
-        required_headings = [
-            section.heading_text for section in input.skeleton.headings if section.required
-        ]
-        headings_text = "\n".join(f"- {heading}" for heading in required_headings[:6])
+        onboarding = is_handbook_onboarding_page(page)
+        if onboarding:
+            headings_text = "\n".join(f"- {heading}" for heading in _HANDBOOK_ONBOARDING_HEADINGS)
+            recommended_structure = _HANDBOOK_ONBOARDING_STRUCTURE
+            identity_slot = "「这是什么」"
+            list_rule = (
+                "- 使用段落解释为主；安装步骤必须用编号步骤，"
+                "每一步若有命令则该步必须含 ```bash 或 ```sh 围栏。"
+            )
+        else:
+            required_headings = [
+                section.heading_text for section in input.skeleton.headings if section.required
+            ]
+            headings_text = "\n".join(f"- {heading}" for heading in required_headings[:6])
+            recommended_structure = _ESSAY_RECOMMENDED_STRUCTURE
+            identity_slot = "简介"
+            list_rule = "- 使用段落解释为主，列表只用于核心组件或检查项。"
         evidence_context = (
             self._build_evidence_context(input.evidence_binding)
             if input.evidence_binding and input.evidence_binding.candidates
@@ -711,7 +799,7 @@ class LLMPageComposer:
 页面类型：{page.category.value}
 页面 ID：{page.page_id}
 仓库名称：{repository_name}
-产品身份（必须写入简介，优先于仓库 slug 或通用 api-server/core-platform 表述）：
+产品身份（必须写入{identity_slot}，优先于仓库 slug 或通用 api-server/core-platform 表述）：
 {product_description}
 相关模块：{modules}
 相关 API：{endpoints}
@@ -724,9 +812,9 @@ class LLMPageComposer:
 - 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
 - 至少保留 3 个 `<cite>` 引用，格式为仓库相对路径加行号范围，例如 `<cite>src/app.py:1-10</cite>`。
 {self._root_readme_cite_rule()}
-{handbook_cite_rules}- 使用段落解释为主，列表只用于核心组件或检查项。
+{handbook_cite_rules}{list_rule}
 - 如果证据不足，明确写”当前证据显示”，不要过度推断。
-- 简介必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
+- {identity_slot}必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
 {api_quality_rules}
 
 {self._build_low_confidence_guidance(input)}
@@ -737,30 +825,7 @@ class LLMPageComposer:
 源码证据：
 {evidence_context}
 
-推荐结构：
-## 简介
-说明本页主题在仓库中的职责和边界。
-
-## 项目结构
-说明相关目录、文件和模块如何组织。
-
-## 核心组件
-按证据列出关键类、函数、配置或 API。
-
-## 详细分析
-解释调用关系、数据流或模型关系。
-
-## 依赖关系分析
-说明上下游依赖与变更影响。
-
-## 性能考虑
-指出可能的性能、缓存、批处理或 IO 风险。
-
-## 故障排查指南
-给出基于源码位置的排查步骤。
-
-## 结论
-总结该页面对理解仓库的价值。
+{recommended_structure}
 """
 
     def _compact_snippet(self, text: str, max_chars: int = 180) -> str:
@@ -1135,9 +1200,11 @@ def build_composer_input(
     doc_type = _category_to_doc_type(page_plan.category)
     contract = get_contract_for_page_type(PagePromptType(doc_type))
 
-    # Build skeleton
+    # Install / quick-start / overview onboarding pages use handbook headings,
+    # not the essay 简介/详细分析 skeleton inherited from PROJECT_OVERVIEW.
+    skeleton_type = "install" if is_handbook_onboarding_page(page_plan) else doc_type
     skeleton = build_skeleton(
-        doc_type,
+        skeleton_type,
         page_plan.title,
         repository_name=context.repository_name,
     )

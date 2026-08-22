@@ -24,6 +24,7 @@ from repo_wiki.verifier.handbook import (
     existing_readme_names,
     find_matching_pages,
     has_api_routes_citation,
+    has_fenced_install_run_command,
     has_readme_citation,
     install_run_clue_count,
     iter_markdown_pages,
@@ -76,6 +77,7 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_GENERATOR_META",
         "QODER_HANDBOOK_OVERVIEW_IDENTITY",
         "QODER_HANDBOOK_INSTALL_RUN",
+        "QODER_HANDBOOK_INSTALL_FENCE",
         "QODER_HANDBOOK_API_ROUTE_FILE",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -205,6 +207,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_generator_meta(),
             self._check_handbook_overview_identity(),
             self._check_handbook_install_run(),
+            self._check_handbook_install_fence(),
             self._check_handbook_api_route_file(),
         ]
 
@@ -2316,6 +2319,30 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-install-run",
             "Installation page includes runnable clues and README citation",
+        )
+
+    def _check_handbook_install_fence(self) -> CheckResult:
+        pages = find_matching_pages(
+            self._find_content_dir(), ("installation", "安装指南", "安装与配置")
+        )
+        if not pages:
+            return self._skip_check("qoder-handbook-install-fence", "Installation page absent")
+        repo_root = self._handbook_repo_root()
+        offenders: list[str] = []
+        for page in pages:
+            text = page.read_text(encoding="utf-8", errors="ignore")
+            if not has_fenced_install_run_command(text, repo_root):
+                offenders.append(page.as_posix())
+        if offenders:
+            return self._handbook_fail(
+                "qoder-handbook-install-fence",
+                "QODER_HANDBOOK_INSTALL_FENCE",
+                "Installation page missing a fenced install/run command block",
+                {"pages": offenders},
+            )
+        return self._handbook_pass(
+            "qoder-handbook-install-fence",
+            "Installation page includes a fenced install/run command",
         )
 
     def _check_handbook_api_route_file(self) -> CheckResult:
