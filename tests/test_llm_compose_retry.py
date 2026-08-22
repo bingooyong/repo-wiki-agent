@@ -6,6 +6,7 @@ import pytest
 
 from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 from repo_wiki.generator.composer import (
+    EMPTY_COMPOSER_STUB_PHRASE,
     ComposerContext,
     build_composer_input,
     create_composer,
@@ -23,6 +24,7 @@ from repo_wiki.llm.models import (
 from repo_wiki.llm.retry import RetryConfig
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
+from repo_wiki.verifier.handbook import EMPTY_CONTENT_REJECTION
 
 SUCCESS_MARKDOWN = "# Sample Page\n\nRetried LLM content with enough prose for validation."
 
@@ -268,6 +270,47 @@ async def test_compose_page_does_not_retry_nonempty_content(
     assert output.rejected is False
     assert "LLM composer did not return content" not in output.markdown
     assert provider.call_count == 1
+
+
+def _think_only_response() -> ChatResponse:
+    return ChatResponse(
+        content="<think>\n" + ("planning the install page. " * 40) + "\n</think>\n",
+        model="mock-gpt",
+        usage={"prompt_tokens": 80, "completion_tokens": 5200, "total_tokens": 5280},
+    )
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_think_only_once(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    """Think-only HTTP 200 is a page-local rewrite, not a PASS stub."""
+    provider = SequenceLLMProvider([_think_only_response(), _paragraph_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert EMPTY_COMPOSER_STUB_PHRASE not in output.markdown
+    assert provider.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_compose_page_rejects_think_only_after_one_recovery(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_think_only_response(), _think_only_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is True
+    assert output.rejection_reason == EMPTY_CONTENT_REJECTION
+    assert EMPTY_COMPOSER_STUB_PHRASE not in output.markdown
+    assert provider.call_count == 2
 
 
 LIST_HEAVY_MARKDOWN = """# Sample Page

@@ -253,3 +253,40 @@ def test_fastapi_leftover_readme_tokens_are_not_stale(tmp_path: Path) -> None:
     report = resolve_source_docs_conflicts(_source_inventory(), inv)
     assert report["deferred_items"] == []
     assert report["flagged_items"] == []
+
+
+def test_fastapi_readme_badge_url_tails_are_not_stale(tmp_path: Path) -> None:
+    """GitHub badge URL tails such as app/blob/master/license must not be stale refs."""
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text("app = True\n", encoding="utf-8")
+    (tmp_path / "README.rst").write_text(
+        "FastAPI RealWorld example\n"
+        "=========================\n\n"
+        ".. image:: https://github.com/nsidnev/fastapi-realworld-example-app/workflows/API/badge.svg\n"
+        "   :target: https://github.com/nsidnev/fastapi-realworld-example-app/actions?query=workflow%3AAPI\n\n"
+        ".. image:: https://img.shields.io/github/license/nsidnev/fastapi-realworld-example-app.svg\n"
+        "   :target: https://github.com/nsidnev/fastapi-realworld-example-app/blob/master/LICENSE\n\n"
+        "The handler lives in ``app/main.py``.\n"
+        "The removed module was ``src/legacy/gone.py``.\n",
+        encoding="utf-8",
+    )
+    inv = scan_repository_docs_inventory(
+        tmp_path, _source_inventory(), incremental=False, persist_cache=False
+    )
+    readme = next(doc for doc in inv["documents"] if doc["path"].startswith("README"))
+    stale = set(readme["stale_references"])
+    assert "app/blob/master/license" not in stale
+    assert "app/workflows/api" not in stale
+    assert "app/workflows/api/badge.svg" not in stale
+    assert "app/main.py" not in stale
+    assert "src/legacy/gone.py" in stale
+    report = resolve_source_docs_conflicts(_source_inventory(), inv)
+    evidence = {
+        item
+        for bucket in (report["flagged_items"], report["deferred_items"])
+        for row in bucket
+        for item in row.get("evidence", [])
+    }
+    assert "app/blob/master/license" not in evidence
+    assert "app/workflows/api" not in evidence
+    assert "src/legacy/gone.py" in evidence

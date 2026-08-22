@@ -37,6 +37,58 @@ from repo_wiki.scanner.repository_scanner import RepositoryScanner
 from repo_wiki.verifier.handbook import is_page_local_quality_rejection
 from repo_wiki.verifier.service import VerifierService
 
+_INSTALL_FENCE_COMMAND_PATTERNS = (
+    re.compile(r"docker(?:-|\s+)compose(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\buv\s+sync\b", re.I),
+    re.compile(r"\buv\s+run(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bnpm\s+install(?:\s+[A-Za-z0-9_@/-]+){0,4}", re.I),
+    re.compile(r"\bnpx\s+[A-Za-z0-9_@/-]+", re.I),
+    re.compile(r"\byarn\s+(?:install|dev|build)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bpnpm\s+(?:install|dev)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bpip(?:3)?\s+install(?:\s+[A-Za-z0-9_\[\]'\"=-]+){0,4}", re.I),
+    re.compile(r"\bpoetry\s+(?:install|run)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+)
+_INSTALL_ENV_CLUE_PATTERNS = (
+    re.compile(r"\bDATABASE_URL\b", re.I),
+    re.compile(r"\bPOSTGRES(?:QL)?\b", re.I),
+    re.compile(r"\bSQLITE3?\b", re.I),
+    re.compile(r"\bdocker(?:-|\s+)compose\b", re.I),
+    re.compile(r"\buv\s+sync\b", re.I),
+    re.compile(r"\bnpm\s+install\b", re.I),
+    re.compile(r"\bpip(?:3)?\s+install\b", re.I),
+    re.compile(r"\bpoetry\s+(?:install|run)\b", re.I),
+)
+
+
+def _fallback_install_env_clues(
+    snippets: list[str],
+    commands: list[str],
+    evidence: dict[str, Any],
+    binding: Any | None,
+) -> str:
+    blob_parts = [" ".join(snippets), " ".join(commands)]
+    for item in evidence.get("snippets") or []:
+        blob_parts.append(str(item.get("summary") or ""))
+    if binding and getattr(binding, "candidates", None):
+        for candidate in binding.candidates[:12]:
+            span = getattr(candidate, "span", None)
+            blob_parts.append(str(getattr(span, "span_text", "") or ""))
+    blob = "\n".join(blob_parts)
+    found: list[str] = []
+    seen: set[str] = set()
+    for pattern in _INSTALL_ENV_CLUE_PATTERNS:
+        match = pattern.search(blob)
+        if not match:
+            continue
+        token = " ".join(match.group(0).split())
+        key = token.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(token)
+    return "、".join(found)
+
+
 if TYPE_CHECKING:
     from repo_wiki.evidence.ranking import PageEvidenceBinding
     from repo_wiki.llm.config import LLMProviderConfig
@@ -1492,6 +1544,15 @@ class RepoWikiService:
             return f"<cite>{path}:{start}-{end}</cite>"
         return f"<cite>{path}:{start}</cite>"
 
+    def _fallback_page_blob(self, page: Any) -> str:
+        return " ".join(
+            [
+                str(getattr(page, "title", "") or ""),
+                str(getattr(page, "page_id", "") or ""),
+                " ".join(str(tag) for tag in (getattr(page, "tags", None) or [])),
+            ]
+        ).lower()
+
     def _fallback_is_onboarding_page(self, page: Any) -> bool:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
 
@@ -1502,16 +1563,25 @@ class RepoWikiService:
             WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
         }:
             return True
-        blob = " ".join(
-            [
-                str(getattr(page, "title", "") or ""),
-                str(getattr(page, "page_id", "") or ""),
-                " ".join(str(tag) for tag in (getattr(page, "tags", None) or [])),
-            ]
-        ).lower()
+        blob = self._fallback_page_blob(page)
         return any(
             token in blob
             for token in ("install", "安装", "quickstart", "快速开始", "getting-started", "setup")
+        )
+
+    def _fallback_is_install_page(self, page: Any) -> bool:
+        blob = self._fallback_page_blob(page)
+        return any(
+            token in blob
+            for token in (
+                "install",
+                "安装",
+                "quick-start",
+                "quickstart",
+                "quick_start",
+                "getting-started",
+                "setup",
+            )
         )
 
     def _fallback_empty_notice(self, title: str) -> list[str]:
@@ -1652,13 +1722,183 @@ class RepoWikiService:
 
         evidence = self._summarize_evidence_for_fallback(binding)
         title = str(getattr(page, "title", "") or "仓库说明")
-        if self._fallback_is_onboarding_page(page):
+        if self._fallback_is_install_page(page):
+            body = self._fallback_install_markdown(title, evidence, binding)
+        elif self._fallback_is_onboarding_page(page):
             body = self._fallback_onboarding_markdown(title, evidence)
         elif getattr(page, "category", None) == WikiTaxonomyCategory.SECURITY_COMPLIANCE:
             body = self._fallback_security_markdown(title, evidence)
         else:
             body = self._fallback_topic_markdown(title, evidence)
         return "\n".join([f"# {title}", "", *body]).strip() + "\n"
+
+    def _fallback_readme_citation(self, evidence: dict[str, Any]) -> str:
+        from repo_wiki.verifier.handbook import _README_NAMES
+
+        for item in evidence.get("files") or []:
+            path = str(item.get("path") or "").strip()
+            if Path(path).name.lower() in {name.lower() for name in _README_NAMES}:
+                cite = self._fallback_cite(item)
+                if cite:
+                    return cite
+        for name in _README_NAMES:
+            if (self.root / name).is_file():
+                return f"<cite>{name}:1</cite>"
+        return ""
+
+    def _fallback_install_source_texts(
+        self, evidence: dict[str, Any], binding: Any | None, *, include_root_readme: bool
+    ) -> list[str]:
+        from repo_wiki.verifier.handbook import read_readme_text
+
+        texts: list[str] = []
+        if binding and getattr(binding, "candidates", None):
+            for candidate in binding.candidates[:12]:
+                span = getattr(candidate, "span", None)
+                text = str(getattr(span, "span_text", "") or "")
+                if text.strip():
+                    texts.append(text)
+        for item in evidence.get("snippets") or []:
+            summary = str(item.get("summary") or "").strip()
+            if summary:
+                texts.append(summary)
+        if include_root_readme:
+            readme = read_readme_text(self.root)
+            if readme.strip():
+                texts.append(readme)
+        return texts
+
+    def _fallback_collect_install_commands(self, texts: list[str]) -> list[str]:
+        commands: list[str] = []
+        seen: set[str] = set()
+        for text in texts:
+            for raw_line in text.splitlines() or [text]:
+                line = raw_line.strip().lstrip("$").strip()
+                if not line or line.startswith("#") or line.startswith(".."):
+                    continue
+                for pattern in _INSTALL_FENCE_COMMAND_PATTERNS:
+                    match = pattern.search(line)
+                    if not match:
+                        continue
+                    command = " ".join(match.group(0).split()).rstrip(".,;:)")
+                    if not command or len(command) > 120:
+                        continue
+                    key = command.casefold()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    commands.append(command)
+                    if len(commands) >= 6:
+                        return commands
+        return commands
+
+    def _fallback_install_run_commands(
+        self, evidence: dict[str, Any], binding: Any | None
+    ) -> list[str]:
+        bound = self._fallback_collect_install_commands(
+            self._fallback_install_source_texts(evidence, binding, include_root_readme=False)
+        )
+        if bound:
+            return bound
+        return self._fallback_collect_install_commands(
+            self._fallback_install_source_texts(evidence, binding, include_root_readme=True)
+        )
+
+    def _fallback_install_markdown(
+        self, title: str, evidence: dict[str, Any], binding: Any | None
+    ) -> list[str]:
+        snippets = self._fallback_snippet_paragraphs(evidence)
+        commands = self._fallback_install_run_commands(evidence, binding)
+        readme_cite = self._fallback_readme_citation(evidence)
+        cite_bit = f" {readme_cite}" if readme_cite else ""
+        env_clues = _fallback_install_env_clues(snippets, commands, evidence, binding)
+        lines = [
+            "## 这是什么",
+            "",
+            f"「{title}」面向刚接手本仓库的读者，按本页把项目安装并在本地跑起来。",
+            "下面只复述仓库文档里已经出现的依赖、命令和环境变量，不另写一套未出现在仓库里的步骤。",
+            f"核对原文时以入口文档为准。{cite_bit}".rstrip(),
+            "",
+        ]
+        if snippets:
+            lines.extend(
+                [
+                    "根据仓库文档，项目说明与启动方式如下。",
+                    "",
+                    *snippets,
+                ]
+            )
+        else:
+            lines.extend(self._fallback_empty_notice(title))
+            lines.append("")
+        lines.extend(
+            [
+                "## 环境要求",
+                "",
+                "动手前先对照仓库文档里写到的运行时、包管理器和外部依赖。"
+                "本页不补充文档没有出现的版本号或服务。",
+                "",
+            ]
+        )
+        if env_clues:
+            lines.extend([f"当前证据里出现的环境线索：{env_clues}。", ""])
+        else:
+            lines.extend(
+                [
+                    "当前证据没有单独列出环境版本；请打开根目录 README 核对语言、数据库和依赖。",
+                    "",
+                ]
+            )
+        lines.extend(["## 安装步骤", ""])
+        if commands:
+            lines.extend(
+                [
+                    "按仓库文档中的命令安装依赖并准备运行环境：",
+                    "",
+                    "```bash",
+                    *commands,
+                    "```",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "当前证据没有列出可复制的安装命令。请先打开根目录 README，"
+                    "按原文中的包管理器或容器步骤执行，不要用其他项目的安装命令充数。",
+                    "",
+                ]
+            )
+        lines.extend(["## 启动与验证", ""])
+        if commands:
+            lines.extend(
+                [
+                    "安装完成后用同一组仓库文档命令启动，并按原文检查服务是否起来。",
+                    "",
+                    "```bash",
+                    commands[0],
+                    "```",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "当前没有可复制的启动命令。启动方式以入口文档为准，本页不编造端口或健康检查。",
+                    "",
+                ]
+            )
+        lines.extend(
+            [
+                "## 常见问题",
+                "",
+                "如果命令失败，先核对接线文档里的环境变量和依赖是否与当前机器一致，"
+                "再回到引用文件查看完整上下文。本页不把其他仓库的排错步骤写进来。",
+                "",
+            ]
+        )
+        lines.extend(self._fallback_related_files_section(evidence))
+        return lines
 
     def _summarize_evidence_for_fallback(self, binding: Any | None) -> dict[str, Any]:
         summary: dict[str, Any] = {

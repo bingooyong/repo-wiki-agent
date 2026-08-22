@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from repo_wiki.generator.composer import (
+    EMPTY_COMPOSER_STUB_PHRASE,
     ComposerContext,
     ComposerInput,
     LLMPageComposer,
@@ -18,6 +19,7 @@ from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
 from repo_wiki.prompts.contracts import PagePromptType, get_contract_for_page_type
 from repo_wiki.prompts.skeleton import build_skeleton
 from repo_wiki.verifier.handbook import (
+    EMPTY_CONTENT_REJECTION,
     GENERATOR_META_REJECTION,
     is_page_local_quality_rejection,
 )
@@ -116,6 +118,15 @@ def test_validate_output_accepts_handbook_prose_without_meta() -> None:
     content = f"# 项目概述\n\n{ENOUGH_PROSE}\n"
     result = composer._validate_output(content, _composer_input())
     assert result.rejection_reason != "Handbook generator meta content"
+
+
+def test_validate_output_rejects_empty_and_historic_stub() -> None:
+    composer: LLMPageComposer = create_composer()
+    stub = f"# 安装指南\n\n{EMPTY_COMPOSER_STUB_PHRASE}."
+    for content in ("", stub):
+        result = composer._validate_output(content, _composer_input())
+        assert result.rejected is True
+        assert result.rejection_reason == EMPTY_CONTENT_REJECTION
 
 
 @pytest.mark.asyncio

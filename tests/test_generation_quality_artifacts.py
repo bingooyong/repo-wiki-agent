@@ -5,8 +5,31 @@ from pathlib import Path
 
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.orchestration.eval_layout import EvalOutputProfile
-from repo_wiki.orchestration.quality_artifacts import build_evidence_index
+from repo_wiki.orchestration.quality_artifacts import (
+    _quality_state_for,
+    build_evidence_index,
+)
 from repo_wiki.orchestration.service import RepoWikiService
+
+
+def test_quality_warning_on_llm_page_is_pass_not_degraded() -> None:
+    """Citation/heading gaps stay PASS; only fallback is DEGRADED."""
+    state, reasons = _quality_state_for(
+        {"generation_mode": "llm", "quality_warning": True, "reasons": []},
+        {"mode": "real"},
+    )
+    assert state == "PASS"
+    assert "composer_quality_warning" in reasons
+
+    fallback, _fallback_reasons = _quality_state_for(
+        {
+            "generation_mode": "fallback",
+            "quality_warning": True,
+            "reasons": ["Empty LLM assistant content"],
+        },
+        {"mode": "real"},
+    )
+    assert fallback == "DEGRADED"
 
 
 def _write_small_repo(root: Path) -> None:

@@ -170,6 +170,36 @@ def test_extract_claims_skips_pascalcase_framework_names() -> None:
     assert "ghostservice" in names
 
 
+_FASTAPI_README_RST_BADGES = """
+FastAPI RealWorld example
+=========================
+
+.. image:: https://github.com/nsidnev/fastapi-realworld-example-app/workflows/API/badge.svg
+   :target: https://github.com/nsidnev/fastapi-realworld-example-app/actions?query=workflow%3AAPI
+
+.. image:: https://img.shields.io/github/license/nsidnev/fastapi-realworld-example-app.svg
+   :target: https://github.com/nsidnev/fastapi-realworld-example-app/blob/master/LICENSE
+
+Quickstart
+----------
+
+The handler lives in ``app/main.py``.
+The removed module was ``src/legacy/gone.py``.
+""".strip()
+
+
+def test_github_badge_url_tails_are_not_extracted_as_source_paths() -> None:
+    """R13 leftover: example-app/blob and example-app/workflows/API are URL tails."""
+    assert ds._is_source_file_claim("app/blob/master/license")
+    assert ds._is_source_file_claim("app/workflows/api")
+    _names, path_like = _extract_claims(_FASTAPI_README_RST_BADGES)
+    assert "app/blob/master/license" not in path_like
+    assert "app/workflows/api" not in path_like
+    assert "app/workflows/api/badge.svg" not in path_like
+    assert "app/main.py" in path_like
+    assert "src/legacy/gone.py" in path_like
+
+
 def test_casefold_existing_doc_is_not_stale(tmp_path: Path) -> None:
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "AI_Novel_Agent_PRD_Architecture.md").write_text(

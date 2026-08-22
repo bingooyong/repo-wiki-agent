@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
+from repo_wiki.generator.composer import (
+    _HANDBOOK_ONBOARDING_HEADINGS,
+    EMPTY_COMPOSER_STUB_PHRASE,
+)
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.orchestration.service import RepoWikiService
 from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
+from repo_wiki.verifier.handbook import has_fenced_install_run_command
 
 GENERATOR_JARGON = (
     "fallback composer",
@@ -121,6 +126,36 @@ def test_installation_fallback_surfaces_how_to_run_evidence() -> None:
     assert "docker" in markdown.lower()
     assert "DATABASE_URL" in markdown
     assert "该证据用于限定本文的描述范围" not in markdown
+    assert EMPTY_COMPOSER_STUB_PHRASE not in markdown
+    for heading in _HANDBOOK_ONBOARDING_HEADINGS:
+        assert heading in markdown
+    assert "```bash" in markdown
+    assert has_fenced_install_run_command(markdown)
+    assert "docker compose" in markdown.lower() or "docker-compose" in markdown.lower()
+
+
+def test_installation_fallback_has_fenced_run_clue() -> None:
+    service = _service()
+    page = _page(
+        page_id="installation",
+        title="安装指南",
+        category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+    )
+    binding = _binding(file_path="README.rst", span_text=README_QUICKSTART, symbol="Quickstart")
+
+    markdown = service._fallback_markdown_for_failed_page(page, binding)
+    enriched = service._enforce_qoder_page_contract(
+        page=page,
+        markdown=markdown,
+        binding=binding,
+        add_mermaid=True,
+        composition_context=None,
+    )
+
+    assert EMPTY_COMPOSER_STUB_PHRASE not in enriched
+    assert has_fenced_install_run_command(enriched)
+    assert "## 安装步骤" in enriched
+    assert "## 启动与验证" in enriched
 
 
 def test_security_fallback_avoids_composer_jargon() -> None:

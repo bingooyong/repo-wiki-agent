@@ -346,6 +346,7 @@ _UNCLOSED_THINK_PREFIX_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _LEADING_THINK_TAG_RE = re.compile(r"\A<think(?:ing)?>", re.IGNORECASE)
+EMPTY_COMPOSER_STUB_PHRASE = "LLM composer did not return content"
 
 
 def _strip_leaked_think_dumps(content: str) -> str:
@@ -356,6 +357,14 @@ def _strip_leaked_think_dumps(content: str) -> str:
     if _LEADING_THINK_TAG_RE.match(text):
         return ""
     return text
+
+
+def is_empty_composer_markdown(content: str) -> bool:
+    """True for empty, think-only, or the historic empty-composer stub."""
+    text = (content or "").strip()
+    if not text:
+        return True
+    return EMPTY_COMPOSER_STUB_PHRASE in text
 
 
 class LLMPageComposer:
@@ -971,8 +980,9 @@ class LLMPageComposer:
     def _normalize_markdown_response(self, content: str, title: str) -> str:
         """Ensure provider output is a readable Markdown page."""
         stripped = _strip_leaked_think_dumps(content).strip()
-        if not stripped:
-            return f"# {title}\n\nLLM composer did not return content."
+        if is_empty_composer_markdown(stripped):
+            # Empty / think-only must not become a titled stub that later PASSes.
+            return ""
         if not stripped.startswith("#"):
             stripped = f"# {title}\n\n{stripped}"
         return normalize_citation_markup(stripped, self.workspace_root)
@@ -1004,6 +1014,12 @@ class LLMPageComposer:
         - Missing required heading preservation
         """
         result = ValidationResult()
+
+        if is_empty_composer_markdown(content):
+            result.rejection_reason = EMPTY_CONTENT_REJECTION
+            result.rejected = True
+            result.tokens_used = len((content or "").split()) * 4
+            return result
 
         # Count citations in evidence
         original_citations = []
