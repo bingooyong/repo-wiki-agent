@@ -1547,3 +1547,46 @@ class TestG005SecondRoundVerifierClosure:
         assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
         claims = [item.get("claim") for item in check.details.get("offenders", [])]
         assert "articles" in claims
+
+    def test_scanner_alias_source_inventory_is_not_missing_required_inventories(self, tmp_path):
+        """api_surfaces/data_models/kind-only services must populate required inventories."""
+        run_dir, _, meta_dir = self._write_complete_run(tmp_path)
+        for path in meta_dir.glob("*inventory*.json"):
+            if path.name != "source-inventory.json":
+                path.unlink()
+        service_registry = meta_dir / "service-registry.json"
+        if service_registry.exists():
+            service_registry.unlink()
+        (meta_dir / "source-inventory.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "repo_agent.source_inventory/1.0",
+                    "services": [
+                        {
+                            "kind": "python_fastapi_app",
+                            "evidence_path": "app/main.py",
+                        }
+                    ],
+                    "api_surfaces": [
+                        {"method": "POST", "path": "/api/users/login"},
+                        {"method": "GET", "path": "/api/articles"},
+                    ],
+                    "data_models": [{"name": "User"}],
+                    "relationships": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        verifier = QoderLikeVerifierService(run_dir, strict=True)
+        inventories = verifier._load_structured_inventory_sets()
+        missing = [
+            name
+            for name in ("sources", "apis", "services", "models", "runtimes")
+            if not inventories[name]
+        ]
+        assert missing == [], missing
+        assert ("POST", "/api/users/login") in inventories["apis"]
+        assert "User" in inventories["models"]
+        assert "app/main.py" in inventories["runtimes"]
+        result = verifier.verify(ci=True)
+        assert "QODER_REQUIRED_INVENTORY_MISSING" not in result.get("hard_gate_codes", [])

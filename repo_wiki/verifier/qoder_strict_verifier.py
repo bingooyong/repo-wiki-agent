@@ -123,6 +123,16 @@ class QoderLikeVerifierService(VerifierService):
     MIN_MERMAID_COVERAGE = 0.3
     MERMAID_CODE_BLOCK_PATTERN = re.compile(r"```mermaid\s*(.*?)```", re.IGNORECASE | re.DOTALL)
     _FASTAPI_AUTODOC_PATHS = frozenset({"/docs", "/redoc"})
+    _RUNTIME_SERVICE_KINDS = frozenset(
+        {
+            "python_fastapi_app",
+            "python_flask_app",
+            "nodejs_express",
+            "go_main",
+            "spring_component",
+            "docker_compose_service",
+        }
+    )
     _GITHUB_ACTIONS_RESERVED_SERVICE_NAMES = frozenset(
         {
             "job",
@@ -514,7 +524,11 @@ class QoderLikeVerifierService(VerifierService):
 
         This ensures that citations don't bind evidence to the wrong service:
         - A billing page should not cite authentication implementation files
-        - An API reference page should not cite data model files unrelated to that API
+        - An unrelated service page should not cite another service's implementation
+
+        Same-app architectural layers (API, database/query, data-model/schema) are
+        sibling evidence, not high-confidence wrong-service binds. FastAPI pages
+        routinely cite ``app/db/queries``, ``app/models``, and schema tests.
 
         High-confidence mismatches are HARD failures in strict profile.
         Ambiguous cases that could be shared infrastructure are WARN only.
@@ -551,7 +565,10 @@ class QoderLikeVerifierService(VerifierService):
             "third_party/",
         ]
 
-        # Map page filename keywords to expected service/module patterns
+        # Map page filename keywords to expected service/module patterns.
+        # Domain services (auth, billing) are distinct product areas.
+        # Layer labels (api, data-model, database) are the same app's
+        # HTTP / persistence / schema files, not competing services.
         PAGE_SERVICE_MAP = {
             "auth": ["auth", "login", "session", "token", "oauth", "sso"],
             "billing": ["billing", "invoice", "payment", "subscription", "price"],
@@ -559,6 +576,7 @@ class QoderLikeVerifierService(VerifierService):
             "data-model": ["model", "schema", "entity", "dto", "migration"],
             "database": ["db", "database", "repo", "query", "sql"],
         }
+        SIBLING_LAYER_SERVICES = frozenset({"api", "data-model", "database"})
 
         for page in md_files:
             try:
@@ -601,6 +619,13 @@ class QoderLikeVerifierService(VerifierService):
                 other_services = [k for k in PAGE_SERVICE_MAP if k != page_service]
 
                 for other_service in other_services:
+                    if (
+                        page_service in SIBLING_LAYER_SERVICES
+                        and other_service in SIBLING_LAYER_SERVICES
+                    ):
+                        # API ↔ query/db ↔ domain model/schema is related
+                        # evidence in FastAPI-style apps, not a HARD mismatch.
+                        continue
                     other_keywords = PAGE_SERVICE_MAP[other_service]
                     # High confidence mismatch: page name suggests service A
                     # but citation path contains strong indicators of service B
@@ -1872,6 +1897,24 @@ class QoderLikeVerifierService(VerifierService):
                             paths.append(self.root / raw)
         return paths
 
+    @staticmethod
+    def _inventory_lists(data: dict[str, Any], *keys: str) -> list[Any]:
+        items: list[Any] = []
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, list):
+                items.extend(value)
+        return items
+
+    def _runtime_id_from_service(self, item: dict[str, Any]) -> str | None:
+        kind = item.get("kind")
+        if not isinstance(kind, str) or kind.strip() not in self._RUNTIME_SERVICE_KINDS:
+            return None
+        evidence = item.get("evidence_path")
+        if isinstance(evidence, str) and evidence.strip():
+            return evidence.strip()
+        return kind.strip()
+
     def _load_structured_inventory_sets(self) -> dict[str, Any]:
         meta = None
         payload = self._load_manifest_payload(self.root)
@@ -1895,10 +1938,7 @@ class QoderLikeVerifierService(VerifierService):
                     or data.get("schema_version") == "repo_agent.source_inventory/1.0"
                 ):
                     sources.add(path.name)
-                endpoints = data.get("endpoints", [])
-                if not isinstance(endpoints, list):
-                    endpoints = data.get("api_surfaces", [])
-                for item in endpoints if isinstance(endpoints, list) else []:
+                for item in self._inventory_lists(data, "endpoints", "api_surfaces", "apis"):
                     if (
                         isinstance(item, dict)
                         and isinstance(item.get("method"), str)
@@ -1910,22 +1950,28 @@ class QoderLikeVerifierService(VerifierService):
                         auth = self._endpoint_auth_value(item)
                         if auth is not None:
                             endpoint_auth[api_key] = auth
-                services_payload = data.get("services", [])
-                for item in services_payload if isinstance(services_payload, list) else []:
-                    if isinstance(item, dict):
-                        for key in ("service_id", "service", "name", "display_name"):
-                            value = item.get(key)
-                            if isinstance(value, str):
-                                services.add(value)
-                models_payload = data.get("models", [])
-                if not isinstance(models_payload, list):
-                    models_payload = data.get("data_models", [])
-                for item in models_payload if isinstance(models_payload, list) else []:
+                services_payload = self._inventory_lists(data, "services")
+                for item in services_payload:
+                    if not isinstance(item, dict):
+                        continue
+                    named = False
+                    for key in ("service_id", "service", "name", "display_name"):
+                        value = item.get(key)
+                        if isinstance(value, str) and value.strip():
+                            services.add(value.strip())
+                            named = True
+                    kind = item.get("kind")
+                    if not named and isinstance(kind, str) and kind.strip():
+                        services.add(kind.strip())
+                    runtime_id = self._runtime_id_from_service(item)
+                    if runtime_id:
+                        runtimes.add(runtime_id)
+                for item in self._inventory_lists(data, "models", "data_models"):
                     if isinstance(item, dict):
                         for key in ("model_id", "name", "display_name"):
                             value = item.get(key)
-                            if isinstance(value, str):
-                                models.add(value)
+                            if isinstance(value, str) and value.strip():
+                                models.add(value.strip())
                 for key in ("runtime_entrypoints", "entrypoints", "commands"):
                     runtime_payload = data.get(key, [])
                     for item in runtime_payload if isinstance(runtime_payload, list) else []:
