@@ -2028,14 +2028,46 @@ class QoderLikeVerifierService(VerifierService):
         normalized = self._normalize_claimed_api_path(path)
         return re.sub(r"\{[^}/]+\}", "{}", normalized)
 
+    def _inventory_api_mount_prefix(self, apis: set[tuple[str, str]]) -> str:
+        """Shared first segment (commonly `/api`) when it dominates inventory routes."""
+        counts: dict[str, int] = {}
+        total = 0
+        for _method, path in apis:
+            parts = [part for part in self._normalize_claimed_api_path(path).split("/") if part]
+            if not parts or parts[0].startswith("{") or parts[0].startswith(":"):
+                continue
+            total += 1
+            counts[parts[0]] = counts.get(parts[0], 0) + 1
+        if total and counts:
+            segment, count = max(counts.items(), key=lambda item: (item[1], item[0]))
+            if count * 2 > total:
+                return f"/{segment}"
+            if "api" in counts:
+                return "/api"
+        return "/api"
+
+    def _apply_api_mount_prefix(self, path: str, prefix: str) -> str:
+        """Join a mount prefix onto a claim without doubling an existing prefix."""
+        claimed = self._normalize_claimed_api_path(path)
+        prefix = self._normalize_claimed_api_path(prefix)
+        if not prefix or prefix == "/":
+            return claimed
+        if claimed == prefix or claimed.startswith(f"{prefix}/"):
+            return claimed
+        return f"{prefix}/{claimed.lstrip('/')}"
+
     def _api_claim_in_inventory(self, method: str, path: str, apis: set[tuple[str, str]]) -> bool:
         method = method.upper()
         claimed = self._normalize_claimed_api_path(path)
         if (method, path) in apis or (method, claimed) in apis:
             return True
         claimed_key = self._api_path_slot_key(claimed)
+        prefixed_key = self._api_path_slot_key(
+            self._apply_api_mount_prefix(claimed, self._inventory_api_mount_prefix(apis))
+        )
+        candidate_keys = {claimed_key, prefixed_key}
         return any(
-            inv_method == method and self._api_path_slot_key(inv_path) == claimed_key
+            inv_method == method and self._api_path_slot_key(inv_path) in candidate_keys
             for inv_method, inv_path in apis
         )
 

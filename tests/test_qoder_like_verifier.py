@@ -1399,6 +1399,84 @@ class TestG005SecondRoundVerifierClosure:
         assert check.status == "PASS"
         assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
 
+    def test_api_mount_prefix_claim_matches_inventory(self, tmp_path):
+        run_dir, page, meta_dir = self._write_complete_run(tmp_path)
+        (meta_dir / "api-inventory.json").write_text(
+            json.dumps(
+                {
+                    "endpoints": [
+                        {"method": "GET", "path": "/health", "public": True},
+                        {"method": "POST", "path": "/api/users/login"},
+                        {"method": "POST", "path": "/api/users"},
+                        {"method": "POST", "path": "/api/profiles/{username}/follow"},
+                        {"method": "GET", "path": "/api/articles/feed"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        page.write_text(
+            page.read_text(encoding="utf-8")
+            + "\nPOST /users/login authenticates a Conduit user.\n"
+            + "POST /users registers a new account.\n"
+            + "POST /profiles/{username}/follow subscribes to another author.\n"
+            + "GET /articles/feed returns the authenticated home feed.\n"
+            + "POST /api/users/login is the same mounted login route.\n"
+            + "<cite>source:src/app.py:22</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+
+    def test_api_mount_prefix_missing_route_still_false_fact(self, tmp_path):
+        run_dir, page, meta_dir = self._write_complete_run(tmp_path)
+        (meta_dir / "api-inventory.json").write_text(
+            json.dumps(
+                {
+                    "endpoints": [
+                        {"method": "GET", "path": "/health", "public": True},
+                        {"method": "POST", "path": "/api/users/login"},
+                        {"method": "POST", "path": "/api/users"},
+                        {"method": "POST", "path": "/api/profiles/{username}/follow"},
+                        {"method": "GET", "path": "/api/articles/feed"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        page.write_text(
+            page.read_text(encoding="utf-8")
+            + "\nPOST /users/does-not-exist is a product route.\n"
+            + "GET /profiles/{username}/follow is the wrong method.\n"
+            + "<cite>source:src/app.py:23</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "FAIL"
+        assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
+        claims = [item.get("claim") for item in check.details.get("offenders", [])]
+        assert "POST /users/does-not-exist" in claims
+        assert "GET /profiles/{username}/follow" in claims
+
+    def test_api_claim_in_inventory_mount_prefix_and_trailing_param(self, tmp_path):
+        verifier = QoderLikeVerifierService(tmp_path, strict=True)
+        apis = {
+            ("POST", "/api/users/login"),
+            ("POST", "/api/users"),
+            ("POST", "/api/profiles/{username}/follow"),
+            ("GET", "/api/articles/feed"),
+        }
+        assert verifier._api_claim_in_inventory("POST", "/users/login", apis)
+        assert verifier._api_claim_in_inventory("POST", "/api/users/login", apis)
+        assert verifier._api_claim_in_inventory("POST", "/users", apis)
+        assert verifier._api_claim_in_inventory("GET", "/articles/feed", apis)
+        assert verifier._api_claim_in_inventory("POST", "/profiles/{username}/follow", apis)
+        assert verifier._api_claim_in_inventory("POST", "/api/profiles/{username}/follow", apis)
+        assert not verifier._api_claim_in_inventory("POST", "/users/does-not-exist", apis)
+        assert not verifier._api_claim_in_inventory("GET", "/users/login", apis)
+        assert not verifier._api_claim_in_inventory("POST", "/users/login/extra", apis)
+
     def test_github_actions_service_options_is_not_a_product_service(self, tmp_path):
         run_dir, page, _ = self._write_complete_run(tmp_path)
         content_dir = page.parent.parent
