@@ -1363,7 +1363,15 @@ class RepoWikiService:
             )
             estimated_tokens += page.estimated_tokens or 1000
 
-            cached = self._observe_composer_cache_hit(cache, page.page_id, input_hash)
+            cached = self._observe_composer_cache_hit(
+                cache,
+                page.page_id,
+                input_hash,
+                input_data=input_data,
+                model_name=llm_config.model,
+                temperature=llm_config.temperature,
+                max_tokens=llm_config.max_tokens,
+            )
             if cached and cached.output_markdown:
                 cache_hits += 1
                 info(f"compose cache hit page_id={page.page_id} title={page.title}")
@@ -1516,8 +1524,29 @@ class RepoWikiService:
             "llm": llm_summary,
         }
 
-    def _observe_composer_cache_hit(self, cache: Any, page_id: str, input_hash: str) -> Any | None:
-        cached = cache.get(page_id, input_hash)
+    def _observe_composer_cache_hit(
+        self,
+        cache: Any,
+        page_id: str,
+        input_hash: str,
+        input_data: Any | None = None,
+        model_name: str = "mock-gpt",
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ) -> Any | None:
+        if input_data is not None:
+            from repo_wiki.generator.composer_cache import lookup_composer_cache
+
+            _, cached = lookup_composer_cache(
+                cache,
+                page_id,
+                input_data,
+                model_name=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        else:
+            cached = cache.get(page_id, input_hash)
         if cached and cached.output_markdown:
             cache.record_skipped_page()
         return cached

@@ -11,6 +11,8 @@ Phase 24 - Task 24.6: Page composer incremental cache
 
 from __future__ import annotations
 
+import hashlib
+import json
 import tempfile
 from pathlib import Path
 
@@ -36,6 +38,7 @@ from repo_wiki.generator.composer_cache import (
     estimate_cost_from_tokens,
     estimate_tokens_from_markdown,
     format_cache_stats,
+    lookup_composer_cache,
 )
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.orchestration.service import RepoWikiService
@@ -47,6 +50,81 @@ from repo_wiki.planner.schema import (
 )
 from repo_wiki.prompts.contracts import PagePromptType
 from repo_wiki.prompts.skeleton import ArticleSkeleton, build_skeleton
+
+
+def _pre_narrow_context_hash(context: ComposerContext) -> str:
+    """Exact ``compute_context_hash`` before 8d6395c (snapshot dumps + root)."""
+    parts = [
+        context.repository_name,
+        context.primary_language,
+        context.framework,
+        context.repository_root,
+        context.product_description or "",
+    ]
+    modules = sorted(context.modules, key=lambda m: m.get("name", ""))
+    parts.append(json.dumps(modules, sort_keys=True))
+    endpoints = sorted(context.endpoints, key=lambda e: e.get("path", ""))
+    parts.append(json.dumps(endpoints, sort_keys=True))
+    models = sorted(context.models, key=lambda m: m.get("name", ""))
+    parts.append(json.dumps(models, sort_keys=True))
+    commands = json.dumps(dict(sorted(context.commands.items())), sort_keys=True)
+    parts.append(commands)
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:24]
+
+
+def _pre_narrow_composer_input_hash(
+    input_data: ComposerInput,
+    model_name: str = "mock-gpt",
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+) -> str:
+    """Exact ``compute_composer_input_hash`` before 8d6395c (no contract_id)."""
+    combined = "|".join(
+        [
+            compute_page_plan_hash(input_data.page_plan),
+            compute_evidence_hash(input_data.evidence_binding),
+            compute_skeleton_hash(input_data.skeleton),
+            _pre_narrow_context_hash(input_data.context),
+            model_name,
+            str(temperature),
+            str(max_tokens),
+        ]
+    )
+    return hashlib.sha256(combined.encode()).hexdigest()[:32]
+
+
+def _noisy_composer_input(
+    sample_page: WikiPagePlan,
+    sample_skeleton: ArticleSkeleton,
+) -> ComposerInput:
+    """Composer input whose pre-8d6395c hash includes incidental snapshot noise."""
+    from repo_wiki.prompts.contracts import get_contract_for_page_type
+
+    contract = get_contract_for_page_type(PagePromptType.OVERVIEW)
+    return ComposerInput(
+        page_plan=sample_page,
+        evidence_binding=None,
+        skeleton=sample_skeleton,
+        contract=contract,
+        context=ComposerContext(
+            repository_name="test-repo",
+            primary_language="python",
+            framework="fastapi",
+            repository_root="/workspace/fastapi-realworld",
+            product_description="A RealWorld FastAPI backend",
+            modules=[
+                {
+                    "name": "auth",
+                    "path": "app/api/routes/auth.py",
+                    "exports": ["login", "register"],
+                    "domain_confidence": 0.41,
+                    "domain_classification_reason": "first-scan",
+                }
+            ],
+            endpoints=[{"path": "/users/login", "method": "POST", "line_number": 12}],
+            commands={"test": "pytest"},
+        ),
+    )
 
 
 class TestComputePagePlanHash:
@@ -525,6 +603,66 @@ class TestComputeComposerInputHash:
 
         assert compute_composer_input_hash(input_a) != compute_composer_input_hash(input_b)
 
+    def test_new_writes_use_narrowed_hash_only(
+        self,
+        sample_page: WikiPagePlan,
+        sample_skeleton: ArticleSkeleton,
+    ):
+        """Post-upgrade puts must store the narrowed hash, never the legacy key."""
+        input_data = _noisy_composer_input(sample_page, sample_skeleton)
+        new_hash = compute_composer_input_hash(input_data, model_name="minimax")
+        legacy_hash = _pre_narrow_composer_input_hash(input_data, model_name="minimax")
+        assert new_hash != legacy_hash
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ComposerCache(Path(tmpdir) / "cache.sqlite3")
+            cache.put(
+                page_id=sample_page.page_id,
+                input_hash=new_hash,
+                output_markdown="# Fresh page",
+                tokens_used=40,
+            )
+            assert cache.get(sample_page.page_id, new_hash) is not None
+            assert cache.get(sample_page.page_id, legacy_hash) is None
+
+    def test_legacy_hash_row_hits_after_upgrade_and_rewrites_new_key(
+        self,
+        sample_page: WikiPagePlan,
+        sample_skeleton: ArticleSkeleton,
+    ):
+        """Pre-8d6395c sqlite rows must still hit when page-local inputs match."""
+        input_data = _noisy_composer_input(sample_page, sample_skeleton)
+        new_hash = compute_composer_input_hash(input_data, model_name="minimax")
+        legacy_hash = _pre_narrow_composer_input_hash(input_data, model_name="minimax")
+        assert new_hash != legacy_hash
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ComposerCache(Path(tmpdir) / "cache.sqlite3")
+            cache.put(
+                page_id=sample_page.page_id,
+                input_hash=legacy_hash,
+                output_markdown="# Cached before hash narrow",
+                tokens_used=88,
+                doc_type="overview",
+            )
+            assert cache.get(sample_page.page_id, new_hash) is None
+
+            current_hash, record = lookup_composer_cache(
+                cache,
+                sample_page.page_id,
+                input_data,
+                model_name="minimax",
+            )
+            assert current_hash == new_hash
+            assert record is not None
+            assert record.output_markdown == "# Cached before hash narrow"
+            assert record.tokens_used == 88
+
+            migrated = cache.get(sample_page.page_id, new_hash)
+            assert migrated is not None
+            assert migrated.output_markdown == "# Cached before hash narrow"
+            assert cache.get(sample_page.page_id, legacy_hash) is None
+
 
 class TestComputeOutputHash:
     """Tests for compute_output_hash function."""
@@ -825,6 +963,49 @@ class TestComposerCache:
         assert stats.cache_misses == 0
         assert stats.skipped_pages == 1
         assert stats.regenerated_pages == 1
+
+    def test_service_observe_hits_legacy_hash_row_after_upgrade(self, tmp_path: Path):
+        """qoder-like observe must reuse a pre-narrow sqlite row and migrate it."""
+        sample_page = WikiPagePlan(
+            page_id="test-page",
+            title="Test Page",
+            category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+            output_path="docs/test.md",
+            source_requirements=SourceRequirement(modules=["auth", "api"]),
+            generation_mode=GenerationMode.LLM_ASSISTED,
+        )
+        sample_skeleton = build_skeleton("overview", "Test Page")
+        input_data = _noisy_composer_input(sample_page, sample_skeleton)
+        new_hash = compute_composer_input_hash(input_data, model_name="minimax")
+        legacy_hash = _pre_narrow_composer_input_hash(input_data, model_name="minimax")
+        assert new_hash != legacy_hash
+
+        cfg = RepoWikiConfig()
+        cfg.project.root = str(tmp_path)
+        service = RepoWikiService(cfg)
+        cache = ComposerCache(tmp_path / "composer.sqlite3")
+        cache.put(
+            page_id=sample_page.page_id,
+            input_hash=legacy_hash,
+            output_markdown="# Legacy handbook page",
+            tokens_used=64,
+            doc_type="overview",
+        )
+
+        cached = service._observe_composer_cache_hit(
+            cache,
+            sample_page.page_id,
+            new_hash,
+            input_data=input_data,
+            model_name="minimax",
+        )
+        assert cached is not None
+        assert cached.output_markdown == "# Legacy handbook page"
+        stats = cache.stats()
+        assert stats.cache_hits == 1
+        assert stats.skipped_pages == 1
+        assert cache.get(sample_page.page_id, new_hash) is not None
+        assert cache.get(sample_page.page_id, legacy_hash) is None
 
     def test_cached_composer_mixin_records_real_hit_miss_and_store_observations(
         self, cache: ComposerCache
