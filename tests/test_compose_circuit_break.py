@@ -16,7 +16,8 @@ from pathlib import Path
 import pytest
 
 from repo_wiki.core.config import RepoWikiConfig
-from repo_wiki.core.contracts import RepositoryInfo, RepositorySnapshot
+from repo_wiki.core.contracts import Module, RepositoryInfo, RepositorySnapshot
+from repo_wiki.generator.composer_cache import ComposerCache
 from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.models import (
     ChatRequest,
@@ -946,3 +947,216 @@ async def test_page_timeout_twice_stays_degraded_without_circuit_break(
     assert states == ["DEGRADED"] * PAGE_COUNT
     assert timeout_reasons
     assert not disabled_reasons
+
+
+def _module(*, confidence: float, exports: list[str], reason: str) -> Module:
+    return Module(
+        name="auth",
+        path="app/auth.py",
+        responsibility="authentication",
+        doc_path="docs/auth.md",
+        exports=exports,
+        domain_confidence=confidence,
+        domain_classification_reason=reason,
+    )
+
+
+@pytest.mark.asyncio
+async def test_real_max_calls_budget_is_spent_on_queued_pages(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A finite REAL_MAX_CALLS budget must run the already-queued jobs.
+
+    improve sets MAX_FAILURES=REAL_MAX_CALLS. Prep used to mark
+    provider_disabled once the queue filled, so workers skipped those
+    jobs and the limited-call run produced only fallbacks.
+    """
+    monkeypatch.setenv("REPO_WIKI_LLM_REAL_MAX_CALLS", "2")
+    monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "2")
+    monkeypatch.setenv("REPO_WIKI_LLM_PRIORITY_PAGE_IDS", "page-00,page-01")
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    provider = HealthyLLMProvider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, provider)
+
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+    modes = [meta["generation_mode"] for meta in result["page_metadata"]]
+    attempted = llm["attempted_page_ids"]
+
+    assert provider.call_count == 2
+    assert llm["llm_call_count"] == 2
+    assert attempted[:2] == ["page-00", "page-01"]
+    assert modes.count("llm") == 2
+    assert modes.count("fallback") == PAGE_COUNT - 2
+    assert llm["fallback_page_count"] == PAGE_COUNT - 2
+
+
+@pytest.mark.asyncio
+async def test_priority_recovery_reuses_cache_hits_and_spends_budget_on_misses(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Page-local improve must cache-hit unchanged pages and LLM only misses."""
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+
+    first = HealthyLLMProvider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, first)
+    first_result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    assert first.call_count == PAGE_COUNT
+    assert first_result["llm"]["cache_hits"] == 0
+
+    cache = ComposerCache(compose_env / "composer-cache.sqlite3")
+    assert cache.invalidate("page-00") == 1
+    assert cache.invalidate("page-01") == 1
+
+    monkeypatch.setenv("REPO_WIKI_LLM_REAL_MAX_CALLS", "2")
+    monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "2")
+    monkeypatch.setenv("REPO_WIKI_LLM_PRIORITY_PAGE_IDS", "page-00,page-01")
+    second = HealthyLLMProvider()
+    _install_provider(monkeypatch, service, second)
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+    modes = [meta["generation_mode"] for meta in result["page_metadata"]]
+
+    assert second.call_count == 2
+    assert llm["llm_call_count"] == 2
+    assert llm["cache_hits"] == PAGE_COUNT - 2
+    assert llm["fallback_page_count"] == 0
+    assert modes.count("llm") == PAGE_COUNT
+    assert modes.count("fallback") == 0
+    assert llm["attempted_page_ids"] == ["page-00", "page-01"]
+
+
+@pytest.mark.asyncio
+async def test_second_compose_cache_hits_when_only_snapshot_noise_changes(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verifier-only / rescan noise must not zero out an intact composer cache."""
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    first_snapshot = RepositorySnapshot(
+        repository=RepositoryInfo(
+            name="circuit-break-test",
+            root_path=str(root),
+            language="python",
+            framework="pytest",
+        ),
+        modules=[_module(confidence=0.4, exports=["login", "register"], reason="scan-1")],
+    )
+    first = HealthyLLMProvider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, first)
+    await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=first_snapshot,
+        output_dir=output_dir,
+    )
+
+    noisy_snapshot = RepositorySnapshot(
+        repository=RepositoryInfo(
+            name="circuit-break-test",
+            root_path=str(compose_env / "other-checkout"),
+            language="python",
+            framework="pytest",
+        ),
+        modules=[_module(confidence=0.95, exports=["register", "login"], reason="scan-2")],
+    )
+    monkeypatch.setenv("REPO_WIKI_LLM_REAL_MAX_CALLS", "2")
+    monkeypatch.setenv("REPO_WIKI_LLM_PRIORITY_PAGE_IDS", "page-00,page-01")
+    second = HealthyLLMProvider()
+    _install_provider(monkeypatch, service, second)
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=noisy_snapshot,
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+
+    assert second.call_count == 0
+    assert llm["cache_hits"] == PAGE_COUNT
+    assert llm["cache_misses"] == 0
+    assert llm["llm_call_count"] == 0
+    assert llm["fallback_page_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_budget_exhausted_reuses_stale_cache_instead_of_fallback(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When hashes miss and the call budget is spent, reuse last cached page.
+
+    A drifted hash must not rewrite an intact wiki into mass fallbacks.
+    """
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    first = HealthyLLMProvider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, first)
+    await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+
+    cache = ComposerCache(compose_env / "composer-cache.sqlite3")
+    assert cache.invalidate("page-00") == 1
+    assert cache.invalidate("page-01") == 1
+
+    drifted = _plan()
+    for page in drifted.pages:
+        page.title = f"{page.title} drifted"
+
+    monkeypatch.setenv("REPO_WIKI_LLM_REAL_MAX_CALLS", "2")
+    monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "2")
+    monkeypatch.setenv("REPO_WIKI_LLM_PRIORITY_PAGE_IDS", "page-00,page-01")
+    second = HealthyLLMProvider()
+    _install_provider(monkeypatch, service, second)
+    result = await service._compose_qoder_like_pages(
+        plan=drifted,
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    llm = result["llm"]
+    modes = [meta["generation_mode"] for meta in result["page_metadata"]]
+    reasons = [tuple(meta["reasons"]) for meta in result["page_metadata"]]
+
+    assert second.call_count == 2
+    assert llm["llm_call_count"] == 2
+    assert llm["fallback_page_count"] == 0
+    assert modes.count("fallback") == 0
+    assert modes.count("llm") == PAGE_COUNT
+    assert any("cache_reuse" in reason for reason in reasons)

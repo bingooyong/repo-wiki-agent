@@ -425,6 +425,106 @@ class TestComputeComposerInputHash:
 
         assert hash1 != hash2
 
+    def test_incidental_snapshot_fields_do_not_change_hash(
+        self,
+        sample_page: WikiPagePlan,
+        sample_skeleton: ArticleSkeleton,
+    ):
+        """Rescan noise must not invalidate page-local composer cache.
+
+        The compact prompt uses repository name, product description, and
+        page source_requirements — not full module/endpoint dumps, scanner
+        confidence, export list order, or the absolute repository_root.
+        A second generate/improve against an unchanged page must hash-hit.
+        """
+        from repo_wiki.prompts.contracts import get_contract_for_page_type
+
+        contract = get_contract_for_page_type(PagePromptType.OVERVIEW)
+        context_first = ComposerContext(
+            repository_name="test-repo",
+            primary_language="python",
+            framework="fastapi",
+            repository_root="/workspace/fastapi-realworld",
+            product_description="A RealWorld FastAPI backend",
+            modules=[
+                {
+                    "name": "auth",
+                    "path": "app/api/routes/auth.py",
+                    "exports": ["login", "register"],
+                    "domain_confidence": 0.41,
+                    "domain_classification_reason": "first-scan",
+                }
+            ],
+            endpoints=[{"path": "/users/login", "method": "POST", "line_number": 12}],
+        )
+        context_rescan = ComposerContext(
+            repository_name="test-repo",
+            primary_language="python",
+            framework="fastapi",
+            repository_root="/tmp/other-checkout/fastapi-realworld",
+            product_description="A RealWorld FastAPI backend",
+            modules=[
+                {
+                    "name": "auth",
+                    "path": "app/api/routes/auth.py",
+                    "exports": ["register", "login"],
+                    "domain_confidence": 0.93,
+                    "domain_classification_reason": "second-scan",
+                }
+            ],
+            endpoints=[{"path": "/users/login", "method": "POST", "line_number": 40}],
+        )
+        input_first = ComposerInput(
+            page_plan=sample_page,
+            evidence_binding=None,
+            skeleton=sample_skeleton,
+            contract=contract,
+            context=context_first,
+        )
+        input_rescan = ComposerInput(
+            page_plan=sample_page,
+            evidence_binding=None,
+            skeleton=sample_skeleton,
+            contract=contract,
+            context=context_rescan,
+        )
+
+        assert compute_composer_input_hash(input_first, model_name="minimax") == (
+            compute_composer_input_hash(input_rescan, model_name="minimax")
+        )
+
+    def test_product_description_change_does_change_hash(
+        self,
+        sample_page: WikiPagePlan,
+        sample_skeleton: ArticleSkeleton,
+    ):
+        """Prompt-affecting context must still invalidate the cache."""
+        from repo_wiki.prompts.contracts import get_contract_for_page_type
+
+        contract = get_contract_for_page_type(PagePromptType.OVERVIEW)
+        shared = {
+            "repository_name": "test-repo",
+            "primary_language": "python",
+            "framework": "fastapi",
+            "repository_root": "/test",
+        }
+        input_a = ComposerInput(
+            page_plan=sample_page,
+            evidence_binding=None,
+            skeleton=sample_skeleton,
+            contract=contract,
+            context=ComposerContext(**shared, product_description="Service A"),
+        )
+        input_b = ComposerInput(
+            page_plan=sample_page,
+            evidence_binding=None,
+            skeleton=sample_skeleton,
+            contract=contract,
+            context=ComposerContext(**shared, product_description="Service B"),
+        )
+
+        assert compute_composer_input_hash(input_a) != compute_composer_input_hash(input_b)
+
 
 class TestComputeOutputHash:
     """Tests for compute_output_hash function."""

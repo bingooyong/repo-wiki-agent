@@ -1166,6 +1166,44 @@ class RepoWikiService:
         def _should_add_mermaid(page_idx: int, page: Any) -> bool:
             return page_idx < target_mermaid_pages or self._page_requires_hard_mermaid(page)
 
+        def apply_cached_page(
+            page: Any,
+            binding: Any,
+            page_idx: int,
+            markdown: str,
+            reason: str,
+        ) -> None:
+            cached_markdown = self._enforce_qoder_page_contract(
+                page=page,
+                markdown=markdown,
+                binding=binding,
+                add_mermaid=_should_add_mermaid(page_idx, page),
+                composition_context=context,
+            )
+            page_results[page_idx] = (page.output_path, cached_markdown)
+            page_metadata_by_idx[page_idx] = {
+                "page_id": page.page_id,
+                "source_path": page.output_path,
+                "generation_mode": "llm",
+                "quality_state": "PASS",
+                "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                "reasons": [reason],
+            }
+
+        def reuse_stale_cached_page(page: Any, binding: Any, page_idx: int) -> bool:
+            stale = cache.get(page.page_id)
+            if not (stale and stale.output_markdown):
+                return False
+            cache.record_skipped_page()
+            apply_cached_page(
+                page,
+                binding,
+                page_idx,
+                stale.output_markdown,
+                "cache_reuse",
+            )
+            return True
+
         def write_fallback(page: Any, binding: Any, page_idx: int, reason: str) -> None:
             nonlocal fallback_page_count
             fallback_page_count += 1
@@ -1329,58 +1367,39 @@ class RepoWikiService:
             if cached and cached.output_markdown:
                 cache_hits += 1
                 info(f"compose cache hit page_id={page.page_id} title={page.title}")
-                cached_markdown = self._enforce_qoder_page_contract(
-                    page=page,
-                    markdown=cached.output_markdown,
-                    binding=binding,
-                    add_mermaid=(
-                        page_idx < target_mermaid_pages or self._page_requires_hard_mermaid(page)
+                apply_cached_page(page, binding, page_idx, cached.output_markdown, "cache_hit")
+                continue
+
+            budget_exhausted = (
+                max_real_provider_calls is not None
+                and provider_attempt_count >= max_real_provider_calls
+            )
+            if provider_disabled_after_failures or budget_exhausted:
+                # Do not mark provider_disabled here: that flag also skips
+                # already-queued jobs. A finite REAL_MAX_CALLS budget must
+                # still let those queued priority pages consume the calls.
+                if reuse_stale_cached_page(page, binding, page_idx):
+                    cache_hits += 1
+                    info(
+                        "compose cache reuse "
+                        f"page_id={page.page_id} title={page.title} "
+                        "reason=budget_or_provider_disabled"
+                    )
+                    continue
+                cache_misses += 1
+                write_fallback(
+                    page,
+                    binding,
+                    page_idx,
+                    self._provider_disabled_reason(
+                        max_provider_failures=max_provider_failures,
+                        max_real_provider_calls=max_real_provider_calls,
+                        provider_attempt_count=provider_attempt_count,
                     ),
-                    composition_context=context,
                 )
-                page_results[page_idx] = (page.output_path, cached_markdown)
-                page_metadata_by_idx[page_idx] = {
-                    "page_id": page.page_id,
-                    "source_path": page.output_path,
-                    "generation_mode": "llm",
-                    "quality_state": "PASS",
-                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
-                    "reasons": ["cache_hit"],
-                }
                 continue
 
             cache_misses += 1
-
-            if provider_disabled_after_failures:
-                write_fallback(
-                    page,
-                    binding,
-                    page_idx,
-                    self._provider_disabled_reason(
-                        max_provider_failures=max_provider_failures,
-                        max_real_provider_calls=max_real_provider_calls,
-                        provider_attempt_count=provider_attempt_count,
-                    ),
-                )
-                continue
-
-            if (
-                max_real_provider_calls is not None
-                and provider_attempt_count >= max_real_provider_calls
-            ):
-                provider_disabled_after_failures = True
-                write_fallback(
-                    page,
-                    binding,
-                    page_idx,
-                    self._provider_disabled_reason(
-                        max_provider_failures=max_provider_failures,
-                        max_real_provider_calls=max_real_provider_calls,
-                        provider_attempt_count=provider_attempt_count,
-                    ),
-                )
-                continue
-
             provider_attempt_count += 1
             attempted_page_ids.append(page.page_id)
             compose_jobs.append(

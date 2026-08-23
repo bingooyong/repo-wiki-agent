@@ -3,9 +3,13 @@
 Computes input hashes from:
 - Page plan (WikiPagePlan)
 - Evidence binding (PageEvidenceBinding) and source digests
-- Prompt contract
+- Prompt contract page type
 - Skeleton
+- Prompt-affecting context (name/language/framework/product description)
 - Model config
+
+Does not hash full snapshot dumps, scanner confidence, or absolute
+repository_root — those are not page-local composer inputs.
 
 Phase 24 - Task 24.6: Page composer incremental cache
 
@@ -175,32 +179,20 @@ def compute_skeleton_hash(skeleton: ArticleSkeleton) -> str:
 
 
 def compute_context_hash(context: ComposerContext) -> str:
-    """Compute deterministic hash from composer context.
+    """Compute deterministic hash from prompt-affecting composer context.
 
-    Includes: repository_name, primary_language, framework,
-    product_description, modules, endpoints, models, commands.
+    The compact page prompt uses repository_name, language, framework, and
+    product_description. Full snapshot dumps (modules/endpoints/models),
+    scanner confidence, list order, and the absolute repository_root are
+    not hashed: they are not page-local inputs and would miss every cache
+    entry after a rescan or verifier-only checkout.
     """
     parts = [
         context.repository_name,
         context.primary_language,
         context.framework,
-        context.repository_root,
         context.product_description or "",
     ]
-
-    # Sort modules by name for deterministic ordering
-    modules = sorted(context.modules, key=lambda m: m.get("name", ""))
-    parts.append(json.dumps(modules, sort_keys=True))
-
-    endpoints = sorted(context.endpoints, key=lambda e: e.get("path", ""))
-    parts.append(json.dumps(endpoints, sort_keys=True))
-
-    models = sorted(context.models, key=lambda m: m.get("name", ""))
-    parts.append(json.dumps(models, sort_keys=True))
-
-    commands = json.dumps(dict(sorted(context.commands.items())), sort_keys=True)
-    parts.append(commands)
-
     content = "|".join(parts)
     return hashlib.sha256(content.encode()).hexdigest()[:24]
 
@@ -229,6 +221,9 @@ def compute_composer_input_hash(
     evidence_hash = compute_evidence_hash(input_data.evidence_binding)
     skeleton_hash = compute_skeleton_hash(input_data.skeleton)
     context_hash = compute_context_hash(input_data.context)
+    contract = getattr(input_data, "contract", None)
+    page_type = getattr(contract, "page_type", None)
+    contract_id = getattr(page_type, "value", str(page_type or ""))
 
     # Combine all hashes
     combined = "|".join(
@@ -237,6 +232,7 @@ def compute_composer_input_hash(
             evidence_hash,
             skeleton_hash,
             context_hash,
+            contract_id,
             model_name,
             str(temperature),
             str(max_tokens),
