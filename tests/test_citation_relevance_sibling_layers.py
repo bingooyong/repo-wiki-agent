@@ -1,8 +1,9 @@
 """R15 leftover HARD: FastAPI sibling-layer citation relevance false positives.
 
 QODER_CITATION_RELEVANCE_MISMATCH still fires when same-app FastAPI layers
-cite each other: API pages cite query/schema/model files, and a Db page cites
-domain models. Those are related evidence, not billing-citing-auth binds.
+cite each other: API pages cite query/schema/model files and
+app/api/**/authentication*.py, and a Db page cites domain models. Those are
+related evidence, not billing-citing-auth binds.
 
 Gates stay HARD. True wrong-service binds still fail.
 """
@@ -104,6 +105,36 @@ def test_db_page_citing_domain_users_model_is_not_relevance_mismatch(tmp_path: P
 The users table is backed by the domain user model.
 
 <cite>app/models/domain/users.py:1</cite>
+""",
+    )
+
+    result = _verify(tmp_path)
+    assert "QODER_CITATION_RELEVANCE_MISMATCH" not in result.get("hard_gate_codes", [])
+    assert _relevance_check(result)["status"] in {"PASS", "WARN", "SKIP"}
+
+
+def test_api_page_citing_app_api_authentication_is_not_relevance_mismatch(
+    tmp_path: Path,
+) -> None:
+    """API/auth API pages citing app/api authentication routes are sibling evidence."""
+    _write_wiki_page(
+        tmp_path,
+        "API参考/认证授权API.md",
+        """# 认证授权API
+
+Login lives in the FastAPI authentication router.
+
+<cite>app/api/routes/authentication.py:10-40</cite>
+""",
+    )
+    _write_wiki_page(
+        tmp_path,
+        "API参考/核心服务API.md",
+        """# 核心服务API
+
+Current-user injection uses the authentication dependency.
+
+<cite>app/api/dependencies/authentication.py:1-20</cite>
 """,
     )
 

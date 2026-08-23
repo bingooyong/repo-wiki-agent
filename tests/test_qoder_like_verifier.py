@@ -732,6 +732,42 @@ graph LR
         assert "QODER_PAGE_QUALITY_STATE_MISSING" in result.get("hard_gate_codes", [])
         assert expected_detail in json.dumps(quality_check["details"], ensure_ascii=False)
 
+    def test_duplicate_page_across_quality_containers_same_state_is_not_missing(self, tmp_path):
+        """The same relative_path in page-registry and quality-report is not a miss."""
+        self._write_release_candidate(tmp_path)
+        meta_dir = tmp_path / "repowiki" / "zh" / "meta"
+        quality_path = meta_dir / "quality-report.json"
+        quality = json.loads(quality_path.read_text(encoding="utf-8"))
+        # Production quality-report aliases the same pages under both containers.
+        quality["pages"] = [dict(item) for item in quality["page_quality"]]
+        quality_path.write_text(json.dumps(quality), encoding="utf-8")
+
+        result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+        quality_check = next(c for c in result["checks"] if c["name"] == "qoder-quality-artifacts")
+
+        assert quality_check["status"] == "PASS"
+        assert "QODER_PAGE_QUALITY_STATE_MISSING" not in result.get("hard_gate_codes", [])
+        details = json.dumps(quality_check.get("details") or {}, ensure_ascii=False)
+        assert "duplicate page entry" not in details
+
+    def test_conflicting_page_quality_states_across_containers_still_fail(self, tmp_path):
+        self._write_release_candidate(tmp_path)
+        meta_dir = tmp_path / "repowiki" / "zh" / "meta"
+        quality_path = meta_dir / "quality-report.json"
+        quality = json.loads(quality_path.read_text(encoding="utf-8"))
+        quality["pages"] = [
+            {**dict(item), "quality_state": "DEGRADED"} for item in quality["page_quality"]
+        ]
+        quality_path.write_text(json.dumps(quality), encoding="utf-8")
+
+        result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+        quality_check = next(c for c in result["checks"] if c["name"] == "qoder-quality-artifacts")
+
+        assert "QODER_PAGE_QUALITY_STATE_MISSING" in result.get("hard_gate_codes", [])
+        assert "conflicting page quality state" in json.dumps(
+            quality_check["details"], ensure_ascii=False
+        )
+
     def test_release_candidate_corrupt_conflict_artifact_hard_fails(self, tmp_path):
         self._write_release_candidate(tmp_path)
         (tmp_path / "repowiki" / "zh" / "meta" / "source-docs-conflicts.json").write_text(
@@ -1513,6 +1549,53 @@ class TestG005SecondRoundVerifierClosure:
         assert not any(
             item.get("claim") in {"job", "options", "uses", "workflow"} for item in offenders
         )
+
+    def test_infra_tool_and_entity_tokens_are_not_product_services(self, tmp_path):
+        """sudo/postgresql install prose and mermaid Entity/DTO nodes are not services."""
+        run_dir, page, _ = self._write_complete_run(tmp_path)
+        content_dir = page.parent.parent
+        dev_page = content_dir / "本地开发环境.md"
+        dev_page.write_text(
+            "# 本地开发环境\n\n"
+            "Start the database with sudo service postgresql start.\n"
+            "Compose also exposes a postgres healthcheck.\n"
+            "<cite>source:src/app.py:22</cite>\n",
+            encoding="utf-8",
+        )
+        api_page = content_dir / "API参考" / "核心服务API.md"
+        api_page.parent.mkdir(parents=True)
+        api_page.write_text(
+            "# 核心服务API\n\n"
+            "```mermaid\n"
+            "flowchart TD\n"
+            "    service[Service]\n"
+            "    entity[Entity/DTO]\n"
+            "    repository -->|map| entity\n"
+            "    service -->|DTO transform| entity\n"
+            "```\n"
+            "<cite>source:src/app.py:23</cite>\n",
+            encoding="utf-8",
+        )
+        check = QoderLikeVerifierService(run_dir, strict=True)._check_qoder_critical_false_facts()
+        assert check.status == "PASS"
+        assert check.reason_code != "QODER_CRITICAL_FALSE_FACT"
+        offenders = check.details.get("offenders", [])
+        assert not any(
+            item.get("claim") in {"postgresql", "postgres", "sudo", "entity"} for item in offenders
+        )
+
+        api_page.write_text(
+            api_page.read_text(encoding="utf-8")
+            + "\nThe payments-service service handles invoices for Conduit.\n",
+            encoding="utf-8",
+        )
+        fail_check = QoderLikeVerifierService(
+            run_dir, strict=True
+        )._check_qoder_critical_false_facts()
+        assert fail_check.status == "FAIL"
+        assert fail_check.reason_code == "QODER_CRITICAL_FALSE_FACT"
+        claims = [item.get("claim") for item in fail_check.details.get("offenders", [])]
+        assert "payments-service" in claims
 
     def test_unmatched_app_module_service_claim_still_false_fact(self, tmp_path):
         run_dir, page, _ = self._write_complete_run(tmp_path)

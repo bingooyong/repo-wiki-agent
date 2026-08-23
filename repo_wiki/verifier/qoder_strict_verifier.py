@@ -154,6 +154,17 @@ class QoderLikeVerifierService(VerifierService):
             "container",
         }
     )
+    # Infra/tool words and generic mermaid node ids are not product services.
+    # ``sudo service postgresql`` on install/dev pages and flowchart
+    # ``entity`` / ``service`` nodes (Entity/DTO) must not HARD-fail.
+    _NON_PRODUCT_SERVICE_NAMES = frozenset(
+        {
+            "postgresql",
+            "postgres",
+            "sudo",
+            "entity",
+        }
+    )
     _ACTIONS_YAML_VOCAB_RE = re.compile(
         r"github\s+actions|runs-on\b|workflow_dispatch|\bjobs\s*:|\bsteps\s*:|"
         r"\bneeds\s*:|\bstrategy\s*:|\bmatrix\s*:|--health-cmd|\bactions/checkout|"
@@ -526,9 +537,10 @@ class QoderLikeVerifierService(VerifierService):
         - A billing page should not cite authentication implementation files
         - An unrelated service page should not cite another service's implementation
 
-        Same-app architectural layers (API, database/query, data-model/schema) are
-        sibling evidence, not high-confidence wrong-service binds. FastAPI pages
-        routinely cite ``app/db/queries``, ``app/models``, and schema tests.
+        Same-app architectural layers (API, auth routes, database/query,
+        data-model/schema) are sibling evidence, not high-confidence
+        wrong-service binds. FastAPI pages routinely cite ``app/db/queries``,
+        ``app/models``, schema tests, and ``app/api/**/authentication*.py``.
 
         High-confidence mismatches are HARD failures in strict profile.
         Ambiguous cases that could be shared infrastructure are WARN only.
@@ -566,9 +578,11 @@ class QoderLikeVerifierService(VerifierService):
         ]
 
         # Map page filename keywords to expected service/module patterns.
-        # Domain services (auth, billing) are distinct product areas.
-        # Layer labels (api, data-model, database) are the same app's
-        # HTTP / persistence / schema files, not competing services.
+        # Domain services (billing) are distinct product areas.
+        # Layer labels (api, auth, data-model, database) are the same app's
+        # HTTP / auth-route / persistence / schema files, not competing services.
+        # FastAPI auth lives under app/api/**/authentication*.py, so auth is a
+        # sibling of api rather than a billing-like domain bind.
         PAGE_SERVICE_MAP = {
             "auth": ["auth", "login", "session", "token", "oauth", "sso"],
             "billing": ["billing", "invoice", "payment", "subscription", "price"],
@@ -576,7 +590,7 @@ class QoderLikeVerifierService(VerifierService):
             "data-model": ["model", "schema", "entity", "dto", "migration"],
             "database": ["db", "database", "repo", "query", "sql"],
         }
-        SIBLING_LAYER_SERVICES = frozenset({"api", "data-model", "database"})
+        SIBLING_LAYER_SERVICES = frozenset({"api", "auth", "data-model", "database"})
 
         for page in md_files:
             try:
@@ -1329,6 +1343,9 @@ class QoderLikeVerifierService(VerifierService):
                 f"quality_only={sorted(quality_paths - registry_paths)[:20]}, "
                 f"registry_only={sorted(registry_paths - quality_paths)[:20]}"
             )
+        for rel in sorted(quality_paths & registry_paths):
+            if quality_states[rel] != registry_states[rel]:
+                coverage_errors.append(f"conflicting page quality state: {rel}")
         if coverage_errors:
             return CheckResult(
                 name="qoder-quality-artifacts",
@@ -1526,6 +1543,8 @@ class QoderLikeVerifierService(VerifierService):
                         )
             if inventories["services"]:
                 for service in self._extract_structured_name_claims(text, "service"):
+                    if self._is_non_product_service_token(service):
+                        continue
                     if self._is_github_actions_reserved_service_token(service, text, rel):
                         continue
                     if service not in inventories["services"]:
@@ -1809,6 +1828,7 @@ class QoderLikeVerifierService(VerifierService):
             if not isinstance(items, list):
                 errors.append(f"{container_key} must be a list")
                 continue
+            seen_in_container: set[str] = set()
             for index, item in enumerate(items):
                 if not isinstance(item, dict):
                     errors.append(f"{container_key}[{index}] must be an object")
@@ -1821,12 +1841,16 @@ class QoderLikeVerifierService(VerifierService):
                     errors.append(f"{container_key}[{index}] missing relative_path")
                     continue
                 rel = self._strip_content_prefix(rel.strip())
-                if rel in states:
+                if rel in seen_in_container:
                     errors.append(f"duplicate page entry: {rel}")
+                seen_in_container.add(rel)
                 if not isinstance(state, str) or not state.strip():
                     errors.append(f"{container_key}[{index}] missing quality_state")
                     continue
-                states[rel] = state.strip()
+                normalized_state = state.strip()
+                if rel in states and states[rel] != normalized_state:
+                    errors.append(f"conflicting page quality state: {rel}")
+                states[rel] = normalized_state
         return states, errors
 
     def _validate_conflict_report_payload(self, payload: dict[str, Any]) -> list[str]:
@@ -2047,7 +2071,7 @@ class QoderLikeVerifierService(VerifierService):
                 r"\b[Ss]ervice\s+([a-z][a-z0-9_-]{2,})\b",
                 r"\b([a-z][a-z0-9_-]{2,})\s+service\b",
             )
-            generic = {"service", "services", "core", "public"}
+            generic = {"service", "services", "core", "public", "entity"}
         else:
             patterns = (
                 r"\b(?:Model|Entity)\s+`([^`]+)`",
@@ -2160,6 +2184,10 @@ class QoderLikeVerifierService(VerifierService):
             return True
         parts = [part for part in re.split(r"[^a-z0-9]+", lowered) if part]
         return "ci" in parts or "cd" in parts
+
+    def _is_non_product_service_token(self, service: str) -> bool:
+        """Infra/tool words and generic mermaid ids are never product services."""
+        return service.strip("`").lower() in self._NON_PRODUCT_SERVICE_NAMES
 
     def _is_github_actions_reserved_service_token(self, service: str, text: str, rel: str) -> bool:
         """Workflow reserved words are not product services on ops/CI or Actions YAML prose."""
