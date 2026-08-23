@@ -212,6 +212,20 @@ INSTALL_HEADING_CONTRACT = HeadingContract(
     toc_depth=2,
 )
 
+# Handbook project-overview page heading contract (not an install recipe)
+HANDBOOK_OVERVIEW_HEADING_CONTRACT = HeadingContract(
+    page_type="handbook-overview",
+    sections=(
+        HeadingSection("这是什么", "## 这是什么", 2, required=True, min_prose_chars=80),
+        HeadingSection("能做什么", "## 能做什么", 2, required=True, min_prose_chars=60),
+        HeadingSection("仓库怎么组织", "## 仓库怎么组织", 2, required=True, min_prose_chars=60),
+        HeadingSection("建议阅读顺序", "## 建议阅读顺序", 2, required=True, min_prose_chars=40),
+        HeadingSection("常见误解", "## 常见误解", 2, required=True, min_prose_chars=40),
+    ),
+    toc_required=True,
+    toc_depth=2,
+)
+
 # Development page heading contract
 DEVELOPMENT_HEADING_CONTRACT = HeadingContract(
     page_type="development",
@@ -238,6 +252,7 @@ HEADING_CONTRACTS: dict[str, HeadingContract] = {
     "ops": OPS_HEADING_CONTRACT,
     "development": DEVELOPMENT_HEADING_CONTRACT,
     "install": INSTALL_HEADING_CONTRACT,
+    "handbook-overview": HANDBOOK_OVERVIEW_HEADING_CONTRACT,
 }
 
 

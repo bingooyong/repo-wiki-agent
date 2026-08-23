@@ -1544,45 +1544,15 @@ class RepoWikiService:
             return f"<cite>{path}:{start}-{end}</cite>"
         return f"<cite>{path}:{start}</cite>"
 
-    def _fallback_page_blob(self, page: Any) -> str:
-        return " ".join(
-            [
-                str(getattr(page, "title", "") or ""),
-                str(getattr(page, "page_id", "") or ""),
-                " ".join(str(tag) for tag in (getattr(page, "tags", None) or [])),
-            ]
-        ).lower()
-
     def _fallback_is_onboarding_page(self, page: Any) -> bool:
-        from repo_wiki.planner.schema import WikiTaxonomyCategory
+        from repo_wiki.generator.composer import is_handbook_overview_page
 
-        category = getattr(page, "category", None)
-        if category in {
-            WikiTaxonomyCategory.PROJECT_OVERVIEW,
-            WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
-            WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
-        }:
-            return True
-        blob = self._fallback_page_blob(page)
-        return any(
-            token in blob
-            for token in ("install", "安装", "quickstart", "快速开始", "getting-started", "setup")
-        )
+        return is_handbook_overview_page(page)
 
     def _fallback_is_install_page(self, page: Any) -> bool:
-        blob = self._fallback_page_blob(page)
-        return any(
-            token in blob
-            for token in (
-                "install",
-                "安装",
-                "quick-start",
-                "quickstart",
-                "quick_start",
-                "getting-started",
-                "setup",
-            )
-        )
+        from repo_wiki.generator.composer import is_handbook_install_page
+
+        return is_handbook_install_page(page)
 
     def _fallback_empty_notice(self, title: str) -> list[str]:
         return [
@@ -1650,21 +1620,16 @@ class RepoWikiService:
         lines = [
             "## 这是什么",
             "",
-            f"「{title}」面向刚接手本仓库的读者，说明这个项目是做什么的，以及怎样在本地跑起来。",
+            f"「{title}」说明这个仓库是什么产品、给谁用，而不是一份安装步骤清单。",
             "下面只复述仓库文档和源码里已经出现的内容，不补充仓库之外的通用安装或架构说法。",
             "",
         ]
         if snippets:
             lines.extend(
                 [
-                    "根据仓库文档，项目说明与启动方式如下。",
+                    "根据仓库入口文档，产品身份与用途如下。",
                     "",
                     *snippets,
-                    "## 如何运行",
-                    "",
-                    "启动、依赖和测试步骤以上面的文档摘录为准。"
-                    "请按原文中的命令、环境变量和依赖核对本地环境，本页不另写一套未出现在仓库文档里的安装步骤。",
-                    "",
                     "如果摘录是英文，含义仍以原文为准；中文段落只帮助定位该看哪一段。",
                     "",
                 ]
@@ -1672,7 +1637,31 @@ class RepoWikiService:
         else:
             lines.extend(self._fallback_empty_notice(title))
             lines.append("")
+        lines.extend(
+            [
+                "## 能做什么",
+                "",
+                "本页只概括仓库文档里已经写到的能力与边界，不把安装命令或启动步骤当成概述正文。",
+                "",
+                "## 仓库怎么组织",
+                "",
+                "目录和模块以入口文档与下方可核对文件为准，本页不另画一套未出现在仓库里的架构。",
+                "",
+            ]
+        )
         lines.extend(self._fallback_related_files_section(evidence))
+        lines.extend(
+            [
+                "## 建议阅读顺序",
+                "",
+                "先读本页确认产品身份，再打开安装与配置或快速开始指南动手；细节以引用文件为准。",
+                "",
+                "## 常见误解",
+                "",
+                "不要把项目概述当成安装步骤清单。环境、命令和验证步骤在安装或快速开始页，不在本页重复写成操作手册。",
+                "",
+            ]
+        )
         return lines
 
     def _fallback_security_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:

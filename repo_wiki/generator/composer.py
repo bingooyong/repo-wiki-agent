@@ -79,23 +79,49 @@ _PROSE_RECOVERY_REASONS = frozenset(
     }
 )
 
-_HANDBOOK_ONBOARDING_PAGE_IDS = frozenset(
+_HANDBOOK_OVERVIEW_PAGE_IDS = frozenset({"project-overview"})
+_HANDBOOK_INSTALL_PAGE_IDS = frozenset(
     {
-        "project-overview",
+        "installation",
+        "quick-start",
+        "quickstart",
+        "getting-started",
+        "local-setup",
+        "environment-setup",
+    }
+)
+_HANDBOOK_INSTALL_ID_TOKENS = (
+    "install",
+    "quick-start",
+    "quickstart",
+    "getting-started",
+)
+_HANDBOOK_INSTALL_TITLE_TOKENS = ("安装", "快速开始")
+_HANDBOOK_INSTALL_TAGS = frozenset(
+    {
         "installation",
         "quick-start",
         "quickstart",
         "getting-started",
     }
 )
-_HANDBOOK_ONBOARDING_HEADINGS = (
+_HANDBOOK_OVERVIEW_TITLES = frozenset({"项目概述", "项目概览", "project overview"})
+_HANDBOOK_INSTALL_HEADINGS = (
     "## 这是什么",
     "## 环境要求",
     "## 安装步骤",
     "## 启动与验证",
     "## 常见问题",
 )
-_HANDBOOK_ONBOARDING_STRUCTURE = """推荐结构：
+_HANDBOOK_ONBOARDING_HEADINGS = _HANDBOOK_INSTALL_HEADINGS
+_HANDBOOK_OVERVIEW_HEADINGS = (
+    "## 这是什么",
+    "## 能做什么",
+    "## 仓库怎么组织",
+    "## 建议阅读顺序",
+    "## 常见误解",
+)
+_HANDBOOK_INSTALL_STRUCTURE = """推荐结构：
 ## 这是什么
 用产品身份说明仓库是什么、读者按本页做完后能得到什么。不要用仓库 slug 或通用 api-server 表述代替产品名。
 
@@ -110,6 +136,23 @@ _HANDBOOK_ONBOARDING_STRUCTURE = """推荐结构：
 
 ## 常见问题
 只写仓库证据里能核对的失败点或配置坑。不要写「详细分析」「性能考虑」「结论」。
+"""
+_HANDBOOK_ONBOARDING_STRUCTURE = _HANDBOOK_INSTALL_STRUCTURE
+_HANDBOOK_OVERVIEW_STRUCTURE = """推荐结构：
+## 这是什么
+用产品身份说明仓库是什么、给谁用。不要用仓库 slug 或通用 api-server 表述代替产品名。不要写成安装手册。
+
+## 能做什么
+概括仓库文档里已经出现的能力与边界。证据不足时写「当前证据显示」。
+
+## 仓库怎么组织
+说明主要目录、模块或文档入口如何对应，不另画未出现在仓库里的架构。
+
+## 建议阅读顺序
+告诉读者先看概述、再看安装或快速开始、再进模块页。不要在本页展开安装命令。
+
+## 常见误解
+澄清本页不是安装步骤清单；环境、命令和验证在安装或快速开始页。不要写「详细分析」「性能考虑」「结论」。
 """
 _ESSAY_RECOMMENDED_STRUCTURE = """推荐结构：
 ## 简介
@@ -138,21 +181,53 @@ _ESSAY_RECOMMENDED_STRUCTURE = """推荐结构：
 """
 
 
+def _handbook_page_id(page: WikiPagePlan) -> str:
+    return (page.page_id or "").lower()
+
+
+def _handbook_page_title(page: WikiPagePlan) -> str:
+    return (page.title or "").strip()
+
+
+def _handbook_page_tags(page: WikiPagePlan) -> set[str]:
+    return {str(tag).lower() for tag in (page.tags or [])}
+
+
+def _is_ide_config_page(page: WikiPagePlan) -> bool:
+    page_id = _handbook_page_id(page)
+    title = _handbook_page_title(page).lower()
+    return "ide" in page_id or "ide" in title or "ide配置" in title
+
+
+def is_handbook_install_page(page: WikiPagePlan) -> bool:
+    """True for install / quick-start / local or environment setup pages."""
+    if _is_ide_config_page(page):
+        return False
+    page_id = _handbook_page_id(page)
+    title = _handbook_page_title(page)
+    if page_id in _HANDBOOK_INSTALL_PAGE_IDS:
+        return True
+    if any(token in page_id for token in _HANDBOOK_INSTALL_ID_TOKENS):
+        return True
+    if any(token in title for token in _HANDBOOK_INSTALL_TITLE_TOKENS):
+        return True
+    return bool(_handbook_page_tags(page) & _HANDBOOK_INSTALL_TAGS)
+
+
+def is_handbook_overview_page(page: WikiPagePlan) -> bool:
+    """True for project-overview pages that must not use the install recipe."""
+    if is_handbook_install_page(page):
+        return False
+    page_id = _handbook_page_id(page)
+    title = _handbook_page_title(page)
+    if page_id in _HANDBOOK_OVERVIEW_PAGE_IDS or page_id.endswith("project-overview"):
+        return True
+    return title in _HANDBOOK_OVERVIEW_TITLES or title.lower() in _HANDBOOK_OVERVIEW_TITLES
+
+
 def is_handbook_onboarding_page(page: WikiPagePlan) -> bool:
-    """True for overview / install / quick-start / setup handbook pages."""
-    page_id = (page.page_id or "").lower()
-    tags = {str(tag).lower() for tag in (page.tags or [])}
-    if page_id in _HANDBOOK_ONBOARDING_PAGE_IDS:
-        return True
-    if page.category in {
-        WikiTaxonomyCategory.PROJECT_OVERVIEW,
-        WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
-        WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
-    } and any(
-        token in page_id for token in ("overview", "install", "quick-start", "quickstart", "setup")
-    ):
-        return True
-    return bool(tags & {"installation", "setup", "quick-start", "quickstart", "getting-started"})
+    """True for handbook overview or install / quick-start / setup pages."""
+    return is_handbook_overview_page(page) or is_handbook_install_page(page)
 
 
 # =============================================================================
@@ -659,12 +734,18 @@ class LLMPageComposer:
         compact_evidence = self._build_compact_recovery_evidence(input.evidence_binding)
         previous_for_prompt = self._strip_fenced_blocks(previous)[:1200]
         product = (context.get("product_description") or "").strip() or "（未解析到产品描述）"
-        if is_handbook_onboarding_page(input.page_plan):
+        if is_handbook_install_page(input.page_plan):
             fence_rule = (
                 "禁止把源码证据原文整段放进 Markdown 代码围栏（```）；"
                 "安装/运行命令必须保留或补成可复制的 ```bash 或 ```sh 围栏，不要只写行内反引号；"
                 "禁止 mermaid 堆砌替代正文；围栏必须成对闭合。\n"
                 "安装步骤用编号列表；每一步若有命令，该步必须含独立围栏。"
+            )
+        elif is_handbook_overview_page(input.page_plan):
+            fence_rule = (
+                "禁止把源码证据原文整段放进 Markdown 代码围栏（```）；"
+                "禁止 mermaid 或围栏堆砌替代正文；围栏必须成对闭合。\n"
+                "本页是项目概述，不要补安装步骤或 ```bash / ```sh 命令围栏。"
             )
         else:
             fence_rule = (
@@ -718,7 +799,7 @@ class LLMPageComposer:
         )
 
     def _is_handbook_overview_or_install(self, page: WikiPagePlan) -> bool:
-        return is_handbook_onboarding_page(page)
+        return is_handbook_overview_page(page) or is_handbook_install_page(page)
 
     def _evidence_has_api_routes(self, binding: PageEvidenceBinding | None) -> bool:
         if binding is None:
@@ -731,8 +812,7 @@ class LLMPageComposer:
 
     def _handbook_cite_rules(self, input: ComposerInput) -> str:
         page = input.page_plan
-        onboarding = is_handbook_onboarding_page(page)
-        if onboarding:
+        if is_handbook_install_page(page):
             rules: list[str] = [
                 "- 每个事实句的 `<cite>` 必须写在该句同一行或下一行（同行 / 下一行），"
                 "不要把引用只堆在文末「源码引用」列表里。",
@@ -741,7 +821,16 @@ class LLMPageComposer:
                 "- 不要把源码证据原文整段放进 Markdown 代码围栏。"
                 "安装/运行命令必须写成可复制的 ```bash 或 ```sh 围栏，"
                 "禁止只把命令写在行内反引号里；围栏不能替代段落说明。",
-                "- 概述/安装页：README 证据的 `<cite>` 必须写在论断的同一行或下一行"
+                "- 安装页：README 证据的 `<cite>` 必须写在论断的同一行或下一行"
+                "（same-line / next-line），不要把 README 引用甩到段落很远的地方。",
+            ]
+        elif is_handbook_overview_page(page):
+            rules = [
+                "- 每个事实句的 `<cite>` 必须写在该句同一行或下一行（同行 / 下一行），"
+                "不要把引用只堆在文末「源码引用」列表里。",
+                "- 正文必须用段落解释；不要把项目概述写成安装步骤清单。列表行不计入 prose 下限。",
+                "- 不要把源码证据原文整段放进 Markdown 代码围栏；本页不要求 ```bash / ```sh 安装命令围栏。",
+                "- 概述页：README 证据的 `<cite>` 必须写在论断的同一行或下一行"
                 "（same-line / next-line），不要把 README 引用甩到段落很远的地方。",
             ]
         else:
@@ -763,15 +852,19 @@ class LLMPageComposer:
 
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         page = input.page_plan
-        onboarding = is_handbook_onboarding_page(page)
-        if onboarding:
-            headings_text = "\n".join(f"- {heading}" for heading in _HANDBOOK_ONBOARDING_HEADINGS)
-            recommended_structure = _HANDBOOK_ONBOARDING_STRUCTURE
+        if is_handbook_install_page(page):
+            headings_text = "\n".join(f"- {heading}" for heading in _HANDBOOK_INSTALL_HEADINGS)
+            recommended_structure = _HANDBOOK_INSTALL_STRUCTURE
             identity_slot = "「这是什么」"
             list_rule = (
                 "- 使用段落解释为主；安装步骤必须用编号步骤，"
                 "每一步若有命令则该步必须含 ```bash 或 ```sh 围栏。"
             )
+        elif is_handbook_overview_page(page):
+            headings_text = "\n".join(f"- {heading}" for heading in _HANDBOOK_OVERVIEW_HEADINGS)
+            recommended_structure = _HANDBOOK_OVERVIEW_STRUCTURE
+            identity_slot = "「这是什么」"
+            list_rule = "- 使用段落解释为主；本页是项目概述，不要写安装步骤或要求命令围栏。"
         else:
             required_headings = [
                 section.heading_text for section in input.skeleton.headings if section.required
@@ -1216,9 +1309,14 @@ def build_composer_input(
     doc_type = _category_to_doc_type(page_plan.category)
     contract = get_contract_for_page_type(PagePromptType(doc_type))
 
-    # Install / quick-start / overview onboarding pages use handbook headings,
-    # not the essay 简介/详细分析 skeleton inherited from PROJECT_OVERVIEW.
-    skeleton_type = "install" if is_handbook_onboarding_page(page_plan) else doc_type
+    # Install / quick-start use the runnable handbook skeleton.
+    # Project overview uses a separate identity outline, not install steps.
+    if is_handbook_install_page(page_plan):
+        skeleton_type = "install"
+    elif is_handbook_overview_page(page_plan):
+        skeleton_type = "handbook-overview"
+    else:
+        skeleton_type = doc_type
     skeleton = build_skeleton(
         skeleton_type,
         page_plan.title,

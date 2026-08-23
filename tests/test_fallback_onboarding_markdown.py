@@ -88,6 +88,15 @@ def _assert_prose_floor(service: RepoWikiService, markdown: str) -> None:
     assert service._count_prose_chars(markdown) >= 260
 
 
+_HANDBOOK_OVERVIEW_HEADINGS = (
+    "## 这是什么",
+    "## 能做什么",
+    "## 仓库怎么组织",
+    "## 建议阅读顺序",
+    "## 常见误解",
+)
+
+
 def test_overview_fallback_uses_readme_quickstart_not_generator_meta() -> None:
     service = _service()
     page = _page(
@@ -106,6 +115,31 @@ def test_overview_fallback_uses_readme_quickstart_not_generator_meta() -> None:
     assert "PostgreSQL" in markdown
     assert "docker" in markdown.lower()
     assert "DATABASE_URL" in markdown
+    for heading in _HANDBOOK_OVERVIEW_HEADINGS:
+        assert heading in markdown
+    assert "## 安装步骤" not in markdown
+    assert "## 启动与验证" not in markdown
+    assert "## 环境要求" not in markdown
+
+
+def test_overview_fallback_uses_overview_outline_not_install_steps() -> None:
+    service = _service()
+    page = _page(
+        page_id="project-overview",
+        title="项目概述",
+        category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+    )
+    binding = _binding(file_path="README.rst", span_text=README_QUICKSTART, symbol="Quickstart")
+
+    markdown = service._fallback_markdown_for_failed_page(page, binding)
+
+    for heading in _HANDBOOK_OVERVIEW_HEADINGS:
+        assert heading in markdown
+    for heading in _HANDBOOK_ONBOARDING_HEADINGS:
+        if heading == "## 这是什么":
+            continue
+        assert heading not in markdown
+    assert not has_fenced_install_run_command(markdown)
 
 
 def test_installation_fallback_surfaces_how_to_run_evidence() -> None:

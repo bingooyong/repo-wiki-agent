@@ -147,6 +147,23 @@ class TestHeadingContract:
         heading_keys = [section.key for section in skeleton.headings]
         assert heading_keys == required
 
+    def test_handbook_overview_required_sections_are_not_install(self) -> None:
+        from repo_wiki.prompts.skeleton import (
+            HANDBOOK_OVERVIEW_HEADING_CONTRACT,
+            INSTALL_HEADING_CONTRACT,
+        )
+
+        required = HANDBOOK_OVERVIEW_HEADING_CONTRACT.get_required_sections()
+        assert required == ["这是什么", "能做什么", "仓库怎么组织", "建议阅读顺序", "常见误解"]
+        assert required != INSTALL_HEADING_CONTRACT.get_required_sections()
+        assert "安装步骤" not in required
+        assert "环境要求" not in required
+        assert "启动与验证" not in required
+        skeleton = build_skeleton("handbook-overview", title="项目概述")
+        heading_keys = [section.key for section in skeleton.headings]
+        assert heading_keys == required
+        assert skeleton.page_type == "handbook-overview"
+
     def test_get_optional_sections(self) -> None:
         """Test getting optional sections from contract."""
         contract = OVERVIEW_HEADING_CONTRACT

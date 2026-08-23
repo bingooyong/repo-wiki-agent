@@ -609,6 +609,51 @@ def test_overview_compact_prompt_requires_readme_same_line_cite() -> None:
     assert "## 详细分析" not in prompt
 
 
+def test_overview_compact_prompt_uses_overview_outline_not_install() -> None:
+    from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+    prompt = _handbook_compact_prompt(
+        _handbook_page("project-overview", "项目概述", WikiTaxonomyCategory.PROJECT_OVERVIEW)
+    )
+    assert "## 这是什么" in prompt
+    assert "## 能做什么" in prompt
+    assert "## 仓库怎么组织" in prompt
+    assert "## 建议阅读顺序" in prompt
+    assert "## 常见误解" in prompt
+    assert "## 环境要求" not in prompt
+    assert "## 安装步骤" not in prompt
+    assert "## 启动与验证" not in prompt
+    assert "必须给出可复制的 ```bash" not in prompt
+    assert "该步必须含 ```bash" not in prompt
+    assert "不要求" in prompt
+    assert "产品身份" in prompt
+    assert "README" in prompt and "<cite>" in prompt
+
+
+def test_build_composer_input_uses_handbook_overview_skeleton_for_overview() -> None:
+    from repo_wiki.generator.composer import build_composer_input
+    from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+    page = _handbook_page("project-overview", "项目概述", WikiTaxonomyCategory.PROJECT_OVERVIEW)
+    composer_input = build_composer_input(page, None, _handbook_context())
+    assert composer_input.skeleton.page_type == "handbook-overview"
+    heading_keys = [section.key for section in composer_input.skeleton.headings]
+    assert heading_keys == ["这是什么", "能做什么", "仓库怎么组织", "建议阅读顺序", "常见误解"]
+    assert "安装步骤" not in heading_keys
+    assert "环境要求" not in heading_keys
+
+
+def test_ide_setup_compact_prompt_is_not_install_outline() -> None:
+    from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+    prompt = _handbook_compact_prompt(
+        _handbook_page("ide-setup", "IDE配置", WikiTaxonomyCategory.DEVELOPMENT_GUIDE)
+    )
+    assert "## 安装步骤" not in prompt
+    assert "## 环境要求" not in prompt
+    assert "## 启动与验证" not in prompt
+
+
 def test_api_compact_prompt_requires_routes_cite_when_routes_evidence_exists() -> None:
     from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
     from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord

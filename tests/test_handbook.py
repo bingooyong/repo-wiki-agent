@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from repo_wiki.verifier.handbook import contains_generator_meta, has_fenced_install_run_command
+from repo_wiki.verifier.handbook import (
+    contains_generator_meta,
+    find_matching_pages,
+    has_fenced_install_run_command,
+    page_matches,
+)
 from repo_wiki.verifier.qoder_strict_verifier import (
     QoderLikeSeverityThreshold,
     QoderLikeVerifierService,
@@ -176,6 +181,40 @@ def test_overview_identity_skips_when_only_key_features_under_overview_folder(
     result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_overview_identity()
     assert result.status == "PASS"
     assert result.reason_code != "QODER_HANDBOOK_OVERVIEW_IDENTITY" or "Skip" in result.message
+
+
+_INSTALL_PAGE_TOKENS = ("installation", "安装指南", "安装与配置")
+
+
+def test_page_matches_install_tokens_exclude_pure_overview(tmp_path: Path) -> None:
+    overview = tmp_path / "项目概述.md"
+    install = tmp_path / "安装与配置.md"
+    overview.write_text("# 项目概述\n", encoding="utf-8")
+    install.write_text("# 安装与配置\n", encoding="utf-8")
+    assert page_matches(overview, _INSTALL_PAGE_TOKENS) is False
+    assert page_matches(install, _INSTALL_PAGE_TOKENS) is True
+    content_dir = tmp_path / "content"
+    _write_page(tmp_path, "项目概述/项目概述.md", "# 项目概述\n")
+    _write_page(tmp_path, "项目概述/安装与配置.md", "# 安装与配置\n")
+    matched = {path.name for path in find_matching_pages(content_dir, _INSTALL_PAGE_TOKENS)}
+    assert matched == {"安装与配置.md"}
+
+
+def test_overview_identity_passes_without_bash_fences(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text(
+        "Conduit is a RealWorld FastAPI backend.\n", encoding="utf-8"
+    )
+    _write_page(
+        tmp_path,
+        "project-overview.md",
+        "# 项目概述\n\n## 这是什么\n\nConduit 是 RealWorld 规范的 FastAPI 后端。\n",
+    )
+    identity = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_overview_identity()
+    fence = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_install_fence()
+    assert identity.status == "PASS"
+    assert identity.reason_code != "QODER_HANDBOOK_OVERVIEW_IDENTITY"
+    assert fence.status == "PASS"
+    assert fence.reason_code != "QODER_HANDBOOK_INSTALL_FENCE" or "Skip" in fence.message
 
 
 def test_install_run_fails_without_run_clues(tmp_path: Path) -> None:
