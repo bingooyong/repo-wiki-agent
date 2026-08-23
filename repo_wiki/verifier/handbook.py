@@ -69,7 +69,7 @@ def has_unclosed_fence(markdown: str) -> bool:
 
 def is_page_timeout_rejection(reason: str | None) -> bool:
     """True for ``LLM page timeout after {seconds}s`` reasons."""
-    return bool(reason) and reason.startswith(PAGE_TIMEOUT_REJECTION_PREFIX)
+    return reason is not None and reason.startswith(PAGE_TIMEOUT_REJECTION_PREFIX)
 
 
 def page_timeout_rejection(seconds: float) -> str:
@@ -78,7 +78,7 @@ def page_timeout_rejection(seconds: float) -> str:
 
 def is_page_server_error_rejection(reason: str | None) -> bool:
     """True for ``LLM page server error 529: ...`` page-local rewrites."""
-    return bool(reason) and reason.startswith(PAGE_SERVER_ERROR_REJECTION_PREFIX)
+    return reason is not None and reason.startswith(PAGE_SERVER_ERROR_REJECTION_PREFIX)
 
 
 def page_server_error_rejection(exc: BaseException) -> str:
@@ -95,6 +95,8 @@ def is_transient_server_error(exc: BaseException) -> bool:
         return True
     details = getattr(exc, "details", None) or {}
     status = details.get("status") if isinstance(details, dict) else None
+    if status is None:
+        return False
     try:
         return int(status) in {500, 502, 503, 504, 529}
     except (TypeError, ValueError):
