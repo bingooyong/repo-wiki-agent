@@ -1387,15 +1387,15 @@ class RepoWikiService:
                     )
                     continue
                 cache_misses += 1
+                if provider_disabled_after_failures:
+                    reason = self._provider_disabled_reason(max_provider_failures)
+                else:
+                    reason = self._real_call_budget_reason(max_real_provider_calls)
                 write_fallback(
                     page,
                     binding,
                     page_idx,
-                    self._provider_disabled_reason(
-                        max_provider_failures=max_provider_failures,
-                        max_real_provider_calls=max_real_provider_calls,
-                        provider_attempt_count=provider_attempt_count,
-                    ),
+                    reason,
                 )
                 continue
 
@@ -1442,11 +1442,7 @@ class RepoWikiService:
                                     page,
                                     skipped["binding"],
                                     skipped["page_idx"],
-                                    self._provider_disabled_reason(
-                                        max_provider_failures=max_provider_failures,
-                                        max_real_provider_calls=max_real_provider_calls,
-                                        provider_attempt_count=provider_attempt_count,
-                                    ),
+                                    self._provider_disabled_reason(max_provider_failures),
                                 )
                             return
                         if job_cursor >= len(compose_jobs):
@@ -1474,10 +1470,6 @@ class RepoWikiService:
 
         pages = [page_results[idx] for idx in sorted(page_results)]
         page_metadata = [page_metadata_by_idx[idx] for idx in sorted(page_metadata_by_idx)]
-        provider_disabled_after_failures = provider_disabled_after_failures or (
-            max_real_provider_calls is not None
-            and provider_attempt_count >= max_real_provider_calls
-        )
 
         if hasattr(provider, "close"):
             await provider.close()
@@ -2627,18 +2619,13 @@ class RepoWikiService:
             return max(1, min(value, 8))
         return max(1, min(int(getattr(self.config.llm, "max_concurrent", 1) or 1), 8))
 
-    def _provider_disabled_reason(
-        self,
-        max_provider_failures: int,
-        max_real_provider_calls: int | None,
-        provider_attempt_count: int,
-    ) -> str:
-        if (
-            max_real_provider_calls is not None
-            and provider_attempt_count >= max_real_provider_calls
-        ):
-            return f"provider disabled after {max_real_provider_calls} real-provider attempts"
+    def _provider_disabled_reason(self, max_provider_failures: int) -> str:
+        """Reason for a real circuit-break, not a spent REAL_MAX_CALLS budget."""
         return f"provider disabled after {max_provider_failures} consecutive failures"
+
+    def _real_call_budget_reason(self, max_real_provider_calls: int | None) -> str:
+        budget = max_real_provider_calls if max_real_provider_calls is not None else 0
+        return f"real-provider call budget exhausted after {budget} attempts"
 
     def search(self, *, query: str, module: str | None = None, top_k: int = 10) -> dict[str, Any]:
         bootstrap(self.config)

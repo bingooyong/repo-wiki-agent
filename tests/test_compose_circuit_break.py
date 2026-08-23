@@ -996,6 +996,12 @@ async def test_real_max_calls_budget_is_spent_on_queued_pages(
     llm = result["llm"]
     modes = [meta["generation_mode"] for meta in result["page_metadata"]]
     attempted = llm["attempted_page_ids"]
+    disabled_reasons = [
+        reason
+        for meta in result["page_metadata"]
+        for reason in meta["reasons"]
+        if "provider disabled after" in reason
+    ]
 
     assert provider.call_count == 2
     assert llm["llm_call_count"] == 2
@@ -1003,6 +1009,8 @@ async def test_real_max_calls_budget_is_spent_on_queued_pages(
     assert modes.count("llm") == 2
     assert modes.count("fallback") == PAGE_COUNT - 2
     assert llm["fallback_page_count"] == PAGE_COUNT - 2
+    assert llm["provider_disabled_after_failures"] is False
+    assert not disabled_reasons
 
 
 @pytest.mark.asyncio
@@ -1050,6 +1058,7 @@ async def test_priority_recovery_reuses_cache_hits_and_spends_budget_on_misses(
     assert llm["llm_call_count"] == 2
     assert llm["cache_hits"] == PAGE_COUNT - 2
     assert llm["fallback_page_count"] == 0
+    assert llm["provider_disabled_after_failures"] is False
     assert modes.count("llm") == PAGE_COUNT
     assert modes.count("fallback") == 0
     assert llm["attempted_page_ids"] == ["page-00", "page-01"]
@@ -1110,6 +1119,7 @@ async def test_second_compose_cache_hits_when_only_snapshot_noise_changes(
     assert llm["cache_misses"] == 0
     assert llm["llm_call_count"] == 0
     assert llm["fallback_page_count"] == 0
+    assert llm["provider_disabled_after_failures"] is False
 
 
 @pytest.mark.asyncio
@@ -1161,6 +1171,7 @@ async def test_budget_exhausted_reuses_stale_cache_instead_of_fallback(
     assert second.call_count == 2
     assert llm["llm_call_count"] == 2
     assert llm["fallback_page_count"] == 0
+    assert llm["provider_disabled_after_failures"] is False
     assert modes.count("fallback") == 0
     assert modes.count("llm") == PAGE_COUNT
     assert any("cache_reuse" in reason for reason in reasons)
