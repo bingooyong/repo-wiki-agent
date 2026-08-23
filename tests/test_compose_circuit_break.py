@@ -704,6 +704,10 @@ async def test_insufficient_prose_rejects_do_not_trip_circuit_breaker(
 ) -> None:
     """R10: 3× Insufficient prose (HTTP 200 + tokens) must not disable the provider."""
     monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
+    # The reject budget is counted in chats, not pages. concurrency=2 can
+    # split 6 rejects across 4 in-flight pages (12 chats) instead of 3
+    # pages × rewrite (11 chats). Pin serial so the R10 count is stable.
+    monkeypatch.setenv("REPO_WIKI_LLM_CONCURRENCY", "1")
     root = compose_env / "repo"
     root.mkdir()
     output_dir = compose_env / "run"
