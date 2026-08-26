@@ -113,6 +113,9 @@ def generate_command(
             raise typer.Exit(code=1)
 
 
+IMPROVE_DEFAULT_MAX_TOKENS = 16384
+
+
 @app.command("improve")
 def improve_command(
     profile: str = typer.Option(
@@ -125,7 +128,9 @@ def improve_command(
     ),
     timeout_seconds: float = typer.Option(90.0, "--timeout-seconds", help="Per-page LLM timeout"),
     concurrency: int = typer.Option(1, "--concurrency", help="Concurrent real LLM page calls"),
-    max_tokens: int = typer.Option(1000, "--max-tokens", help="Max completion tokens per page"),
+    max_tokens: int = typer.Option(
+        IMPROVE_DEFAULT_MAX_TOKENS, "--max-tokens", help="Max completion tokens per page"
+    ),
     max_pages: int = typer.Option(220, "--max-pages", help="Curated qoder-like page-plan cap"),
     priority: str = typer.Option(
         "qoder", "--priority", help="LLM call priority: qoder, overview, api, plan"
@@ -175,6 +180,10 @@ def improve_command(
     }
     if priority_page_ids:
         env_updates["REPO_WIKI_LLM_PRIORITY_PAGE_IDS"] = priority_page_ids
+    else:
+        degraded_ids = _last_run_degraded_page_ids(Path(output))
+        if degraded_ids:
+            env_updates["REPO_WIKI_LLM_PRIORITY_PAGE_IDS"] = ",".join(degraded_ids)
 
     with _temporary_env(env_updates):
         cfg = load_config(config)
@@ -1204,6 +1213,41 @@ def _jsonable_knowledge_result(result: Any) -> Any:
     if hasattr(result, "dict"):
         return result.dict()
     return str(result)
+
+
+def _last_run_degraded_page_ids(output: str | Path) -> list[str]:
+    """Read last-run DEGRADED page_ids when improve omits --priority-page-ids."""
+    try:
+        run_dir = select_run(Path(output))
+    except (ValueError, OSError, typer.BadParameter):
+        return []
+    candidates = (
+        run_dir / "repowiki" / "zh" / "meta" / "quality-report.json",
+        run_dir / "meta" / "quality-report.json",
+        run_dir / "quality-report.json",
+    )
+    payload: Any = None
+    for path in candidates:
+        payload = _read_json_file(path, None)
+        if isinstance(payload, dict):
+            break
+    if not isinstance(payload, dict):
+        return []
+    pages = payload.get("page_quality") or payload.get("pages") or []
+    if not isinstance(pages, list):
+        return []
+    page_ids: list[str] = []
+    seen: set[str] = set()
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        if str(page.get("quality_state") or "").upper() != "DEGRADED":
+            continue
+        page_id = str(page.get("page_id") or "").strip()
+        if page_id and page_id not in seen:
+            seen.add(page_id)
+            page_ids.append(page_id)
+    return page_ids
 
 
 class _temporary_env:

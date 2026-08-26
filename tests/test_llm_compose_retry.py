@@ -54,6 +54,7 @@ class SequenceLLMProvider(LLMProvider):
         self._outcomes = list(outcomes)
         self._call_count = 0
         self.user_prompts: list[str] = []
+        self.requests: list[ChatRequest] = []
         self._config = LLMProviderConfig(provider="mock", model="mock-gpt")
 
     @property
@@ -70,6 +71,7 @@ class SequenceLLMProvider(LLMProvider):
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         self._call_count += 1
+        self.requests.append(request)
         self.user_prompts.append(
             next((m.content for m in reversed(request.messages) if m.role == "user"), "")
         )
@@ -596,3 +598,122 @@ async def test_compose_page_rejects_unclosed_fence_after_one_recovery(
     assert output.rejected is True
     assert output.rejection_reason == "Unclosed fenced code block"
     assert provider.call_count == 2
+
+
+REWRITE_MIN_MAX_TOKENS = 16384
+
+
+class BudgetGatedLLMProvider(LLMProvider):
+    """Succeeds only when ChatRequest.max_tokens is raised for the rewrite."""
+
+    def __init__(
+        self,
+        *,
+        min_tokens: int = REWRITE_MIN_MAX_TOKENS,
+        empty: ChatResponse | None = None,
+        success: ChatResponse | None = None,
+        config: LLMProviderConfig | None = None,
+    ) -> None:
+        self.min_tokens = min_tokens
+        self._empty = empty or _empty_response("")
+        self._success = success or _paragraph_response()
+        self.requests: list[ChatRequest] = []
+        self._call_count = 0
+        self._config = config or LLMProviderConfig(
+            provider="minimax",
+            model="MiniMax-M3",
+            max_tokens=4096,
+        )
+
+    @property
+    def name(self) -> str:
+        return str(self._config.provider)
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(max_context_tokens=128000)
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        self._call_count += 1
+        self.requests.append(request)
+        if self._call_count > 20:
+            raise AssertionError("retry loop exceeded guard; expected RetryConfig.max_retries")
+        if request.max_tokens >= self.min_tokens:
+            return self._success
+        return self._empty
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
+def _assert_rewrite_budget_and_minimax_recovery(provider: BudgetGatedLLMProvider) -> None:
+    starved = [req for req in provider.requests if req.max_tokens < REWRITE_MIN_MAX_TOKENS]
+    bumped = [req for req in provider.requests if req.max_tokens >= REWRITE_MIN_MAX_TOKENS]
+    assert starved, "first attempt must reuse the starved completion budget"
+    assert bumped, "empty/think-only rewrite must raise max_tokens"
+    assert all(req.max_tokens < REWRITE_MIN_MAX_TOKENS for req in starved)
+    assert all(req.max_tokens >= REWRITE_MIN_MAX_TOKENS for req in bumped)
+    rewrite = bumped[0]
+    thinking = rewrite.extra_body.get("thinking")
+    assert thinking == {"type": "disabled"} or rewrite.extra_body.get("reasoning_split") is True
+    assert "禁止空" in rewrite.messages[-1].content or "不要返回空" in rewrite.messages[-1].content
+
+
+@pytest.mark.asyncio
+async def test_empty_content_rewrite_succeeds_only_when_max_tokens_bumped(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Improve's REPO_WIKI_LLM_COMPOSER_MAX_TOKENS=1000 must not starve the rewrite."""
+    monkeypatch.setenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", "1000")
+    provider = BudgetGatedLLMProvider()
+    composer = create_composer(provider=provider, llm_config=provider._config)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    _assert_rewrite_budget_and_minimax_recovery(provider)
+    assert all(req.max_tokens == 1000 for req in provider.requests if req.max_tokens < 16384)
+
+
+@pytest.mark.asyncio
+async def test_empty_content_rewrite_bumps_past_real_provider_4096_floor(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", raising=False)
+    provider = BudgetGatedLLMProvider()
+    composer = create_composer(provider=provider, llm_config=provider._config)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    _assert_rewrite_budget_and_minimax_recovery(provider)
+    first_tokens = [req.max_tokens for req in provider.requests if req.max_tokens < 16384]
+    assert first_tokens
+    assert all(token in {4096, 1000} or token < 16384 for token in first_tokens)
+
+
+@pytest.mark.asyncio
+async def test_think_only_rewrite_succeeds_only_when_max_tokens_bumped(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", "1000")
+    provider = BudgetGatedLLMProvider(empty=_think_only_response())
+    composer = create_composer(provider=provider, llm_config=provider._config)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    _assert_rewrite_budget_and_minimax_recovery(provider)

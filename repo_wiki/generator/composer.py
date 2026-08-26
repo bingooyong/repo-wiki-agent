@@ -78,6 +78,7 @@ _PROSE_RECOVERY_REASONS = frozenset(
         UNCLOSED_FENCE_REJECTION,
     }
 )
+EMPTY_CONTENT_REWRITE_MAX_TOKENS = 16384
 
 _HANDBOOK_OVERVIEW_PAGE_IDS = frozenset({"project-overview"})
 _HANDBOOK_INSTALL_PAGE_IDS = frozenset(
@@ -515,11 +516,18 @@ class LLMPageComposer:
             completion_tokens = 0
             total_tokens = 0
             last_rejected: ComposerOutput | None = None
+            rewrite_max_tokens: int | None = None
+            rewrite_extra_body: dict[str, Any] | None = None
 
             for attempt in range(2):
                 try:
                     response = await asyncio.wait_for(
-                        self._call_llm(prompt, input.page_plan.title),
+                        self._call_llm(
+                            prompt,
+                            input.page_plan.title,
+                            max_tokens=rewrite_max_tokens,
+                            extra_body=rewrite_extra_body,
+                        ),
                         timeout=self._resolve_page_timeout(),
                     )
                 except TimeoutError:
@@ -563,6 +571,8 @@ class LLMPageComposer:
                         )
                         if attempt == 0:
                             prompt = self._build_prose_recovery_prompt(input, context, "")
+                            rewrite_max_tokens = self._resolve_empty_content_rewrite_max_tokens()
+                            rewrite_extra_body = self._empty_content_rewrite_extra_body()
                             continue
                         return last_rejected
                     if is_transient_server_error(exc):
@@ -621,6 +631,9 @@ class LLMPageComposer:
                     or is_page_timeout_rejection(validation_result.rejection_reason)
                 ):
                     prompt = self._build_prose_recovery_prompt(input, context, response_content)
+                    if validation_result.rejection_reason == EMPTY_CONTENT_REJECTION:
+                        rewrite_max_tokens = self._resolve_empty_content_rewrite_max_tokens()
+                        rewrite_extra_body = self._empty_content_rewrite_extra_body()
                     continue
                 return output
 
@@ -1007,7 +1020,14 @@ class LLMPageComposer:
                 return True
         return False
 
-    async def _call_llm(self, prompt: str, title: str) -> ChatResponse:
+    async def _call_llm(
+        self,
+        prompt: str,
+        title: str,
+        *,
+        max_tokens: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+    ) -> ChatResponse:
         """Call LLM provider with prompt."""
         messages = [
             ChatMessage(
@@ -1024,8 +1044,11 @@ class LLMPageComposer:
             messages=messages,
             model=self._llm_config.model,
             temperature=self._llm_config.temperature,
-            max_tokens=self._resolve_request_max_tokens(),
+            max_tokens=(
+                max_tokens if max_tokens is not None else self._resolve_request_max_tokens()
+            ),
             timeout=self._llm_config.timeout,
+            extra_body=dict(extra_body or {}),
         )
 
         return await chat_with_retry(self._provider, request)
@@ -1069,6 +1092,44 @@ class LLMPageComposer:
         # Real providers: use configured llm.max_tokens, or at least 4096, still
         # <= provider max. Compact prompt must not clamp these to 1400.
         return max(256, min(max(configured, 4096), provider_max))
+
+    def _resolve_empty_content_rewrite_max_tokens(self) -> int:
+        """Completion budget for one empty/think-only rewrite.
+
+        MiniMax-M3 can spend a 4096 (or improve's 1000) budget on hidden
+        thinking and leave ``message.content`` blank. The rewrite must not
+        reuse ``REPO_WIKI_LLM_COMPOSER_MAX_TOKENS`` or the 4096 first-call
+        floor.
+        """
+        configured = int(getattr(self._llm_config, "max_tokens", 0) or 0)
+        provider_max = int(
+            getattr(self._provider.capabilities, "max_context_tokens", configured)
+            or configured
+            or EMPTY_CONTENT_REWRITE_MAX_TOKENS
+        )
+        return max(
+            256,
+            min(max(configured, EMPTY_CONTENT_REWRITE_MAX_TOKENS), provider_max),
+        )
+
+    def _looks_like_minimax(self) -> bool:
+        blob = " ".join(
+            [
+                str(self._llm_config.provider or ""),
+                str(self._llm_config.model or ""),
+                str(getattr(self._provider, "name", "") or ""),
+            ]
+        ).lower()
+        return "minimax" in blob
+
+    def _empty_content_rewrite_extra_body(self) -> dict[str, Any]:
+        """Disable MiniMax thinking so the bumped rewrite can fill content."""
+        if not self._looks_like_minimax():
+            return {}
+        return {
+            "thinking": {"type": "disabled"},
+            "reasoning_split": True,
+        }
 
     def _normalize_markdown_response(self, content: str, title: str) -> str:
         """Ensure provider output is a readable Markdown page."""
