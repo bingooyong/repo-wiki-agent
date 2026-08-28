@@ -566,6 +566,7 @@ class RepoWikiService:
         written_content, content_stats = writer.write_markdown_pages(
             composition["pages"],
             selected_source_paths=selected_paths,
+            planner_titles={page.output_path: page.title for page in plan.pages},
         )
         navigation_tree = build_navigation_tree(written_content, content_dir)
         page_registry = writer.build_page_registry(written_content)
@@ -738,8 +739,8 @@ class RepoWikiService:
             (WikiTaxonomyCategory.SECURITY_COMPLIANCE, "security-overview", "安全合规"),
             (
                 WikiTaxonomyCategory.TROUBLESHOOTING,
-                "troubleshooting-maintenance-overview",
-                "故障排除与维护",
+                "troubleshooting-overview",
+                "故障排除",
             ),
         ]
         if not has_frontend_wiki_surface(getattr(snapshot, "modules", None)):
@@ -836,6 +837,9 @@ class RepoWikiService:
             if title.lower().startswith("consider adding"):
                 continue
             if _is_filename_like_handbook_title(title):
+                continue
+            if page_id == "troubleshooting-maintenance-overview":
+                # Alias of troubleshooting-overview → 故障排除.md; keep one root page.
                 continue
             if page_id in seen:
                 continue

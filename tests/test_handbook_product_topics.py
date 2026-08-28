@@ -155,6 +155,36 @@ def test_filter_drops_filename_like_qoder_pages(tmp_path) -> None:
     assert titles == ["核心服务"]
 
 
+def test_filter_drops_duplicate_troubleshooting_maintenance_overview(tmp_path) -> None:
+    cfg = RepoWikiConfig()
+    cfg.project.root = str(tmp_path)
+    service = RepoWikiService(cfg)
+    pages = [
+        WikiPagePlan(
+            page_id="troubleshooting-overview",
+            title="故障排除概览",
+            category=WikiTaxonomyCategory.TROUBLESHOOTING,
+            output_path="docs/pages/troubleshooting/troubleshooting-overview.md",
+        ),
+        WikiPagePlan(
+            page_id="troubleshooting-maintenance-overview",
+            title="故障排除与维护",
+            category=WikiTaxonomyCategory.TROUBLESHOOTING,
+            output_path="docs/pages/troubleshooting/troubleshooting-maintenance-overview.md",
+        ),
+        WikiPagePlan(
+            page_id="debug-tools",
+            title="调试工具",
+            category=WikiTaxonomyCategory.TROUBLESHOOTING,
+            output_path="docs/pages/troubleshooting/debug-tools.md",
+        ),
+    ]
+
+    kept = service._filter_qoder_like_pages(pages)
+    page_ids = [page.page_id for page in kept]
+    assert page_ids == ["troubleshooting-overview", "debug-tools"]
+
+
 def test_page_contract_does_not_seed_canned_outline_for_body_only(tmp_path) -> None:
     cfg = RepoWikiConfig()
     cfg.project.root = str(tmp_path)
