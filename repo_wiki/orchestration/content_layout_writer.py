@@ -799,9 +799,10 @@ class ContentLayoutWriter:
 
             markdown = source_file.read_text(encoding="utf-8")
             output_file, relative_path = self._output_path_for_markdown(file_path, markdown)
-            relative_path = _dedupe_relative_path(relative_path, used_paths, file_path)
-            if relative_path is None:
+            unique_path = _dedupe_relative_path(relative_path, used_paths, file_path)
+            if unique_path is None:
                 continue
+            relative_path = unique_path
             output_file = self._content_dir / relative_path
 
             self._assert_safe_output_path(output_file)
@@ -857,9 +858,10 @@ class ContentLayoutWriter:
             output_file, relative_path = self._output_path_for_markdown(
                 source_path, markdown, planner_title=planner_title
             )
-            relative_path = _dedupe_relative_path(relative_path, used_paths, source_path)
-            if relative_path is None:
+            unique_path = _dedupe_relative_path(relative_path, used_paths, source_path)
+            if unique_path is None:
                 continue
+            relative_path = unique_path
             output_file = (
                 self._content_dir / relative_path if self.profile.content_subdir else output_file
             )
