@@ -122,7 +122,11 @@ def improve_command(
         "qoder-like", "--profile", help="Improvement profile; currently qoder-like is supported"
     ),
     output: str = typer.Option(".repo-agent-eval", "--output", help="Eval output root"),
-    run_id: str | None = typer.Option(None, "--run-id", help="Custom run identifier"),
+    run_id: str | None = typer.Option(
+        None,
+        "--run-id",
+        help="Existing handbook run to patch in place. Defaults to the last run under --output.",
+    ),
     real_max_calls: int = typer.Option(
         5, "--real-max-calls", help="Maximum real LLM page calls for this batch"
     ),
@@ -144,11 +148,12 @@ def improve_command(
     ci: bool = typer.Option(False, "--ci", help="Run strict verify and optional baseline compare"),
     config: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    """Incrementally improve qoder-like wiki pages using real LLM calls.
+    """Patch last-run DEGRADED pages in the existing handbook directory.
 
-    This command reuses the profile-level composer cache under
-    `.repo-agent-eval/.runtime/composer_cache.sqlite3`, so repeated batches can
-    gradually replace fallback pages without starting from zero.
+    Default ``--run-id`` is the last run under ``--output`` (select_run), not a
+    new ``run-{ts}`` sibling wiki. Priority / last-run DEGRADED ids are
+    cache-invalidated so they re-compose; hash-hit PASS pages skip LLM and are
+    not rewritten. Writes go through ContentLayoutWriter Chinese paths.
     """
     if profile != "qoder-like":
         raise typer.BadParameter("improve currently supports --profile qoder-like only")
@@ -167,6 +172,15 @@ def improve_command(
         content_subdir=eval_profile.content_subdir,
     )
     reject_unsafe_output_root(output)
+    run_id, existing_run_dir = _resolve_improve_run_target(Path(output), run_id)
+    in_place = existing_run_dir is not None
+    if existing_run_dir is not None:
+        eval_profile = EvalOutputProfile(
+            name=profile,
+            root=str(existing_run_dir.parent),
+            create_subdirs=eval_profile.create_subdirs,
+            content_subdir=eval_profile.content_subdir,
+        )
 
     env_updates = {
         "REPO_WIKI_LLM_PAGE_TIMEOUT_SECONDS": str(timeout_seconds),
@@ -188,7 +202,7 @@ def improve_command(
     with _temporary_env(env_updates):
         cfg = load_config(config)
         service = RepoWikiService(cfg)
-        result = service.generate(eval_profile=eval_profile, run_id=run_id)
+        result = service.generate(eval_profile=eval_profile, run_id=run_id, in_place=in_place)
 
     info("improve completed")
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -1213,6 +1227,17 @@ def _jsonable_knowledge_result(result: Any) -> Any:
     if hasattr(result, "dict"):
         return result.dict()
     return str(result)
+
+
+def _resolve_improve_run_target(
+    output: str | Path, run_id: str | None
+) -> tuple[str | None, Path | None]:
+    """Resolve the handbook directory improve should patch in place."""
+    try:
+        run_dir = select_run(Path(output), run_id=run_id)
+    except (ValueError, OSError, typer.BadParameter):
+        return run_id, None
+    return run_dir.name, run_dir
 
 
 def _last_run_degraded_page_ids(output: str | Path) -> list[str]:

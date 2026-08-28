@@ -59,6 +59,67 @@ _INSTALL_ENV_CLUE_PATTERNS = (
     re.compile(r"\bpoetry\s+(?:install|run)\b", re.I),
 )
 
+
+def _read_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _merge_in_place_quality_documents(
+    meta_dir: Path,
+    previous_quality: dict[str, Any] | None,
+    previous_registry: dict[str, Any] | None,
+) -> None:
+    """Keep skip-write pages in quality/registry after a page-local improve."""
+    if previous_quality:
+        quality_path = meta_dir / "quality-report.json"
+        current = _read_json_object(quality_path)
+        if current is not None:
+            merged = {
+                str(item.get("page_id")): item
+                for item in previous_quality.get("page_quality") or []
+                if isinstance(item, dict) and item.get("page_id")
+            }
+            for item in current.get("page_quality") or []:
+                if isinstance(item, dict) and item.get("page_id"):
+                    merged[str(item["page_id"])] = item
+            pages = list(merged.values())
+            current["page_quality"] = pages
+            summary = dict(current.get("summary") or {})
+            summary["page_count"] = len(pages)
+            summary["degraded_count"] = sum(
+                1 for item in pages if str(item.get("quality_state") or "").upper() == "DEGRADED"
+            )
+            summary["ready_count"] = sum(
+                1
+                for item in pages
+                if str(item.get("quality_state") or "").upper() in {"PASS", "READY"}
+            )
+            current["summary"] = summary
+            quality_path.write_text(
+                json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+    if previous_registry:
+        registry_path = meta_dir / "page-registry.json"
+        current_registry = _read_json_object(registry_path)
+        if current_registry is not None:
+            merged_pages = {
+                str(item.get("page_id")): item
+                for item in previous_registry.get("pages") or []
+                if isinstance(item, dict) and item.get("page_id")
+            }
+            for item in current_registry.get("pages") or []:
+                if isinstance(item, dict) and item.get("page_id"):
+                    merged_pages[str(item["page_id"])] = item
+            current_registry["pages"] = list(merged_pages.values())
+            registry_path.write_text(
+                json.dumps(current_registry, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+
 _FILENAME_HANDBOOK_TITLES = frozenset(
     {
         "app",
@@ -362,12 +423,15 @@ class RepoWikiService:
         self,
         eval_profile: Any = None,
         run_id: str | None = None,
+        in_place: bool = False,
     ) -> dict[str, Any]:
         """Generate wiki content with optional eval profile.
 
         Args:
             eval_profile: Optional EvalOutputProfile for qoder-like output
             run_id: Optional run identifier
+            in_place: When True, patch an existing handbook run instead of minting
+                a sibling ``run-{ts}`` directory.
 
         Returns:
             Generation result with file counts and manifest path
@@ -390,12 +454,23 @@ class RepoWikiService:
             eval_profile = get_eval_profile("default")
         eval_profile = eval_profile.resolve_root(self.root)
 
-        # Generate run_id if not provided
+        # Generate run_id if not provided. In-place improve reuses the last
+        # handbook under the eval root instead of minting a sibling run-{ts}.
         if run_id is None:
-            run_id = f"run-{int(time.time() * 1000)}"
+            if in_place:
+                try:
+                    from repo_wiki.orchestration.latest_run_selector import select_run
+
+                    run_id = select_run(Path(eval_profile.root)).name
+                except (ValueError, OSError):
+                    run_id = f"run-{int(time.time() * 1000)}"
+            else:
+                run_id = f"run-{int(time.time() * 1000)}"
 
         if eval_profile.content_subdir:
-            return self._generate_isolated_eval(eval_profile=eval_profile, run_id=run_id)
+            return self._generate_isolated_eval(
+                eval_profile=eval_profile, run_id=run_id, in_place=in_place
+            )
 
         bootstrap(self.config)
 
@@ -483,7 +558,9 @@ class RepoWikiService:
             "timings": stage.timings,
         }
 
-    def _generate_isolated_eval(self, eval_profile: Any, run_id: str) -> dict[str, Any]:
+    def _generate_isolated_eval(
+        self, eval_profile: Any, run_id: str, in_place: bool = False
+    ) -> dict[str, Any]:
         """Generate qoder-like eval output without mutating target docs/runtime dirs."""
         from repo_wiki.orchestration.content_layout_writer import (
             ContentLayoutWriter,
@@ -551,6 +628,7 @@ class RepoWikiService:
                 evidence_bindings=evidence_bindings,
                 snapshot=snapshot,
                 output_dir=output_dir,
+                in_place=in_place,
             )
         )
         stage.stop("compose")
@@ -580,13 +658,28 @@ class RepoWikiService:
             selected_paths = plan_md_paths
         else:
             selected_paths = overlap
+        previous_quality: dict[str, Any] | None = None
+        previous_registry: dict[str, Any] | None = None
+        if in_place:
+            meta_dir = output_dir / "repowiki" / "zh" / "meta"
+            previous_quality = _read_json_object(meta_dir / "quality-report.json")
+            previous_registry = _read_json_object(meta_dir / "page-registry.json")
         written_content, content_stats = writer.write_markdown_pages(
             composition["pages"],
             selected_source_paths=selected_paths,
             planner_titles={page.output_path: page.title for page in plan.pages},
         )
-        navigation_tree = build_navigation_tree(written_content, content_dir)
-        page_registry = writer.build_page_registry(written_content)
+        if in_place:
+            disk_pages = [
+                path.relative_to(content_dir).as_posix()
+                for path in sorted(content_dir.rglob("*.md"))
+                if path.is_file()
+            ]
+            navigation_tree = build_navigation_tree(disk_pages, content_dir)
+            page_registry = writer.build_page_registry(disk_pages)
+        else:
+            navigation_tree = build_navigation_tree(written_content, content_dir)
+            page_registry = writer.build_page_registry(written_content)
         stage.stop("content")
         info(
             f"stage content completed files={len(written_content)} elapsed={stage.timings.get('content')}s"
@@ -630,6 +723,10 @@ class RepoWikiService:
             quality_warnings=composition["quality_warnings"],
             llm_summary=composition["llm"],
         )
+        if in_place:
+            _merge_in_place_quality_documents(
+                repowiki_meta_dir, previous_quality, previous_registry
+            )
         conflict_artifact_paths = write_generation_conflict_artifacts(
             config=self.config,
             repo_root=self.root,
@@ -1180,6 +1277,7 @@ class RepoWikiService:
         evidence_bindings: dict[str, PageEvidenceBinding],
         snapshot: Any,
         output_dir: Path,
+        in_place: bool = False,
     ) -> dict[str, Any]:
         from repo_wiki.generator.composer import (
             ComposerContext,
@@ -1200,6 +1298,10 @@ class RepoWikiService:
         )
         cache_path = self._resolve_composer_cache_path(output_dir)
         cache = ComposerCache(cache_path)
+        priority_ids = set(self._priority_page_ids())
+        if in_place:
+            for page_id in priority_ids:
+                cache.invalidate(page_id)
         identity = getattr(plan, "repository_identity", None)
         product_description = getattr(identity, "description", None) if identity else None
         if not product_description:
@@ -1279,6 +1381,16 @@ class RepoWikiService:
                 "quality_state": "PASS",
                 "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
                 "reasons": [reason],
+            }
+
+        def skip_existing_page(page: Any, binding: Any, page_idx: int, reason: str) -> None:
+            page_metadata_by_idx[page_idx] = {
+                "page_id": page.page_id,
+                "source_path": page.output_path,
+                "generation_mode": "llm",
+                "quality_state": "PASS",
+                "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                "reasons": [reason, "skip_write"],
             }
 
         def reuse_stale_cached_page(page: Any, binding: Any, page_idx: int) -> bool:
@@ -1466,6 +1578,9 @@ class RepoWikiService:
             if cached and cached.output_markdown:
                 cache_hits += 1
                 info(f"compose cache hit page_id={page.page_id} title={page.title}")
+                if in_place and page.page_id not in priority_ids:
+                    skip_existing_page(page, binding, page_idx, "cache_hit")
+                    continue
                 apply_cached_page(page, binding, page_idx, cached.output_markdown, "cache_hit")
                 continue
 
@@ -1477,6 +1592,14 @@ class RepoWikiService:
                 # Do not mark provider_disabled here: that flag also skips
                 # already-queued jobs. A finite REAL_MAX_CALLS budget must
                 # still let those queued priority pages consume the calls.
+                if in_place and page.page_id not in priority_ids:
+                    skip_existing_page(page, binding, page_idx, "keep_existing")
+                    info(
+                        "compose skip write "
+                        f"page_id={page.page_id} title={page.title} "
+                        "reason=in_place_non_priority"
+                    )
+                    continue
                 if reuse_stale_cached_page(page, binding, page_idx):
                     cache_hits += 1
                     info(
@@ -2596,22 +2719,25 @@ class RepoWikiService:
             return mode
         return "qoder"
 
+    def _priority_page_ids(self) -> list[str]:
+        """Page ids that improve should re-compose first (and cache-bust in place)."""
+        import os
+
+        return [
+            item.strip()
+            for item in os.environ.get("REPO_WIKI_LLM_PRIORITY_PAGE_IDS", "").split(",")
+            if item.strip()
+        ]
+
     def _order_pages_for_llm_attempts(
         self,
         page_entries: list[tuple[int, Any]],
         priority_mode: str,
     ) -> list[tuple[int, Any]]:
-        if priority_mode == "plan":
-            return page_entries
-
-        import os
-
-        explicit_ids = [
-            item.strip()
-            for item in os.environ.get("REPO_WIKI_LLM_PRIORITY_PAGE_IDS", "").split(",")
-            if item.strip()
-        ]
+        explicit_ids = self._priority_page_ids()
         explicit_rank = {page_id: idx for idx, page_id in enumerate(explicit_ids)}
+        if priority_mode == "plan" and not explicit_rank:
+            return page_entries
 
         def score(entry: tuple[int, Any]) -> tuple[int, int, int, str]:
             original_idx, page = entry
@@ -2625,6 +2751,9 @@ class RepoWikiService:
 
             if page_id in explicit_rank:
                 return (0, explicit_rank[page_id], original_idx, page_id)
+
+            if priority_mode == "plan":
+                return (1, original_idx, original_idx, page_id)
 
             exact_rank = self._core_page_exact_rank(page_id)
             if exact_rank is not None and priority_mode in {"qoder", "overview"}:

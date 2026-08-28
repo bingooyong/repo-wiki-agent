@@ -1065,6 +1065,65 @@ async def test_priority_recovery_reuses_cache_hits_and_spends_budget_on_misses(
 
 
 @pytest.mark.asyncio
+async def test_in_place_compose_invalidates_priority_ids_without_manual_cache_delete(
+    compose_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In-place improve must bust DEGRADED/priority cache entries itself.
+
+    Hash-hit non-priority pages skip LLM and are omitted from the write list so
+    the rest of the wiki is not rewritten.
+    """
+    root = compose_env / "repo"
+    root.mkdir()
+    output_dir = compose_env / "run"
+    output_dir.mkdir()
+    first = HealthyLLMProvider()
+    service = _service(root)
+    _install_provider(monkeypatch, service, first)
+    await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+    )
+    assert first.call_count == PAGE_COUNT
+
+    monkeypatch.setenv("REPO_WIKI_LLM_REAL_MAX_CALLS", "2")
+    monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "2")
+    monkeypatch.setenv("REPO_WIKI_LLM_PRIORITY_PAGE_IDS", "page-00,page-01")
+    second = HealthyLLMProvider()
+    _install_provider(monkeypatch, service, second)
+    result = await service._compose_qoder_like_pages(
+        plan=_plan(),
+        evidence_bindings={},
+        snapshot=_snapshot(root),
+        output_dir=output_dir,
+        in_place=True,
+    )
+    llm = result["llm"]
+    written_ids = [
+        meta["page_id"] for meta in result["page_metadata"] if "skip_write" not in meta["reasons"]
+    ]
+    skip_ids = [
+        meta["page_id"] for meta in result["page_metadata"] if "skip_write" in meta["reasons"]
+    ]
+
+    assert second.call_count == 2
+    assert llm["llm_call_count"] == 2
+    assert llm["cache_hits"] == PAGE_COUNT - 2
+    assert llm["fallback_page_count"] == 0
+    assert llm["provider_disabled_after_failures"] is False
+    assert llm["attempted_page_ids"] == ["page-00", "page-01"]
+    assert written_ids == ["page-00", "page-01"]
+    assert "page-02" in skip_ids
+    assert {path for path, _markdown in result["pages"]} == {
+        "docs/page-00.md",
+        "docs/page-01.md",
+    }
+
+
+@pytest.mark.asyncio
 async def test_second_compose_cache_hits_when_only_snapshot_noise_changes(
     compose_env: Path,
     monkeypatch: pytest.MonkeyPatch,
