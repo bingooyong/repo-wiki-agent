@@ -130,6 +130,7 @@ class RepoWikiService:
     _LOCAL_LINK_PATTERN = re.compile(r"\[[^\]\n]+\]\(([^)\n]+)\)")
     _CITE_PATTERN = re.compile(r"<cite>[^<]+</cite>")
     _HEADING_L2_PATTERN = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+    _QODER_TOC_HEADING_NAMES = frozenset({"目录", "table of contents", "contents", "toc"})
 
     def __init__(self, config: RepoWikiConfig) -> None:
         self.config = config
@@ -2049,13 +2050,9 @@ class RepoWikiService:
         if not content.startswith("#"):
             content = f"# {page.title}\n\n{content}"
 
-        if "## 目录" not in content and "## Table of Contents" not in content:
-            h2_sections = self._extract_or_seed_h2_sections(page, content)
-            if h2_sections:
-                toc_lines = ["## 目录", ""]
-                for idx, heading in enumerate(h2_sections, 1):
-                    toc_lines.append(f"{idx}. {heading}")
-                content = "\n".join([content, "", *toc_lines]).strip()
+        # Always rebuild 目录 from real H2s. LLM leftover 结论/项目结构 bullets
+        # and sentence-length TOC items must not remain as dangling targets.
+        content = self._rebuild_qoder_toc_from_real_h2s(page, content)
 
         if self._count_prose_chars(content) < 260:
             content += (
@@ -2366,9 +2363,57 @@ class RepoWikiService:
                 rendered_blocks.append(f"```mermaid\n{rendered}\n```")
         return rendered_blocks
 
+    def _rebuild_qoder_toc_from_real_h2s(self, page: Any, content: str) -> str:
+        h2_sections = self._extract_or_seed_h2_sections(page, content)
+        content = self._strip_qoder_toc_section(content)
+        if not h2_sections:
+            return content
+        toc_lines = ["## 目录", ""]
+        for idx, heading in enumerate(h2_sections, 1):
+            toc_lines.append(f"{idx}. {heading}")
+        return "\n".join([content, "", *toc_lines]).strip()
+
+    def _strip_qoder_toc_section(self, content: str) -> str:
+        kept: list[str] = []
+        in_fence = False
+        skipping_toc = False
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+                if not skipping_toc:
+                    kept.append(line)
+                continue
+            if skipping_toc:
+                if not in_fence and re.match(r"^#{1,6}\s+\S", stripped):
+                    skipping_toc = False
+                else:
+                    continue
+            if not in_fence:
+                heading = re.match(r"^#{1,6}\s+(.+)$", stripped)
+                if heading and heading.group(1).strip().lower() in self._QODER_TOC_HEADING_NAMES:
+                    skipping_toc = True
+                    continue
+            kept.append(line)
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
     def _extract_or_seed_h2_sections(self, page: Any, content: str) -> list[str]:
-        headings = [m.group(1).strip() for m in self._HEADING_L2_PATTERN.finditer(content)]
-        headings = [h for h in headings if h and h not in {"目录", "Table of Contents", "Contents"}]
+        headings: list[str] = []
+        in_fence = False
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            match = self._HEADING_L2_PATTERN.match(line)
+            if not match:
+                continue
+            title = match.group(1).strip()
+            if not title or title.lower() in self._QODER_TOC_HEADING_NAMES:
+                continue
+            headings.append(title)
         return headings[:10]
 
     def _build_minimal_mermaid_block(self, page: Any) -> str:

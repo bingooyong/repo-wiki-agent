@@ -215,6 +215,169 @@ def test_page_contract_builds_toc_from_real_h2s(tmp_path) -> None:
         assert heading not in toc_items
 
 
+def test_page_contract_rebuilds_llm_toc_from_real_h2s_only(tmp_path) -> None:
+    """LLM leftover 结论/项目结构 bullets must not survive compose."""
+    cfg = RepoWikiConfig()
+    cfg.project.root = str(tmp_path)
+    service = RepoWikiService(cfg)
+    page = WikiPagePlan(
+        page_id="api-dev-guide",
+        title="API开发指南",
+        category=WikiTaxonomyCategory.API_REFERENCE,
+        output_path="docs/pages/guides/api-dev-guide.md",
+    )
+    markdown = """# API开发指南
+
+## 目录
+
+1. 简介
+2. 项目结构
+3. 环境搭建
+4. 开发规范
+5. 结论
+
+## 路由注册
+
+FastAPI 用 APIRouter 挂载业务路由。
+
+## 鉴权约定
+
+受保护接口读取 Authorization 头。
+"""
+    rendered = service._enforce_qoder_page_contract(
+        page=page,
+        markdown=markdown,
+        binding=None,
+        add_mermaid=False,
+        composition_context=None,
+    )
+    assert "## 目录" in rendered
+    toc_items = _toc_item_texts(rendered)
+    assert "路由注册" in toc_items
+    assert "鉴权约定" in toc_items
+    for heading in _CANNED_OUTLINE:
+        assert heading not in toc_items
+    assert "环境搭建" not in toc_items
+    assert "开发规范" not in toc_items
+
+
+def test_page_contract_drops_sentence_like_toc_bullets(tmp_path) -> None:
+    cfg = RepoWikiConfig()
+    cfg.project.root = str(tmp_path)
+    service = RepoWikiService(cfg)
+    page = WikiPagePlan(
+        page_id="deployment",
+        title="部署运维",
+        category=WikiTaxonomyCategory.CORE_SERVICES,
+        output_path="docs/pages/ops/deployment.md",
+    )
+    markdown = """# 部署运维
+
+## 目录
+
+1. `README.rst` 提供 Quickstart 与安装说明，不是独立章节。
+2. docker-compose.yml 编排生产依赖与健康检查。
+3. 核心模块
+
+## 发布流程
+
+先构建镜像再滚动更新。
+
+## 回滚策略
+
+保留上一版镜像以便快速回退。
+"""
+    rendered = service._enforce_qoder_page_contract(
+        page=page,
+        markdown=markdown,
+        binding=None,
+        add_mermaid=False,
+    )
+    assert "## 目录" in rendered
+    toc_items = _toc_item_texts(rendered)
+    assert "发布流程" in toc_items
+    assert "回滚策略" in toc_items
+    assert "核心模块" not in toc_items
+    assert not any("Quickstart" in item for item in toc_items)
+    assert not any("docker-compose.yml" in item for item in toc_items)
+
+
+def test_page_contract_omits_toc_when_llm_toc_has_no_real_h2s(tmp_path) -> None:
+    cfg = RepoWikiConfig()
+    cfg.project.root = str(tmp_path)
+    service = RepoWikiService(cfg)
+    page = WikiPagePlan(
+        page_id="memory-issues",
+        title="内存问题",
+        category=WikiTaxonomyCategory.TROUBLESHOOTING,
+        output_path="docs/pages/troubleshooting/memory-issues.md",
+    )
+    markdown = """# 内存问题
+
+## 目录
+
+1. 核心模块
+2. 项目结构
+3. 故障排查指南
+4. 依赖关系分析
+5. 性能考虑
+
+仓库 README 说明如何观察内存占用，没有二级标题。
+"""
+    rendered = service._enforce_qoder_page_contract(
+        page=page,
+        markdown=markdown,
+        binding=None,
+        add_mermaid=False,
+    )
+    assert "## 目录" not in rendered
+    for heading in ("核心模块", "项目结构", "故障排查指南", "依赖关系分析", "性能考虑"):
+        assert heading not in _toc_item_texts(rendered)
+
+
+def test_page_contract_makes_dangling_llm_toc_pass_qoder_toc_presence(tmp_path) -> None:
+    cfg = RepoWikiConfig()
+    cfg.project.root = str(tmp_path)
+    service = RepoWikiService(cfg)
+    page = WikiPagePlan(
+        page_id="audit-log",
+        title="审计日志",
+        category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
+        output_path="docs/pages/security/audit-log.md",
+    )
+    markdown = """# 审计日志
+
+## 目录
+
+1. 结论
+2. 项目结构
+
+## 记录内容
+
+每次写操作记录操作者与资源。
+
+## 查询入口
+
+管理员按时间范围检索审计事件。
+"""
+    rendered = service._enforce_qoder_page_contract(
+        page=page,
+        markdown=markdown,
+        binding=None,
+        add_mermaid=False,
+    )
+    content_dir = tmp_path / "content"
+    content_dir.mkdir()
+    (content_dir / "audit-log.md").write_text(rendered, encoding="utf-8")
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_qoder_toc_presence()
+    assert result.status == "PASS"
+    toc_items = _toc_item_texts(rendered)
+    assert "记录内容" in toc_items
+    assert "查询入口" in toc_items
+    assert "结论" not in toc_items
+    assert "项目结构" not in toc_items
+
+
 def test_qoder_toc_presence_passes_when_real_h2s_have_toc(tmp_path) -> None:
     content_dir = tmp_path / "content"
     content_dir.mkdir()
