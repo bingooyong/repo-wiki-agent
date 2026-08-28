@@ -772,8 +772,54 @@ class RuleFirstPlanner:
                     tags=["api", "endpoint-index"],
                 )
 
+    def _snapshot_rel_paths(self) -> list[str]:
+        paths: list[str] = []
+        for module in self.snapshot.modules:
+            paths.append(module.path)
+        for model in self.snapshot.data_models:
+            paths.append(model.file_path)
+        for endpoint in self.snapshot.endpoints:
+            paths.append(endpoint.file_path)
+        paths.extend(self.snapshot.repository.key_directories)
+        return [path for path in paths if path]
+
+    def _database_evidence_files(self) -> list[str]:
+        matches: list[str] = []
+        seen: set[str] = set()
+        for path in self._snapshot_rel_paths():
+            lower = path.replace("\\", "/").lower()
+            parts = [part for part in lower.split("/") if part]
+            if lower.endswith(".sql") or any(
+                part in {"alembic", "migrations", "migration"} for part in parts
+            ):
+                if path not in seen:
+                    seen.add(path)
+                    matches.append(path)
+        return matches
+
+    def _has_database_architecture_evidence(self) -> bool:
+        return bool(self._database_evidence_files())
+
+    def _core_data_model_names(self) -> list[str]:
+        tokens = ("entity", "apiatom", "contract", "workflow", "audit", "execution")
+        return [
+            model.name
+            for model in self.snapshot.data_models
+            if any(token in model.name.lower() for token in tokens)
+        ]
+
+    def _service_data_model_groups(self) -> list[tuple[str, list]]:
+        by_module: dict[str, list] = {}
+        for data_model in self.snapshot.data_models:
+            by_module.setdefault(data_model.module, []).append(data_model)
+        return [
+            (module_name, models)
+            for module_name, models in sorted(by_module.items())
+            if self._is_service_like_module_name(module_name) and models
+        ]
+
     def _generate_data_model_pages(self) -> None:
-        """Generate Qoder-like data model pages without raw DTO/entity dumps."""
+        """Generate one 数据模型 chapter unless distinct evidence warrants children."""
         self._add_page(
             page_id=self._make_page_id("data-models-overview", WikiTaxonomyCategory.DATA_MODELS),
             title="数据模型",
@@ -786,95 +832,91 @@ class RuleFirstPlanner:
             tags=["models", "schemas"],
         )
 
-        by_module: dict[str, list] = {}
-        for dm in self.snapshot.data_models:
-            if dm.module not in by_module:
-                by_module[dm.module] = []
-            by_module[dm.module].append(dm)
+        all_names = [dm.name for dm in self.snapshot.data_models]
+        core_names = self._core_data_model_names()
+        has_distinct_core = bool(core_names) and set(core_names) != set(all_names)
+        service_groups = self._service_data_model_groups()
+        has_db_evidence = self._has_database_architecture_evidence()
 
-        core_names = [
-            model.name
-            for model in self.snapshot.data_models
-            if any(
-                token in model.name.lower()
-                for token in ["entity", "apiatom", "contract", "workflow", "audit", "execution"]
-            )
-        ]
-        self._add_page(
-            page_id=self._make_page_id("core-data-models", WikiTaxonomyCategory.DATA_MODELS),
-            title="核心数据模型",
-            category=WikiTaxonomyCategory.DATA_MODELS,
-            parent="data-models-overview",
-            source_requirements=SourceRequirement(data_models=sorted(set(core_names))[:120]),
-            sort_order=10,
-            tags=["models", "core-entities"],
-        )
-        self._add_page(
-            page_id=self._make_page_id("service-data-models", WikiTaxonomyCategory.DATA_MODELS),
-            title="服务数据模型",
-            category=WikiTaxonomyCategory.DATA_MODELS,
-            parent="data-models-overview",
-            source_requirements=SourceRequirement(
-                data_models=[dm.name for dm in self.snapshot.data_models]
-            ),
-            sort_order=11,
-            tags=["models", "service-models"],
-        )
-        self._add_page(
-            page_id=self._make_page_id("database-architecture", WikiTaxonomyCategory.DATA_MODELS),
-            title="数据库架构",
-            category=WikiTaxonomyCategory.DATA_MODELS,
-            parent="data-models-overview",
-            source_requirements=SourceRequirement(files=["db", "sql", "migrations"]),
-            sort_order=12,
-            tags=["database", "schema"],
-        )
-        self._add_page(
-            page_id=self._make_page_id(
-                "database-migration-strategy", WikiTaxonomyCategory.DATA_MODELS
-            ),
-            title="数据迁移策略",
-            category=WikiTaxonomyCategory.DATA_MODELS,
-            parent="database-architecture",
-            source_requirements=SourceRequirement(files=["migration", "migrations", "sql"]),
-            sort_order=13,
-            tags=["database", "migration"],
-        )
-
-        for idx, (module_name, models) in enumerate(sorted(by_module.items())):
-            if not self._is_service_like_module_name(module_name):
-                continue
-            module_models_id = self._make_page_id(
-                f"{module_name}-data-models", WikiTaxonomyCategory.DATA_MODELS
-            )
+        if has_distinct_core:
             self._add_page(
-                page_id=module_models_id,
-                title=f"{self._humanize_service_title(module_name)} 数据模型",
+                page_id=self._make_page_id("core-data-models", WikiTaxonomyCategory.DATA_MODELS),
+                title="核心数据模型",
                 category=WikiTaxonomyCategory.DATA_MODELS,
-                parent="service-data-models",
-                source_requirements=SourceRequirement(data_models=[m.name for m in models]),
-                sort_order=100 + idx,
-                tags=["models", "service-model", module_name],
+                parent="data-models-overview",
+                source_requirements=SourceRequirement(data_models=sorted(set(core_names))[:120]),
+                sort_order=10,
+                tags=["models", "core-entities"],
             )
 
-            if not self._include_raw_model_pages():
-                continue
-            for model_idx, model in enumerate(sorted(models, key=lambda m: m.name)):
-                model_id = self._make_page_id(
-                    f"{module_name}-{model.name}", WikiTaxonomyCategory.DATA_MODELS
+        if len(service_groups) >= 2 or (len(service_groups) == 1 and has_distinct_core):
+            self._add_page(
+                page_id=self._make_page_id("service-data-models", WikiTaxonomyCategory.DATA_MODELS),
+                title="服务数据模型",
+                category=WikiTaxonomyCategory.DATA_MODELS,
+                parent="data-models-overview",
+                source_requirements=SourceRequirement(
+                    data_models=[model.name for _, models in service_groups for model in models]
+                ),
+                sort_order=11,
+                tags=["models", "service-models"],
+            )
+            for idx, (module_name, models) in enumerate(service_groups):
+                module_models_id = self._make_page_id(
+                    f"{module_name}-data-models", WikiTaxonomyCategory.DATA_MODELS
                 )
                 self._add_page(
-                    page_id=model_id,
-                    title=model.name,
+                    page_id=module_models_id,
+                    title=f"{self._humanize_service_title(module_name)} 数据模型",
                     category=WikiTaxonomyCategory.DATA_MODELS,
-                    parent=module_models_id,
-                    source_requirements=SourceRequirement(
-                        data_models=[model.name],
-                        files=[model.file_path],
-                    ),
-                    sort_order=200 + model_idx,
-                    tags=["raw-model", model.type],
+                    parent="service-data-models",
+                    source_requirements=SourceRequirement(data_models=[m.name for m in models]),
+                    sort_order=100 + idx,
+                    tags=["models", "service-model", module_name],
                 )
+                if not self._include_raw_model_pages():
+                    continue
+                for model_idx, model in enumerate(sorted(models, key=lambda item: item.name)):
+                    model_id = self._make_page_id(
+                        f"{module_name}-{model.name}", WikiTaxonomyCategory.DATA_MODELS
+                    )
+                    self._add_page(
+                        page_id=model_id,
+                        title=model.name,
+                        category=WikiTaxonomyCategory.DATA_MODELS,
+                        parent=module_models_id,
+                        source_requirements=SourceRequirement(
+                            data_models=[model.name],
+                            files=[model.file_path],
+                        ),
+                        sort_order=200 + model_idx,
+                        tags=["raw-model", model.type],
+                    )
+
+        if has_db_evidence:
+            db_files = self._database_evidence_files()
+            self._add_page(
+                page_id=self._make_page_id(
+                    "database-architecture", WikiTaxonomyCategory.DATA_MODELS
+                ),
+                title="数据库架构",
+                category=WikiTaxonomyCategory.DATA_MODELS,
+                parent="data-models-overview",
+                source_requirements=SourceRequirement(files=db_files[:20]),
+                sort_order=12,
+                tags=["database", "schema"],
+            )
+            self._add_page(
+                page_id=self._make_page_id(
+                    "database-migration-strategy", WikiTaxonomyCategory.DATA_MODELS
+                ),
+                title="数据迁移策略",
+                category=WikiTaxonomyCategory.DATA_MODELS,
+                parent="database-architecture",
+                source_requirements=SourceRequirement(files=db_files[:20]),
+                sort_order=13,
+                tags=["database", "migration"],
+            )
 
     def _generate_ops_pages(self) -> None:
         """Generate deployment and operations pages."""

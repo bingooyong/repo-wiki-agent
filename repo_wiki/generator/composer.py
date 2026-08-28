@@ -250,6 +250,7 @@ class ComposerContext:
     commands: dict[str, str] = field(default_factory=dict)
     domain_groups_markdown: str = ""
     product_description: str | None = None
+    key_directories: list[str] = field(default_factory=list)
 
 
 @dataclass

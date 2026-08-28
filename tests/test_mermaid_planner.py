@@ -232,6 +232,72 @@ class TestMermaidPlanner:
         assert diagram.diagram_id == "overview-architecture"
         assert diagram.diagram_type == MermaidDiagramType.FLOWCHART
 
+    def test_fastapi_like_overview_omits_filenames_and_missing_wiki_layers(self):
+        """Architecture mermaid shows app packages, not __init__.py or this tool's folders."""
+        planner = create_planner()
+        renderer = create_renderer()
+        context = {
+            "modules": [
+                {"name": "__init__.py", "path": "app/__init__.py"},
+                {"name": "main.py", "path": "app/main.py"},
+                {"name": "api", "path": "app/api"},
+                {"name": "core", "path": "app/core"},
+                {"name": "db", "path": "app/db"},
+                {"name": "models", "path": "app/models"},
+                {"name": "resources", "path": "app/resources"},
+                {"name": "services", "path": "app/services"},
+                {"name": "tests", "path": "tests"},
+            ],
+            "key_directories": ["app", "tests"],
+        }
+        diagrams = planner.plan_diagram_for_page("overview", "overview", None, context)
+        assert diagrams
+        rendered = renderer.render_diagram(diagrams[0])
+        assert "__init__.py" not in rendered
+        assert "main.py" not in rendered
+        assert ".repo-wiki" not in rendered
+        assert "ai/source-of-truth" not in rendered
+        assert "docs/" not in rendered
+        assert "api" in rendered
+        assert "services" in rendered
+
+    def test_architecture_includes_wiki_layers_only_when_snapshot_has_them(self):
+        planner = create_planner()
+        renderer = create_renderer()
+        context = {
+            "modules": [{"name": "repo_wiki", "path": "repo_wiki"}],
+            "key_directories": ["docs", "ai", "repo_wiki"],
+            "snapshot_paths": [
+                "docs/00-overview.md",
+                "ai/source-of-truth/module-index.yaml",
+                ".repo-wiki/index/meta.json",
+            ],
+        }
+        diagrams = planner.plan_diagram_for_page("architecture", "architecture", None, context)
+        rendered = renderer.render_diagram(diagrams[0])
+        assert "docs/" in rendered
+        assert "ai/source-of-truth" in rendered
+        assert ".repo-wiki" in rendered
+
+    def test_service_diagram_omits_filename_modules_and_dangling_start_edge(self):
+        planner = create_planner()
+        renderer = create_renderer()
+        context = {
+            "modules": [
+                {"name": "__init__.py", "path": "app/__init__.py"},
+                {"name": "main.py", "path": "app/main.py"},
+                {"name": "services", "path": "app/services"},
+            ],
+            "commands": {"start": "uvicorn app.main:app"},
+        }
+        diagrams = planner.plan_diagram_for_page("core-services", "service", None, context)
+        assert diagrams
+        rendered = renderer.render_diagram(diagrams[0])
+        assert "__init__.py" not in rendered
+        assert "main.py" not in rendered
+        assert "cmd_start ==> start" not in rendered
+        assert "services" in rendered
+
     def test_plan_api_diagram(self):
         """Test planning an API sequence diagram."""
         planner = create_planner()

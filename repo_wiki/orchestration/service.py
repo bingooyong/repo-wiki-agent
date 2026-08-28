@@ -85,6 +85,23 @@ def _is_filename_like_handbook_title(title: str) -> bool:
     return collapsed in _FILENAME_HANDBOOK_TITLES
 
 
+def _composition_snapshot_paths(composition_context: Any) -> list[str]:
+    """Collect scanned product paths from composer context, ignoring fabricated doc_path."""
+    paths: list[str] = []
+    for module in getattr(composition_context, "modules", None) or []:
+        if isinstance(module, dict):
+            paths.append(str(module.get("path") or ""))
+    for model in getattr(composition_context, "models", None) or []:
+        if isinstance(model, dict):
+            paths.append(str(model.get("file_path") or ""))
+    for endpoint in getattr(composition_context, "endpoints", None) or []:
+        if isinstance(endpoint, dict):
+            paths.append(str(endpoint.get("file_path") or ""))
+    for item in getattr(composition_context, "key_directories", None) or []:
+        paths.append(str(item))
+    return [path for path in paths if path]
+
+
 def _fallback_install_env_clues(
     snippets: list[str],
     commands: list[str],
@@ -843,9 +860,50 @@ class RepoWikiService:
                 continue
             if page_id in seen:
                 continue
+            if self._is_redundant_qoder_data_model_child(page, pages):
+                continue
             filtered.append(page)
             seen.add(page_id)
         return filtered
+
+    def _is_redundant_qoder_data_model_child(self, page: Any, pages: list[Any]) -> bool:
+        """Drop overlapping 数据模型 children that copy the index without distinct evidence."""
+        page_id = str(getattr(page, "page_id", ""))
+        overlapping = {
+            "core-data-models",
+            "service-data-models",
+            "database-architecture",
+            "database-migration-strategy",
+        }
+        if page_id not in overlapping:
+            return False
+        req = getattr(page, "source_requirements", None)
+        data_models = list(getattr(req, "data_models", None) or [])
+        files = [
+            str(item).replace("\\", "/").strip("/").lower()
+            for item in (getattr(req, "files", None) or [])
+        ]
+        overview = next(
+            (item for item in pages if str(getattr(item, "page_id", "")) == "data-models-overview"),
+            None,
+        )
+        overview_models = list(
+            getattr(getattr(overview, "source_requirements", None), "data_models", None) or []
+        )
+        if page_id == "core-data-models":
+            return not data_models or set(data_models) == set(overview_models)
+        if page_id == "service-data-models":
+            has_service_kids = any(
+                "service-model" in set(getattr(item, "tags", []) or [])
+                for item in pages
+                if str(getattr(item, "page_id", "")) != page_id
+            )
+            duplicates_index = not data_models or set(data_models) == set(overview_models)
+            return duplicates_index and not has_service_kids
+        generic_db_tokens = {"db", "sql", "migrations", "migration"}
+        if not files:
+            return True
+        return all(item in generic_db_tokens for item in files)
 
     def _cap_qoder_like_pages(
         self,
@@ -1158,6 +1216,7 @@ class RepoWikiService:
             models=[m.model_dump() for m in snapshot.data_models],
             commands=snapshot.commands,
             product_description=product_description,
+            key_directories=list(snapshot.repository.key_directories),
         )
 
         pages: list[tuple[str, str]] = []
@@ -2089,23 +2148,6 @@ class RepoWikiService:
                     api_endpoints
                 )
 
-        if page.category == WikiTaxonomyCategory.DATA_MODELS:
-            if "## 核心实体族" not in content:
-                content += (
-                    "\n\n## 核心实体族\n\n"
-                    "本节按业务实体族进行归并，强调主键、生命周期和跨服务共享模型。"
-                )
-            if "## 服务模型聚合" not in content:
-                content += (
-                    "\n\n## 服务模型聚合\n\n"
-                    "按服务边界聚合 DTO、Entity、Schema 与映射关系，避免堆叠原始模型定义。"
-                )
-            if "## 数据库与迁移摘要" not in content:
-                content += (
-                    "\n\n## 数据库与迁移摘要\n\n"
-                    "汇总表结构演进、索引策略与迁移脚本影响范围，支持后续增量变更评估。"
-                )
-
         is_api_page = page.category == WikiTaxonomyCategory.API_REFERENCE
         is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
         needs_er_mermaid = is_data_model_page and not self._content_has_er_mermaid(content)
@@ -2353,6 +2395,8 @@ class RepoWikiService:
             "endpoints": getattr(composition_context, "endpoints", []),
             "data_models": getattr(composition_context, "models", []),
             "commands": getattr(composition_context, "commands", {}),
+            "key_directories": list(getattr(composition_context, "key_directories", []) or []),
+            "snapshot_paths": _composition_snapshot_paths(composition_context),
         }
         plans = planner.plan_diagram_for_page(
             page_id=page.page_id,

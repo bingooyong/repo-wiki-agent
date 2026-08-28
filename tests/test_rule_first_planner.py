@@ -249,9 +249,9 @@ class TestRuleFirstPlanner:
         manifest = planner.generate()
 
         # reference-repo should have substantial documentation from real inventory.
-        # Empty taxonomy slots (frontend / gateway / agent / mesh) no longer pad the count.
-        assert manifest.page_count() >= 70, (
-            f"Expected at least 70 pages, got {manifest.page_count()}"
+        # Distinct service/database chapters, not empty overlapping 数据模型 copies.
+        assert manifest.page_count() >= 65, (
+            f"Expected at least 65 pages, got {manifest.page_count()}"
         )
 
 

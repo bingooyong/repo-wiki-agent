@@ -17,7 +17,7 @@ from repo_wiki.core.contracts import (
 from repo_wiki.orchestration.service import RepoWikiService
 from repo_wiki.planner.identity import RepositoryIdentity
 from repo_wiki.planner.rule_first import RuleFirstPlanner
-from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
+from repo_wiki.planner.schema import SourceRequirement, WikiPagePlan, WikiTaxonomyCategory
 from repo_wiki.verifier.qoder_strict_verifier import QoderLikeVerifierService
 
 _CANNED_OUTLINE = ("简介", "项目结构", "核心组件", "详细分析", "结论")
@@ -153,6 +153,95 @@ def test_filter_drops_filename_like_qoder_pages(tmp_path) -> None:
     kept = service._filter_qoder_like_pages(pages)
     titles = [page.title for page in kept]
     assert titles == ["核心服务"]
+
+
+def test_small_app_plan_keeps_one_data_model_chapter() -> None:
+    """A small FastAPI-like app gets one 数据模型 index, not four overlapping copies."""
+    planner = RuleFirstPlanner(_identity(), _filename_module_snapshot())
+    manifest = planner.generate()
+    data_pages = [
+        page for page in manifest.pages if page.category == WikiTaxonomyCategory.DATA_MODELS
+    ]
+    page_ids = [page.page_id for page in data_pages]
+    assert "data-models-overview" in page_ids
+    overview = next(page for page in data_pages if page.page_id == "data-models-overview")
+    assert overview.title == "数据模型"
+    assert "core-data-models" not in page_ids
+    assert "service-data-models" not in page_ids
+    assert "database-architecture" not in page_ids
+    assert "database-migration-strategy" not in page_ids
+
+
+def test_filter_drops_overlapping_data_model_children(tmp_path) -> None:
+    cfg = RepoWikiConfig()
+    cfg.project.root = str(tmp_path)
+    service = RepoWikiService(cfg)
+    article_models = SourceRequirement(data_models=["Article"])
+    pages = [
+        WikiPagePlan(
+            page_id="data-models-overview",
+            title="数据模型",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            output_path="docs/pages/data-models/data-models-overview.md",
+            source_requirements=article_models,
+            tags=["models", "schemas"],
+        ),
+        WikiPagePlan(
+            page_id="core-data-models",
+            title="核心数据模型",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            output_path="docs/pages/data-models/core-data-models.md",
+            source_requirements=article_models,
+            tags=["models", "core-entities"],
+        ),
+        WikiPagePlan(
+            page_id="service-data-models",
+            title="服务数据模型",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            output_path="docs/pages/data-models/service-data-models.md",
+            source_requirements=article_models,
+            tags=["models", "service-models"],
+        ),
+        WikiPagePlan(
+            page_id="database-architecture",
+            title="数据库架构",
+            category=WikiTaxonomyCategory.DATA_MODELS,
+            output_path="docs/pages/data-models/database-architecture.md",
+            source_requirements=SourceRequirement(files=["db", "sql", "migrations"]),
+            tags=["database", "schema"],
+        ),
+    ]
+
+    kept = service._filter_qoder_like_pages(pages)
+    assert [page.page_id for page in kept] == ["data-models-overview"]
+
+
+def test_page_contract_does_not_append_empty_data_model_stub_h2s(tmp_path) -> None:
+    cfg = RepoWikiConfig()
+    cfg.project.root = str(tmp_path)
+    service = RepoWikiService(cfg)
+    page = WikiPagePlan(
+        page_id="data-models-overview",
+        title="数据模型",
+        category=WikiTaxonomyCategory.DATA_MODELS,
+        output_path="docs/pages/data-models/data-models-overview.md",
+        source_requirements=SourceRequirement(data_models=["Article"]),
+    )
+    markdown = """# 数据模型
+
+## 核心数据模型
+
+Article 保存作者与正文。
+"""
+    rendered = service._enforce_qoder_page_contract(
+        page=page,
+        markdown=markdown,
+        binding=None,
+        add_mermaid=False,
+    )
+    assert "## 核心实体族" not in rendered
+    assert "## 服务模型聚合" not in rendered
+    assert "## 数据库与迁移摘要" not in rendered
 
 
 def test_filter_drops_duplicate_troubleshooting_maintenance_overview(tmp_path) -> None:
