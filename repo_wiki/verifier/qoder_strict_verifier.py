@@ -33,6 +33,73 @@ from repo_wiki.verifier.handbook import (
 )
 from repo_wiki.verifier.service import CheckResult, GateType, SeverityThreshold, VerifierService
 
+_TOC_HEADING_NAMES = frozenset({"目录", "table of contents", "contents", "toc"})
+_PADDING_HEADING_NAMES = frozenset({"正文", "阅读说明", "源码引用"})
+_HEADING_PATTERN = re.compile(r"^(#{2,6})\s+(.+)$")
+_TOC_ITEM_PATTERN = re.compile(r"^\s*(?:\d+\.|[-*+])\s+(.+)$")
+_TOC_LINK_PATTERN = re.compile(r"^\[([^\]]+)\]\([^)]+\)\s*$")
+
+
+def _iter_markdown_content_lines(content: str):
+    in_fence = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        yield line
+
+
+def _real_content_headings(content: str) -> list[str]:
+    headings: list[str] = []
+    for line in _iter_markdown_content_lines(content):
+        match = _HEADING_PATTERN.match(line)
+        if not match:
+            continue
+        title = match.group(2).strip()
+        if title.lower() in _TOC_HEADING_NAMES:
+            continue
+        if title:
+            headings.append(title)
+    return headings
+
+
+def _toc_listed_headings(content: str) -> list[str]:
+    collecting = False
+    items: list[str] = []
+    for line in _iter_markdown_content_lines(content):
+        heading = _HEADING_PATTERN.match(line)
+        if heading:
+            title = heading.group(2).strip()
+            if title.lower() in _TOC_HEADING_NAMES:
+                collecting = True
+                continue
+            if collecting:
+                break
+            continue
+        if not collecting:
+            continue
+        item = _TOC_ITEM_PATTERN.match(line)
+        if not item:
+            continue
+        text = item.group(1).strip()
+        link = _TOC_LINK_PATTERN.match(text)
+        if link:
+            text = link.group(1).strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def _heading_name_matches(entry: str, headings: list[str]) -> bool:
+    needle = re.sub(r"\s+", " ", entry).strip().lower()
+    for heading in headings:
+        if re.sub(r"\s+", " ", heading).strip().lower() == needle:
+            return True
+    return False
+
 
 class QoderLikeSeverityThreshold(SeverityThreshold):
     """Strict severity thresholds for qoder-like profile."""
@@ -708,24 +775,76 @@ class QoderLikeVerifierService(VerifierService):
             return self._skip_check("toc-presence", "No markdown pages")
 
         pages_with_toc = 0
+        toc_eligible = 0
+        dangling_targets: list[str] = []
         for f in md_files:
             try:
                 content = read_text(f)
             except Exception:
                 continue
-            if (
+            real_headings = _real_content_headings(content)
+            product_headings = [
+                heading
+                for heading in real_headings
+                if heading.strip() not in _PADDING_HEADING_NAMES
+            ]
+            has_toc = bool(
                 re.search(r"^#{1,6}\s+(Table of Contents|目录|Contents|TOC)", content, re.MULTILINE)
                 or "[TOC]" in content
-            ):
+            )
+            if has_toc:
+                missing = [
+                    entry
+                    for entry in _toc_listed_headings(content)
+                    if not _heading_name_matches(entry, real_headings)
+                ]
+                if missing:
+                    dangling_targets.append(f"{f.name}: {', '.join(missing[:5])}")
+            if not product_headings:
+                continue
+            toc_eligible += 1
+            if has_toc:
                 pages_with_toc += 1
 
-        ratio = pages_with_toc / len(md_files)
+        if dangling_targets:
+            return CheckResult(
+                name="qoder-toc-presence",
+                status="FAIL",
+                message="TOC lists headings that do not exist",
+                details={
+                    "dangling_targets": dangling_targets[:20],
+                    "pages_with_toc": pages_with_toc,
+                    "toc_eligible_pages": toc_eligible,
+                    "total_pages": len(md_files),
+                },
+                reason_code="QODER_TOC_MISSING",
+                gate_type=GateType.HARD,
+            )
+
+        if toc_eligible == 0:
+            return CheckResult(
+                name="qoder-toc-presence",
+                status="PASS",
+                message="No headed pages require a TOC",
+                details={
+                    "pages_with_toc": 0,
+                    "total_pages": len(md_files),
+                    "toc_eligible_pages": 0,
+                },
+                gate_type=GateType.HARD,
+            )
+
+        ratio = pages_with_toc / toc_eligible
         if ratio < self.MIN_TOC_COVERAGE:
             return CheckResult(
                 name="qoder-toc-presence",
                 status="FAIL",
                 message=f"TOC coverage too low: {ratio:.2%}",
-                details={"pages_with_toc": pages_with_toc, "total_pages": len(md_files)},
+                details={
+                    "pages_with_toc": pages_with_toc,
+                    "toc_eligible_pages": toc_eligible,
+                    "total_pages": len(md_files),
+                },
                 reason_code="QODER_TOC_MISSING",
                 gate_type=GateType.HARD,
             )
@@ -733,7 +852,11 @@ class QoderLikeVerifierService(VerifierService):
             name="qoder-toc-presence",
             status="PASS",
             message=f"TOC coverage OK: {ratio:.2%}",
-            details={"pages_with_toc": pages_with_toc, "total_pages": len(md_files)},
+            details={
+                "pages_with_toc": pages_with_toc,
+                "toc_eligible_pages": toc_eligible,
+                "total_pages": len(md_files),
+            },
             gate_type=GateType.HARD,
         )
 

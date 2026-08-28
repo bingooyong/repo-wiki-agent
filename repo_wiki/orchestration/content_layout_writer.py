@@ -117,6 +117,10 @@ PAGE_TITLE_OVERRIDES: dict[str, str] = {
     "security-overview": "安全合规",
     "troubleshooting-overview": "故障排除",
     "troubleshooting-maintenance-overview": "故障排除",
+    "audit-logging": "审计日志",
+    "data-protection": "数据保护",
+    "container-deployment": "容器化部署",
+    "backup-recovery": "备份恢复",
 }
 
 TAXONOMY_ALIASES: dict[str, str] = {

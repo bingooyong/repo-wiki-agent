@@ -9,6 +9,7 @@ Output: deterministic page IDs, paths, parent links, and order.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from repo_wiki.core.contracts import Module, RepositorySnapshot
 from repo_wiki.planner.schema import (
@@ -23,6 +24,109 @@ from repo_wiki.planner.schema import (
     current_schema_version,
 )
 from repo_wiki.scanner.artifacts import is_product_source_path, is_product_wiki_module
+
+# Product service titles. Filename-like modules must not use the fallback capitalizer.
+_SERVICE_TITLE_OVERRIDES = {
+    "api-reference-agent": "API采集Agent",
+    "api-gateway": "API网关",
+    "doc-parser-service": "文档解析服务",
+    "tcsl-generator-service": "TCSL生成服务",
+    "nl-to-dsl-service": "自然语言转DSL服务",
+    "scenario-orchestrator-service": "场景编排服务",
+    "contract-service": "契约管理服务",
+    "diff-service": "差异分析服务",
+    "execution-service": "执行引擎服务",
+    "gate-service": "质量门禁服务",
+    "inventory-service": "API台账服务",
+    "knowledge-graph-service": "知识图谱服务",
+    "prd-reviewer": "PRD评审服务",
+    "script-generator-service": "脚本生成服务",
+    "security-audit-service": "安全审计服务",
+    "security-scan-mcp-service": "安全扫描MCP服务",
+    "test-data-factory-service": "测试数据工厂服务",
+    "zentao-mcp-service": "禅道MCP服务",
+    "jenkins-mcp-service": "Jenkins MCP服务",
+    "gitlab-mcp-service": "GitLab MCP服务",
+    "frontend": "前端应用",
+}
+
+_FILENAME_MODULE_LEAVES = frozenset(
+    {
+        "__init__",
+        "__init__.py",
+        "init",
+        "init.py",
+        "main",
+        "main.py",
+    }
+)
+_GENERIC_PACKAGE_LEAVES = frozenset(
+    {
+        "app",
+        "apps",
+        "api",
+        "cli",
+        "config",
+        "constants",
+        "controllers",
+        "core",
+        "crud",
+        "db",
+        "deps",
+        "dependencies",
+        "exceptions",
+        "helpers",
+        "helper",
+        "http",
+        "internal",
+        "lib",
+        "model",
+        "models",
+        "pkg",
+        "repositories",
+        "repository",
+        "routers",
+        "routes",
+        "schema",
+        "schemas",
+        "service",
+        "services",
+        "src",
+        "test",
+        "tests",
+        "types",
+        "util",
+        "utils",
+        "views",
+    }
+)
+_SERVICE_NAME_TOKENS = frozenset(
+    {
+        "agent",
+        "engine",
+        "gateway",
+        "orchestrator",
+        "runtime",
+        "server",
+        "service",
+        "services",
+        "worker",
+    }
+)
+
+
+def _module_leaf_name(name: str) -> str:
+    return name.replace("\\", "/").rstrip("/").split("/")[-1].strip()
+
+
+def _is_filename_like_module_name(name: str) -> bool:
+    leaf = _module_leaf_name(name).lower()
+    collapsed = re.sub(r"\s+", "", leaf)
+    if collapsed.endswith(".py") or collapsed.endswith(".pyc") or ".py" in collapsed:
+        return True
+    stem = Path(leaf).stem.lower().strip("._")
+    return leaf in _FILENAME_MODULE_LEAVES or stem in {"init", "main"}
+
 
 # Category ordering for navigation
 _CATEGORY_ORDER = {
@@ -162,36 +266,34 @@ class RuleFirstPlanner:
         return combined or "unknown"
 
     def _humanize_service_title(self, name: str) -> str:
-        known = {
-            "api-reference-agent": "API采集Agent",
-            "api-gateway": "API网关",
-            "doc-parser-service": "文档解析服务",
-            "tcsl-generator-service": "TCSL生成服务",
-            "nl-to-dsl-service": "自然语言转DSL服务",
-            "scenario-orchestrator-service": "场景编排服务",
-            "contract-service": "契约管理服务",
-            "diff-service": "差异分析服务",
-            "execution-service": "执行引擎服务",
-            "gate-service": "质量门禁服务",
-            "inventory-service": "API台账服务",
-            "knowledge-graph-service": "知识图谱服务",
-            "prd-reviewer": "PRD评审服务",
-            "script-generator-service": "脚本生成服务",
-            "security-audit-service": "安全审计服务",
-            "security-scan-mcp-service": "安全扫描MCP服务",
-            "test-data-factory-service": "测试数据工厂服务",
-            "zentao-mcp-service": "禅道MCP服务",
-            "jenkins-mcp-service": "Jenkins MCP服务",
-            "gitlab-mcp-service": "GitLab MCP服务",
-            "frontend": "前端应用",
-        }
-        if name in known:
-            return known[name]
+        leaf = _module_leaf_name(name)
+        stem = Path(leaf).stem
+        for key in (name, leaf, stem):
+            if key in _SERVICE_TITLE_OVERRIDES:
+                return _SERVICE_TITLE_OVERRIDES[key]
         words = [part for part in re.split(r"[-_]+", name) if part]
         return " ".join(
             part.upper() if part.lower() in {"api", "mcp", "ai"} else part.capitalize()
             for part in words
         )
+
+    def _is_service_like_module_name(self, name: str) -> bool:
+        """Return whether a scanned module deserves its own handbook chapter."""
+        leaf = _module_leaf_name(name)
+        stem = Path(leaf).stem
+        for key in (name, leaf, stem):
+            if key in _SERVICE_TITLE_OVERRIDES:
+                return True
+        if _is_filename_like_module_name(name):
+            return False
+        tokens = [part for part in re.split(r"[-_]+", stem.lower().strip("._")) if part]
+        if not tokens:
+            return False
+        if len(tokens) == 1 and tokens[0] in _GENERIC_PACKAGE_LEAVES | {"init", "main"}:
+            return False
+        if any(token in _SERVICE_NAME_TOKENS for token in tokens):
+            return True
+        return len(tokens) >= 2
 
     def _include_endpoint_pages(self) -> bool:
         import os
@@ -441,15 +543,22 @@ class RuleFirstPlanner:
         """Generate module category pages."""
         product_modules = self._product_modules()
 
-        # Core services index
+        # Core services index. Filename-like packages are folded here, not emitted as chapters.
+        index_modules: list[str] = []
+        seen_index_modules: set[str] = set()
+        for module in product_modules:
+            if module.domain == "core-platform" or not self._is_service_like_module_name(
+                module.name
+            ):
+                if module.name not in seen_index_modules:
+                    index_modules.append(module.name)
+                    seen_index_modules.add(module.name)
         self._add_page(
             page_id=self._make_page_id("core-services-index", WikiTaxonomyCategory.CORE_SERVICES),
             title="核心服务",
             category=WikiTaxonomyCategory.CORE_SERVICES,
             parent=None,
-            source_requirements=SourceRequirement(
-                modules=[m.name for m in product_modules if m.domain == "core-platform"]
-            ),
+            source_requirements=SourceRequirement(modules=index_modules),
             sort_order=0,
             tags=["index", "services"],
         )
@@ -467,8 +576,10 @@ class RuleFirstPlanner:
                 tags=["ai", "machine-learning"],
             )
 
-        # Individual module pages
+        # Individual module pages. Skip filename / one-token package dumps.
         for idx, module in enumerate(sorted(product_modules, key=lambda m: m.path)):
+            if not self._is_service_like_module_name(module.name):
+                continue
             module_page_id = self._make_page_id(module.name, WikiTaxonomyCategory.CORE_SERVICES)
             self._add_page(
                 page_id=module_page_id,
@@ -624,7 +735,7 @@ class RuleFirstPlanner:
 
         # Per-service API articles are useful, but individual endpoint pages are not.
         for idx, (module_name, endpoints) in enumerate(sorted(by_module.items())):
-            if not endpoints:
+            if not endpoints or not self._is_service_like_module_name(module_name):
                 continue
             self._add_page(
                 page_id=self._make_page_id(
@@ -643,6 +754,8 @@ class RuleFirstPlanner:
 
         if self._include_endpoint_pages():
             for module_name, endpoints in sorted(by_module.items()):
+                if not self._is_service_like_module_name(module_name):
+                    continue
                 module_api_id = self._make_page_id(
                     f"{module_name}-endpoints", WikiTaxonomyCategory.API_REFERENCE
                 )
@@ -729,6 +842,8 @@ class RuleFirstPlanner:
         )
 
         for idx, (module_name, models) in enumerate(sorted(by_module.items())):
+            if not self._is_service_like_module_name(module_name):
+                continue
             module_models_id = self._make_page_id(
                 f"{module_name}-data-models", WikiTaxonomyCategory.DATA_MODELS
             )

@@ -59,6 +59,31 @@ _INSTALL_ENV_CLUE_PATTERNS = (
     re.compile(r"\bpoetry\s+(?:install|run)\b", re.I),
 )
 
+_FILENAME_HANDBOOK_TITLES = frozenset(
+    {
+        "app",
+        "core",
+        "db",
+        "init",
+        "init.py",
+        "main",
+        "main.py",
+        "models",
+        "services",
+        "__init__",
+        "__init__.py",
+    }
+)
+
+
+def _is_filename_like_handbook_title(title: str) -> bool:
+    """Return whether a page title is a source filename or one-token package dump."""
+    compact = re.sub(r"\s+", " ", str(title)).strip()
+    collapsed = compact.replace(" ", "").lower().removesuffix(".md")
+    if collapsed.endswith(".py") or ".py" in collapsed:
+        return True
+    return collapsed in _FILENAME_HANDBOOK_TITLES
+
 
 def _fallback_install_env_clues(
     snippets: list[str],
@@ -808,6 +833,8 @@ class RepoWikiService:
             ):
                 continue
             if title.lower().startswith("consider adding"):
+                continue
+            if _is_filename_like_handbook_title(title):
                 continue
             if page_id in seen:
                 continue
@@ -2024,10 +2051,11 @@ class RepoWikiService:
 
         if "## 目录" not in content and "## Table of Contents" not in content:
             h2_sections = self._extract_or_seed_h2_sections(page, content)
-            toc_lines = ["## 目录", ""]
-            for idx, heading in enumerate(h2_sections, 1):
-                toc_lines.append(f"{idx}. {heading}")
-            content = "\n".join([content, "", *toc_lines]).strip()
+            if h2_sections:
+                toc_lines = ["## 目录", ""]
+                for idx, heading in enumerate(h2_sections, 1):
+                    toc_lines.append(f"{idx}. {heading}")
+                content = "\n".join([content, "", *toc_lines]).strip()
 
         if self._count_prose_chars(content) < 260:
             content += (
@@ -2341,9 +2369,7 @@ class RepoWikiService:
     def _extract_or_seed_h2_sections(self, page: Any, content: str) -> list[str]:
         headings = [m.group(1).strip() for m in self._HEADING_L2_PATTERN.finditer(content)]
         headings = [h for h in headings if h and h not in {"目录", "Table of Contents", "Contents"}]
-        if headings:
-            return headings[:10]
-        return ["简介", "项目结构", "核心组件", "详细分析", "结论"]
+        return headings[:10]
 
     def _build_minimal_mermaid_block(self, page: Any) -> str:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
