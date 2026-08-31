@@ -683,13 +683,65 @@ async def test_empty_content_rewrite_succeeds_only_when_max_tokens_bumped(
 
 
 @pytest.mark.asyncio
-async def test_empty_content_rewrite_bumps_past_real_provider_4096_floor(
+async def test_generate_first_compose_asks_16384_with_minimax_thinking_off(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generate does not set REPO_WIKI_LLM_COMPOSER_MAX_TOKENS; first call must not stay at 4096."""
+    monkeypatch.delenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", raising=False)
+    provider = BudgetGatedLLMProvider(min_tokens=0)
+    composer = create_composer(provider=provider, llm_config=provider._config)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == 1, (
+        "first compose at 16384 with thinking off should not need rewrite"
+    )
+    first = provider.requests[0]
+    assert first.max_tokens == 16384
+    assert first.max_tokens != 4096
+    thinking = first.extra_body.get("thinking")
+    assert thinking == {"type": "disabled"} or first.extra_body.get("reasoning_split") is True
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_minimax_first_call_forwards_thinking_extra_body(
     sample_page: WikiPagePlan,
     sample_context: ComposerContext,
     no_retry_sleep: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", raising=False)
+    provider = BudgetGatedLLMProvider(
+        min_tokens=0,
+        config=LLMProviderConfig(
+            provider="openai",
+            model="MiniMax-M3",
+            max_tokens=4096,
+        ),
+    )
+    composer = create_composer(provider=provider, llm_config=provider._config)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    first = provider.requests[0]
+    assert first.max_tokens == 16384
+    thinking = first.extra_body.get("thinking")
+    assert thinking == {"type": "disabled"} or first.extra_body.get("reasoning_split") is True
+
+
+@pytest.mark.asyncio
+async def test_empty_content_rewrite_bumps_past_real_provider_4096_floor(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the first call is starved (env 4096), rewrite still bumps to 16384."""
+    monkeypatch.setenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", "4096")
     provider = BudgetGatedLLMProvider()
     composer = create_composer(provider=provider, llm_config=provider._config)
     output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))

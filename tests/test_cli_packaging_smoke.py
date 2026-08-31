@@ -37,7 +37,7 @@ def test_subcommand_help_exits_zero(args: list[str]) -> None:
 
 
 def test_improve_max_tokens_default_is_not_starved() -> None:
-    """improve --max-tokens must not default to 1000 (skips the real-provider 4096 floor)."""
+    """improve --max-tokens must default to 16384, matching generate's first-call floor."""
     import inspect
 
     from typer.models import OptionInfo
@@ -46,8 +46,9 @@ def test_improve_max_tokens_default_is_not_starved() -> None:
 
     option = inspect.signature(improve_command).parameters["max_tokens"].default
     assert isinstance(option, OptionInfo)
-    assert int(option.default) >= 8192
+    assert int(option.default) == 16384
     assert int(option.default) != 1000
+    assert int(option.default) != 4096
 
 
 def test_last_run_degraded_page_ids_are_preferred_when_flag_omitted(tmp_path: Path) -> None:

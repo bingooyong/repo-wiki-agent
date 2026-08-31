@@ -527,7 +527,9 @@ class LLMPageComposer:
                             prompt,
                             input.page_plan.title,
                             max_tokens=rewrite_max_tokens,
-                            extra_body=rewrite_extra_body,
+                            extra_body=(
+                                rewrite_extra_body or self._empty_content_rewrite_extra_body()
+                            ),
                         ),
                         timeout=self._resolve_page_timeout(),
                     )
@@ -1087,20 +1089,25 @@ class LLMPageComposer:
                 value = int(raw)
             except ValueError:
                 value = 1400
-            return max(256, min(value, configured, provider_max))
+            # Honor the env even when it is below LlmConfig (improve --max-tokens 1000)
+            # or above it (user raised the budget). Cap only by the provider.
+            return max(256, min(value, provider_max))
         if self._use_compact_prompt() and self._uses_compact_mock_token_cap():
             return max(256, min(configured, 1400))
-        # Real providers: use configured llm.max_tokens, or at least 4096, still
-        # <= provider max. Compact prompt must not clamp these to 1400.
-        return max(256, min(max(configured, 4096), provider_max))
+        # Real providers: first compose already uses the 16384 rewrite floor so
+        # MiniMax-M3 thinking cannot empty message.content. Compact prompt must
+        # not clamp these to 1400. A higher configured/env value still wins.
+        return max(
+            256,
+            min(max(configured, EMPTY_CONTENT_REWRITE_MAX_TOKENS), provider_max),
+        )
 
     def _resolve_empty_content_rewrite_max_tokens(self) -> int:
         """Completion budget for one empty/think-only rewrite.
 
-        MiniMax-M3 can spend a 4096 (or improve's 1000) budget on hidden
-        thinking and leave ``message.content`` blank. The rewrite must not
-        reuse ``REPO_WIKI_LLM_COMPOSER_MAX_TOKENS`` or the 4096 first-call
-        floor.
+        MiniMax-M3 can spend a starved first-call budget (improve's 1000, or
+        an explicit 4096 env) on hidden thinking and leave ``message.content``
+        blank. The rewrite must not reuse ``REPO_WIKI_LLM_COMPOSER_MAX_TOKENS``.
         """
         configured = int(getattr(self._llm_config, "max_tokens", 0) or 0)
         provider_max = int(
@@ -1124,7 +1131,7 @@ class LLMPageComposer:
         return "minimax" in blob
 
     def _empty_content_rewrite_extra_body(self) -> dict[str, Any]:
-        """Disable MiniMax thinking so the bumped rewrite can fill content."""
+        """Disable MiniMax thinking on first compose and on empty-content rewrite."""
         if not self._looks_like_minimax():
             return {}
         return {
