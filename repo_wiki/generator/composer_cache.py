@@ -3,9 +3,18 @@
 Computes input hashes from:
 - Page plan (WikiPagePlan)
 - Evidence binding (PageEvidenceBinding) and source digests
-- Prompt contract
+- Prompt contract page type
 - Skeleton
+- Prompt-affecting context (name/language/framework/product description)
 - Model config
+
+Does not hash full snapshot dumps, scanner confidence, or absolute
+repository_root — those are not page-local composer inputs.
+
+Lookup tries the current page-local hash first, then the pre-8d6395c
+formula (snapshot dumps + absolute root, no contract_id). A legacy hit
+rewrites the sqlite row under the current key. New writes use the
+narrowed hash only.
 
 Phase 24 - Task 24.6: Page composer incremental cache
 
@@ -175,32 +184,20 @@ def compute_skeleton_hash(skeleton: ArticleSkeleton) -> str:
 
 
 def compute_context_hash(context: ComposerContext) -> str:
-    """Compute deterministic hash from composer context.
+    """Compute deterministic hash from prompt-affecting composer context.
 
-    Includes: repository_name, primary_language, framework,
-    product_description, modules, endpoints, models, commands.
+    The compact page prompt uses repository_name, language, framework, and
+    product_description. Full snapshot dumps (modules/endpoints/models),
+    scanner confidence, list order, and the absolute repository_root are
+    not hashed: they are not page-local inputs and would miss every cache
+    entry after a rescan or verifier-only checkout.
     """
     parts = [
         context.repository_name,
         context.primary_language,
         context.framework,
-        context.repository_root,
         context.product_description or "",
     ]
-
-    # Sort modules by name for deterministic ordering
-    modules = sorted(context.modules, key=lambda m: m.get("name", ""))
-    parts.append(json.dumps(modules, sort_keys=True))
-
-    endpoints = sorted(context.endpoints, key=lambda e: e.get("path", ""))
-    parts.append(json.dumps(endpoints, sort_keys=True))
-
-    models = sorted(context.models, key=lambda m: m.get("name", ""))
-    parts.append(json.dumps(models, sort_keys=True))
-
-    commands = json.dumps(dict(sorted(context.commands.items())), sort_keys=True)
-    parts.append(commands)
-
     content = "|".join(parts)
     return hashlib.sha256(content.encode()).hexdigest()[:24]
 
@@ -229,8 +226,68 @@ def compute_composer_input_hash(
     evidence_hash = compute_evidence_hash(input_data.evidence_binding)
     skeleton_hash = compute_skeleton_hash(input_data.skeleton)
     context_hash = compute_context_hash(input_data.context)
+    contract = getattr(input_data, "contract", None)
+    page_type = getattr(contract, "page_type", None)
+    contract_id = getattr(page_type, "value", str(page_type or ""))
 
     # Combine all hashes
+    combined = "|".join(
+        [
+            page_hash,
+            evidence_hash,
+            skeleton_hash,
+            context_hash,
+            contract_id,
+            model_name,
+            str(temperature),
+            str(max_tokens),
+        ]
+    )
+
+    return hashlib.sha256(combined.encode()).hexdigest()[:32]
+
+
+def compute_legacy_context_hash(context: ComposerContext) -> str:
+    """Reproduce ``compute_context_hash`` from before 8d6395c.
+
+    Pre-fix rows hashed repository_root plus full snapshot dumps
+    (modules/endpoints/models/commands). Kept only so an upgrade can
+    still read those rows; new writes must not use this formula.
+    """
+    parts = [
+        context.repository_name,
+        context.primary_language,
+        context.framework,
+        context.repository_root,
+        context.product_description or "",
+    ]
+    modules = sorted(context.modules, key=lambda m: m.get("name", ""))
+    parts.append(json.dumps(modules, sort_keys=True))
+    endpoints = sorted(context.endpoints, key=lambda e: e.get("path", ""))
+    parts.append(json.dumps(endpoints, sort_keys=True))
+    models = sorted(context.models, key=lambda m: m.get("name", ""))
+    parts.append(json.dumps(models, sort_keys=True))
+    commands = json.dumps(dict(sorted(context.commands.items())), sort_keys=True)
+    parts.append(commands)
+    content = "|".join(parts)
+    return hashlib.sha256(content.encode()).hexdigest()[:24]
+
+
+def compute_legacy_composer_input_hash(
+    input_data: ComposerInput,
+    model_name: str = "mock-gpt",
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+) -> str:
+    """Reproduce ``compute_composer_input_hash`` from before 8d6395c.
+
+    Combined page/evidence/skeleton/context hashes with model config
+    and omitted contract_id. Used only as a lookup fallback.
+    """
+    page_hash = compute_page_plan_hash(input_data.page_plan)
+    evidence_hash = compute_evidence_hash(input_data.evidence_binding)
+    skeleton_hash = compute_skeleton_hash(input_data.skeleton)
+    context_hash = compute_legacy_context_hash(input_data.context)
     combined = "|".join(
         [
             page_hash,
@@ -242,7 +299,6 @@ def compute_composer_input_hash(
             str(max_tokens),
         ]
     )
-
     return hashlib.sha256(combined.encode()).hexdigest()[:32]
 
 
@@ -317,6 +373,54 @@ class ComposerCache:
         self._init_db()
         self._stats = {"hits": 0, "misses": 0, "skipped": 0, "regenerated": 0}
 
+    def _record_from_row(self, row: sqlite3.Row) -> ComposerCacheRecord:
+        return ComposerCacheRecord(
+            page_id=row["page_id"],
+            doc_type=row["doc_type"],
+            input_hash=row["input_hash"],
+            output_hash=row["output_hash"],
+            model_name=row["model_name"],
+            tokens_used=row["tokens_used"],
+            cost_usd=row["cost_usd"],
+            cached_at=row["cached_at"],
+            output_markdown=row["output_markdown"],
+        )
+
+    def _fetch_record(
+        self,
+        page_id: str,
+        input_hash: str | None = None,
+    ) -> ComposerCacheRecord | None:
+        """Fetch a cache row without updating hit/miss counters."""
+        conn = sqlite3.connect(str(self.sqlite_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            if input_hash:
+                row = conn.execute(
+                    """
+                    SELECT * FROM composer_cache
+                    WHERE page_id = ? AND input_hash = ?
+                    ORDER BY cached_at DESC
+                    LIMIT 1
+                    """,
+                    (page_id, input_hash),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT * FROM composer_cache
+                    WHERE page_id = ?
+                    ORDER BY cached_at DESC
+                    LIMIT 1
+                    """,
+                    (page_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            return self._record_from_row(row)
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
         """Initialize cache database schema."""
         conn = sqlite3.connect(str(self.sqlite_path))
@@ -366,48 +470,45 @@ class ComposerCache:
         Returns:
             ComposerCacheRecord if found, None otherwise
         """
-        conn = sqlite3.connect(str(self.sqlite_path))
-        conn.row_factory = sqlite3.Row
-        try:
-            if input_hash:
-                row = conn.execute(
-                    """
-                    SELECT * FROM composer_cache
-                    WHERE page_id = ? AND input_hash = ?
-                    ORDER BY cached_at DESC
-                    LIMIT 1
-                    """,
-                    (page_id, input_hash),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    """
-                    SELECT * FROM composer_cache
-                    WHERE page_id = ?
-                    ORDER BY cached_at DESC
-                    LIMIT 1
-                    """,
-                    (page_id,),
-                ).fetchone()
+        record = self._fetch_record(page_id, input_hash)
+        if record is None:
+            self._stats["misses"] += 1
+            return None
+        self._stats["hits"] += 1
+        return record
 
-            if row is None:
-                self._stats["misses"] += 1
-                return None
+    def get_or_migrate_legacy(
+        self,
+        page_id: str,
+        current_hash: str,
+        legacy_hash: str,
+    ) -> ComposerCacheRecord | None:
+        """Look up ``current_hash``, then ``legacy_hash``; rewrite on legacy hit.
 
+        A successful lookup counts as one cache hit even when the stored key
+        is the pre-8d6395c formula. New writes stay on ``current_hash``.
+        """
+        record = self._fetch_record(page_id, current_hash)
+        if record:
             self._stats["hits"] += 1
-            return ComposerCacheRecord(
-                page_id=row["page_id"],
-                doc_type=row["doc_type"],
-                input_hash=row["input_hash"],
-                output_hash=row["output_hash"],
-                model_name=row["model_name"],
-                tokens_used=row["tokens_used"],
-                cost_usd=row["cost_usd"],
-                cached_at=row["cached_at"],
-                output_markdown=row["output_markdown"],
-            )
-        finally:
-            conn.close()
+            return record
+        if legacy_hash and legacy_hash != current_hash:
+            record = self._fetch_record(page_id, legacy_hash)
+            if record and record.output_markdown:
+                self.put(
+                    page_id=page_id,
+                    input_hash=current_hash,
+                    output_markdown=record.output_markdown,
+                    tokens_used=record.tokens_used,
+                    model_name=record.model_name,
+                    doc_type=record.doc_type,
+                    cost_usd=record.cost_usd,
+                )
+                self.invalidate_by_hash(page_id, legacy_hash)
+                self._stats["hits"] += 1
+                return self._fetch_record(page_id, current_hash)
+        self._stats["misses"] += 1
+        return None
 
     def put(
         self,
@@ -656,6 +757,37 @@ def create_composer_cache(
     """
     cache_path = root / ".repo-wiki" / "index" / "cache" / filename
     return ComposerCache(cache_path)
+
+
+def lookup_composer_cache(
+    cache: ComposerCache,
+    page_id: str,
+    input_data: ComposerInput,
+    *,
+    model_name: str = "mock-gpt",
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+) -> tuple[str, ComposerCacheRecord | None]:
+    """Look up a page by the current hash, then the pre-8d6395c hash.
+
+    Returns ``(current_input_hash, record_or_none)``. A legacy hit rewrites
+    the sqlite row under the current key so later same-algorithm runs hit
+    without falling back. New writes must keep using ``current_input_hash``.
+    """
+    current_hash = compute_composer_input_hash(
+        input_data,
+        model_name=model_name,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    legacy_hash = compute_legacy_composer_input_hash(
+        input_data,
+        model_name=model_name,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    record = cache.get_or_migrate_legacy(page_id, current_hash, legacy_hash)
+    return current_hash, record
 
 
 class CachedComposerMixin:

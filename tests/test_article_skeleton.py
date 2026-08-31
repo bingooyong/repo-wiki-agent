@@ -92,7 +92,16 @@ class TestHeadingContract:
 
     def test_all_page_types_have_contracts(self) -> None:
         """Test that all expected page types have contracts."""
-        expected = ["overview", "service", "api", "data", "entity", "ops", "development"]
+        expected = [
+            "overview",
+            "service",
+            "api",
+            "data",
+            "entity",
+            "ops",
+            "development",
+            "install",
+        ]
         for page_type in expected:
             assert page_type in HEADING_CONTRACTS, f"Missing contract for {page_type}"
 
@@ -126,6 +135,35 @@ class TestHeadingContract:
         assert "依赖" in required
         assert "结论" in required
 
+    def test_install_required_sections_are_handbook_shaped(self) -> None:
+        from repo_wiki.prompts.skeleton import INSTALL_HEADING_CONTRACT
+
+        required = INSTALL_HEADING_CONTRACT.get_required_sections()
+        assert required == ["这是什么", "环境要求", "安装步骤", "启动与验证", "常见问题"]
+        assert "详细分析" not in required
+        assert "性能" not in required
+        assert "结论" not in required
+        skeleton = build_skeleton("install", title="安装指南")
+        heading_keys = [section.key for section in skeleton.headings]
+        assert heading_keys == required
+
+    def test_handbook_overview_required_sections_are_not_install(self) -> None:
+        from repo_wiki.prompts.skeleton import (
+            HANDBOOK_OVERVIEW_HEADING_CONTRACT,
+            INSTALL_HEADING_CONTRACT,
+        )
+
+        required = HANDBOOK_OVERVIEW_HEADING_CONTRACT.get_required_sections()
+        assert required == ["这是什么", "能做什么", "仓库怎么组织", "建议阅读顺序", "常见误解"]
+        assert required != INSTALL_HEADING_CONTRACT.get_required_sections()
+        assert "安装步骤" not in required
+        assert "环境要求" not in required
+        assert "启动与验证" not in required
+        skeleton = build_skeleton("handbook-overview", title="项目概述")
+        heading_keys = [section.key for section in skeleton.headings]
+        assert heading_keys == required
+        assert skeleton.page_type == "handbook-overview"
+
     def test_get_optional_sections(self) -> None:
         """Test getting optional sections from contract."""
         contract = OVERVIEW_HEADING_CONTRACT
@@ -158,7 +196,16 @@ class TestGetHeadingContract:
 
     def test_valid_page_types(self) -> None:
         """Test getting contracts for valid page types."""
-        for page_type in ["overview", "service", "api", "data", "entity", "ops", "development"]:
+        for page_type in [
+            "overview",
+            "service",
+            "api",
+            "data",
+            "entity",
+            "ops",
+            "development",
+            "install",
+        ]:
             contract = get_heading_contract(page_type)
             assert contract is not None
             assert contract.page_type == page_type

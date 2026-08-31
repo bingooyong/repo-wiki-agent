@@ -34,7 +34,167 @@ from repo_wiki.orchestration.runtime_store import (
 from repo_wiki.retrieval.service import RetrievalService
 from repo_wiki.scanner.artifacts import has_frontend_wiki_surface, write_source_of_truth
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
+from repo_wiki.verifier.api_claim_inventory import (
+    drop_uninventoried_api_claims,
+    endpoints_to_api_inventory,
+)
+from repo_wiki.verifier.handbook import is_page_local_quality_rejection
 from repo_wiki.verifier.service import VerifierService
+
+_INSTALL_FENCE_COMMAND_PATTERNS = (
+    re.compile(r"docker(?:-|\s+)compose(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\buv\s+sync\b", re.I),
+    re.compile(r"\buv\s+run(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bnpm\s+install(?:\s+[A-Za-z0-9_@/-]+){0,4}", re.I),
+    re.compile(r"\bnpx\s+[A-Za-z0-9_@/-]+", re.I),
+    re.compile(r"\byarn\s+(?:install|dev|build)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bpnpm\s+(?:install|dev)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bpip(?:3)?\s+install(?:\s+[A-Za-z0-9_\[\]'\"=-]+){0,4}", re.I),
+    re.compile(r"\bpoetry\s+(?:install|run)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+)
+_INSTALL_ENV_CLUE_PATTERNS = (
+    re.compile(r"\bDATABASE_URL\b", re.I),
+    re.compile(r"\bPOSTGRES(?:QL)?\b", re.I),
+    re.compile(r"\bSQLITE3?\b", re.I),
+    re.compile(r"\bdocker(?:-|\s+)compose\b", re.I),
+    re.compile(r"\buv\s+sync\b", re.I),
+    re.compile(r"\bnpm\s+install\b", re.I),
+    re.compile(r"\bpip(?:3)?\s+install\b", re.I),
+    re.compile(r"\bpoetry\s+(?:install|run)\b", re.I),
+)
+
+
+def _read_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _merge_in_place_quality_documents(
+    meta_dir: Path,
+    previous_quality: dict[str, Any] | None,
+    previous_registry: dict[str, Any] | None,
+) -> None:
+    """Keep skip-write pages in quality/registry after a page-local improve."""
+    if previous_quality:
+        quality_path = meta_dir / "quality-report.json"
+        current = _read_json_object(quality_path)
+        if current is not None:
+            merged = {
+                str(item.get("page_id")): item
+                for item in previous_quality.get("page_quality") or []
+                if isinstance(item, dict) and item.get("page_id")
+            }
+            for item in current.get("page_quality") or []:
+                if isinstance(item, dict) and item.get("page_id"):
+                    merged[str(item["page_id"])] = item
+            pages = list(merged.values())
+            current["page_quality"] = pages
+            summary = dict(current.get("summary") or {})
+            summary["page_count"] = len(pages)
+            summary["degraded_count"] = sum(
+                1 for item in pages if str(item.get("quality_state") or "").upper() == "DEGRADED"
+            )
+            summary["ready_count"] = sum(
+                1
+                for item in pages
+                if str(item.get("quality_state") or "").upper() in {"PASS", "READY"}
+            )
+            current["summary"] = summary
+            quality_path.write_text(
+                json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+    if previous_registry:
+        registry_path = meta_dir / "page-registry.json"
+        current_registry = _read_json_object(registry_path)
+        if current_registry is not None:
+            merged_pages = {
+                str(item.get("page_id")): item
+                for item in previous_registry.get("pages") or []
+                if isinstance(item, dict) and item.get("page_id")
+            }
+            for item in current_registry.get("pages") or []:
+                if isinstance(item, dict) and item.get("page_id"):
+                    merged_pages[str(item["page_id"])] = item
+            current_registry["pages"] = list(merged_pages.values())
+            registry_path.write_text(
+                json.dumps(current_registry, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+
+_FILENAME_HANDBOOK_TITLES = frozenset(
+    {
+        "app",
+        "core",
+        "db",
+        "init",
+        "init.py",
+        "main",
+        "main.py",
+        "models",
+        "services",
+        "__init__",
+        "__init__.py",
+    }
+)
+
+
+def _is_filename_like_handbook_title(title: str) -> bool:
+    """Return whether a page title is a source filename or one-token package dump."""
+    compact = re.sub(r"\s+", " ", str(title)).strip()
+    collapsed = compact.replace(" ", "").lower().removesuffix(".md")
+    if collapsed.endswith(".py") or ".py" in collapsed:
+        return True
+    return collapsed in _FILENAME_HANDBOOK_TITLES
+
+
+def _composition_snapshot_paths(composition_context: Any) -> list[str]:
+    """Collect scanned product paths from composer context, ignoring fabricated doc_path."""
+    paths: list[str] = []
+    for module in getattr(composition_context, "modules", None) or []:
+        if isinstance(module, dict):
+            paths.append(str(module.get("path") or ""))
+    for model in getattr(composition_context, "models", None) or []:
+        if isinstance(model, dict):
+            paths.append(str(model.get("file_path") or ""))
+    for endpoint in getattr(composition_context, "endpoints", None) or []:
+        if isinstance(endpoint, dict):
+            paths.append(str(endpoint.get("file_path") or ""))
+    for item in getattr(composition_context, "key_directories", None) or []:
+        paths.append(str(item))
+    return [path for path in paths if path]
+
+
+def _fallback_install_env_clues(
+    snippets: list[str],
+    commands: list[str],
+    evidence: dict[str, Any],
+    binding: Any | None,
+) -> str:
+    blob_parts = [" ".join(snippets), " ".join(commands)]
+    for item in evidence.get("snippets") or []:
+        blob_parts.append(str(item.get("summary") or ""))
+    if binding and getattr(binding, "candidates", None):
+        for candidate in binding.candidates[:12]:
+            span = getattr(candidate, "span", None)
+            blob_parts.append(str(getattr(span, "span_text", "") or ""))
+    blob = "\n".join(blob_parts)
+    found: list[str] = []
+    seen: set[str] = set()
+    for pattern in _INSTALL_ENV_CLUE_PATTERNS:
+        match = pattern.search(blob)
+        if not match:
+            continue
+        token = " ".join(match.group(0).split())
+        key = token.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(token)
+    return "、".join(found)
+
 
 if TYPE_CHECKING:
     from repo_wiki.evidence.ranking import PageEvidenceBinding
@@ -52,6 +212,7 @@ class RepoWikiService:
     _LOCAL_LINK_PATTERN = re.compile(r"\[[^\]\n]+\]\(([^)\n]+)\)")
     _CITE_PATTERN = re.compile(r"<cite>[^<]+</cite>")
     _HEADING_L2_PATTERN = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+    _QODER_TOC_HEADING_NAMES = frozenset({"目录", "table of contents", "contents", "toc"})
 
     def __init__(self, config: RepoWikiConfig) -> None:
         self.config = config
@@ -266,12 +427,15 @@ class RepoWikiService:
         self,
         eval_profile: Any = None,
         run_id: str | None = None,
+        in_place: bool = False,
     ) -> dict[str, Any]:
         """Generate wiki content with optional eval profile.
 
         Args:
             eval_profile: Optional EvalOutputProfile for qoder-like output
             run_id: Optional run identifier
+            in_place: When True, patch an existing handbook run instead of minting
+                a sibling ``run-{ts}`` directory.
 
         Returns:
             Generation result with file counts and manifest path
@@ -294,12 +458,23 @@ class RepoWikiService:
             eval_profile = get_eval_profile("default")
         eval_profile = eval_profile.resolve_root(self.root)
 
-        # Generate run_id if not provided
+        # Generate run_id if not provided. In-place improve reuses the last
+        # handbook under the eval root instead of minting a sibling run-{ts}.
         if run_id is None:
-            run_id = f"run-{int(time.time() * 1000)}"
+            if in_place:
+                try:
+                    from repo_wiki.orchestration.latest_run_selector import select_run
+
+                    run_id = select_run(Path(eval_profile.root)).name
+                except (ValueError, OSError):
+                    run_id = f"run-{int(time.time() * 1000)}"
+            else:
+                run_id = f"run-{int(time.time() * 1000)}"
 
         if eval_profile.content_subdir:
-            return self._generate_isolated_eval(eval_profile=eval_profile, run_id=run_id)
+            return self._generate_isolated_eval(
+                eval_profile=eval_profile, run_id=run_id, in_place=in_place
+            )
 
         bootstrap(self.config)
 
@@ -387,7 +562,9 @@ class RepoWikiService:
             "timings": stage.timings,
         }
 
-    def _generate_isolated_eval(self, eval_profile: Any, run_id: str) -> dict[str, Any]:
+    def _generate_isolated_eval(
+        self, eval_profile: Any, run_id: str, in_place: bool = False
+    ) -> dict[str, Any]:
         """Generate qoder-like eval output without mutating target docs/runtime dirs."""
         from repo_wiki.orchestration.content_layout_writer import (
             ContentLayoutWriter,
@@ -411,7 +588,7 @@ class RepoWikiService:
 
         target_head_before = get_git_commit_full(self.root)
         target_git_commit, target_revision_source = resolve_revision_with_fallback(self.root)
-        target_dirty = is_git_dirty(self.root)
+        target_dirty = is_git_dirty(self.root, isolated_output=eval_profile.root)
         info(f"qoder-like generation started run_id={run_id} root={self.root}")
 
         info("stage scan started")
@@ -455,6 +632,7 @@ class RepoWikiService:
                 evidence_bindings=evidence_bindings,
                 snapshot=snapshot,
                 output_dir=output_dir,
+                in_place=in_place,
             )
         )
         stage.stop("compose")
@@ -484,12 +662,28 @@ class RepoWikiService:
             selected_paths = plan_md_paths
         else:
             selected_paths = overlap
+        previous_quality: dict[str, Any] | None = None
+        previous_registry: dict[str, Any] | None = None
+        if in_place:
+            meta_dir = output_dir / "repowiki" / "zh" / "meta"
+            previous_quality = _read_json_object(meta_dir / "quality-report.json")
+            previous_registry = _read_json_object(meta_dir / "page-registry.json")
         written_content, content_stats = writer.write_markdown_pages(
             composition["pages"],
             selected_source_paths=selected_paths,
+            planner_titles={page.output_path: page.title for page in plan.pages},
         )
-        navigation_tree = build_navigation_tree(written_content, content_dir)
-        page_registry = writer.build_page_registry(written_content)
+        if in_place:
+            disk_pages = [
+                path.relative_to(content_dir).as_posix()
+                for path in sorted(content_dir.rglob("*.md"))
+                if path.is_file()
+            ]
+            navigation_tree = build_navigation_tree(disk_pages, content_dir)
+            page_registry = writer.build_page_registry(disk_pages)
+        else:
+            navigation_tree = build_navigation_tree(written_content, content_dir)
+            page_registry = writer.build_page_registry(written_content)
         stage.stop("content")
         info(
             f"stage content completed files={len(written_content)} elapsed={stage.timings.get('content')}s"
@@ -533,6 +727,10 @@ class RepoWikiService:
             quality_warnings=composition["quality_warnings"],
             llm_summary=composition["llm"],
         )
+        if in_place:
+            _merge_in_place_quality_documents(
+                repowiki_meta_dir, previous_quality, previous_registry
+            )
         conflict_artifact_paths = write_generation_conflict_artifacts(
             config=self.config,
             repo_root=self.root,
@@ -659,8 +857,8 @@ class RepoWikiService:
             (WikiTaxonomyCategory.SECURITY_COMPLIANCE, "security-overview", "安全合规"),
             (
                 WikiTaxonomyCategory.TROUBLESHOOTING,
-                "troubleshooting-maintenance-overview",
-                "故障排除与维护",
+                "troubleshooting-overview",
+                "故障排除",
             ),
         ]
         if not has_frontend_wiki_surface(getattr(snapshot, "modules", None)):
@@ -756,11 +954,57 @@ class RepoWikiService:
                 continue
             if title.lower().startswith("consider adding"):
                 continue
+            if _is_filename_like_handbook_title(title):
+                continue
+            if page_id == "troubleshooting-maintenance-overview":
+                # Alias of troubleshooting-overview → 故障排除.md; keep one root page.
+                continue
             if page_id in seen:
+                continue
+            if self._is_redundant_qoder_data_model_child(page, pages):
                 continue
             filtered.append(page)
             seen.add(page_id)
         return filtered
+
+    def _is_redundant_qoder_data_model_child(self, page: Any, pages: list[Any]) -> bool:
+        """Drop overlapping 数据模型 children that copy the index without distinct evidence."""
+        page_id = str(getattr(page, "page_id", ""))
+        overlapping = {
+            "core-data-models",
+            "service-data-models",
+            "database-architecture",
+            "database-migration-strategy",
+        }
+        if page_id not in overlapping:
+            return False
+        req = getattr(page, "source_requirements", None)
+        data_models = list(getattr(req, "data_models", None) or [])
+        files = [
+            str(item).replace("\\", "/").strip("/").lower()
+            for item in (getattr(req, "files", None) or [])
+        ]
+        overview = next(
+            (item for item in pages if str(getattr(item, "page_id", "")) == "data-models-overview"),
+            None,
+        )
+        overview_models = list(
+            getattr(getattr(overview, "source_requirements", None), "data_models", None) or []
+        )
+        if page_id == "core-data-models":
+            return not data_models or set(data_models) == set(overview_models)
+        if page_id == "service-data-models":
+            has_service_kids = any(
+                "service-model" in set(getattr(item, "tags", []) or [])
+                for item in pages
+                if str(getattr(item, "page_id", "")) != page_id
+            )
+            duplicates_index = not data_models or set(data_models) == set(overview_models)
+            return duplicates_index and not has_service_kids
+        generic_db_tokens = {"db", "sql", "migrations", "migration"}
+        if not files:
+            return True
+        return all(item in generic_db_tokens for item in files)
 
     def _cap_qoder_like_pages(
         self,
@@ -1037,6 +1281,7 @@ class RepoWikiService:
         evidence_bindings: dict[str, PageEvidenceBinding],
         snapshot: Any,
         output_dir: Path,
+        in_place: bool = False,
     ) -> dict[str, Any]:
         from repo_wiki.generator.composer import (
             ComposerContext,
@@ -1057,6 +1302,10 @@ class RepoWikiService:
         )
         cache_path = self._resolve_composer_cache_path(output_dir)
         cache = ComposerCache(cache_path)
+        priority_ids = set(self._priority_page_ids())
+        if in_place:
+            for page_id in priority_ids:
+                cache.invalidate(page_id)
         identity = getattr(plan, "repository_identity", None)
         product_description = getattr(identity, "description", None) if identity else None
         if not product_description:
@@ -1073,6 +1322,7 @@ class RepoWikiService:
             models=[m.model_dump() for m in snapshot.data_models],
             commands=snapshot.commands,
             product_description=product_description,
+            key_directories=list(snapshot.repository.key_directories),
         )
 
         pages: list[tuple[str, str]] = []
@@ -1112,6 +1362,54 @@ class RepoWikiService:
 
         def _should_add_mermaid(page_idx: int, page: Any) -> bool:
             return page_idx < target_mermaid_pages or self._page_requires_hard_mermaid(page)
+
+        def apply_cached_page(
+            page: Any,
+            binding: Any,
+            page_idx: int,
+            markdown: str,
+            reason: str,
+        ) -> None:
+            cached_markdown = self._enforce_qoder_page_contract(
+                page=page,
+                markdown=markdown,
+                binding=binding,
+                add_mermaid=_should_add_mermaid(page_idx, page),
+                composition_context=context,
+            )
+            page_results[page_idx] = (page.output_path, cached_markdown)
+            page_metadata_by_idx[page_idx] = {
+                "page_id": page.page_id,
+                "source_path": page.output_path,
+                "generation_mode": "llm",
+                "quality_state": "PASS",
+                "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                "reasons": [reason],
+            }
+
+        def skip_existing_page(page: Any, binding: Any, page_idx: int, reason: str) -> None:
+            page_metadata_by_idx[page_idx] = {
+                "page_id": page.page_id,
+                "source_path": page.output_path,
+                "generation_mode": "llm",
+                "quality_state": "PASS",
+                "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                "reasons": [reason, "skip_write"],
+            }
+
+        def reuse_stale_cached_page(page: Any, binding: Any, page_idx: int) -> bool:
+            stale = cache.get(page.page_id)
+            if not (stale and stale.output_markdown):
+                return False
+            cache.record_skipped_page()
+            apply_cached_page(
+                page,
+                binding,
+                page_idx,
+                stale.output_markdown,
+                "cache_reuse",
+            )
+            return True
 
         def write_fallback(page: Any, binding: Any, page_idx: int, reason: str) -> None:
             nonlocal fallback_page_count
@@ -1155,9 +1453,11 @@ class RepoWikiService:
                 f"page_id={page.page_id} title={page.title}"
             )
             try:
+                # Envelope covers the original call plus one rewrite at the same
+                # per-call timeout. This does not raise the 180s page timeout.
                 output = await asyncio.wait_for(
                     composer.compose_page(job["input_data"]),
-                    timeout=page_timeout_seconds,
+                    timeout=page_timeout_seconds * 2 + 1.0,
                 )
                 info(
                     "llm page completed "
@@ -1196,7 +1496,8 @@ class RepoWikiService:
             page_idx = job["page_idx"]
 
             if result["status"] == "error":
-                note_provider_failure()
+                if not is_page_local_quality_rejection(str(result.get("reason") or "")):
+                    note_provider_failure()
                 write_fallback(page, binding, page_idx, str(result["reason"]))
                 return
 
@@ -1205,10 +1506,9 @@ class RepoWikiService:
             actual_tokens += output.tokens_used
 
             if output.rejected:
-                # Quality rejects after a successful HTTP 200 are page-local
-                # fallbacks, not provider outages. R10: 3× Insufficient prose
-                # must not consume the #49 circuit-break budget.
-                if output.rejection_reason != "Insufficient prose content":
+                # Quality rejects after a successful HTTP 200, and page LLM
+                # timeouts, are page-local fallbacks, not provider outages.
+                if not is_page_local_quality_rejection(output.rejection_reason):
                     note_provider_failure()
                 write_fallback(
                     page,
@@ -1270,62 +1570,62 @@ class RepoWikiService:
             )
             estimated_tokens += page.estimated_tokens or 1000
 
-            cached = self._observe_composer_cache_hit(cache, page.page_id, input_hash)
+            cached = self._observe_composer_cache_hit(
+                cache,
+                page.page_id,
+                input_hash,
+                input_data=input_data,
+                model_name=llm_config.model,
+                temperature=llm_config.temperature,
+                max_tokens=llm_config.max_tokens,
+            )
             if cached and cached.output_markdown:
                 cache_hits += 1
                 info(f"compose cache hit page_id={page.page_id} title={page.title}")
-                cached_markdown = self._enforce_qoder_page_contract(
-                    page=page,
-                    markdown=cached.output_markdown,
-                    binding=binding,
-                    add_mermaid=(
-                        page_idx < target_mermaid_pages or self._page_requires_hard_mermaid(page)
-                    ),
-                    composition_context=context,
+                if in_place and page.page_id not in priority_ids:
+                    skip_existing_page(page, binding, page_idx, "cache_hit")
+                    continue
+                apply_cached_page(page, binding, page_idx, cached.output_markdown, "cache_hit")
+                continue
+
+            budget_exhausted = (
+                max_real_provider_calls is not None
+                and provider_attempt_count >= max_real_provider_calls
+            )
+            if provider_disabled_after_failures or budget_exhausted:
+                # Do not mark provider_disabled here: that flag also skips
+                # already-queued jobs. A finite REAL_MAX_CALLS budget must
+                # still let those queued priority pages consume the calls.
+                if in_place and page.page_id not in priority_ids:
+                    skip_existing_page(page, binding, page_idx, "keep_existing")
+                    info(
+                        "compose skip write "
+                        f"page_id={page.page_id} title={page.title} "
+                        "reason=in_place_non_priority"
+                    )
+                    continue
+                if reuse_stale_cached_page(page, binding, page_idx):
+                    cache_hits += 1
+                    info(
+                        "compose cache reuse "
+                        f"page_id={page.page_id} title={page.title} "
+                        "reason=budget_or_provider_disabled"
+                    )
+                    continue
+                cache_misses += 1
+                if provider_disabled_after_failures:
+                    reason = self._provider_disabled_reason(max_provider_failures)
+                else:
+                    reason = self._real_call_budget_reason(max_real_provider_calls)
+                write_fallback(
+                    page,
+                    binding,
+                    page_idx,
+                    reason,
                 )
-                page_results[page_idx] = (page.output_path, cached_markdown)
-                page_metadata_by_idx[page_idx] = {
-                    "page_id": page.page_id,
-                    "source_path": page.output_path,
-                    "generation_mode": "llm",
-                    "quality_state": "PASS",
-                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
-                    "reasons": ["cache_hit"],
-                }
                 continue
 
             cache_misses += 1
-
-            if provider_disabled_after_failures:
-                write_fallback(
-                    page,
-                    binding,
-                    page_idx,
-                    self._provider_disabled_reason(
-                        max_provider_failures=max_provider_failures,
-                        max_real_provider_calls=max_real_provider_calls,
-                        provider_attempt_count=provider_attempt_count,
-                    ),
-                )
-                continue
-
-            if (
-                max_real_provider_calls is not None
-                and provider_attempt_count >= max_real_provider_calls
-            ):
-                provider_disabled_after_failures = True
-                write_fallback(
-                    page,
-                    binding,
-                    page_idx,
-                    self._provider_disabled_reason(
-                        max_provider_failures=max_provider_failures,
-                        max_real_provider_calls=max_real_provider_calls,
-                        provider_attempt_count=provider_attempt_count,
-                    ),
-                )
-                continue
-
             provider_attempt_count += 1
             attempted_page_ids.append(page.page_id)
             compose_jobs.append(
@@ -1368,11 +1668,7 @@ class RepoWikiService:
                                     page,
                                     skipped["binding"],
                                     skipped["page_idx"],
-                                    self._provider_disabled_reason(
-                                        max_provider_failures=max_provider_failures,
-                                        max_real_provider_calls=max_real_provider_calls,
-                                        provider_attempt_count=provider_attempt_count,
-                                    ),
+                                    self._provider_disabled_reason(max_provider_failures),
                                 )
                             return
                         if job_cursor >= len(compose_jobs):
@@ -1400,10 +1696,6 @@ class RepoWikiService:
 
         pages = [page_results[idx] for idx in sorted(page_results)]
         page_metadata = [page_metadata_by_idx[idx] for idx in sorted(page_metadata_by_idx)]
-        provider_disabled_after_failures = provider_disabled_after_failures or (
-            max_real_provider_calls is not None
-            and provider_attempt_count >= max_real_provider_calls
-        )
 
         if hasattr(provider, "close"):
             await provider.close()
@@ -1450,8 +1742,29 @@ class RepoWikiService:
             "llm": llm_summary,
         }
 
-    def _observe_composer_cache_hit(self, cache: Any, page_id: str, input_hash: str) -> Any | None:
-        cached = cache.get(page_id, input_hash)
+    def _observe_composer_cache_hit(
+        self,
+        cache: Any,
+        page_id: str,
+        input_hash: str,
+        input_data: Any | None = None,
+        model_name: str = "mock-gpt",
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ) -> Any | None:
+        if input_data is not None:
+            from repo_wiki.generator.composer_cache import lookup_composer_cache
+
+            _, cached = lookup_composer_cache(
+                cache,
+                page_id,
+                input_data,
+                model_name=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        else:
+            cached = cache.get(page_id, input_hash)
         if cached and cached.output_markdown:
             cache.record_skipped_page()
         return cached
@@ -1479,143 +1792,360 @@ class RepoWikiService:
         )
         cache.record_regenerated_page()
 
+    def _fallback_cite(self, item: dict[str, Any]) -> str:
+        path = str(item.get("path") or "").strip()
+        if not path:
+            return ""
+        start = int(item.get("line_start") or 1)
+        end = int(item.get("line_end") or start)
+        if end != start:
+            return f"<cite>{path}:{start}-{end}</cite>"
+        return f"<cite>{path}:{start}</cite>"
+
+    def _fallback_is_onboarding_page(self, page: Any) -> bool:
+        from repo_wiki.generator.composer import is_handbook_overview_page
+
+        return is_handbook_overview_page(page)
+
+    def _fallback_is_install_page(self, page: Any) -> bool:
+        from repo_wiki.generator.composer import is_handbook_install_page
+
+        return is_handbook_install_page(page)
+
+    def _fallback_empty_notice(self, title: str) -> list[str]:
+        return [
+            f"本页目前无法根据仓库内容写成可用的「{title}」说明。",
+            "",
+            "当前没有匹配到与本主题相关的文档或源码片段，因此这里不能描述项目是什么、怎样安装，"
+            "或怎样做访问控制。本页也不会列出并不存在于仓库证据中的文件路径。",
+            "",
+            "接手仓库的人需要先在仓库根目录自行查看现有文档、启动配置和源码。"
+            "在找到可核对的文件之前，请不要把本页当成安装、运行或安全方面的事实来源。",
+            "",
+            "这里留空是为了避免用其他项目的安装步骤或合规套话充数，而不是因为主题不重要。",
+        ]
+
+    def _fallback_snippet_paragraphs(
+        self, evidence: dict[str, Any], *, limit: int = 4
+    ) -> list[str]:
+        lines: list[str] = []
+        for item in (evidence.get("snippets") or [])[:limit]:
+            path = str(item.get("path") or "").strip()
+            summary = str(item.get("summary") or "").strip()
+            if not path or not summary:
+                continue
+            cite = self._fallback_cite(item)
+            symbol = str(item.get("symbol") or "").strip()
+            if symbol:
+                intro = f"仓库文件 `{path}` 中与 `{symbol}` 相关的原文如下。"
+            else:
+                intro = f"仓库文件 `{path}` 中的相关说明如下。"
+            if cite:
+                intro = f"{intro} {cite}"
+            lines.extend([intro, "", summary, ""])
+        return lines
+
+    def _fallback_related_files_section(self, evidence: dict[str, Any]) -> list[str]:
+        files = evidence.get("files") or []
+        if not files:
+            return []
+        lines = [
+            "## 可核对的文件",
+            "",
+            "下面这些路径来自本页已经绑定到的仓库文件，打开即可看到完整上下文。",
+            "",
+        ]
+        for item in files[:6]:
+            cite = self._fallback_cite(item)
+            symbol = str(item.get("symbol") or "").strip()
+            if not cite:
+                continue
+            if symbol:
+                lines.append(f"- {cite}（`{symbol}`）")
+            else:
+                lines.append(f"- {cite}")
+        lines.extend(
+            [
+                "",
+                "这些引用只用于跳转到仓库内的真实位置，并不表示本页对未摘录的内容做了额外推断。",
+                "",
+            ]
+        )
+        return lines
+
+    def _fallback_onboarding_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:
+        snippets = self._fallback_snippet_paragraphs(evidence)
+        lines = [
+            "## 这是什么",
+            "",
+            f"「{title}」说明这个仓库是什么产品、给谁用，而不是一份安装步骤清单。",
+            "下面只复述仓库文档和源码里已经出现的内容，不补充仓库之外的通用安装或架构说法。",
+            "",
+        ]
+        if snippets:
+            lines.extend(
+                [
+                    "根据仓库入口文档，产品身份与用途如下。",
+                    "",
+                    *snippets,
+                    "如果摘录是英文，含义仍以原文为准；中文段落只帮助定位该看哪一段。",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(self._fallback_empty_notice(title))
+            lines.append("")
+        lines.extend(
+            [
+                "## 能做什么",
+                "",
+                "本页只概括仓库文档里已经写到的能力与边界，不把安装命令或启动步骤当成概述正文。",
+                "",
+                "## 仓库怎么组织",
+                "",
+                "目录和模块以入口文档与下方可核对文件为准，本页不另画一套未出现在仓库里的架构。",
+                "",
+            ]
+        )
+        lines.extend(self._fallback_related_files_section(evidence))
+        lines.extend(
+            [
+                "## 建议阅读顺序",
+                "",
+                "先读本页确认产品身份，再打开安装与配置或快速开始指南动手；细节以引用文件为准。",
+                "",
+                "## 常见误解",
+                "",
+                "不要把项目概述当成安装步骤清单。环境、命令和验证步骤在安装或快速开始页，不在本页重复写成操作手册。",
+                "",
+            ]
+        )
+        return lines
+
+    def _fallback_security_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:
+        snippets = self._fallback_snippet_paragraphs(evidence)
+        lines = [
+            "## 当前仓库里能看到的控制",
+            "",
+            f"「{title}」只描述源码或配置里实际出现的认证、授权或访问控制，"
+            "不套用通用合规清单，也不对未出现的审计、加密或认证框架下结论。",
+            "",
+        ]
+        if snippets:
+            lines.extend(
+                [
+                    "与本页相关的实现摘录如下。请按原文理解请求头、令牌或权限检查，不要把未出现的合规要求写进本页。",
+                    "",
+                    *snippets,
+                    "阅读时以引用文件中的实现为准。本页没有额外的安全承诺。",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(self._fallback_empty_notice(title))
+            lines.append("")
+        lines.extend(self._fallback_related_files_section(evidence))
+        return lines
+
+    def _fallback_topic_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:
+        snippets = self._fallback_snippet_paragraphs(evidence)
+        lines = [
+            "## 这是什么",
+            "",
+            f"「{title}」面向接手仓库的人，用来定位这个主题在仓库里的实现。",
+            "下面列出可核对位置，并摘录片段中的原话。本页不解释文档是如何生成的。",
+            "",
+        ]
+        if snippets:
+            lines.extend(snippets)
+        else:
+            lines.extend(self._fallback_empty_notice(title))
+            lines.append("")
+        lines.extend(self._fallback_related_files_section(evidence))
+        return lines
+
     def _fallback_markdown_for_failed_page(self, page: Any, binding: Any | None) -> str:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
 
         evidence = self._summarize_evidence_for_fallback(binding)
-        modules = ", ".join(evidence["modules"][:5]) if evidence["modules"] else "仓库根模块"
-        symbols = "、".join(evidence["symbols"][:6]) if evidence["symbols"] else page.title
-        file_count = len(evidence["files"])
+        title = str(getattr(page, "title", "") or "仓库说明")
+        if self._fallback_is_install_page(page):
+            body = self._fallback_install_markdown(title, evidence, binding)
+        elif self._fallback_is_onboarding_page(page):
+            body = self._fallback_onboarding_markdown(title, evidence)
+        elif getattr(page, "category", None) == WikiTaxonomyCategory.SECURITY_COMPLIANCE:
+            body = self._fallback_security_markdown(title, evidence)
+        else:
+            body = self._fallback_topic_markdown(title, evidence)
+        return "\n".join([f"# {title}", "", *body]).strip() + "\n"
 
-        category_intro = {
-            WikiTaxonomyCategory.PROJECT_OVERVIEW: "本页从项目定位、关键能力和入口文件解释仓库整体形态。",
-            WikiTaxonomyCategory.ARCHITECTURE_DESIGN: "本页从模块边界、调用关系和数据流解释系统架构。",
-            WikiTaxonomyCategory.CORE_SERVICES: "本页聚焦服务职责、核心组件和上下游协作。",
-            WikiTaxonomyCategory.PYTHON_SERVICES: "本页聚焦 Python 服务的运行入口、依赖和处理流程。",
-            WikiTaxonomyCategory.FRONTEND_APPLICATIONS: "本页聚焦前端应用结构、页面职责和后端接口依赖。",
-            WikiTaxonomyCategory.DATA_MODELS: "本页聚焦实体族、服务模型和持久化结构。",
-            WikiTaxonomyCategory.API_REFERENCE: "本页聚焦 API 服务族、调用约定和错误处理边界。",
-            WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS: "本页聚焦部署配置、运行环境和运维检查点。",
-            WikiTaxonomyCategory.DEVELOPMENT_GUIDE: "本页聚焦开发入口、命令约定和本地调试路径。",
-            WikiTaxonomyCategory.SECURITY_COMPLIANCE: "本页聚焦认证授权、审计记录和安全控制点。",
-            WikiTaxonomyCategory.TROUBLESHOOTING: "本页聚焦常见故障、定位线索和恢复策略。",
-        }.get(page.category, "本页基于仓库证据解释对应主题。")
+    def _fallback_readme_citation(self, evidence: dict[str, Any]) -> str:
+        from repo_wiki.verifier.handbook import _README_NAMES
 
+        for item in evidence.get("files") or []:
+            path = str(item.get("path") or "").strip()
+            if Path(path).name.lower() in {name.lower() for name in _README_NAMES}:
+                cite = self._fallback_cite(item)
+                if cite:
+                    return cite
+        for name in _README_NAMES:
+            if (self.root / name).is_file():
+                return f"<cite>{name}:1</cite>"
+        return ""
+
+    def _fallback_install_source_texts(
+        self, evidence: dict[str, Any], binding: Any | None, *, include_root_readme: bool
+    ) -> list[str]:
+        from repo_wiki.verifier.handbook import read_readme_text
+
+        texts: list[str] = []
+        if binding and getattr(binding, "candidates", None):
+            for candidate in binding.candidates[:12]:
+                span = getattr(candidate, "span", None)
+                text = str(getattr(span, "span_text", "") or "")
+                if text.strip():
+                    texts.append(text)
+        for item in evidence.get("snippets") or []:
+            summary = str(item.get("summary") or "").strip()
+            if summary:
+                texts.append(summary)
+        if include_root_readme:
+            readme = read_readme_text(self.root)
+            if readme.strip():
+                texts.append(readme)
+        return texts
+
+    def _fallback_collect_install_commands(self, texts: list[str]) -> list[str]:
+        commands: list[str] = []
+        seen: set[str] = set()
+        for text in texts:
+            for raw_line in text.splitlines() or [text]:
+                line = raw_line.strip().lstrip("$").strip()
+                if not line or line.startswith("#") or line.startswith(".."):
+                    continue
+                for pattern in _INSTALL_FENCE_COMMAND_PATTERNS:
+                    match = pattern.search(line)
+                    if not match:
+                        continue
+                    command = " ".join(match.group(0).split()).rstrip(".,;:)")
+                    if not command or len(command) > 120:
+                        continue
+                    key = command.casefold()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    commands.append(command)
+                    if len(commands) >= 6:
+                        return commands
+        return commands
+
+    def _fallback_install_run_commands(
+        self, evidence: dict[str, Any], binding: Any | None
+    ) -> list[str]:
+        bound = self._fallback_collect_install_commands(
+            self._fallback_install_source_texts(evidence, binding, include_root_readme=False)
+        )
+        if bound:
+            return bound
+        return self._fallback_collect_install_commands(
+            self._fallback_install_source_texts(evidence, binding, include_root_readme=True)
+        )
+
+    def _fallback_install_markdown(
+        self, title: str, evidence: dict[str, Any], binding: Any | None
+    ) -> list[str]:
+        snippets = self._fallback_snippet_paragraphs(evidence)
+        commands = self._fallback_install_run_commands(evidence, binding)
+        readme_cite = self._fallback_readme_citation(evidence)
+        cite_bit = f" {readme_cite}" if readme_cite else ""
+        env_clues = _fallback_install_env_clues(snippets, commands, evidence, binding)
         lines = [
-            f"# {page.title}",
+            "## 这是什么",
             "",
-            "## 简介",
-            "",
-            f"{category_intro} 该页面对应 `{page.page_id}`，当前由 repo-agent 的证据驱动 fallback composer 生成。",
-            f"生成器从 {file_count} 个相关源文件中抽取候选证据，重点覆盖 `{modules}` 等范围。",
-            "与普通索引页不同，本页会把证据位置、组件职责、调用边界和维护风险组织成可阅读的专题说明。",
-            "",
-            "## 项目结构",
-            "",
-            f"围绕 **{page.title}**，当前仓库中最相关的代码集中在 `{modules}`。",
-            f"证据排名显示，`{symbols}` 是阅读该主题时优先关注的符号或配置点。",
-            "这些文件共同构成页面主题的事实来源：上层说明只描述能被源码片段或配置片段支撑的内容。",
-            "",
-            "## 核心组件",
+            f"「{title}」面向刚接手本仓库的读者，按本页把项目安装并在本地跑起来。",
+            "下面只复述仓库文档里已经出现的依赖、命令和环境变量，不另写一套未出现在仓库里的步骤。",
+            f"核对原文时以入口文档为准。{cite_bit}".rstrip(),
             "",
         ]
-
-        if evidence["files"]:
-            for item in evidence["files"][:6]:
-                lines.append(
-                    f"- `{item['path']}`：关联符号 `{item['symbol']}`，覆盖第 {item['line_start']}-{item['line_end']} 行。"
-                )
+        if snippets:
+            lines.extend(
+                [
+                    "根据仓库文档，项目说明与启动方式如下。",
+                    "",
+                    *snippets,
+                ]
+            )
         else:
-            lines.append("- 当前页面没有匹配到高置信源码片段，后续需要补充扫描规则或页面规划规则。")
-
+            lines.extend(self._fallback_empty_notice(title))
+            lines.append("")
         lines.extend(
             [
+                "## 环境要求",
                 "",
-                "## 详细组件分析",
-                "",
-                "从证据片段看，本主题的实现通常不是单点文件完成，而是由入口、配置、模型和服务逻辑共同支撑。",
-                "阅读时应先确认入口文件，再追踪模型和服务层的引用关系，最后查看部署或测试文件中的运行约束。",
-                "如果某个符号同时出现在多个服务目录中，应优先把它理解为跨服务契约，而不是孤立类或函数。",
+                "动手前先对照仓库文档里写到的运行时、包管理器和外部依赖。"
+                "本页不补充文档没有出现的版本号或服务。",
                 "",
             ]
         )
-
-        for item in evidence["snippets"][:4]:
+        if env_clues:
+            lines.extend([f"当前证据里出现的环境线索：{env_clues}。", ""])
+        else:
             lines.extend(
                 [
-                    f"### {item['symbol']}",
-                    "",
-                    f"`{item['path']}` 的片段显示：{item['summary']}",
-                    "该证据用于限定本文的描述范围，避免生成与仓库无关的通用说明。",
+                    "当前证据没有单独列出环境版本；请打开根目录 README 核对语言、数据库和依赖。",
                     "",
                 ]
             )
-
-        if page.category == WikiTaxonomyCategory.API_REFERENCE:
+        lines.extend(["## 安装步骤", ""])
+        if commands:
             lines.extend(
                 [
-                    "## 依赖关系分析",
+                    "按仓库文档中的命令安装依赖并准备运行环境：",
                     "",
-                    "API 页面需要同时关注 controller/router、请求响应模型、认证拦截器和错误处理路径。",
-                    "服务族的 GET、POST、PUT、PATCH、DELETE 方法应被放在同一个业务流程中理解，避免只输出端点清单。",
-                    "当接口返回结构依赖 DTO 或 Entity 时，页面应跳转阅读对应的数据模型页，以确认字段生命周期和兼容性约束。",
-                    "",
-                    "## 性能考虑",
-                    "",
-                    "接口性能主要受鉴权、序列化、数据库访问和外部服务调用影响。若证据中出现批处理、分页或异步任务，"
-                    "应优先检查限流、超时和幂等策略。缺少这些约束时，后续实现需要补充 API 治理说明。",
-                    "",
-                ]
-            )
-        elif page.category == WikiTaxonomyCategory.DATA_MODELS:
-            lines.extend(
-                [
-                    "## 依赖关系分析",
-                    "",
-                    "数据模型页面需要区分核心实体、传输 DTO、配置 Schema 和迁移脚本。"
-                    "同名模型如果跨服务出现，应按业务语义归并，而不是把每个类都作为独立核心实体。",
-                    "字段解释应优先引用 Entity、migration 或 OpenAPI schema 中的来源。",
-                    "",
-                    "## 性能考虑",
-                    "",
-                    "模型性能关注索引、主键、外键、JSON 字段和序列化成本。"
-                    "当页面证据只来自 DTO 而缺少数据库定义时，应把该模型标记为服务边界模型，而不是持久化实体。",
+                    "```bash",
+                    *commands,
+                    "```",
                     "",
                 ]
             )
         else:
             lines.extend(
                 [
-                    "## 依赖关系分析",
-                    "",
-                    "该主题的依赖关系应从文件路径、符号引用和服务目录共同判断。"
-                    "如果证据集中在单一服务，说明该页面偏向服务内部知识；如果证据分布在多个服务，说明它更接近平台级能力。",
-                    "后续变更时，应优先检查这些证据文件是否发生修改，并据此决定页面是否需要增量重生成。",
-                    "",
-                    "## 性能考虑",
-                    "",
-                    "性能风险主要来自跨服务调用、批处理任务、扫描范围和运行时缓存。"
-                    "当页面涉及生成、索引或验证流程时，应额外关注是否存在全量重跑、重复 IO 或无法恢复的长任务。",
+                    "当前证据没有列出可复制的安装命令。请先打开根目录 README，"
+                    "按原文中的包管理器或容器步骤执行，不要用其他项目的安装命令充数。",
                     "",
                 ]
             )
-
+        lines.extend(["## 启动与验证", ""])
+        if commands:
+            lines.extend(
+                [
+                    "安装完成后用同一组仓库文档命令启动，并按原文检查服务是否起来。",
+                    "",
+                    "```bash",
+                    commands[0],
+                    "```",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "当前没有可复制的启动命令。启动方式以入口文档为准，本页不编造端口或健康检查。",
+                    "",
+                ]
+            )
         lines.extend(
             [
-                "## 故障排查指南",
+                "## 常见问题",
                 "",
-                "排查该主题时，建议按三步执行：先确认页面引用的文件是否仍存在，再检查相关符号是否改名或迁移，"
-                "最后对照运行命令、测试用例和配置文件确认行为是否发生变化。",
-                "如果生成结果与人工理解不一致，应优先扩展 evidence ranking，而不是只修改模板文案。",
+                "如果命令失败，先核对接线文档里的环境变量和依赖是否与当前机器一致，"
+                "再回到引用文件查看完整上下文。本页不把其他仓库的排错步骤写进来。",
                 "",
-                "## 结论",
-                "",
-                f"`{page.title}` 是当前仓库知识树中的一个可追溯专题页。"
-                "本页已提供源码证据、结构解释和维护检查点，可用于 IDE 插件浏览、人工验收和后续增量生成。",
             ]
         )
-
-        return "\n".join(lines)
+        lines.extend(self._fallback_related_files_section(evidence))
+        return lines
 
     def _summarize_evidence_for_fallback(self, binding: Any | None) -> dict[str, Any]:
         summary: dict[str, Any] = {
@@ -1661,6 +2191,8 @@ class RepoWikiService:
                         "path": path,
                         "symbol": symbol,
                         "summary": text,
+                        "line_start": getattr(span, "line_start", 1),
+                        "line_end": getattr(span, "line_end", 1),
                     }
                 )
 
@@ -1671,8 +2203,8 @@ class RepoWikiService:
         cleaned = re.sub(r"\s+", " ", cleaned)
         if not cleaned:
             return ""
-        if len(cleaned) > 180:
-            return cleaned[:177].rstrip() + "..."
+        if len(cleaned) > 360:
+            return cleaned[:357].rstrip() + "..."
         return cleaned
 
     def _page_requires_hard_mermaid(self, page: Any) -> bool:
@@ -1698,19 +2230,19 @@ class RepoWikiService:
         add_mermaid: bool,
         composition_context: Any | None = None,
     ) -> str:
-        from repo_wiki.evidence.citation_renderer import CitationRenderer
+        from repo_wiki.evidence.citation_renderer import (
+            CitationRenderer,
+            normalize_citation_markup,
+        )
         from repo_wiki.planner.schema import WikiTaxonomyCategory
 
         content = markdown.strip() or f"# {page.title}\n"
         if not content.startswith("#"):
             content = f"# {page.title}\n\n{content}"
 
-        if "## 目录" not in content and "## Table of Contents" not in content:
-            h2_sections = self._extract_or_seed_h2_sections(page, content)
-            toc_lines = ["## 目录", ""]
-            for idx, heading in enumerate(h2_sections, 1):
-                toc_lines.append(f"{idx}. {heading}")
-            content = "\n".join([content, "", *toc_lines]).strip()
+        # Always rebuild 目录 from real H2s. LLM leftover 结论/项目结构 bullets
+        # and sentence-length TOC items must not remain as dangling targets.
+        content = self._rebuild_qoder_toc_from_real_h2s(page, content)
 
         if self._count_prose_chars(content) < 260:
             content += (
@@ -1743,23 +2275,6 @@ class RepoWikiService:
                     api_endpoints
                 )
 
-        if page.category == WikiTaxonomyCategory.DATA_MODELS:
-            if "## 核心实体族" not in content:
-                content += (
-                    "\n\n## 核心实体族\n\n"
-                    "本节按业务实体族进行归并，强调主键、生命周期和跨服务共享模型。"
-                )
-            if "## 服务模型聚合" not in content:
-                content += (
-                    "\n\n## 服务模型聚合\n\n"
-                    "按服务边界聚合 DTO、Entity、Schema 与映射关系，避免堆叠原始模型定义。"
-                )
-            if "## 数据库与迁移摘要" not in content:
-                content += (
-                    "\n\n## 数据库与迁移摘要\n\n"
-                    "汇总表结构演进、索引策略与迁移脚本影响范围，支持后续增量变更评估。"
-                )
-
         is_api_page = page.category == WikiTaxonomyCategory.API_REFERENCE
         is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
         needs_er_mermaid = is_data_model_page and not self._content_has_er_mermaid(content)
@@ -1790,8 +2305,15 @@ class RepoWikiService:
         citation_renderer = CitationRenderer(workspace_root=self.root)
         cites: list[str] = []
         if binding and binding.candidates:
-            for candidate in binding.candidates[:6]:
+            for candidate in binding.candidates[:8]:
                 cites.append(citation_renderer.render_cite_block_from_candidate(candidate))
+
+        content = self._strip_broken_local_markdown_links(content)
+        content = self._ensure_minimum_prose_density(content, page)
+        if cites:
+            from repo_wiki.generator.adjacent_cites import attach_adjacent_cites
+
+            content = attach_adjacent_cites(content, cites)
 
         existing_cites = len(self._CITE_PATTERN.findall(content))
         needed = max(0, 3 - existing_cites)
@@ -1800,10 +2322,39 @@ class RepoWikiService:
             for cite in cites[:needed]:
                 content += f"- {cite}\n"
 
-        content = self._strip_broken_local_markdown_links(content)
-        content = self._ensure_minimum_prose_density(content, page)
+        content = self._drop_uninventoried_snapshot_api_claims(content, composition_context)
 
-        return content.strip() + "\n"
+        # CiteBlock.render() and leftover LLM markup can still carry
+        # ``path:start-end (label)`` after composer normalize; strip before write.
+        return normalize_citation_markup(content, self.root).strip() + "\n"
+
+    def _drop_uninventoried_snapshot_api_claims(
+        self,
+        content: str,
+        composition_context: Any | None,
+    ) -> str:
+        """Drop METHOD /path mentions that are not in the snapshot endpoint inventory.
+
+        Uses the same inventory + `/api` mount-prefix matching as
+        QODER_CRITICAL_FALSE_FACT. Test-only 404 fixtures such as
+        ``GET /wrong_path/asd`` are never published as product APIs.
+        """
+        raw_endpoints = (
+            getattr(composition_context, "endpoints", []) or []
+            if composition_context is not None
+            else []
+        )
+        apis = endpoints_to_api_inventory(raw_endpoints)
+        framework = (
+            str(getattr(composition_context, "framework", "") or "").lower()
+            if composition_context is not None
+            else ""
+        )
+        return drop_uninventoried_api_claims(
+            content,
+            apis,
+            fastapi_app="fastapi" in framework,
+        )
 
     def _evidence_backed_api_endpoints(
         self,
@@ -2001,6 +2552,8 @@ class RepoWikiService:
             "endpoints": getattr(composition_context, "endpoints", []),
             "data_models": getattr(composition_context, "models", []),
             "commands": getattr(composition_context, "commands", {}),
+            "key_directories": list(getattr(composition_context, "key_directories", []) or []),
+            "snapshot_paths": _composition_snapshot_paths(composition_context),
         }
         plans = planner.plan_diagram_for_page(
             page_id=page.page_id,
@@ -2015,12 +2568,58 @@ class RepoWikiService:
                 rendered_blocks.append(f"```mermaid\n{rendered}\n```")
         return rendered_blocks
 
+    def _rebuild_qoder_toc_from_real_h2s(self, page: Any, content: str) -> str:
+        h2_sections = self._extract_or_seed_h2_sections(page, content)
+        content = self._strip_qoder_toc_section(content)
+        if not h2_sections:
+            return content
+        toc_lines = ["## 目录", ""]
+        for idx, heading in enumerate(h2_sections, 1):
+            toc_lines.append(f"{idx}. {heading}")
+        return "\n".join([content, "", *toc_lines]).strip()
+
+    def _strip_qoder_toc_section(self, content: str) -> str:
+        kept: list[str] = []
+        in_fence = False
+        skipping_toc = False
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+                if not skipping_toc:
+                    kept.append(line)
+                continue
+            if skipping_toc:
+                if not in_fence and re.match(r"^#{1,6}\s+\S", stripped):
+                    skipping_toc = False
+                else:
+                    continue
+            if not in_fence:
+                heading = re.match(r"^#{1,6}\s+(.+)$", stripped)
+                if heading and heading.group(1).strip().lower() in self._QODER_TOC_HEADING_NAMES:
+                    skipping_toc = True
+                    continue
+            kept.append(line)
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
     def _extract_or_seed_h2_sections(self, page: Any, content: str) -> list[str]:
-        headings = [m.group(1).strip() for m in self._HEADING_L2_PATTERN.finditer(content)]
-        headings = [h for h in headings if h and h not in {"目录", "Table of Contents", "Contents"}]
-        if headings:
-            return headings[:10]
-        return ["简介", "项目结构", "核心组件", "详细分析", "结论"]
+        headings: list[str] = []
+        in_fence = False
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            match = self._HEADING_L2_PATTERN.match(line)
+            if not match:
+                continue
+            title = match.group(1).strip()
+            if not title or title.lower() in self._QODER_TOC_HEADING_NAMES:
+                continue
+            headings.append(title)
+        return headings[:10]
 
     def _build_minimal_mermaid_block(self, page: Any) -> str:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
@@ -2123,7 +2722,7 @@ class RepoWikiService:
             paragraph = (
                 f"\n{page.title} 的阅读重点不是罗列文件，而是把源码证据、模块职责、调用边界和维护风险串联起来。"
                 "读者可以先查看目录确认主题范围，再根据源码引用定位实现位置，最后结合架构图或 schema 摘要判断变更影响。"
-                "如果页面来自 fallback 生成链路，它仍然保留证据绑定结果，但需要在后续优化中用真实 LLM 叙述替换保守说明。"
+                "阅读时请对照文中的源码引用核对实现，不要把未引用的通用说法当成本仓库事实。"
             )
             content += paragraph
             prose = self._count_prose_chars(content)
@@ -2154,22 +2753,25 @@ class RepoWikiService:
             return mode
         return "qoder"
 
+    def _priority_page_ids(self) -> list[str]:
+        """Page ids that improve should re-compose first (and cache-bust in place)."""
+        import os
+
+        return [
+            item.strip()
+            for item in os.environ.get("REPO_WIKI_LLM_PRIORITY_PAGE_IDS", "").split(",")
+            if item.strip()
+        ]
+
     def _order_pages_for_llm_attempts(
         self,
         page_entries: list[tuple[int, Any]],
         priority_mode: str,
     ) -> list[tuple[int, Any]]:
-        if priority_mode == "plan":
-            return page_entries
-
-        import os
-
-        explicit_ids = [
-            item.strip()
-            for item in os.environ.get("REPO_WIKI_LLM_PRIORITY_PAGE_IDS", "").split(",")
-            if item.strip()
-        ]
+        explicit_ids = self._priority_page_ids()
         explicit_rank = {page_id: idx for idx, page_id in enumerate(explicit_ids)}
+        if priority_mode == "plan" and not explicit_rank:
+            return page_entries
 
         def score(entry: tuple[int, Any]) -> tuple[int, int, int, str]:
             original_idx, page = entry
@@ -2183,6 +2785,9 @@ class RepoWikiService:
 
             if page_id in explicit_rank:
                 return (0, explicit_rank[page_id], original_idx, page_id)
+
+            if priority_mode == "plan":
+                return (1, original_idx, original_idx, page_id)
 
             exact_rank = self._core_page_exact_rank(page_id)
             if exact_rank is not None and priority_mode in {"qoder", "overview"}:
@@ -2325,18 +2930,13 @@ class RepoWikiService:
             return max(1, min(value, 8))
         return max(1, min(int(getattr(self.config.llm, "max_concurrent", 1) or 1), 8))
 
-    def _provider_disabled_reason(
-        self,
-        max_provider_failures: int,
-        max_real_provider_calls: int | None,
-        provider_attempt_count: int,
-    ) -> str:
-        if (
-            max_real_provider_calls is not None
-            and provider_attempt_count >= max_real_provider_calls
-        ):
-            return f"provider disabled after {max_real_provider_calls} real-provider attempts"
+    def _provider_disabled_reason(self, max_provider_failures: int) -> str:
+        """Reason for a real circuit-break, not a spent REAL_MAX_CALLS budget."""
         return f"provider disabled after {max_provider_failures} consecutive failures"
+
+    def _real_call_budget_reason(self, max_real_provider_calls: int | None) -> str:
+        budget = max_real_provider_calls if max_real_provider_calls is not None else 0
+        return f"real-provider call budget exhausted after {budget} attempts"
 
     def search(self, *, query: str, module: str | None = None, top_k: int = 10) -> dict[str, Any]:
         bootstrap(self.config)

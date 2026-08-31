@@ -175,7 +175,10 @@ class OpenAICompatibleProvider(LLMProvider):
 
         choice = choices[0]
         message = choice.get("message", {})
-        content = message.get("content", "")
+        content = message.get("content")
+        if not isinstance(content, str):
+            content = ""
+        # Think-only dumps live in reasoning_content; do not promote them to a page.
 
         return ChatResponse(
             content=content,

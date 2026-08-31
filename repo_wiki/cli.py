@@ -113,19 +113,28 @@ def generate_command(
             raise typer.Exit(code=1)
 
 
+IMPROVE_DEFAULT_MAX_TOKENS = 16384
+
+
 @app.command("improve")
 def improve_command(
     profile: str = typer.Option(
         "qoder-like", "--profile", help="Improvement profile; currently qoder-like is supported"
     ),
     output: str = typer.Option(".repo-agent-eval", "--output", help="Eval output root"),
-    run_id: str | None = typer.Option(None, "--run-id", help="Custom run identifier"),
+    run_id: str | None = typer.Option(
+        None,
+        "--run-id",
+        help="Existing handbook run to patch in place. Defaults to the last run under --output.",
+    ),
     real_max_calls: int = typer.Option(
         5, "--real-max-calls", help="Maximum real LLM page calls for this batch"
     ),
     timeout_seconds: float = typer.Option(90.0, "--timeout-seconds", help="Per-page LLM timeout"),
     concurrency: int = typer.Option(1, "--concurrency", help="Concurrent real LLM page calls"),
-    max_tokens: int = typer.Option(1000, "--max-tokens", help="Max completion tokens per page"),
+    max_tokens: int = typer.Option(
+        IMPROVE_DEFAULT_MAX_TOKENS, "--max-tokens", help="Max completion tokens per page"
+    ),
     max_pages: int = typer.Option(220, "--max-pages", help="Curated qoder-like page-plan cap"),
     priority: str = typer.Option(
         "qoder", "--priority", help="LLM call priority: qoder, overview, api, plan"
@@ -139,11 +148,12 @@ def improve_command(
     ci: bool = typer.Option(False, "--ci", help="Run strict verify and optional baseline compare"),
     config: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    """Incrementally improve qoder-like wiki pages using real LLM calls.
+    """Patch last-run DEGRADED pages in the existing handbook directory.
 
-    This command reuses the profile-level composer cache under
-    `.repo-agent-eval/.runtime/composer_cache.sqlite3`, so repeated batches can
-    gradually replace fallback pages without starting from zero.
+    Default ``--run-id`` is the last run under ``--output`` (select_run), not a
+    new ``run-{ts}`` sibling wiki. Priority / last-run DEGRADED ids are
+    cache-invalidated so they re-compose; hash-hit PASS pages skip LLM and are
+    not rewritten. Writes go through ContentLayoutWriter Chinese paths.
     """
     if profile != "qoder-like":
         raise typer.BadParameter("improve currently supports --profile qoder-like only")
@@ -162,6 +172,15 @@ def improve_command(
         content_subdir=eval_profile.content_subdir,
     )
     reject_unsafe_output_root(output)
+    run_id, existing_run_dir = _resolve_improve_run_target(Path(output), run_id)
+    in_place = existing_run_dir is not None
+    if existing_run_dir is not None:
+        eval_profile = EvalOutputProfile(
+            name=profile,
+            root=str(existing_run_dir.parent),
+            create_subdirs=eval_profile.create_subdirs,
+            content_subdir=eval_profile.content_subdir,
+        )
 
     env_updates = {
         "REPO_WIKI_LLM_PAGE_TIMEOUT_SECONDS": str(timeout_seconds),
@@ -175,11 +194,15 @@ def improve_command(
     }
     if priority_page_ids:
         env_updates["REPO_WIKI_LLM_PRIORITY_PAGE_IDS"] = priority_page_ids
+    else:
+        degraded_ids = _last_run_degraded_page_ids(Path(output))
+        if degraded_ids:
+            env_updates["REPO_WIKI_LLM_PRIORITY_PAGE_IDS"] = ",".join(degraded_ids)
 
     with _temporary_env(env_updates):
         cfg = load_config(config)
         service = RepoWikiService(cfg)
-        result = service.generate(eval_profile=eval_profile, run_id=run_id)
+        result = service.generate(eval_profile=eval_profile, run_id=run_id, in_place=in_place)
 
     info("improve completed")
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -580,8 +603,10 @@ def verify_command(
     if profile == "qoder-like":
         from repo_wiki.verifier.qoder_strict_verifier import verify_qoder_like
 
-        verify_root = _resolve_verify_root(Path(cfg.project.root), output)
-        result = verify_qoder_like(verify_root, ci=ci, strict=True)
+        project_root = Path(cfg.project.root)
+        verify_root = _resolve_verify_root(project_root, output)
+        isolated_output = _resolve_isolated_output(project_root, output)
+        result = verify_qoder_like(verify_root, ci=ci, strict=True, isolated_output=isolated_output)
         result["verify_root"] = str(verify_root)
         if ci:
             strict_report_path = _persist_qoder_strict_report(verify_root, result)
@@ -1204,6 +1229,52 @@ def _jsonable_knowledge_result(result: Any) -> Any:
     return str(result)
 
 
+def _resolve_improve_run_target(
+    output: str | Path, run_id: str | None
+) -> tuple[str | None, Path | None]:
+    """Resolve the handbook directory improve should patch in place."""
+    try:
+        run_dir = select_run(Path(output), run_id=run_id)
+    except (ValueError, OSError, typer.BadParameter):
+        return run_id, None
+    return run_dir.name, run_dir
+
+
+def _last_run_degraded_page_ids(output: str | Path) -> list[str]:
+    """Read last-run DEGRADED page_ids when improve omits --priority-page-ids."""
+    try:
+        run_dir = select_run(Path(output))
+    except (ValueError, OSError, typer.BadParameter):
+        return []
+    candidates = (
+        run_dir / "repowiki" / "zh" / "meta" / "quality-report.json",
+        run_dir / "meta" / "quality-report.json",
+        run_dir / "quality-report.json",
+    )
+    payload: Any = None
+    for path in candidates:
+        payload = _read_json_file(path, None)
+        if isinstance(payload, dict):
+            break
+    if not isinstance(payload, dict):
+        return []
+    pages = payload.get("page_quality") or payload.get("pages") or []
+    if not isinstance(pages, list):
+        return []
+    page_ids: list[str] = []
+    seen: set[str] = set()
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        if str(page.get("quality_state") or "").upper() != "DEGRADED":
+            continue
+        page_id = str(page.get("page_id") or "").strip()
+        if page_id and page_id not in seen:
+            seen.add(page_id)
+            page_ids.append(page_id)
+    return page_ids
+
+
 class _temporary_env:
     def __init__(self, updates: dict[str, str]) -> None:
         self.updates = updates
@@ -1220,6 +1291,20 @@ class _temporary_env:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def _resolve_isolated_output(project_root: Path, output: str | None) -> Path:
+    """Return the isolated wiki output directory that must not count as dirty."""
+    default = (project_root / ".repo-agent-eval").resolve()
+    if not output:
+        return default
+    raw = Path(output)
+    resolved = raw.resolve() if raw.exists() else (project_root / output).resolve()
+    try:
+        resolved.relative_to(default)
+        return default
+    except ValueError:
+        return resolved
 
 
 def _resolve_verify_root(project_root: Path, output: str | None) -> Path:

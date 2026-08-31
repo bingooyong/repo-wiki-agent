@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import re
+
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.generator.composer import ComposerContext
 from repo_wiki.orchestration.service import RepoWikiService
 from repo_wiki.planner.schema import SourceRequirement, WikiPagePlan, WikiTaxonomyCategory
+from repo_wiki.verifier.qoder_strict_verifier import QoderLikeVerifierService
 
 
 def _service(tmp_path):
@@ -158,3 +161,105 @@ def test_qoder_api_page_does_not_empty_state_when_product_endpoints_exist(tmp_pa
     assert "POST /login" in rendered
     assert "GET /feed" in rendered
     assert "GET /{slug}" in rendered
+
+
+def _error_codes_page() -> WikiPagePlan:
+    return WikiPagePlan(
+        page_id="error-codes",
+        title="错误码参考",
+        category=WikiTaxonomyCategory.TROUBLESHOOTING,
+        output_path="docs/pages/troubleshooting/error-codes.md",
+    )
+
+
+def test_error_code_page_drops_test_only_wrong_path_api_claim(tmp_path):
+    """Test 404 fixtures must not ship as product APIs after page contract."""
+    service = _service(tmp_path)
+    context = ComposerContext(
+        repository_name="conduit",
+        primary_language="python",
+        framework="fastapi",
+        repository_root=str(tmp_path),
+        endpoints=[
+            {
+                "method": "GET",
+                "path": "/api/articles",
+                "module": "articles",
+                "handler": "list_articles",
+                "file_path": "app/api/routes/articles.py",
+                "line_number": 18,
+            },
+            {
+                "method": "POST",
+                "path": "/api/users/login",
+                "module": "authentication",
+                "handler": "login",
+                "file_path": "app/api/routes/authentication.py",
+                "line_number": 12,
+            },
+        ],
+    )
+    markdown = """# 错误码参考
+
+## 404 Not Found
+
+客户端访问 GET /wrong_path/asd 会得到 404，这不是产品路由。
+真实文章列表是 GET /api/articles。
+登录也可写为 POST /users/login。
+"""
+
+    rendered = service._enforce_qoder_page_contract(
+        page=_error_codes_page(),
+        markdown=markdown,
+        binding=None,
+        add_mermaid=False,
+        composition_context=context,
+    )
+
+    assert "GET /wrong_path/asd" not in rendered
+    assert "/wrong_path/asd" not in rendered
+    assert "GET /api/articles" in rendered
+    assert "POST /users/login" in rendered
+
+
+def test_error_code_page_without_test_fixture_does_not_trip_critical_false_fact(tmp_path):
+    """After contract, unmatched test paths are gone so CRITICAL_FALSE_FACT stays quiet."""
+    service = _service(tmp_path)
+    context = ComposerContext(
+        repository_name="conduit",
+        primary_language="python",
+        framework="fastapi",
+        repository_root=str(tmp_path),
+        endpoints=[
+            {
+                "method": "GET",
+                "path": "/api/articles",
+                "handler": "list_articles",
+            }
+        ],
+    )
+    markdown = """# 错误码参考
+
+## 常见状态码
+
+GET /wrong_path/asd 被测试当成 404 夹具。
+产品接口 GET /api/articles 返回文章列表。
+"""
+    rendered = service._enforce_qoder_page_contract(
+        page=_error_codes_page(),
+        markdown=markdown,
+        binding=None,
+        add_mermaid=False,
+        composition_context=context,
+    )
+
+    apis = {("GET", "/api/articles")}
+    verifier = QoderLikeVerifierService(tmp_path, strict=True)
+    leftover = []
+    for method, api_path in re.findall(
+        r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(/[-A-Za-z0-9_./{}:]+)",
+        rendered,
+    ):
+        if not verifier._api_claim_in_inventory(method.upper(), api_path, apis):
+            leftover.append(f"{method.upper()} {api_path}")
+    assert leftover == []

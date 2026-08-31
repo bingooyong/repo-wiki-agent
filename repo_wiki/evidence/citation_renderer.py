@@ -25,9 +25,15 @@ _PLACEHOLDER_CITE_BODY = "start-end"
 _CITE_BLOCK_RE = re.compile(r"(<cite>\s*)([^<]+?)(\s*</cite>)")
 _BRACKET_CITE_RE = re.compile(r"(\[cite:\s*)([^\]]+?)(\])")
 _CITE_PATH_SUFFIX_RE = re.compile(r"^(.+?)(:\d+(?:-\d+)?(?:\s*\([^)]+\))?)$")
+_CITE_PAREN_RE = re.compile(r"（[^）]*）|\([^)]*\)")
+_CITE_SPLIT_RE = re.compile(r"\s*[,，、]\s*")
+_VALID_CITE_BODY_RE = re.compile(
+    r"^(?P<path>.+?):(?P<start>\d+)(?:-(?P<end>\d+))?$",
+)
 _ROOT_README_MD = "README.md"
 _ROOT_README_FALLBACKS = ("README.rst", "README.txt", "README")
 _ROOT_README_NAMES = (_ROOT_README_MD, *_ROOT_README_FALLBACKS)
+_ROOT_README_ALIASES = frozenset({"README", "README.md"})
 
 
 def unique_root_readme_name(workspace_root: str | Path | None) -> str | None:
@@ -42,7 +48,7 @@ def unique_root_readme_name(workspace_root: str | Path | None) -> str | None:
 
 
 def _remap_missing_readme_md(value: str, workspace_root: str | Path | None) -> str:
-    """Map a missing root README.md cite to the one real root readme, if unique."""
+    """Map a missing root README.md / README cite to the one real root readme, if unique."""
     if workspace_root is None:
         return value
     root = Path(workspace_root)
@@ -56,11 +62,12 @@ def _remap_missing_readme_md(value: str, workspace_root: str | Path | None) -> s
         path_text, suffix = match.group(1), match.group(2)
     else:
         path_text, suffix = body, ""
-    if path_text.replace("\\", "/") != _ROOT_README_MD:
+    path_key = path_text.replace("\\", "/")
+    if path_key not in _ROOT_README_ALIASES:
         return value
-    if (root / _ROOT_README_MD).is_file():
+    if (root / path_key).is_file():
         return value
-    found = [name for name in _ROOT_README_FALLBACKS if (root / name).is_file()]
+    found = [name for name in _ROOT_README_NAMES if (root / name).is_file()]
     if len(found) != 1:
         return value
     return f"{prefix}{found[0]}{suffix}"
@@ -85,6 +92,41 @@ def normalize_citation_ref(raw: str, workspace_root: str | Path | None = None) -
     return _remap_missing_readme_md(value, workspace_root)
 
 
+def _coerce_path_line_cite(value: str, workspace_root: str | Path | None = None) -> str | None:
+    """Return ``path:start`` / ``path:start-end`` or None when lines are not integers."""
+    raw = normalize_citation_ref(value, workspace_root).strip()
+    prefix = ""
+    body = raw
+    if body.lower().startswith("source:"):
+        prefix = "source:"
+        body = body[len("source:") :].lstrip()
+    match = _VALID_CITE_BODY_RE.fullmatch(body)
+    if not match:
+        return None
+    path_text = match.group("path").strip()
+    start = match.group("start")
+    end = match.group("end")
+    if not path_text:
+        return None
+    if end:
+        return f"{prefix}{path_text}:{start}-{end}"
+    return f"{prefix}{path_text}:{start}"
+
+
+def sanitize_citation_payloads(raw: str, workspace_root: str | Path | None = None) -> list[str]:
+    """Keep only ``path:digits[-digits]`` cites; split joined payloads; drop the rest."""
+    stripped = _CITE_PAREN_RE.sub("", raw).strip()
+    if not stripped:
+        return []
+    parts = [part.strip() for part in _CITE_SPLIT_RE.split(stripped) if part.strip()]
+    valid: list[str] = []
+    for part in parts:
+        coerced = _coerce_path_line_cite(part, workspace_root)
+        if coerced:
+            valid.append(coerced)
+    return valid
+
+
 def is_placeholder_citation_ref(raw: str) -> bool:
     """True for prompt-template leftovers such as ``relpath:start-end``."""
     value = normalize_citation_ref(raw).strip()
@@ -94,16 +136,22 @@ def is_placeholder_citation_ref(raw: str) -> bool:
 
 
 def normalize_citation_markup(text: str, workspace_root: str | Path | None = None) -> str:
-    """Rewrite cite blocks/brackets so they do not emit file:/path:/relpath: prefixes."""
+    """Rewrite cite blocks so verify sees only ``path:start-end`` targets.
 
-    def _rewrite(match: re.Match[str]) -> str:
-        ref = match.group(2)
-        if is_placeholder_citation_ref(ref):
-            return ""
-        return f"{match.group(1)}{normalize_citation_ref(ref, workspace_root)}{match.group(3)}"
+    Strips parentheticals, splits comma-joined payloads, remaps README aliases
+    onto the real root readme when unique, and drops unrepaired cite bodies.
+    """
 
-    rewritten = _CITE_BLOCK_RE.sub(_rewrite, text)
-    return _BRACKET_CITE_RE.sub(_rewrite, rewritten)
+    def _rewrite_blocks(match: re.Match[str]) -> str:
+        payloads = sanitize_citation_payloads(match.group(2), workspace_root)
+        return "".join(f"<cite>{item}</cite>" for item in payloads)
+
+    def _rewrite_brackets(match: re.Match[str]) -> str:
+        payloads = sanitize_citation_payloads(match.group(2), workspace_root)
+        return "".join(f"[cite: {item}]" for item in payloads)
+
+    rewritten = _CITE_BLOCK_RE.sub(_rewrite_blocks, text)
+    return _BRACKET_CITE_RE.sub(_rewrite_brackets, rewritten)
 
 
 # ============================================================================

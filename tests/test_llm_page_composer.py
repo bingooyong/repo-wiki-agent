@@ -342,23 +342,36 @@ class TestLLMPageComposer:
     ):
         """Compact prompt must not cap real providers at 1400 (starves MiniMax-M3 reasoning).
 
-        Split: mock/tests may keep a compact 1400 cap; real-looking configs use
-        configured llm.max_tokens (or at least 4096), still <= provider max.
+        Split: mock/tests may keep a compact 1400 cap; real-looking configs
+        floor at 16384 on the first call (old LlmConfig 4096 is not enough).
         """
         monkeypatch.setenv("REPO_WIKI_COMPACT_LLM_PROMPT", "1")
         monkeypatch.delenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", raising=False)
         llm_config = LLMProviderConfig(
             provider="minimax",
             model="MiniMax-M3",
-            max_tokens=8192,
+            max_tokens=4096,
         )
         provider = _NamedMockProvider(config=llm_config)
         composer = create_composer(provider=provider, llm_config=llm_config)
         resolved = composer._resolve_request_max_tokens()
         assert resolved != 1400
-        assert resolved == 8192
-        assert resolved >= 4096
-        assert resolved <= llm_config.max_tokens
+        assert resolved != 4096
+        assert resolved == 16384
+
+    def test_real_provider_higher_env_max_tokens_is_not_clipped_by_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("REPO_WIKI_COMPACT_LLM_PROMPT", "1")
+        monkeypatch.setenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", "20000")
+        llm_config = LLMProviderConfig(
+            provider="minimax",
+            model="MiniMax-M3",
+            max_tokens=4096,
+        )
+        provider = _NamedMockProvider(config=llm_config)
+        composer = create_composer(provider=provider, llm_config=llm_config)
+        assert composer._resolve_request_max_tokens() == 20000
 
     def test_mock_provider_compact_max_tokens_keeps_small_cap(
         self, monkeypatch: pytest.MonkeyPatch

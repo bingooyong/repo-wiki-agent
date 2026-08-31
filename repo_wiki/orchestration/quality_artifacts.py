@@ -79,6 +79,9 @@ def _quality_state_for(meta: dict[str, Any], llm_summary: dict[str, Any]) -> tup
             return "DEGRADED", reasons + ["mock_llm_missing_api_key"]
         return "PASS", reasons or ["rule_or_mock_generated"]
     if mode == "llm":
+        # Citation/heading gaps on a real LLM page stay PASS. Empty or
+        # think-only composer output must not reach this branch: those
+        # pages are rejected as EMPTY_CONTENT and written as fallback.
         if meta.get("quality_warning"):
             return "PASS", reasons + ["composer_quality_warning"]
         return "READY", reasons

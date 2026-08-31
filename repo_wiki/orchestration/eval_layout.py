@@ -595,21 +595,81 @@ def resolve_revision_with_fallback(path: Path | str) -> tuple[str, str]:
     return compute_revision_fallback(path), "hash-fallback"
 
 
-def is_git_dirty(repo_path: Path | str) -> bool:
-    """Return True when the repository has uncommitted changes or untracked files."""
+DEFAULT_ISOLATED_EVAL_DIR = ".repo-agent-eval"
+
+
+def find_git_root(path: Path | str) -> Path | None:
+    """Return the enclosing git worktree root, or None if not in a repository."""
+    start = Path(path)
+    start = start if start.is_dir() else start.parent
+    for candidate in [start, *start.parents]:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def porcelain_status_relpath(line: str) -> str:
+    """Extract the path from a `git status --porcelain` line."""
+    if not line.strip():
+        return ""
+    payload = line[3:] if len(line) >= 4 else line.strip()
+    if " -> " in payload:
+        payload = payload.split(" -> ", 1)[1]
+    payload = payload.strip()
+    if len(payload) >= 2 and payload[0] == '"' and payload[-1] == '"':
+        payload = payload[1:-1].encode("utf-8").decode("unicode_escape")
+    return payload.replace("\\", "/")
+
+
+def ignored_dirty_roots(git_root: Path, isolated_output: Path | str | None = None) -> list[Path]:
+    """Directories that must not count as a dirty worktree (isolated wiki output)."""
+    roots = [(git_root / DEFAULT_ISOLATED_EVAL_DIR).resolve()]
+    if isolated_output is not None:
+        roots.append(Path(isolated_output).resolve())
+    return roots
+
+
+def path_is_ignored_eval_output(
+    git_root: Path,
+    relpath: str,
+    isolated_output: Path | str | None = None,
+) -> bool:
+    """True when *relpath* is inside the isolated eval output directory."""
+    if not relpath:
+        return False
+    absolute = (git_root / relpath).resolve()
+    for ignored in ignored_dirty_roots(git_root, isolated_output):
+        if absolute == ignored or ignored in absolute.parents:
+            return True
+    posix = relpath.lstrip("./")
+    return posix == DEFAULT_ISOLATED_EVAL_DIR or posix.startswith(f"{DEFAULT_ISOLATED_EVAL_DIR}/")
+
+
+def is_git_dirty(repo_path: Path | str, isolated_output: Path | str | None = None) -> bool:
+    """Return True when the repository has changes outside isolated eval output."""
+    git_root = find_git_root(repo_path)
+    if git_root is None:
+        return False
     try:
         result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=str(repo_path),
+            ["git", "status", "--porcelain", "-uall"],
+            cwd=str(git_root),
             capture_output=True,
             text=True,
             timeout=5,
         )
-        if result.returncode == 0:
-            return bool(result.stdout.strip())
+        if result.returncode != 0:
+            return False
+        for line in result.stdout.splitlines():
+            relpath = porcelain_status_relpath(line)
+            if not relpath:
+                continue
+            if path_is_ignored_eval_output(git_root, relpath, isolated_output):
+                continue
+            return True
+        return False
     except Exception:
-        pass
-    return False
+        return False
 
 
 def get_git_branch(repo_path: Path | str) -> str | None:

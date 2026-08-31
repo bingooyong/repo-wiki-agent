@@ -1,4 +1,4 @@
-"""Select qoder-like run candidates without mtime heuristics."""
+"""Select qoder-like run candidates by newest mtime."""
 
 from __future__ import annotations
 
@@ -49,8 +49,18 @@ def discover_runs(eval_root: Path) -> list[tuple[str, Path, dict[str, Any]]]:
     return runs
 
 
+def _run_mtime(run_path: Path) -> float:
+    times: list[float] = []
+    for candidate in (run_path, run_path / "manifest.json"):
+        try:
+            times.append(candidate.stat().st_mtime)
+        except OSError:
+            continue
+    return max(times) if times else 0.0
+
+
 def select_run(eval_root: Path, run_id: str | None = None) -> Path:
-    """Select run by explicit id or lexicographically greatest run id."""
+    """Select run by explicit id, else newest mtime (lexicographic id as tie-break)."""
     runs = discover_runs(eval_root)
     if not runs:
         raise ValueError(f"No runs with manifest.json under: {eval_root}")
@@ -61,5 +71,5 @@ def select_run(eval_root: Path, run_id: str | None = None) -> Path:
                 return run_path
         raise ValueError(f"Run not found: {run_id}")
 
-    runs.sort(key=lambda item: item[0])
+    runs.sort(key=lambda item: (_run_mtime(item[1]), item[0]))
     return runs[-1][1]

@@ -117,7 +117,21 @@ PAGE_TITLE_OVERRIDES: dict[str, str] = {
     "security-overview": "安全合规",
     "troubleshooting-overview": "故障排除",
     "troubleshooting-maintenance-overview": "故障排除",
+    "audit-logging": "审计日志",
+    "data-protection": "数据保护",
+    "container-deployment": "容器化部署",
+    "backup-recovery": "备份恢复",
+    "logging": "日志管理",
+    "cicd-pipeline": "CI/CD流水线",
+    "testing-guide": "测试指南",
+    "performance-optimization": "性能优化",
+    "security-best-practices": "安全最佳实践",
+    "build-failures": "构建失败",
+    "debug-tools": "调试工具",
 }
+
+_SKIP_NAV_HEADINGS = frozenset({"目录", "table of contents", "toc"})
+_ASCII_SLUG_TITLE = re.compile(r"^[a-z0-9]+(?: [a-z0-9]+)*$")
 
 TAXONOMY_ALIASES: dict[str, str] = {
     "故障排除与维护": "故障排除",
@@ -295,7 +309,9 @@ def build_navigation_tree(
         parts = Path(file_path).parts
         abs_path = _resolve_content_path(content_root, file_path)
         title = (
-            _extract_title_from_file(abs_path) if abs_path.exists() else _title_from_path(file_path)
+            _extract_title_from_file(abs_path)
+            if abs_path.exists()
+            else _display_title(_title_from_path(file_path))
         )
         page_node = {
             "type": "page",
@@ -362,32 +378,54 @@ def _resolve_content_path(content_root: Path, file_path: str) -> Path:
     return content_root / path
 
 
+def _display_title(title: str) -> str:
+    """Normalize filename-safe punctuation back to the product title."""
+    return title.replace("／", "/").replace("＼", "\\").strip()
+
+
+def _is_ascii_slug_title(title: str) -> bool:
+    """True when a title is just an English page_id with dashes turned into spaces."""
+    return bool(_ASCII_SLUG_TITLE.fullmatch(title.strip()))
+
+
+def _extract_first_atx_heading(markdown: str, *, max_level: int = 2) -> str | None:
+    """Return the first ATX heading up to max_level, skipping TOC headings."""
+    pattern = rf"^(#{{1,{max_level}}})\s+(.+)$"
+    for match in re.finditer(pattern, markdown, re.MULTILINE):
+        text = match.group(2).strip()
+        if not text or text.lower() in _SKIP_NAV_HEADINGS:
+            continue
+        return text
+    return None
+
+
 def _extract_title_from_file(file_path: Path) -> str:
-    """Extract title from markdown file.
+    """Extract a product title from a markdown file.
 
-    Args:
-        file_path: Path to markdown file
-
-    Returns:
-        Title string or derived from path
+    Prefer an H1, then a Chinese (or otherwise non-slug) filename, then the first
+    H2. Never fall back to an ASCII filename stem for zh catalog pages.
     """
+    path_title = _display_title(_title_from_path(str(file_path)))
     try:
         content = file_path.read_text(encoding="utf-8")
-        # Match first # heading
-        import re
-
-        match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-        if match:
-            return match.group(1).strip()
     except Exception:
-        pass
-    return _title_from_path(str(file_path))
+        return path_title
+
+    heading_h1 = _extract_first_atx_heading(content, max_level=1)
+    if heading_h1 and not _is_ascii_slug_title(heading_h1):
+        return _display_title(heading_h1)
+    if not _is_ascii_slug_title(path_title):
+        return path_title
+    heading = _extract_first_atx_heading(content, max_level=2)
+    if heading and not _is_ascii_slug_title(heading):
+        return _display_title(heading)
+    return path_title
 
 
 def _extract_title_from_markdown(markdown: str) -> str | None:
-    match = re.search(r"^#\s+(.+)$", markdown, re.MULTILINE)
-    if match:
-        return match.group(1).strip()
+    heading = _extract_first_atx_heading(markdown, max_level=1)
+    if heading:
+        return _display_title(heading)
     return None
 
 
@@ -413,7 +451,11 @@ def _slug_from_source_path(source_path: str) -> str:
     return Path(source_path).stem
 
 
-def _canonical_title(source_path: str, markdown: str | None = None) -> str:
+def _canonical_title(
+    source_path: str,
+    markdown: str | None = None,
+    planner_title: str | None = None,
+) -> str:
     slug = _slug_from_source_path(source_path)
     if slug in PAGE_TITLE_OVERRIDES:
         return PAGE_TITLE_OVERRIDES[slug]
@@ -427,12 +469,20 @@ def _canonical_title(source_path: str, markdown: str | None = None) -> str:
             return f"{title}数据模型"
         return title
 
+    if planner_title:
+        planned = planner_title.strip()
+        if planned and not _is_ascii_slug_title(planned):
+            return planned
+
     if markdown:
         markdown_title = _extract_title_from_markdown(markdown)
-        if markdown_title:
+        if markdown_title and not _is_ascii_slug_title(markdown_title):
             return markdown_title
 
-    return _title_from_path(source_path)
+    fallback = _display_title(_title_from_path(source_path))
+    if planner_title and planner_title.strip():
+        return planner_title.strip()
+    return fallback
 
 
 def _strip_known_suffixes(slug: str) -> str:
@@ -453,11 +503,15 @@ def _safe_markdown_filename(title: str) -> str:
     return f"{clean or '未命名页面'}.md"
 
 
-def _qoder_like_relative_path(source_path: str, markdown: str | None = None) -> Path:
+def _qoder_like_relative_path(
+    source_path: str,
+    markdown: str | None = None,
+    planner_title: str | None = None,
+) -> Path:
     """Map planner source paths to the Qoder-like Chinese information architecture."""
     normalized = source_path[5:] if source_path.startswith("docs/") else source_path
     slug = _slug_from_source_path(normalized)
-    title = _canonical_title(source_path, markdown)
+    title = _canonical_title(source_path, markdown, planner_title=planner_title)
     filename = _safe_markdown_filename(title)
 
     if normalized.startswith("00-overview") or normalized.startswith("pages/overview/"):
@@ -564,19 +618,22 @@ def _normalize_doc_path_for_filter(doc_path: str, project_root: Path | None) -> 
     return raw.as_posix()
 
 
-def _dedupe_relative_path(relative_path: Path, used_paths: set[str], source_path: str) -> Path:
-    path = relative_path
-    counter = 2
-    while str(path) in used_paths:
-        suffix = compute_stable_slug(_slug_from_source_path(source_path), max_length=24) or str(
-            counter
-        )
-        path = relative_path.with_name(
-            f"{relative_path.stem}-{suffix}-{counter}{relative_path.suffix}"
-        )
-        counter += 1
-    used_paths.add(str(path))
-    return path
+def _dedupe_relative_path(
+    relative_path: Path, used_paths: set[str], source_path: str
+) -> Path | None:
+    """Keep the first page for a relative path; skip later aliases.
+
+    Overview aliases such as troubleshooting-overview and
+    troubleshooting-maintenance-overview both map to ``故障排除.md``. Suffixing
+    the second write as ``故障排除-troubleshooting-maintena-2.md`` would leak an
+    English slug into the content-root sidebar.
+    """
+    del source_path
+    key = str(relative_path)
+    if key in used_paths:
+        return None
+    used_paths.add(key)
+    return relative_path
 
 
 class ContentLayoutWriter:
@@ -637,10 +694,17 @@ class ContentLayoutWriter:
         except ValueError:
             return Path(output_path.name)
 
-    def _output_path_for_markdown(self, source_path: str, markdown: str) -> tuple[Path, Path]:
+    def _output_path_for_markdown(
+        self,
+        source_path: str,
+        markdown: str,
+        planner_title: str | None = None,
+    ) -> tuple[Path, Path]:
         """Map a source path and Markdown body to absolute and content-relative paths."""
         if self.profile.content_subdir:
-            relative_path = _qoder_like_relative_path(source_path, markdown)
+            relative_path = _qoder_like_relative_path(
+                source_path, markdown, planner_title=planner_title
+            )
             return self._content_dir / relative_path, relative_path
         output_path = self.get_output_path(source_path)
         return output_path, self.get_content_relative_path(source_path)
@@ -735,7 +799,10 @@ class ContentLayoutWriter:
 
             markdown = source_file.read_text(encoding="utf-8")
             output_file, relative_path = self._output_path_for_markdown(file_path, markdown)
-            relative_path = _dedupe_relative_path(relative_path, used_paths, file_path)
+            unique_path = _dedupe_relative_path(relative_path, used_paths, file_path)
+            if unique_path is None:
+                continue
+            relative_path = unique_path
             output_file = self._content_dir / relative_path
 
             self._assert_safe_output_path(output_file)
@@ -760,12 +827,14 @@ class ContentLayoutWriter:
         self,
         pages: list[tuple[str, str]],
         selected_source_paths: set[str] | None = None,
+        planner_titles: dict[str, str] | None = None,
     ) -> tuple[list[str], dict[str, Any]]:
         """Write already-composed Markdown pages into the content directory.
 
         Args:
             pages: List of (source-style output path, markdown) tuples. Paths such as
                 `docs/pages/api/foo.md` are mapped under `content/pages/api/foo.md`.
+            planner_titles: Optional map of source path to planner product title.
 
         Returns:
             Tuple of (content-relative written paths, stats)
@@ -778,14 +847,21 @@ class ContentLayoutWriter:
             "path_mappings": [],
         }
         used_paths: set[str] = set()
+        titles = planner_titles or {}
 
         for source_path, markdown in pages:
             if not source_path.endswith(".md"):
                 continue
             if selected_source_paths is not None and source_path not in selected_source_paths:
                 continue
-            output_file, relative_path = self._output_path_for_markdown(source_path, markdown)
-            relative_path = _dedupe_relative_path(relative_path, used_paths, source_path)
+            planner_title = titles.get(source_path)
+            output_file, relative_path = self._output_path_for_markdown(
+                source_path, markdown, planner_title=planner_title
+            )
+            unique_path = _dedupe_relative_path(relative_path, used_paths, source_path)
+            if unique_path is None:
+                continue
+            relative_path = unique_path
             output_file = (
                 self._content_dir / relative_path if self.profile.content_subdir else output_file
             )
@@ -826,7 +902,7 @@ class ContentLayoutWriter:
             title = (
                 _extract_title_from_file(abs_path)
                 if abs_path.exists()
-                else _title_from_path(file_path)
+                else _display_title(_title_from_path(file_path))
             )
             registry.append(
                 {

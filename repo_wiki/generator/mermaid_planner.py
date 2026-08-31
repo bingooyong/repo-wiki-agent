@@ -26,6 +26,13 @@ from typing import Any
 
 from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
+from repo_wiki.planner.rule_first import _is_filename_like_module_name
+
+_WIKI_TOOL_LAYERS: tuple[tuple[str, str], ...] = (
+    ("layer_docs", "docs/"),
+    ("layer_ai", "ai/source-of-truth"),
+    ("layer_repo_wiki", ".repo-wiki"),
+)
 
 # ============================================================================
 # DIAGRAM TYPE DEFINITIONS
@@ -311,6 +318,74 @@ def _validate_state_syntax(code: str, lines: list[str]) -> list[str]:
     return errors
 
 
+def _module_name_and_path(module: Any, index: int) -> tuple[str, str]:
+    if isinstance(module, dict):
+        return str(module.get("name") or f"module_{index}"), str(module.get("path") or "")
+    return str(module), ""
+
+
+def _product_module_labels(modules: list[Any]) -> list[str]:
+    """Return scanned product packages, not __init__.py / main.py filename dumps."""
+    labels: list[str] = []
+    seen: set[str] = set()
+    for index, module in enumerate(modules):
+        name, path = _module_name_and_path(module, index)
+        candidates: list[str] = []
+        if name and not _is_filename_like_module_name(name):
+            candidates.append(name)
+        else:
+            parts = [part for part in path.replace("\\", "/").strip("/").split("/") if part]
+            if len(parts) >= 2:
+                parent = parts[-2]
+                if parent and not _is_filename_like_module_name(parent):
+                    candidates.append(parent)
+        for label in candidates:
+            if label not in seen:
+                seen.add(label)
+                labels.append(label)
+    return labels
+
+
+def _iter_snapshot_paths(context: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for module in context.get("modules") or []:
+        if isinstance(module, dict):
+            paths.append(str(module.get("path") or ""))
+    for model in context.get("data_models") or []:
+        if isinstance(model, dict):
+            paths.append(str(model.get("file_path") or ""))
+    for endpoint in context.get("endpoints") or []:
+        if isinstance(endpoint, dict):
+            paths.append(str(endpoint.get("file_path") or ""))
+    for item in context.get("key_directories") or []:
+        paths.append(str(item))
+    for item in context.get("snapshot_paths") or []:
+        paths.append(str(item))
+    return [path for path in paths if path]
+
+
+def _snapshot_contains_path(paths: list[str], target: str) -> bool:
+    needle = target.strip("/").replace("\\", "/")
+    for path in paths:
+        normalized = path.replace("\\", "/").strip("/")
+        if not normalized:
+            continue
+        if normalized == needle or normalized.startswith(f"{needle}/"):
+            return True
+        if "/" not in needle and normalized.split("/")[0] == needle:
+            return True
+    return False
+
+
+def _wiki_tool_layers_present(context: dict[str, Any]) -> list[tuple[str, str]]:
+    paths = _iter_snapshot_paths(context)
+    layers: list[tuple[str, str]] = []
+    for layer_id, layer_label in _WIKI_TOOL_LAYERS:
+        if _snapshot_contains_path(paths, layer_label):
+            layers.append((layer_id, layer_label))
+    return layers
+
+
 # ============================================================================
 # MERMAID PLANNER
 # ============================================================================
@@ -386,33 +461,18 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        """Plan architecture/overview flowchart."""
-        modules = context.get("modules", [])
+        """Plan architecture/overview flowchart from product modules in the snapshot."""
+        nodes = [DiagramNode(id="repo", label="Repository", shape="round")]
+        edges: list[DiagramEdge] = []
 
-        # Build nodes from modules
-        nodes = []
-        edges = []
+        for label in _product_module_labels(context.get("modules") or [])[:10]:
+            nodes.append(DiagramNode(id=label, label=label, shape="rectangle"))
+            edges.append(DiagramEdge(from_node="repo", to_node=label))
 
-        # Add repository root node
-        nodes.append(DiagramNode(id="repo", label="Repository", shape="round"))
-
-        # Add module nodes
-        for i, module in enumerate(modules[:10]):  # Limit to 10 modules
-            module_name = module.get("name", f"module_{i}")
-            nodes.append(DiagramNode(id=module_name, label=module_name, shape="rectangle"))
-            edges.append(DiagramEdge(from_node="repo", to_node=module_name))
-
-        # Add layer nodes for three-layer architecture
-        layers = [
-            ("docs", "docs/", "rectangle"),
-            ("ai", "ai/source-of-truth", "rectangle"),
-            ("repo_wiki", ".repo-wiki", "rectangle"),
-        ]
-        for layer_id, layer_label, shape in layers:
-            nodes.append(DiagramNode(id=layer_id, label=layer_label, shape=shape))
+        for layer_id, layer_label in _wiki_tool_layers_present(context):
+            nodes.append(DiagramNode(id=layer_id, label=layer_label, shape="rectangle"))
             edges.append(DiagramEdge(from_node="repo", to_node=layer_id))
 
-        # Collect evidence spans
         evidence_spans = []
         if evidence_binding:
             for candidate in evidence_binding.candidates:
@@ -422,7 +482,7 @@ class MermaidPlanner:
             diagram_id=f"{page_id}-architecture",
             diagram_type=MermaidDiagramType.FLOWCHART,
             title="Repository Architecture",
-            description="Three-layer architecture overview",
+            description="Product module architecture",
             nodes=nodes,
             edges=edges,
             evidence_spans=evidence_spans,
@@ -435,22 +495,15 @@ class MermaidPlanner:
         context: dict[str, Any],
     ) -> DiagramPlan | None:
         """Plan service/section flow diagram."""
-        modules = context.get("modules", [])
-        commands = context.get("commands", {})
-
         nodes = []
-        edges = []
+        edges: list[DiagramEdge] = []
 
-        # Add module nodes
-        for i, module in enumerate(modules[:8]):
-            module_name = module.get("name", f"module_{i}")
-            nodes.append(DiagramNode(id=module_name, label=module_name, shape="rectangle"))
-
-        # Add command nodes
-        for cmd, cmd_line in list(commands.items())[:5]:
-            cmd_id = f"cmd_{cmd}"
-            nodes.append(DiagramNode(id=cmd_id, label=cmd, shape="rounded"))
-            edges.append(DiagramEdge(from_node=cmd_id, to_node="start", style="==>"))
+        labels = _product_module_labels(context.get("modules") or [])[:8]
+        for label in labels:
+            nodes.append(DiagramNode(id=label, label=label, shape="rectangle"))
+        if len(labels) >= 2:
+            for left, right in zip(labels, labels[1:], strict=False):
+                edges.append(DiagramEdge(from_node=left, to_node=right))
 
         evidence_spans = []
         if evidence_binding:
@@ -461,7 +514,7 @@ class MermaidPlanner:
             diagram_id=f"{page_id}-service-flow",
             diagram_type=MermaidDiagramType.FLOWCHART,
             title="Service Flow",
-            description="Module and command relationships",
+            description="Product module relationships",
             nodes=nodes,
             edges=edges,
             evidence_spans=evidence_spans,
@@ -678,10 +731,9 @@ class MermaidPlanner:
                 }
             )
 
-        # If no explicit models, infer from modules
+        # If no explicit models, infer from product packages (not __init__.py dumps)
         if not er_entities:
-            for module in modules[:5]:
-                module_name = module.get("name", "unknown")
+            for module_name in _product_module_labels(modules)[:5]:
                 er_entities.append(
                     {
                         "entity": module_name,

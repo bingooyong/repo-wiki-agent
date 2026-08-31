@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 from repo_wiki.generator.composer import (
+    EMPTY_COMPOSER_STUB_PHRASE,
     ComposerContext,
     build_composer_input,
     create_composer,
@@ -20,7 +22,9 @@ from repo_wiki.llm.models import (
     RetryableError,
 )
 from repo_wiki.llm.retry import RetryConfig
+from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
+from repo_wiki.verifier.handbook import EMPTY_CONTENT_REJECTION
 
 SUCCESS_MARKDOWN = "# Sample Page\n\nRetried LLM content with enough prose for validation."
 
@@ -49,6 +53,8 @@ class SequenceLLMProvider(LLMProvider):
     def __init__(self, outcomes: list[Exception | ChatResponse]) -> None:
         self._outcomes = list(outcomes)
         self._call_count = 0
+        self.user_prompts: list[str] = []
+        self.requests: list[ChatRequest] = []
         self._config = LLMProviderConfig(provider="mock", model="mock-gpt")
 
     @property
@@ -65,6 +71,10 @@ class SequenceLLMProvider(LLMProvider):
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         self._call_count += 1
+        self.requests.append(request)
+        self.user_prompts.append(
+            next((m.content for m in reversed(request.messages) if m.role == "user"), "")
+        )
         if self._call_count > 20:
             raise AssertionError("retry loop exceeded guard; expected RetryConfig.max_retries")
         if not self._outcomes:
@@ -204,7 +214,8 @@ async def test_compose_page_rejects_after_retries_exhausted(
 
     assert output.rejected is True
     assert "529" in (output.rejection_reason or "")
-    assert provider.call_count == RetryConfig().max_retries + 1
+    # Inner HTTP retries, then one page-local compact rewrite with the same budget.
+    assert provider.call_count == 2 * (RetryConfig().max_retries + 1)
     assert provider.call_count <= 20
 
 
@@ -244,7 +255,7 @@ async def test_compose_page_rejects_after_empty_content_retries_exhausted(
         output.rejected is False and "LLM composer did not return content" in output.markdown
     )
     assert "LLM composer did not return content" not in output.markdown
-    assert provider.call_count == RetryConfig().max_retries + 1
+    assert provider.call_count == 2 * (RetryConfig().max_retries + 1)
     assert provider.call_count <= 20
 
 
@@ -261,3 +272,500 @@ async def test_compose_page_does_not_retry_nonempty_content(
     assert output.rejected is False
     assert "LLM composer did not return content" not in output.markdown
     assert provider.call_count == 1
+
+
+def _think_only_response() -> ChatResponse:
+    return ChatResponse(
+        content="<think>\n" + ("planning the install page. " * 40) + "\n</think>\n",
+        model="mock-gpt",
+        usage={"prompt_tokens": 80, "completion_tokens": 5200, "total_tokens": 5280},
+    )
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_think_only_once(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    """Think-only HTTP 200 is a page-local rewrite, not a PASS stub."""
+    provider = SequenceLLMProvider([_think_only_response(), _paragraph_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert EMPTY_COMPOSER_STUB_PHRASE not in output.markdown
+    assert provider.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_compose_page_rejects_think_only_after_one_recovery(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_think_only_response(), _think_only_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is True
+    assert output.rejection_reason == EMPTY_CONTENT_REJECTION
+    assert EMPTY_COMPOSER_STUB_PHRASE not in output.markdown
+    assert provider.call_count == 2
+
+
+LIST_HEAVY_MARKDOWN = """# Sample Page
+
+## 简介
+
+- bullet one with extra words for length and a fake endpoint list
+- bullet two with extra words for length and a fake endpoint list
+- bullet three with extra words for length and a fake endpoint list
+- bullet four with extra words for length and a fake endpoint list
+- bullet five with extra words for length and a fake endpoint list
+- bullet six with extra words for length and a fake endpoint list
+- bullet seven with extra words for length and a fake endpoint list
+- bullet eight with extra words for length and a fake endpoint list
+"""
+
+PARAGRAPH_MARKDOWN = """# Sample Page
+
+## 简介
+
+This page explains how the FastAPI service authenticates requests and stores articles.
+The implementation lives in the application package and is described with paragraph prose
+rather than a bullet dump so the composer prose floor can pass. Readers should start at
+the settings module, then follow the request path into the route handlers.
+"""
+
+
+def _list_heavy_response() -> ChatResponse:
+    return ChatResponse(content=LIST_HEAVY_MARKDOWN, model="mock-gpt")
+
+
+def _paragraph_response() -> ChatResponse:
+    return ChatResponse(content=PARAGRAPH_MARKDOWN, model="mock-gpt")
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_insufficient_prose_once(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_list_heavy_response(), _paragraph_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_compose_page_rejects_insufficient_prose_after_one_recovery(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_list_heavy_response(), _list_heavy_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is True
+    assert output.rejection_reason == "Insufficient prose content"
+    assert provider.call_count == 2
+
+
+FENCE_HEAVY_MARKDOWN = """# Sample Page
+
+## 简介
+
+```python
+from app.core import settings
+DATABASE_URL = settings.database_url
+def get_current_user(authorization: str = Header(...)):
+    token = authorization.removeprefix("Token ")
+    return lookup_user_by_api_token(token)
+```
+
+```python
+router = APIRouter()
+@router.post("/articles")
+def create_article():
+    return {"ok": True}
+```
+"""
+
+
+def _fence_heavy_response() -> ChatResponse:
+    return ChatResponse(content=FENCE_HEAVY_MARKDOWN, model="mock-gpt")
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_empty_content_with_paragraph_rewrite(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider(
+        [_empty_response("") for _ in range(RetryConfig().max_retries + 1)]
+        + [_paragraph_response()]
+    )
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == RetryConfig().max_retries + 2
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_fence_heavy_insufficient_prose_once(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_fence_heavy_response(), _paragraph_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == 2
+
+
+def test_prose_recovery_prompt_forbids_evidence_fences(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+) -> None:
+    composer = create_composer()
+    prompt = composer._build_prose_recovery_prompt(
+        build_composer_input(sample_page, None, sample_context),
+        composer._build_context(build_composer_input(sample_page, None, sample_context)),
+        FENCE_HEAVY_MARKDOWN,
+    )
+    assert "代码" in prompt or "围栏" in prompt or "fence" in prompt.lower()
+    assert "段落" in prompt
+    assert "mermaid" in prompt.lower()
+    assert "def get_current_user" not in prompt
+
+
+FENCEPACK_TOKEN = "UNIQUE_FENCEPACK_DUMP_SHOULD_NOT_REACH_REWRITE"
+
+
+def _fence_heavy_binding() -> PageEvidenceBinding:
+    """Eight long dumps whose distinctive token sits after the compact snippet window."""
+    prefix = ("alpha_token " * 12).strip() + " "
+    suffix = "\n".join(["def pad():", "    return 1"] * 20)
+    candidates: list[EvidenceCandidate] = []
+    for index in range(8):
+        span = EvidenceSpanRecord(
+            digest=f"fence-{index}",
+            file_path=f"app/api/routes/file_{index}.py",
+            line_start=1,
+            line_end=80,
+            language="python",
+            symbol=f"handler_{index}",
+            span_text=f"{prefix}{FENCEPACK_TOKEN}_FILE{index}\n{suffix}",
+        )
+        candidates.append(
+            EvidenceCandidate(
+                evidence_id=index + 1,
+                span=span,
+                score=1.0,
+                match_signals=["module_match"],
+                citation_order=index,
+            )
+        )
+    return PageEvidenceBinding(
+        page_id="sample-page",
+        doc_type="overview",
+        candidates=candidates,
+        bound_count=8,
+    )
+
+
+def test_prose_recovery_prompt_uses_compact_evidence_and_forbids_empty_replies(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+) -> None:
+    composer = create_composer()
+    binding = _fence_heavy_binding()
+    composer_input = build_composer_input(sample_page, binding, sample_context)
+    first = composer._build_compose_prompt(composer_input, composer._build_context(composer_input))
+    recovery = composer._build_prose_recovery_prompt(
+        composer_input,
+        composer._build_context(composer_input),
+        FENCE_HEAVY_MARKDOWN,
+    )
+    assert FENCEPACK_TOKEN in first
+    assert FENCEPACK_TOKEN not in recovery
+    assert "file_0.py" in recovery
+    assert "file_7.py" not in recovery
+    assert "def get_current_user" not in recovery
+    assert "禁止空" in recovery or "不要返回空" in recovery
+    assert "段落" in recovery
+    assert "mermaid" in recovery.lower()
+
+
+@pytest.mark.asyncio
+async def test_empty_then_paragraph_rewrite_sends_compact_recovery_prompt(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider(
+        [_empty_response("") for _ in range(RetryConfig().max_retries + 1)]
+        + [_paragraph_response()]
+    )
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(
+        build_composer_input(sample_page, _fence_heavy_binding(), sample_context)
+    )
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == RetryConfig().max_retries + 2
+    assert len(provider.user_prompts) == RetryConfig().max_retries + 2
+    assert FENCEPACK_TOKEN in provider.user_prompts[0]
+    assert FENCEPACK_TOKEN not in provider.user_prompts[-1]
+    assert "禁止空" in provider.user_prompts[-1] or "不要返回空" in provider.user_prompts[-1]
+
+
+@pytest.mark.asyncio
+async def test_insufficient_prose_rewrite_sends_compact_recovery_prompt(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_fence_heavy_response(), _paragraph_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(
+        build_composer_input(sample_page, _fence_heavy_binding(), sample_context)
+    )
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == 2
+    assert FENCEPACK_TOKEN in provider.user_prompts[0]
+    assert FENCEPACK_TOKEN not in provider.user_prompts[1]
+    assert "段落" in provider.user_prompts[1]
+
+
+UNCLOSED_FENCE_MARKDOWN = """# Sample Page
+
+Operators monitor FastAPI latency with Prometheus scrapes and Grafana boards for production.
+This opening paragraph is long enough to pass the one-hundred character prose floor.
+
+```
+Prometheus scrapes /metrics and the remaining body is trapped in this fence.
+Grafana dashboards show request latency, error rate, and saturation.
+The unclosed fence must not be accepted as a passing composed page.
+"""
+
+
+def _unclosed_fence_response() -> ChatResponse:
+    return ChatResponse(content=UNCLOSED_FENCE_MARKDOWN, model="mock-gpt")
+
+
+@pytest.mark.asyncio
+async def test_compose_page_retries_unclosed_fence_once(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_unclosed_fence_response(), _paragraph_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_compose_page_rejects_unclosed_fence_after_one_recovery(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+) -> None:
+    provider = SequenceLLMProvider([_unclosed_fence_response(), _unclosed_fence_response()])
+    composer = create_composer(provider=provider)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is True
+    assert output.rejection_reason == "Unclosed fenced code block"
+    assert provider.call_count == 2
+
+
+REWRITE_MIN_MAX_TOKENS = 16384
+
+
+class BudgetGatedLLMProvider(LLMProvider):
+    """Succeeds only when ChatRequest.max_tokens is raised for the rewrite."""
+
+    def __init__(
+        self,
+        *,
+        min_tokens: int = REWRITE_MIN_MAX_TOKENS,
+        empty: ChatResponse | None = None,
+        success: ChatResponse | None = None,
+        config: LLMProviderConfig | None = None,
+    ) -> None:
+        self.min_tokens = min_tokens
+        self._empty = empty or _empty_response("")
+        self._success = success or _paragraph_response()
+        self.requests: list[ChatRequest] = []
+        self._call_count = 0
+        self._config = config or LLMProviderConfig(
+            provider="minimax",
+            model="MiniMax-M3",
+            max_tokens=4096,
+        )
+
+    @property
+    def name(self) -> str:
+        return str(self._config.provider)
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(max_context_tokens=128000)
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        self._call_count += 1
+        self.requests.append(request)
+        if self._call_count > 20:
+            raise AssertionError("retry loop exceeded guard; expected RetryConfig.max_retries")
+        if request.max_tokens >= self.min_tokens:
+            return self._success
+        return self._empty
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
+def _assert_rewrite_budget_and_minimax_recovery(provider: BudgetGatedLLMProvider) -> None:
+    starved = [req for req in provider.requests if req.max_tokens < REWRITE_MIN_MAX_TOKENS]
+    bumped = [req for req in provider.requests if req.max_tokens >= REWRITE_MIN_MAX_TOKENS]
+    assert starved, "first attempt must reuse the starved completion budget"
+    assert bumped, "empty/think-only rewrite must raise max_tokens"
+    assert all(req.max_tokens < REWRITE_MIN_MAX_TOKENS for req in starved)
+    assert all(req.max_tokens >= REWRITE_MIN_MAX_TOKENS for req in bumped)
+    rewrite = bumped[0]
+    thinking = rewrite.extra_body.get("thinking")
+    assert thinking == {"type": "disabled"} or rewrite.extra_body.get("reasoning_split") is True
+    assert "禁止空" in rewrite.messages[-1].content or "不要返回空" in rewrite.messages[-1].content
+
+
+@pytest.mark.asyncio
+async def test_empty_content_rewrite_succeeds_only_when_max_tokens_bumped(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Improve's REPO_WIKI_LLM_COMPOSER_MAX_TOKENS=1000 must not starve the rewrite."""
+    monkeypatch.setenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", "1000")
+    provider = BudgetGatedLLMProvider()
+    composer = create_composer(provider=provider, llm_config=provider._config)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    _assert_rewrite_budget_and_minimax_recovery(provider)
+    assert all(req.max_tokens == 1000 for req in provider.requests if req.max_tokens < 16384)
+
+
+@pytest.mark.asyncio
+async def test_generate_first_compose_asks_16384_with_minimax_thinking_off(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generate does not set REPO_WIKI_LLM_COMPOSER_MAX_TOKENS; first call must not stay at 4096."""
+    monkeypatch.delenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", raising=False)
+    provider = BudgetGatedLLMProvider(min_tokens=0)
+    composer = create_composer(provider=provider, llm_config=provider._config)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    assert provider.call_count == 1, (
+        "first compose at 16384 with thinking off should not need rewrite"
+    )
+    first = provider.requests[0]
+    assert first.max_tokens == 16384
+    assert first.max_tokens != 4096
+    thinking = first.extra_body.get("thinking")
+    assert thinking == {"type": "disabled"} or first.extra_body.get("reasoning_split") is True
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_minimax_first_call_forwards_thinking_extra_body(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", raising=False)
+    provider = BudgetGatedLLMProvider(
+        min_tokens=0,
+        config=LLMProviderConfig(
+            provider="openai",
+            model="MiniMax-M3",
+            max_tokens=4096,
+        ),
+    )
+    composer = create_composer(provider=provider, llm_config=provider._config)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    first = provider.requests[0]
+    assert first.max_tokens == 16384
+    thinking = first.extra_body.get("thinking")
+    assert thinking == {"type": "disabled"} or first.extra_body.get("reasoning_split") is True
+
+
+@pytest.mark.asyncio
+async def test_empty_content_rewrite_bumps_past_real_provider_4096_floor(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the first call is starved (env 4096), rewrite still bumps to 16384."""
+    monkeypatch.setenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", "4096")
+    provider = BudgetGatedLLMProvider()
+    composer = create_composer(provider=provider, llm_config=provider._config)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    _assert_rewrite_budget_and_minimax_recovery(provider)
+    first_tokens = [req.max_tokens for req in provider.requests if req.max_tokens < 16384]
+    assert first_tokens
+    assert all(token in {4096, 1000} or token < 16384 for token in first_tokens)
+
+
+@pytest.mark.asyncio
+async def test_think_only_rewrite_succeeds_only_when_max_tokens_bumped(
+    sample_page: WikiPagePlan,
+    sample_context: ComposerContext,
+    no_retry_sleep: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REPO_WIKI_LLM_COMPOSER_MAX_TOKENS", "1000")
+    provider = BudgetGatedLLMProvider(empty=_think_only_response())
+    composer = create_composer(provider=provider, llm_config=provider._config)
+    output = await composer.compose_page(build_composer_input(sample_page, None, sample_context))
+
+    assert output.rejected is False
+    assert "authenticates requests" in output.markdown
+    _assert_rewrite_budget_and_minimax_recovery(provider)

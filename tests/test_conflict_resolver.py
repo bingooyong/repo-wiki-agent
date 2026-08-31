@@ -57,9 +57,24 @@ def test_conflict_resolver_handles_all_four_reason_codes(tmp_path):
     assert "待确认" in classifications
     assert "historical" in classifications
 
+    planning_items = [item for item in all_items if item["doc_path"] == "docs/phase-plan.md"]
+    assert planning_items
+    assert all(item["status"] == "resolved" for item in planning_items)
+    assert all(item["classification"] == "historical" for item in planning_items)
+    assert any(item["reason_code"] == UNSUPPORTED_DOC_CLAIM for item in planning_items)
+
+    api_items = [item for item in all_items if item["doc_path"] == "docs/api.md"]
+    assert api_items
+    assert all(item["status"] in {"deferred", "flagged"} for item in api_items)
+    assert all(item["classification"] == "待确认" for item in api_items)
+
     out = write_conflict_report(report, tmp_path / "reports" / "source-docs-conflicts.json")
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["summary"]["total_items"] >= 4
+    assert payload["summary"]["resolved_count"] == len(planning_items)
+    assert payload["summary"]["deferred_count"] + payload["summary"]["flagged_count"] == len(
+        api_items
+    )
 
 
 def test_reason_codes_are_blocking_in_strict_profile():
@@ -71,3 +86,24 @@ def test_reason_codes_are_blocking_in_strict_profile():
         MISSING_SOURCE_CONFIRMATION,
     ):
         assert threshold.is_blocking(code) is True
+
+
+def test_historical_authority_docs_are_resolved():
+    docs_inventory = {
+        "documents": [
+            {
+                "path": "docs/00-overview.md",
+                "doc_type": "overview",
+                "authority_level": "historical",
+                "conflict_level": "stale",
+                "stale_references": ["src/legacy/gone.py"],
+                "conflicting_claims": ["GhostService"],
+            }
+        ]
+    }
+    report = resolve_source_docs_conflicts(_source_inventory_fixture(), docs_inventory)
+    assert report["deferred_items"] == []
+    assert report["flagged_items"] == []
+    assert report["resolved_items"]
+    assert all(item["status"] == "resolved" for item in report["resolved_items"])
+    assert all(item["classification"] == "historical" for item in report["resolved_items"])

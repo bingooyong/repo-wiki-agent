@@ -30,6 +30,21 @@ WEIGHT_API = 1.8
 WEIGHT_DATA_MODEL = 1.8
 WEIGHT_FILE_PROXIMITY = 1.2
 WEIGHT_CATEGORY = 1.0
+WEIGHT_ONBOARDING_README = 3.0
+WEIGHT_ONBOARDING_SETTINGS = 2.5
+WEIGHT_ONBOARDING_ENTRY = 2.5
+WEIGHT_SECURITY_AUTH_FILE = 4.0
+WEIGHT_API_ROUTES_FILE = 3.0
+
+_ONBOARDING_OVERVIEW_INSTALL_IDS = frozenset(
+    {
+        "project-overview",
+        "installation",
+        "quick-start",
+        "quickstart",
+        "getting-started",
+    }
+)
 
 
 @dataclass
@@ -272,6 +287,102 @@ def _score_by_category_relevance(page: WikiPagePlan, span: EvidenceSpanRecord) -
     return 0.0
 
 
+def _normalized_span_path(span: EvidenceSpanRecord) -> str:
+    return str(getattr(span, "file_path", "") or "").replace("\\", "/").lower()
+
+
+def _is_overview_or_install_page(page: WikiPagePlan) -> bool:
+    page_id = (page.page_id or "").lower()
+    tags = {str(tag).lower() for tag in (page.tags or [])}
+    if page_id in _ONBOARDING_OVERVIEW_INSTALL_IDS:
+        return True
+    if page.category in {
+        WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
+        WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
+    } and any(
+        token in page_id for token in ("overview", "install", "quick-start", "quickstart", "setup")
+    ):
+        return True
+    return bool(tags & {"installation", "setup", "quick-start", "quickstart", "getting-started"})
+
+
+def _is_security_onboarding_page(page: WikiPagePlan) -> bool:
+    page_id = (page.page_id or "").lower()
+    if page.category == WikiTaxonomyCategory.SECURITY_COMPLIANCE:
+        return True
+    return "security" in page_id or "auth" in page_id
+
+
+def _is_ops_config_page(page: WikiPagePlan) -> bool:
+    page_id = (page.page_id or "").lower()
+    if page_id in {"configuration", "environment-setup", "logging"}:
+        return True
+    if page.category == WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS:
+        return True
+    return any(token in page_id for token in ("config", "logging", "environment"))
+
+
+def _is_database_troubleshooting_page(page: WikiPagePlan) -> bool:
+    page_id = (page.page_id or "").lower()
+    if page_id == "database-issues":
+        return True
+    return page.category == WikiTaxonomyCategory.TROUBLESHOOTING and "database" in page_id
+
+
+def _score_onboarding_evidence(
+    page: WikiPagePlan, span: EvidenceSpanRecord
+) -> tuple[float, list[str]]:
+    """Boost README / settings / entry files for onboarding pages only.
+
+    API pages must not receive a global README boost.
+    """
+    path = _normalized_span_path(span)
+    name = Path(path).name
+    symbol = str(getattr(span, "symbol", "") or "").lower()
+    text = str(getattr(span, "span_text", "") or "").lower()
+    score = 0.0
+    signals: list[str] = []
+
+    if page.category == WikiTaxonomyCategory.API_REFERENCE:
+        if "api/routes" in path:
+            score += WEIGHT_API_ROUTES_FILE
+            signals.append("api_routes_file")
+        return score, signals
+
+    if _is_overview_or_install_page(page):
+        if name.startswith("readme"):
+            score += WEIGHT_ONBOARDING_README
+            signals.append("onboarding_readme")
+        if "settings" in path or "database_url" in symbol or "database_url" in text:
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("onboarding_settings")
+        if name == "main.py":
+            score += WEIGHT_ONBOARDING_ENTRY
+            signals.append("onboarding_entry")
+    elif _is_ops_config_page(page) or _is_database_troubleshooting_page(page):
+        if "settings" in path or "database_url" in symbol or "database_url" in text:
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("onboarding_settings")
+        if "docker-compose" in path or name in {"docker-compose.yml", "docker-compose.yaml"}:
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("onboarding_compose")
+        if "logging" in path or "logging" in page.page_id.lower():
+            if "log" in path or "logging" in symbol or "logging" in text:
+                score += WEIGHT_ONBOARDING_ENTRY
+                signals.append("onboarding_logging")
+    elif page.category == WikiTaxonomyCategory.DATA_MODELS:
+        if "/models/" in path or name in {"models.py", "model.py"}:
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("data_model_file")
+    elif _is_security_onboarding_page(page):
+        if "authentication.py" in path or path.endswith("/authentication.py"):
+            score += WEIGHT_SECURITY_AUTH_FILE
+            signals.append("security_auth_file")
+
+    return score, signals
+
+
 def score_evidence_for_page(
     page: WikiPagePlan, span: EvidenceSpanRecord
 ) -> tuple[float, list[str]]:
@@ -322,6 +433,11 @@ def score_evidence_for_page(
     if cat_score > 0:
         score += cat_score
         signals.append("category_relevance")
+
+    onboarding_score, onboarding_signals = _score_onboarding_evidence(page, span)
+    if onboarding_score > 0:
+        score += onboarding_score
+        signals.extend(onboarding_signals)
 
     return score, signals
 
