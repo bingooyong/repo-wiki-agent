@@ -34,6 +34,10 @@ from repo_wiki.orchestration.runtime_store import (
 from repo_wiki.retrieval.service import RetrievalService
 from repo_wiki.scanner.artifacts import has_frontend_wiki_surface, write_source_of_truth
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
+from repo_wiki.verifier.api_claim_inventory import (
+    drop_uninventoried_api_claims,
+    endpoints_to_api_inventory,
+)
 from repo_wiki.verifier.handbook import is_page_local_quality_rejection
 from repo_wiki.verifier.service import VerifierService
 
@@ -2318,9 +2322,39 @@ class RepoWikiService:
             for cite in cites[:needed]:
                 content += f"- {cite}\n"
 
+        content = self._drop_uninventoried_snapshot_api_claims(content, composition_context)
+
         # CiteBlock.render() and leftover LLM markup can still carry
         # ``path:start-end (label)`` after composer normalize; strip before write.
         return normalize_citation_markup(content, self.root).strip() + "\n"
+
+    def _drop_uninventoried_snapshot_api_claims(
+        self,
+        content: str,
+        composition_context: Any | None,
+    ) -> str:
+        """Drop METHOD /path mentions that are not in the snapshot endpoint inventory.
+
+        Uses the same inventory + `/api` mount-prefix matching as
+        QODER_CRITICAL_FALSE_FACT. Test-only 404 fixtures such as
+        ``GET /wrong_path/asd`` are never published as product APIs.
+        """
+        raw_endpoints = (
+            getattr(composition_context, "endpoints", []) or []
+            if composition_context is not None
+            else []
+        )
+        apis = endpoints_to_api_inventory(raw_endpoints)
+        framework = (
+            str(getattr(composition_context, "framework", "") or "").lower()
+            if composition_context is not None
+            else ""
+        )
+        return drop_uninventoried_api_claims(
+            content,
+            apis,
+            fastapi_app="fastapi" in framework,
+        )
 
     def _evidence_backed_api_endpoints(
         self,
