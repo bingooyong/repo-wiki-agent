@@ -422,7 +422,12 @@ def unknown_process_mentions(markdown: str, allowed: set[str]) -> list[str]:
         if name in allowed or name.lower() in allowed_l:
             return
         lowered = name.lower()
-        if any(lowered == item.lower() or item.lower().endswith(f"-{lowered}") for item in allowed):
+        if any(
+            lowered == item.lower()
+            or item.lower().endswith(lowered)
+            or item.lower().endswith(f"-{lowered}")
+            for item in allowed
+        ):
             return
         found.add(name)
 

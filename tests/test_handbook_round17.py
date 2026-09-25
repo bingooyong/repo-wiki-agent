@@ -225,6 +225,7 @@ def test_unknown_process_ignores_volume_and_generic_server_names() -> None:
         "UsersRepository 负责读用户。PostgreSQL 是主数据库。\n"
     )
     assert unknown_process_mentions(text, {"probe-agent"}) == []
+    assert unknown_process_mentions("见 cmd/probe-control/main.go。\n", {"ccprobe-control"}) == []
 
 
 def test_code_integrity_matches_raw_replies_by_any_path(tmp_path: Path) -> None:
