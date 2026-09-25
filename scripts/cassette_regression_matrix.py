@@ -29,7 +29,9 @@ REPO_ROOT = SCRIPT_DIR.parent
 ACCEPTANCE = SCRIPT_DIR / "handbook_acceptance.py"
 CITE_RELEVANCE = SCRIPT_DIR / "cite_relevance.py"
 
-DEFAULT_CASSETTES = Path(os.environ.get("REPO_WIKI_CASSETTE_MATRIX_DIR", "/workspace/cassettes-r17"))
+DEFAULT_CASSETTES = Path(
+    os.environ.get("REPO_WIKI_CASSETTE_MATRIX_DIR", "/workspace/cassettes-r17")
+)
 DEFAULT_PROBE_SRC = Path(os.environ.get("REPO_WIKI_PROBE_SRC", "/workspace/probe_exporter-eval"))
 DEFAULT_FASTAPI_SRC = Path(
     os.environ.get("REPO_WIKI_FASTAPI_SRC", "/workspace/fastapi-realworld-example-app")
@@ -40,7 +42,9 @@ REPOS = ("probe", "fastapi")
 _FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 _INLINE_RE = re.compile(r"`([^`\n]+)`")
 _CITE_RE = re.compile(r"<cite>.*?</cite>", re.I)
-_GAP_RE = re.compile(r"[\u4e00-\u9fff，、（]\s{2,}[\u4e00-\u9fff（，。、]|[为用非是名在] [，。）]|选择 （")
+_GAP_RE = re.compile(
+    r"[\u4e00-\u9fff，、（]\s{2,}[\u4e00-\u9fff（，。、]|[为用非是名在] [，。）]|选择 （"
+)
 
 
 def _cli() -> list[str]:
@@ -224,7 +228,11 @@ def _parse_verify(stdout_path: Path, run_dir: Path) -> dict[str, object]:
         except json.JSONDecodeError:
             data = {}
     if not data:
-        text = stdout_path.read_text(encoding="utf-8", errors="ignore") if stdout_path.is_file() else ""
+        text = (
+            stdout_path.read_text(encoding="utf-8", errors="ignore")
+            if stdout_path.is_file()
+            else ""
+        )
         match = re.search(r"\{[\s\S]*\}\s*$", text)
         if match:
             try:
@@ -332,7 +340,9 @@ def _eval_one(
         log=out_dir / f"{which}-cite-strict.stdout",
     )
     if cite_json.exists() is False:
-        text = (out_dir / f"{which}-cite-strict.stdout").read_text(encoding="utf-8", errors="ignore")
+        text = (out_dir / f"{which}-cite-strict.stdout").read_text(
+            encoding="utf-8", errors="ignore"
+        )
         match = re.search(r"\{.*\}\s*$", text, re.S)
         if match:
             cite_json.write_text(match.group(0) + "\n", encoding="utf-8")
@@ -345,7 +355,9 @@ def _eval_one(
     if match:
         try:
             cite_data = json.loads(match.group(0))
-            cite_json.write_text(json.dumps(cite_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            cite_json.write_text(
+                json.dumps(cite_data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except json.JSONDecodeError:
             cite_data = {}
     verify_log = out_dir / f"{which}-verify.stdout"
@@ -429,7 +441,11 @@ def run_one(
             log=gen_log,
         )
         if code != 0:
-            return {"which": which, "generate_exit": code, "error": f"generate failed, see {gen_log}"}
+            return {
+                "which": which,
+                "generate_exit": code,
+                "error": f"generate failed, see {gen_log}",
+            }
     result = _eval_one(
         which=which,
         source=source,

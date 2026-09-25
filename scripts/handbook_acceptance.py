@@ -9,14 +9,28 @@ Optional flags run external tools: --render (npx @mermaid-js/mermaid-cli + chrom
 --build (compile every `go build` command found in the handbook into a temp dir).
 Everything not automated is listed under "todo_manual" instead of being reported as passing.
 """
-import argparse, collections, hashlib, json, os, re, shutil, subprocess, sys, tempfile
+
+import argparse
+import collections
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 HTTP_METHODS = ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "ANY")
 CITE_RE = re.compile(r"<cite>\s*([^<:\s][^<:]*?):(\d+)(?:-(\d+))?\s*</cite>")
 FENCE_RE = re.compile(r"```mermaid\s*\n(.*?)```", re.S)
-PAGE_ID_SUFFIX_RE = re.compile(r"[ \t]*\[[a-z0-9]+(?:-[a-z0-9]+)+\]|[ \t]+\[[a-z0-9]+\][ \t]*$", re.M)
-ROUTE_IN_TEXT_RE = re.compile(r"\b(GET|POST|PUT|DELETE|PATCH|ANY|HEAD|OPTIONS)\s+`?(/[^\s（(，,`<|]*)")
+PAGE_ID_SUFFIX_RE = re.compile(
+    r"[ \t]*\[[a-z0-9]+(?:-[a-z0-9]+)+\]|[ \t]+\[[a-z0-9]+\][ \t]*$", re.M
+)
+ROUTE_IN_TEXT_RE = re.compile(
+    r"\b(GET|POST|PUT|DELETE|PATCH|ANY|HEAD|OPTIONS)\s+`?(/[^\s（(，,`<|]*)"
+)
 
 
 # ----------------------------------------------------------------------------- loading
@@ -33,7 +47,10 @@ def resolve_content(h: Path) -> tuple[Path, Path | None]:
 
 
 def load_pages(content: Path) -> dict[str, str]:
-    return {str(p.relative_to(content)): p.read_text(encoding="utf-8", errors="ignore") for p in sorted(content.rglob("*.md"))}
+    return {
+        str(p.relative_to(content)): p.read_text(encoding="utf-8", errors="ignore")
+        for p in sorted(content.rglob("*.md"))
+    }
 
 
 def strip_fences(t: str) -> str:
@@ -48,7 +65,9 @@ def src_lines(src: Path, rel: str) -> list[str] | None:
 
 
 # ----------------------------------------------------------------------------- text damage
-GAP_RE = re.compile(r"[\u4e00-\u9fff，、（]\s{2,}[\u4e00-\u9fff（，。、]|[为用非是名在] [，。）]|选择 （")
+GAP_RE = re.compile(
+    r"[\u4e00-\u9fff，、（]\s{2,}[\u4e00-\u9fff（，。、]|[为用非是名在] [，。）]|选择 （"
+)
 
 
 def check_text_gaps(pages):
@@ -59,9 +78,13 @@ def check_text_gaps(pages):
                 hits += 1
                 per_page[rel] += 1
                 if len(ex) < 15:
-                    ex.append({"page": rel, "context": line[max(0, m.start() - 30): m.end() + 20]})
-    return {"hits": hits, "pages": len(per_page), "examples": ex,
-            "note": "dangling gaps: double spaces between CJK or a particle before punctuation, left by removed backtick tokens"}
+                    ex.append({"page": rel, "context": line[max(0, m.start() - 30) : m.end() + 20]})
+    return {
+        "hits": hits,
+        "pages": len(per_page),
+        "examples": ex,
+        "note": "dangling gaps: double spaces between CJK or a particle before punctuation, left by removed backtick tokens",
+    }
 
 
 # ----------------------------------------------------------------------------- mermaid
@@ -117,7 +140,9 @@ def check_mermaid(pages, blocks, render=False):
     copies = [{"hash": k, "pages": sorted(v)} for k, v in norm_groups.items() if len(v) > 1]
     # also count identical blocks on the SAME page listed twice
     per_page_dupe = collections.Counter((b["page"], b["norm_hash"]) for b in blocks)
-    same_page_dupes = [{"page": p, "hash": hsh, "count": c} for (p, hsh), c in per_page_dupe.items() if c > 1]
+    same_page_dupes = [
+        {"page": p, "hash": hsh, "count": c} for (p, hsh), c in per_page_dupe.items() if c > 1
+    ]
     # near duplicates: distinct normalized blocks sharing >=80% of body lines (same kind)
     uniq = {}
     for b in blocks:
@@ -134,24 +159,42 @@ def check_mermaid(pages, blocks, render=False):
                 continue
             jac = len(a & c) / len(a | c)
             if jac >= 0.8:
-                near.append({"a": items[i]["norm_hash"], "a_pages": sorted(norm_groups[items[i]["norm_hash"]]),
-                             "b": items[j]["norm_hash"], "b_pages": sorted(norm_groups[items[j]["norm_hash"]]),
-                             "jaccard": round(jac, 2)})
+                near.append(
+                    {
+                        "a": items[i]["norm_hash"],
+                        "a_pages": sorted(norm_groups[items[i]["norm_hash"]]),
+                        "b": items[j]["norm_hash"],
+                        "b_pages": sorted(norm_groups[items[j]["norm_hash"]]),
+                        "jaccard": round(jac, 2),
+                    }
+                )
     # suffix-only distinct: raw distinct that collapse after normalization
     collapsed = len(raw_groups) - len(norm_groups)
     near_clusters = _clusters(len(norm_groups), near)
     res = {
-        "blocks": len(blocks), "pages_with_mermaid": len({b["page"] for b in blocks}), "total_pages": total_pages,
-        "distinct_raw": len(raw_groups), "distinct_normalized": len(norm_groups),
+        "blocks": len(blocks),
+        "pages_with_mermaid": len({b["page"] for b in blocks}),
+        "total_pages": total_pages,
+        "distinct_raw": len(raw_groups),
+        "distinct_normalized": len(norm_groups),
         "distinct_after_near_dup_merge": near_clusters,
         "coverage_raw_pct": round(100 * len(raw_groups) / total_pages, 1) if total_pages else 0,
         "coverage_honest_pct": round(100 * len(norm_groups) / total_pages, 1) if total_pages else 0,
         "coverage_strict_pct": round(100 * near_clusters / total_pages, 1) if total_pages else 0,
-        "collapsed_by_normalization": collapsed, "kinds": dict(kinds),
-        "copies_across_pages": copies, "same_page_duplicates": same_page_dupes, "near_duplicates": near,
-        "raw_cite_in_mermaid": {"blocks": len(cite_in), "tags": sum(x["cite_tags"] for x in cite_in), "items": cite_in[:20]},
-        "empty_messages": empty_msgs[:20], "empty_message_count": len(empty_msgs),
-        "edgeless_flowcharts": edgeless, "empty_er_entities": empty_entities,
+        "collapsed_by_normalization": collapsed,
+        "kinds": dict(kinds),
+        "copies_across_pages": copies,
+        "same_page_duplicates": same_page_dupes,
+        "near_duplicates": near,
+        "raw_cite_in_mermaid": {
+            "blocks": len(cite_in),
+            "tags": sum(x["cite_tags"] for x in cite_in),
+            "items": cite_in[:20],
+        },
+        "empty_messages": empty_msgs[:20],
+        "empty_message_count": len(empty_msgs),
+        "edgeless_flowcharts": edgeless,
+        "empty_er_entities": empty_entities,
         "normalization": "strip <cite>, trailing [page-id] tags, Note lines, whitespace",
     }
     if render:
@@ -168,6 +211,7 @@ def _clusters(n_nodes, near):
             parent[x] = parent[parent[x]]
             x = parent[x]
         return x
+
     for e in near:
         parent[f(e["a"])] = f(e["b"])
     merged = len({f(x) for e in near for x in (e["a"], e["b"])})
@@ -177,7 +221,9 @@ def _clusters(n_nodes, near):
 
 def render_mermaid(blocks):
     npx = shutil.which("npx")
-    chrome = os.environ.get("ACCEPT_CHROME") or shutil.which("google-chrome") or shutil.which("chromium")
+    chrome = (
+        os.environ.get("ACCEPT_CHROME") or shutil.which("google-chrome") or shutil.which("chromium")
+    )
     if not npx or not chrome:
         return {"status": "skipped", "reason": "npx or chrome not found"}
     tmp = Path(tempfile.mkdtemp(prefix="accept-mmd-"))
@@ -187,9 +233,23 @@ def render_mermaid(blocks):
         seen.setdefault(b["raw_hash"], b)
     for hsh, b in seen.items():
         (tmp / f"{hsh}.mmd").write_text(b["raw"])
-        r = subprocess.run([npx, "-y", "@mermaid-js/mermaid-cli@11", "-p", str(tmp / "pp.json"), "-i", str(tmp / f"{hsh}.mmd"),
-                            "-o", str(tmp / f"{hsh}.svg")], capture_output=True, text=True, timeout=180,
-                           env={**os.environ, "PUPPETEER_SKIP_DOWNLOAD": "1"})
+        r = subprocess.run(
+            [
+                npx,
+                "-y",
+                "@mermaid-js/mermaid-cli@11",
+                "-p",
+                str(tmp / "pp.json"),
+                "-i",
+                str(tmp / f"{hsh}.mmd"),
+                "-o",
+                str(tmp / f"{hsh}.svg"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env={**os.environ, "PUPPETEER_SKIP_DOWNLOAD": "1"},
+        )
         if r.returncode:
             fails.append({"hash": hsh, "page": b["page"], "err": r.stderr[-300:]})
     return {"status": "ran", "distinct_rendered": len(seen), "failures": fails, "svg_dir": str(tmp)}
@@ -202,7 +262,11 @@ SKIP_DIRS = ("/.git/", "/vendor/", "/node_modules/", "/.repo-agent-eval/", "/api
 def go_files(src):
     for p in src.rglob("*.go"):
         s = "/" + str(p.relative_to(src)) + "/"
-        if p.name.endswith("_test.go") or any(d in s for d in SKIP_DIRS) or p.name.endswith(".pb.go"):
+        if (
+            p.name.endswith("_test.go")
+            or any(d in s for d in SKIP_DIRS)
+            or p.name.endswith(".pb.go")
+        ):
             continue
         yield p
 
@@ -228,7 +292,10 @@ def go_auth_from_body(body, rel):
 
 def build_go_routes(src, meta):
     routes = []
-    all_src = {str(p.relative_to(src)): p.read_text(encoding="utf-8", errors="ignore").splitlines() for p in go_files(src)}
+    all_src = {
+        str(p.relative_to(src)): p.read_text(encoding="utf-8", errors="ignore").splitlines()
+        for p in go_files(src)
+    }
     func_index = {}
     for rel, L in all_src.items():
         for i, l in enumerate(L):
@@ -244,7 +311,7 @@ def build_go_routes(src, meta):
         m = re.search(r"func apiAuthExempt\(.*?\n}\n", txt, re.S)
         if m:
             body = m.group(0)
-            for c in re.findall(r'case\s+([^:]+):', body):
+            for c in re.findall(r"case\s+([^:]+):", body):
                 exempt.update(re.findall(r'"([^"]+)"', c))
             exempt_prefix = re.findall(r'HasPrefix\(path,\s*"([^"]+)"\)', body)
 
@@ -255,12 +322,13 @@ def build_go_routes(src, meta):
             return []
         return [api_hdr, "Bearer"]
 
-    def enclosing_func(L, i):
+    def enclosing_func(lines, i):
         for j in range(i, -1, -1):
-            m = re.match(r"func\s+(?:\([^)]*\)\s*)?(\w+)\s*\(", L[j])
+            m = re.match(r"func\s+(?:\([^)]*\)\s*)?(\w+)\s*\(", lines[j])
             if m:
                 return m.group(1)
         return ""
+
     for rel, L in all_src.items():
         is_ccagent = "/" not in rel or rel.startswith("internal/services/")
         for i, l in enumerate(L):
@@ -278,20 +346,40 @@ def build_go_routes(src, meta):
                 mm = re.search(r"Method\s*!=\s*http\.Method(\w+)", own)
                 method = mm.group(1).upper() if mm else "ANY"
                 auth = go_auth_from_body(own, rel)
-                routes.append({"method": method, "path": path, "file": rel, "line": i + 1, "handler": named if named and named != "func" else enclosing_func(L, i),
-                               "component": enclosing_func(L, i), "auth": auth, "auth_optional": "apiKey != \"\"" in own or "if s.apiKey" in own,
-                               "source": "source:net/http"})
+                routes.append(
+                    {
+                        "method": method,
+                        "path": path,
+                        "file": rel,
+                        "line": i + 1,
+                        "handler": named if named and named != "func" else enclosing_func(L, i),
+                        "component": enclosing_func(L, i),
+                        "auth": auth,
+                        "auth_optional": 'apiKey != ""' in own or "if s.apiKey" in own,
+                        "source": "source:net/http",
+                    }
+                )
             m = re.search(r'\b(\w+)\.(GET|POST|PUT|DELETE|PATCH|Any)\(\s*"([^"]*)"', l)
             if m and "gin" in "\n".join(L[:40]):
                 method = "ANY" if m.group(2) == "Any" else m.group(2)
                 path = m.group(3)
-                routes.append({"method": method, "path": path, "file": rel, "line": i + 1, "handler": enclosing_func(L, i),
-                               "component": enclosing_func(L, i), "auth": ccagent_auth(path) if is_ccagent else [],
-                               "source": "source:gin"})
+                routes.append(
+                    {
+                        "method": method,
+                        "path": path,
+                        "file": rel,
+                        "line": i + 1,
+                        "handler": enclosing_func(L, i),
+                        "component": enclosing_func(L, i),
+                        "auth": ccagent_auth(path) if is_ccagent else [],
+                        "source": "source:gin",
+                    }
+                )
     # reflection-registered services: only the generator inventory knows the expansion today
     inv_used = 0
     if meta and (meta / "source-inventory.json").is_file():
-        inv = json.load(open(meta / "source-inventory.json")).get("api_surfaces", [])
+        with open(meta / "source-inventory.json") as inv_fh:
+            inv = json.load(inv_fh).get("api_surfaces", [])
         have = {(r["path"], r["file"]) for r in routes}
         for s in inv:
             f, path = s.get("evidence_path"), s.get("path") or s.get("route")
@@ -299,11 +387,24 @@ def build_go_routes(src, meta):
                 continue
             inv_used += 1
             is_cc = "/" not in f or f.startswith("internal/services/")
-            routes.append({"method": (s.get("method") or "ANY").upper(), "path": path, "file": f, "line": s.get("line"),
-                           "handler": s.get("handler") or "", "component": s.get("handler") or "",
-                           "auth": ccagent_auth(path) if is_cc else [], "source": "generator_inventory:" + str(s.get("kind"))})
-    return routes, {"api_token_header": api_hdr, "exempt": sorted(exempt), "exempt_prefix": exempt_prefix,
-                    "routes_from_generator_inventory": inv_used}
+            routes.append(
+                {
+                    "method": (s.get("method") or "ANY").upper(),
+                    "path": path,
+                    "file": f,
+                    "line": s.get("line"),
+                    "handler": s.get("handler") or "",
+                    "component": s.get("handler") or "",
+                    "auth": ccagent_auth(path) if is_cc else [],
+                    "source": "generator_inventory:" + str(s.get("kind")),
+                }
+            )
+    return routes, {
+        "api_token_header": api_hdr,
+        "exempt": sorted(exempt),
+        "exempt_prefix": exempt_prefix,
+        "routes_from_generator_inventory": inv_used,
+    }
 
 
 def build_fastapi_routes(src):
@@ -340,6 +441,7 @@ def build_fastapi_routes(src):
                     scan_api(sub, pre)
                     continue
             prefixes[str(p.relative_to(src))] = pre
+
     # dependency functions that transitively require / optionally use the authorizer
     dep_req, dep_opt = set(), set()
     for f in sorted((src / "app").rglob("*.py")) if (src / "app").is_dir() else []:
@@ -379,17 +481,34 @@ def build_fastapi_routes(src):
                 k += 1
             sigt = "\n".join(sig)
             deps = set(re.findall(r"Depends\(\s*(?:\w+\.)*(\w+)", chunk + "\n" + sigt))
-            if "get_current_user_authorizer(" in sigt and not re.search(r"get_current_user_authorizer\(\s*required\s*=\s*False\s*\)", sigt):
+            if (
+                "get_current_user_authorizer(" in sigt
+                and not re.search(
+                    r"get_current_user_authorizer\(\s*required\s*=\s*False\s*\)", sigt
+                )
+            ) or deps & dep_req:
                 auth, opt = ["Authorization"], False
-            elif deps & dep_req:
-                auth, opt = ["Authorization"], False
-            elif re.search(r"get_current_user_authorizer\(\s*required\s*=\s*False\s*\)", sigt) or deps & dep_opt:
+            elif (
+                re.search(r"get_current_user_authorizer\(\s*required\s*=\s*False\s*\)", sigt)
+                or deps & dep_opt
+            ):
                 auth, opt = ["Authorization"], True
             else:
                 auth, opt = [], False
-            routes.append({"method": m.group(1).upper(), "path": (pre + sub) or "/", "file": rel, "line": dec + 1,
-                           "def_line": j + 1, "handler": dm.group(1) if dm else "", "component": dm.group(1) if dm else "",
-                           "auth": auth, "auth_optional": opt, "source": "source:fastapi"})
+            routes.append(
+                {
+                    "method": m.group(1).upper(),
+                    "path": (pre + sub) or "/",
+                    "file": rel,
+                    "line": dec + 1,
+                    "def_line": j + 1,
+                    "handler": dm.group(1) if dm else "",
+                    "component": dm.group(1) if dm else "",
+                    "auth": auth,
+                    "auth_optional": opt,
+                    "source": "source:fastapi",
+                }
+            )
             i = j + 1
     return routes, {"api_prefix": api_prefix, "router_files": prefixes}
 
@@ -416,8 +535,26 @@ def cite_matches_route(repo, r, f, a, b):
 
 
 # ----------------------------------------------------------------------------- sequence diagrams
-AUTH_TOKENS = ("X-Probe-Api-Token", "X-Agent-Token", "X-API-Key", "Authorization", "Token", "Bearer")
-GENERIC_NODES = {"Client", "Route", "Handler", "APIAuth", "AuthenticationDep", "Browser", "User", "Frontend", "Server", "server"}
+AUTH_TOKENS = (
+    "X-Probe-Api-Token",
+    "X-Agent-Token",
+    "X-API-Key",
+    "Authorization",
+    "Token",
+    "Bearer",
+)
+GENERIC_NODES = {
+    "Client",
+    "Route",
+    "Handler",
+    "APIAuth",
+    "AuthenticationDep",
+    "Browser",
+    "User",
+    "Frontend",
+    "Server",
+    "server",
+}
 
 
 def parse_seq(raw):
@@ -438,7 +575,14 @@ def node_matches(node, r, repo):
     if repo == "go":
         tokens = {Path(f).stem, Path(f).parent.name, Path(f).parent.as_posix().replace("/", ".")}
         if f.startswith("internal/services/") or "/" not in f:
-            tokens |= {"controller", "r.get", "r.post", "ccagent", "internal.services", "controller.go"}
+            tokens |= {
+                "controller",
+                "r.get",
+                "r.post",
+                "ccagent",
+                "internal.services",
+                "controller.go",
+            }
         if "custom-probe" in f:
             tokens |= {"custom.probe", "server", "probehandler", "healthhandler"}
         if "ccprobe-control" in f:
@@ -447,15 +591,31 @@ def node_matches(node, r, repo):
             tokens |= {"internal.agent", "newhttphandler"}
         cands |= {t.lower() for t in tokens}
     variants = {n, node.lower()}
-    return any(c and any(v == c or v.endswith("." + c) or c.endswith("." + v) for v in variants) for c in cands)
+    return any(
+        c and any(v == c or v.endswith("." + c) or c.endswith("." + v) for v in variants)
+        for c in cands
+    )
 
 
 def check_sequences(blocks, routes, repo, src_ident):
     idx = route_index(routes)
     src_ident_norm = {re.sub(r"[-_.]", "", x).lower() for x in src_ident}
-    src_ident_lower = {t.lower() for x in src_ident for t in re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+", x)}
-    out = {"route_messages": 0, "unknown_routes": [], "method_mismatch": [], "auth_wrong": [], "auth_omitted": 0,
-           "node_mismatch": [], "diagram_cite_checked": 0, "diagram_cite_wrong": [], "unknown_participants": []}
+    src_ident_lower = {
+        t.lower()
+        for x in src_ident
+        for t in re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+", x)
+    }
+    out = {
+        "route_messages": 0,
+        "unknown_routes": [],
+        "method_mismatch": [],
+        "auth_wrong": [],
+        "auth_omitted": 0,
+        "node_mismatch": [],
+        "diagram_cite_checked": 0,
+        "diagram_cite_wrong": [],
+        "unknown_participants": [],
+    }
     for b in blocks:
         if b.get("kind") != "sequenceDiagram":
             continue
@@ -465,8 +625,17 @@ def check_sequences(blocks, routes, repo, src_ident):
             if p in GENERIC_NODES:
                 continue
             norm = re.sub(r"[-_.]", "", p).lower()
-            camel = [t.lower() for t in re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+", p) if len(t) > 2]
-            known = norm in src_ident_norm or p in src_ident or pl in src_ident or (camel and all(t in src_ident_lower for t in camel))
+            camel = [
+                t.lower()
+                for t in re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+", p)
+                if len(t) > 2
+            ]
+            known = (
+                norm in src_ident_norm
+                or p in src_ident
+                or pl in src_ident
+                or (camel and all(t in src_ident_lower for t in camel))
+            )
             if not known:
                 out["unknown_participants"].append({"page": b["page"], "participant": p})
         for k, (a, c, text) in enumerate(msgs):
@@ -482,7 +651,9 @@ def check_sequences(blocks, routes, repo, src_ident):
                 continue
             mc = [r for r in cands if r["method"] in (meth, "ANY")]
             if not mc:
-                out["method_mismatch"].append({**item, "claimed": meth, "source": sorted({r["method"] for r in cands})})
+                out["method_mismatch"].append(
+                    {**item, "claimed": meth, "source": sorted({r["method"] for r in cands})}
+                )
             # claimed auth hop: previous message from Client to the sender carries a header token
             claimed = None
             if k > 0:
@@ -501,25 +672,49 @@ def check_sequences(blocks, routes, repo, src_ident):
                 f, x, y = cm.group(1), int(cm.group(2)), int(cm.group(3) or cm.group(2))
                 cited = [r for r in (mc or cands) if cite_matches_route(repo, r, f, x, y)[0]]
                 if not cited:
-                    exp = [f'{r["file"]}:{r["line"]}' + (f'-{r["def_line"]}' if r.get("def_line") else "") for r in (mc or cands)]
-                    out["diagram_cite_wrong"].append({**item, "cited": f"{f}:{x}", "expected_one_of": exp})
+                    exp = [
+                        f"{r['file']}:{r['line']}"
+                        + (f"-{r['def_line']}" if r.get("def_line") else "")
+                        for r in (mc or cands)
+                    ]
+                    out["diagram_cite_wrong"].append(
+                        {**item, "cited": f"{f}:{x}", "expected_one_of": exp}
+                    )
             pool = cited or mc or cands
             if node not in GENERIC_NODES and not any(node_matches(node, r, repo) for r in pool):
-                out["node_mismatch"].append({**item, "node": node, "owners": sorted({r["file"] for r in pool})})
+                out["node_mismatch"].append(
+                    {**item, "node": node, "owners": sorted({r["file"] for r in pool})}
+                )
             exp_auth = [r for r in pool]
             if claimed:
                 ok = False
                 for r in exp_auth:
                     if not r["auth"]:
                         continue
-                    if any(h.lower() in claimed.lower() for h in r["auth"]) or (repo == "fastapi" and "authorization" in claimed.lower()):
+                    if any(h.lower() in claimed.lower() for h in r["auth"]) or (
+                        repo == "fastapi" and "authorization" in claimed.lower()
+                    ):
                         ok = True
                 if not ok:
-                    out["auth_wrong"].append({**item, "claimed_header": claimed,
-                                              "source_auth": [{"file": r["file"], "auth": r["auth"] or "none"} for r in exp_auth]})
+                    out["auth_wrong"].append(
+                        {
+                            **item,
+                            "claimed_header": claimed,
+                            "source_auth": [
+                                {"file": r["file"], "auth": r["auth"] or "none"} for r in exp_auth
+                            ],
+                        }
+                    )
             elif any(r["auth"] and not r.get("auth_optional") for r in exp_auth) and c == "Route":
                 out["auth_omitted"] += 1
-    for k in ("unknown_routes", "method_mismatch", "auth_wrong", "node_mismatch", "diagram_cite_wrong", "unknown_participants"):
+    for k in (
+        "unknown_routes",
+        "method_mismatch",
+        "auth_wrong",
+        "node_mismatch",
+        "diagram_cite_wrong",
+        "unknown_participants",
+    ):
         out[k + "_count"] = len(out[k])
         out[k] = out[k][:25]
     return out
@@ -552,7 +747,11 @@ def is_header_only_cite(rel, end, src):
         return not re.search(r"CREATE\s+TABLE", window, re.I)
     if L is None:
         return False
-    if re.search(r"^(type\s+\w+\s+struct|func\s+main\b|func\s+\w+|def\s+\w+|class\s+\w+|podman-|docker-|poetry |alembic |uvicorn )", window, re.M):
+    if re.search(
+        r"^(type\s+\w+\s+struct|func\s+main\b|func\s+\w+|def\s+\w+|class\s+\w+|podman-|docker-|poetry |alembic |uvicorn )",
+        window,
+        re.M,
+    ):
         return False
     return not re.search(r"\S", window)
 
@@ -574,7 +773,12 @@ def check_citations(pages, src, routes, repo):
                 cite_only += 1
             if re.search(r"）\s*。", line) and "handler" in line:
                 empty_handler.append({"page": rel, "line": s[:160]})
-            if rel.startswith("API") and ROUTE_IN_TEXT_RE.search(line) and "<cite>" not in line and not s.startswith("|---"):
+            if (
+                rel.startswith("API")
+                and ROUTE_IN_TEXT_RE.search(line)
+                and "<cite>" not in line
+                and not s.startswith("|---")
+            ):
                 api_lines_without_cite.append({"page": rel, "line": s[:160]})
         for m in CITE_RE.finditer(body):
             f, a, b = m.group(1), int(m.group(2)), int(m.group(3) or m.group(2))
@@ -583,10 +787,15 @@ def check_citations(pages, src, routes, repo):
                 missing_file.append({"page": rel, "cite": m.group(0)})
             elif a < 1 or b > len(L):
                 out_of_range.append({"page": rel, "cite": m.group(0)})
-        for m in re.finditer(r"\b(GET|POST|PUT|DELETE|PATCH|ANY|HEAD|OPTIONS)\s+`?(/[^\s（(，,`<|]*)`?[^\n<]{0,80}?<cite>([^<:]+):(\d+)(?:-(\d+))?</cite>", body):
+        for m in re.finditer(
+            r"\b(GET|POST|PUT|DELETE|PATCH|ANY|HEAD|OPTIONS)\s+`?(/[^\s（(，,`<|]*)`?[^\n<]{0,80}?<cite>([^<:]+):(\d+)(?:-(\d+))?</cite>",
+            body,
+        ):
             meth, path = m.group(1), norm_path(m.group(2))
             f, a, b = m.group(3), int(m.group(4)), int(m.group(5) or m.group(4))
-            cands = [r for r in idx.get(path, []) if r["method"] in (meth, "ANY")] or idx.get(path, [])
+            cands = [r for r in idx.get(path, []) if r["method"] in (meth, "ANY")] or idx.get(
+                path, []
+            )
             route_total += 1
             if not cands:
                 route_unknown += 1
@@ -597,23 +806,45 @@ def check_citations(pages, src, routes, repo):
             if any(x[0] for x in res):
                 route_exact += 1
             elif len(route_bad) < 25:
-                route_bad.append({"page": rel, "route": f"{meth} {path}", "cited": f"{f}:{a}-{b}",
-                                  "expected_one_of": [f'{r["file"]}:{r["line"]}' for r in cands]})
+                route_bad.append(
+                    {
+                        "page": rel,
+                        "route": f"{meth} {path}",
+                        "cited": f"{f}:{a}-{b}",
+                        "expected_one_of": [f"{r['file']}:{r['line']}" for r in cands],
+                    }
+                )
             if any(x[1] for x in res):
                 route_in_range += 1
     known = route_total - route_unknown
     return {
-        "header_cites": {"count": len(header), "pages": len({h["page"] for h in header}), "items": header[:20]},
+        "header_cites": {
+            "count": len(header),
+            "pages": len({h["page"] for h in header}),
+            "items": header[:20],
+        },
         "citation_only_lines": cite_only,
         "cite_missing_file": {"count": len(missing_file), "items": missing_file[:10]},
         "cite_out_of_range": {"count": len(out_of_range), "items": out_of_range[:10]},
-        "route_cites": {"total": route_total, "known_route": known, "unknown_route": route_unknown, "file_match": route_file,
-                        "exact": route_exact, "range_covers": route_in_range,
-                        "exact_pct": round(100 * route_exact / known, 1) if known else None, "bad_examples": route_bad},
-        "missing_route_cites": {"empty_handler_cite": len(empty_handler), "examples": empty_handler[:10],
-                                "api_route_lines_without_cite": len(api_lines_without_cite)},
-        "definitions": {"exact": "go: cite start == registration line; fastapi: start within decorator..def",
-                        "empty_handler_cite": "line mentions handler and ends with '）。' without a cite (legacy signal)"},
+        "route_cites": {
+            "total": route_total,
+            "known_route": known,
+            "unknown_route": route_unknown,
+            "file_match": route_file,
+            "exact": route_exact,
+            "range_covers": route_in_range,
+            "exact_pct": round(100 * route_exact / known, 1) if known else None,
+            "bad_examples": route_bad,
+        },
+        "missing_route_cites": {
+            "empty_handler_cite": len(empty_handler),
+            "examples": empty_handler[:10],
+            "api_route_lines_without_cite": len(api_lines_without_cite),
+        },
+        "definitions": {
+            "exact": "go: cite start == registration line; fastapi: start within decorator..def",
+            "empty_handler_cite": "line mentions handler and ends with '）。' without a cite (legacy signal)",
+        },
     }
 
 
@@ -659,9 +890,13 @@ def parse_compose(path):
 
 
 def check_compose(blocks, src):
-    files = sorted([p for p in src.iterdir() if p.is_file() and re.search(r"compose.*\.ya?ml$", p.name)])
+    files = sorted(
+        [p for p in src.iterdir() if p.is_file() and re.search(r"compose.*\.ya?ml$", p.name)]
+    )
     comp = {p.name: parse_compose(p) for p in files}
-    all_services = {s for c in comp.values() for s in c} | {c["container_name"] for cf in comp.values() for c in cf.values() if c["container_name"]}
+    all_services = {s for c in comp.values() for s in c} | {
+        c["container_name"] for cf in comp.values() for c in cf.values() if c["container_name"]
+    }
     diagrams = []
     for b in blocks:
         if b.get("kind") not in ("flowchart", "graph"):
@@ -677,22 +912,46 @@ def check_compose(blocks, src):
             a, c = names[x], names[y]
             real_in = []
             for fn, svc in comp.items():
-                if a in svc and c in svc[a]["depends_on"]:
-                    real_in.append(fn)
-                elif a.startswith(".env") and c in svc and any(Path(e).name == a for e in svc[c]["env_file"]):
+                if (a in svc and c in svc[a]["depends_on"]) or (
+                    a.startswith(".env")
+                    and c in svc
+                    and any(Path(e).name == a for e in svc[c]["env_file"])
+                ):
                     real_in.append(fn)
             res.append({"edge": f"{a} -> {c}", "declared_in": real_in})
         invented = [r["edge"] for r in res if not r["declared_in"]]
         full = [fn for fn in comp if all(fn in r["declared_in"] for r in res)] if res else []
-        diagrams.append({"page": b["page"], "hash": b["raw_hash"], "edges": res, "invented": invented,
-                         "all_edges_in_one_file": full})
-    return {"compose_files": list(comp), "diagrams": diagrams,
-            "invented_edges": sum(len(d["invented"]) for d in diagrams)}
+        diagrams.append(
+            {
+                "page": b["page"],
+                "hash": b["raw_hash"],
+                "edges": res,
+                "invented": invented,
+                "all_edges_in_one_file": full,
+            }
+        )
+    return {
+        "compose_files": list(comp),
+        "diagrams": diagrams,
+        "invented_edges": sum(len(d["invented"]) for d in diagrams),
+    }
 
 
 # ----------------------------------------------------------------------------- ER
-PY_TYPE = {"integer": "int", "biginteger": "int", "smallinteger": "int", "text": "string", "string": "string", "unicode": "string",
-           "varchar": "string", "boolean": "bool", "datetime": "datetime", "timestamp": "datetime", "float": "float", "numeric": "float"}
+PY_TYPE = {
+    "integer": "int",
+    "biginteger": "int",
+    "smallinteger": "int",
+    "text": "string",
+    "string": "string",
+    "unicode": "string",
+    "varchar": "string",
+    "boolean": "bool",
+    "datetime": "datetime",
+    "timestamp": "datetime",
+    "float": "float",
+    "numeric": "float",
+}
 
 
 def balanced_calls(txt, opener):
@@ -701,7 +960,7 @@ def balanced_calls(txt, opener):
         while i < len(txt) and depth:
             depth += {"(": 1, ")": -1}.get(txt[i], 0)
             i += 1
-        yield txt[m.end(): i - 1]
+        yield txt[m.end() : i - 1]
 
 
 def split_top_level(args):
@@ -745,10 +1004,15 @@ def schema_from_alembic(src):
                 cm = re.match(r'sa\.Column\(\s*"(\w+)"\s*,\s*sa\.(\w+)', part)
                 if not cm:
                     continue
-                cols[cm.group(1)] = {"type": PY_TYPE.get(cm.group(2).lower(), cm.group(2).lower()), "pk": "primary_key=True" in part}
+                cols[cm.group(1)] = {
+                    "type": PY_TYPE.get(cm.group(2).lower(), cm.group(2).lower()),
+                    "pk": "primary_key=True" in part,
+                }
                 fk = re.search(r'sa\.ForeignKey\(\s*"(\w+)\.(\w+)"', part)
                 if fk:
-                    fks.append({"column": cm.group(1), "ref_table": fk.group(1), "ref_column": fk.group(2)})
+                    fks.append(
+                        {"column": cm.group(1), "ref_table": fk.group(1), "ref_column": fk.group(2)}
+                    )
             tables[name] = {"columns": cols, "fks": fks, "file": str(mig.relative_to(src))}
         for args in balanced_calls(txt, "op.create_primary_key("):
             parts = split_top_level(args)
@@ -760,17 +1024,36 @@ def schema_from_alembic(src):
     return tables
 
 
-SQL_TYPE = [("int", "int"), ("bigint", "int"), ("tinyint", "int"), ("smallint", "int"), ("varchar", "string"), ("char", "string"),
-            ("text", "string"), ("json", "json"), ("enum", "string"), ("datetime", "datetime"), ("timestamp", "datetime"),
-            ("date", "datetime"), ("decimal", "float"), ("double", "float"), ("float", "float"), ("bool", "bool"), ("blob", "bytes"),
-            ("varbinary", "bytes"), ("binary", "bytes")]
+SQL_TYPE = [
+    ("int", "int"),
+    ("bigint", "int"),
+    ("tinyint", "int"),
+    ("smallint", "int"),
+    ("varchar", "string"),
+    ("char", "string"),
+    ("text", "string"),
+    ("json", "json"),
+    ("enum", "string"),
+    ("datetime", "datetime"),
+    ("timestamp", "datetime"),
+    ("date", "datetime"),
+    ("decimal", "float"),
+    ("double", "float"),
+    ("float", "float"),
+    ("bool", "bool"),
+    ("blob", "bytes"),
+    ("varbinary", "bytes"),
+    ("binary", "bytes"),
+]
 
 
 def schema_from_sql(src):
     tables = {}
     for sql in [src / "db/schema.sql"] if (src / "db/schema.sql").is_file() else []:
         txt = sql.read_text(errors="ignore")
-        for m in re.finditer(r"CREATE TABLE(?: IF NOT EXISTS)?\s+`?(\w+)`?\s*\((.*?)\n\)\s*[^;]*;", txt, re.S | re.I):
+        for m in re.finditer(
+            r"CREATE TABLE(?: IF NOT EXISTS)?\s+`?(\w+)`?\s*\((.*?)\n\)\s*[^;]*;", txt, re.S | re.I
+        ):
             name, body = m.group(1), m.group(2)
             cols, fks, pks = {}, [], set()
             for line in body.splitlines():
@@ -779,9 +1062,19 @@ def schema_from_sql(src):
                 if re.match(r"PRIMARY KEY", s, re.I):
                     pks.update(re.findall(r"`?(\w+)`?", s.split("(", 1)[1]))
                 elif re.search(r"FOREIGN KEY", s, re.I):
-                    fm = re.search(r"FOREIGN KEY\s*\(`?(\w+)`?\)\s*REFERENCES\s*`?(\w+)`?\s*\(`?(\w+)`?\)", s, re.I)
+                    fm = re.search(
+                        r"FOREIGN KEY\s*\(`?(\w+)`?\)\s*REFERENCES\s*`?(\w+)`?\s*\(`?(\w+)`?\)",
+                        s,
+                        re.I,
+                    )
                     if fm:
-                        fks.append({"column": fm.group(1), "ref_table": fm.group(2), "ref_column": fm.group(3)})
+                        fks.append(
+                            {
+                                "column": fm.group(1),
+                                "ref_table": fm.group(2),
+                                "ref_column": fm.group(3),
+                            }
+                        )
                 elif cm and not re.match(r"(KEY|UNIQUE|INDEX|CONSTRAINT|CHECK)\b", s, re.I):
                     ty = cm.group(2).lower()
                     t = next((v for k, v in SQL_TYPE if ty.startswith(k)), ty)
@@ -796,7 +1089,9 @@ def schema_from_sql(src):
 def go_model_structs(src, sql_tables):
     """entity name -> {columns: fieldname->{pk}, fks} using internal/models structs, TableName() and schema.sql FKs."""
     out = {}
-    for p in sorted((src / "internal/models").glob("*.go")) if (src / "internal/models").is_dir() else []:
+    for p in (
+        sorted((src / "internal/models").glob("*.go")) if (src / "internal/models").is_dir() else []
+    ):
         if p.name.endswith("_test.go"):
             continue
         L = p.read_text(errors="ignore").splitlines()
@@ -812,16 +1107,30 @@ def go_model_structs(src, sql_tables):
                 fm = re.match(r"\s*(\w+)\s+([\w.*\[\]]+)(.*)", L[j])
                 if fm and not L[j].strip().startswith("//"):
                     tag = fm.group(3)
-                    cols[fm.group(1)] = {"pk": "primaryKey" in tag or "primary_key" in tag, "type_go": fm.group(2)}
-            tn = re.search(r"func \(\w*\s*\*?%s\) TableName\(\) string \{\s*return \"(\w+)\"" % name, txt, re.S)
+                    cols[fm.group(1)] = {
+                        "pk": "primaryKey" in tag or "primary_key" in tag,
+                        "type_go": fm.group(2),
+                    }
+            tn = re.search(
+                rf"func \(\w*\s*\*?{re.escape(name)}\) TableName\(\) string {{\s*return \"(\w+)\"",
+                txt,
+                re.S,
+            )
             table = tn.group(1) if tn else None
-            out[name] = {"columns": cols, "table": table, "fks": [], "file": str(p.relative_to(src))}
+            out[name] = {
+                "columns": cols,
+                "table": table,
+                "fks": [],
+                "file": str(p.relative_to(src)),
+            }
     by_table = {v["table"]: k for k, v in out.items() if v["table"]}
     for tname, t in sql_tables.items():
         for fk in t["fks"]:
             a, c = by_table.get(fk["ref_table"]), by_table.get(tname)
             if a and c:
-                out[c]["fks"].append({"column": fk["column"], "ref_table": a, "ref_column": fk["ref_column"]})
+                out[c]["fks"].append(
+                    {"column": fk["column"], "ref_table": a, "ref_column": fk["ref_column"]}
+                )
     return out
 
 
@@ -836,9 +1145,17 @@ def check_er(blocks, tables, strict_types=True):
             for fl in m.group(2).strip().splitlines():
                 parts = fl.split()
                 if len(parts) >= 2:
-                    fields.append({"type": parts[0].lower(), "name": parts[1], "keys": [p for p in parts[2:] if p in ("PK", "FK", "UK")]})
+                    fields.append(
+                        {
+                            "type": parts[0].lower(),
+                            "name": parts[1],
+                            "keys": [p for p in parts[2:] if p in ("PK", "FK", "UK")],
+                        }
+                    )
             ents[m.group(1)] = fields
-        rels = re.findall(r"^\s*(\w+)\s*[|}o]{1,2}--[|{o]{1,2}\s*(\w+)\s*:\s*\"?([\w ]+?)\"?\s*$", b["raw"], re.M)
+        rels = re.findall(
+            r"^\s*(\w+)\s*[|}o]{1,2}--[|{o]{1,2}\s*(\w+)\s*:\s*\"?([\w ]+?)\"?\s*$", b["raw"], re.M
+        )
         issues = []
         for en, fields in ents.items():
             t = tables.get(en)
@@ -854,15 +1171,26 @@ def check_er(blocks, tables, strict_types=True):
                     continue
                 col_pk = col["pk"] or (f["name"] == "ID" and "type_go" in col)
                 if ("PK" in f["keys"]) != col_pk:
-                    issues.append(f"{en}.{f['name']} PK flag {'PK' in f['keys']} vs schema {col['pk']}")
-                if strict_types and col["type"] in ("int", "string", "datetime", "bool", "float") and f["type"] in ("int", "string", "datetime", "bool", "float") and f["type"] != col["type"]:
+                    issues.append(
+                        f"{en}.{f['name']} PK flag {'PK' in f['keys']} vs schema {col['pk']}"
+                    )
+                if (
+                    strict_types
+                    and col["type"] in ("int", "string", "datetime", "bool", "float")
+                    and f["type"] in ("int", "string", "datetime", "bool", "float")
+                    and f["type"] != col["type"]
+                ):
                     issues.append(f"{en}.{f['name']} type {f['type']} vs schema {col['type']}")
             if fields:
-                pk_cols = {c for c, v in t["columns"].items() if v["pk"] or (c == "ID" and "type_go" in v)}
+                pk_cols = {
+                    c for c, v in t["columns"].items() if v["pk"] or (c == "ID" and "type_go" in v)
+                }
                 shown_pk = {f["name"] for f in fields if "PK" in f["keys"]}
                 if pk_cols - shown_pk:
                     issues.append(f"{en} missing PK columns {sorted(pk_cols - shown_pk)}")
-        real_fk = {(fk["ref_table"], tn, fk["column"]) for tn, t in tables.items() for fk in t["fks"]}
+        real_fk = {
+            (fk["ref_table"], tn, fk["column"]) for tn, t in tables.items() for fk in t["fks"]
+        }
         rel_real, rel_bad = 0, []
         for a, c, lab in rels:
             lab = lab.strip()
@@ -872,16 +1200,44 @@ def check_er(blocks, tables, strict_types=True):
                 rel_bad.append(f"{a} -> {c} : {lab}")
         shown = set(ents) | {x for r in rels for x in r[:2]}
         expected = {x for x in real_fk if x[0] in shown and x[1] in shown}
-        missing = sorted(f"{x[0]} -> {x[1]} : {x[2]}" for x in expected if not any({r[0], r[1]} == {x[0], x[1]} for r in rels))
-        out.append({"page": b["page"], "hash": b["raw_hash"], "entities": len(ents), "relationships": len(rels),
-                    "relationships_real": rel_real, "relationships_invented": rel_bad, "fks_missing_among_shown": missing,
-                    "issues": issues})
-    return {"schema_tables": len(tables), "diagrams": out, "issue_count": sum(len(d["issues"]) + len(d["relationships_invented"]) for d in out)}
+        missing = sorted(
+            f"{x[0]} -> {x[1]} : {x[2]}"
+            for x in expected
+            if not any({r[0], r[1]} == {x[0], x[1]} for r in rels)
+        )
+        out.append(
+            {
+                "page": b["page"],
+                "hash": b["raw_hash"],
+                "entities": len(ents),
+                "relationships": len(rels),
+                "relationships_real": rel_real,
+                "relationships_invented": rel_bad,
+                "fks_missing_among_shown": missing,
+                "issues": issues,
+            }
+        )
+    return {
+        "schema_tables": len(tables),
+        "diagrams": out,
+        "issue_count": sum(len(d["issues"]) + len(d["relationships_invented"]) for d in out),
+    }
 
 
 # ----------------------------------------------------------------------------- structs
-CORE_GO_STRUCTS = ("ProbeEndpoint", "ProbeResult", "ProbeTag", "ProbeSecret", "ProbeBlackboxModule", "BizTreeNode",
-                   "BizInstanceEndpoint", "ProbePolicy", "ProbeRoutingBinding", "AgentRegistry", "AgentOpsSample")
+CORE_GO_STRUCTS = (
+    "ProbeEndpoint",
+    "ProbeResult",
+    "ProbeTag",
+    "ProbeSecret",
+    "ProbeBlackboxModule",
+    "BizTreeNode",
+    "BizInstanceEndpoint",
+    "ProbePolicy",
+    "ProbeRoutingBinding",
+    "AgentRegistry",
+    "AgentOpsSample",
+)
 
 
 def check_structs(pages, src):
@@ -911,11 +1267,18 @@ def check_structs(pages, src):
                 exact += 1
             else:
                 off.append({"struct": sm.group(1), "cite": f"{f}:{a}-{b}", "real_end": end})
-    runon = [rel for rel, t in pages.items() for line in t.splitlines() if line.count("<cite>") >= 8]
-    return {"struct_cites": len(seen), "exact": exact, "models_struct_cites": models_total[0], "models_exact": models_exact[0],
-            "off": off[:20],
-            "core_present_exact": {n: names.get(n) for n in CORE_GO_STRUCTS},
-            "runon_cite_lines_pages": sorted(set(runon))}
+    runon = [
+        rel for rel, t in pages.items() for line in t.splitlines() if line.count("<cite>") >= 8
+    ]
+    return {
+        "struct_cites": len(seen),
+        "exact": exact,
+        "models_struct_cites": models_total[0],
+        "models_exact": models_exact[0],
+        "off": off[:20],
+        "core_present_exact": {n: names.get(n) for n in CORE_GO_STRUCTS},
+        "runon_cite_lines_pages": sorted(set(runon)),
+    }
 
 
 # ----------------------------------------------------------------------------- go package edges
@@ -925,14 +1288,22 @@ def check_go_edges(blocks, src, enable):
     if not shutil.which("go"):
         return {"status": "skipped", "reason": "go not found"}
     mod = re.search(r"^module\s+(\S+)", (src / "go.mod").read_text(), re.M).group(1)
-    r = subprocess.run(["go", "list", "-f", "{{.ImportPath}} {{join .Imports \" \"}}", "./..."], cwd=src, capture_output=True, text=True, timeout=300)
+    r = subprocess.run(
+        ["go", "list", "-f", '{{.ImportPath}} {{join .Imports " "}}', "./..."],
+        cwd=src,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
     if r.returncode:
         return {"status": "error", "stderr": r.stderr[-400:]}
     imports = {}
     for line in r.stdout.splitlines():
         parts = line.split()
         if parts:
-            imports[parts[0].replace(mod + "/", "").replace(mod, ".")] = {p.replace(mod + "/", "") for p in parts[1:] if p.startswith(mod)}
+            imports[parts[0].replace(mod + "/", "").replace(mod, ".")] = {
+                p.replace(mod + "/", "") for p in parts[1:] if p.startswith(mod)
+            }
     total, bad = 0, []
     for b in blocks:
         if b.get("kind") not in ("flowchart", "graph"):
@@ -948,7 +1319,9 @@ def check_go_edges(blocks, src, enable):
 
 
 def check_go_builds(pages, src, enable):
-    cmds = sorted({m.group(0).strip() for t in pages.values() for m in re.finditer(r"go build[^\n`<]*", t)})
+    cmds = sorted(
+        {m.group(0).strip() for t in pages.values() for m in re.finditer(r"go build[^\n`<]*", t)}
+    )
     if not enable:
         return {"status": "skipped", "commands_found": cmds}
     tmp = Path(tempfile.mkdtemp(prefix="accept-gobuild-"))
@@ -967,10 +1340,22 @@ def check_go_builds(pages, src, enable):
         else:
             parts[2:2] = ["-o", str(tmp / "out")]
         if parts[-1] in ("build", "bin/...") or parts[-1].endswith("..."):
-            res.append({"cmd": seg if seg == c else f"{seg}  (from: {c})", "ok": False, "err": "incomplete command"})
+            res.append(
+                {
+                    "cmd": seg if seg == c else f"{seg}  (from: {c})",
+                    "ok": False,
+                    "err": "incomplete command",
+                }
+            )
             continue
         r = subprocess.run(parts, cwd=src, capture_output=True, text=True, timeout=300)
-        res.append({"cmd": seg if seg == c else f"{seg}  (from: {c})", "ok": r.returncode == 0, "err": r.stderr[-200:] if r.returncode else ""})
+        res.append(
+            {
+                "cmd": seg if seg == c else f"{seg}  (from: {c})",
+                "ok": r.returncode == 0,
+                "err": r.stderr[-200:] if r.returncode else "",
+            }
+        )
     return {"status": "ran", "results": res, "failed": [x for x in res if not x["ok"]]}
 
 
@@ -980,7 +1365,12 @@ def check_frontend(blocks, src, routes):
     for d in ("web/src", "static"):
         for p in (src / d).rglob("*") if (src / d).is_dir() else []:
             if p.suffix in (".js", ".ts", ".tsx", ".vue", ".html"):
-                fetched.update(re.findall(r"['\"`](/(?:api|probe|tag|hello|reflect|metrics)[^'\"`?\s]*)", p.read_text(errors="ignore")))
+                fetched.update(
+                    re.findall(
+                        r"['\"`](/(?:api|probe|tag|hello|reflect|metrics)[^'\"`?\s]*)",
+                        p.read_text(errors="ignore"),
+                    )
+                )
     fetched = {re.sub(r"\$\{[^}]*\}", ":param", f).rstrip("/") for f in fetched}
     if not fetched:
         return {"status": "n/a"}
@@ -994,14 +1384,23 @@ def check_frontend(blocks, src, routes):
             pat = re.sub(r":\w+", ":param", path)
             if pat not in fetched:
                 bad.append({"page": b["page"], "route": f"{m.group(1)} {path}"})
-    return {"status": "ran", "frontend_fetch_paths": len(fetched), "diagram_routes_checked": checked, "not_fetched_by_frontend": bad}
+    return {
+        "status": "ran",
+        "frontend_fetch_paths": len(fetched),
+        "diagram_routes_checked": checked,
+        "not_fetched_by_frontend": bad,
+    }
 
 
 # ----------------------------------------------------------------------------- misc reader hygiene
 def check_misc(pages, src):
     res = {}
     res["unresolved_markers"] = sum(t.count("UNRESOLVED") for t in pages.values())
-    res["truncated_commands"] = [{"page": r, "text": m.group(0)} for r, t in pages.items() for m in re.finditer(r"bin/[\w-]*\.\.\.|bin/probe-…", t)]
+    res["truncated_commands"] = [
+        {"page": r, "text": m.group(0)}
+        for r, t in pages.items()
+        for m in re.finditer(r"bin/[\w-]*\.\.\.|bin/probe-…", t)
+    ]
     bad_toc = []
     for r, t in pages.items():
         L = t.splitlines()
@@ -1023,16 +1422,21 @@ def check_misc(pages, src):
             if len(k) >= 80 and "```" not in k:
                 paras[k].add(r)
     res["repeated_paragraphs_4plus_pages"] = sum(1 for v in paras.values() if len(v) >= 4)
-    res["source_dir_name_leaks"] = sum(t.count(src.name) for t in pages.values()) if src.name.endswith("-eval") else 0
+    res["source_dir_name_leaks"] = (
+        sum(t.count(src.name) for t in pages.values()) if src.name.endswith("-eval") else 0
+    )
     return res
 
 
 def check_security_go(pages, src):
     sec = {r: t for r, t in pages.items() if r.startswith("安全")}
     txt = "\n".join(sec.values())
-    return {"pages": len(sec), "mentions_PROBE_API_TOKEN": "PROBE_API_TOKEN" in txt,
-            "aksk_claims": len(re.findall(r"AK/SK|AccessKey", txt)),
-            "token_const_cite": re.findall(r"apiauth\.go:\d+(?:-\d+)?", txt)[:4]}
+    return {
+        "pages": len(sec),
+        "mentions_PROBE_API_TOKEN": "PROBE_API_TOKEN" in txt,
+        "aksk_claims": len(re.findall(r"AK/SK|AccessKey", txt)),
+        "token_const_cite": re.findall(r"apiauth\.go:\d+(?:-\d+)?", txt)[:4],
+    }
 
 
 # ----------------------------------------------------------------------------- main
@@ -1068,7 +1472,18 @@ def main():
         routes, rmeta = build_go_routes(src, meta)
     else:
         routes, rmeta = build_fastapi_routes(src)
-    report["route_table"] = {"routes": len(routes), "by_source": dict(collections.Counter(r["source"].split(":")[0] + ":" + r["source"].split(":")[1] if ":" in r["source"] else r["source"] for r in routes)), **rmeta}
+    report["route_table"] = {
+        "routes": len(routes),
+        "by_source": dict(
+            collections.Counter(
+                r["source"].split(":")[0] + ":" + r["source"].split(":")[1]
+                if ":" in r["source"]
+                else r["source"]
+                for r in routes
+            )
+        ),
+        **rmeta,
+    }
     ident = source_identifiers(src, a.repo)
     report["request_flow"] = check_sequences(blocks, routes, a.repo, ident)
     report["citations"] = check_citations(pages, src, routes, a.repo)
@@ -1076,8 +1491,12 @@ def main():
     if a.repo == "fastapi":
         report["er"] = check_er(blocks, schema_from_alembic(src), strict_types=True)
     else:
-        report["er"] = check_er(blocks, go_model_structs(src, schema_from_sql(src)), strict_types=False)
-        report["er"]["schema_source"] = "internal/models structs (fields, gorm primaryKey) + schema.sql FKs mapped via TableName()"
+        report["er"] = check_er(
+            blocks, go_model_structs(src, schema_from_sql(src)), strict_types=False
+        )
+        report["er"]["schema_source"] = (
+            "internal/models structs (fields, gorm primaryKey) + schema.sql FKs mapped via TableName()"
+        )
     if a.repo == "go":
         report["structs"] = check_structs(pages, src)
         report["go_package_edges"] = check_go_edges(blocks, src, a.golist)
@@ -1091,22 +1510,36 @@ def main():
     m, rf, c = report["mermaid"], report["request_flow"], report["citations"]
     report["summary"] = {
         "text_gaps": report["text_gaps"]["hits"],
-        "mermaid_distinct_normalized": m["distinct_normalized"], "coverage_honest_pct": m["coverage_honest_pct"],
+        "mermaid_distinct_normalized": m["distinct_normalized"],
+        "coverage_honest_pct": m["coverage_honest_pct"],
         "coverage_strict_pct": m["coverage_strict_pct"],
-        "copied_diagrams": len(m["copies_across_pages"]), "near_duplicate_pairs": len(m["near_duplicates"]),
-        "raw_cite_in_mermaid_tags": m["raw_cite_in_mermaid"]["tags"], "empty_messages": m["empty_message_count"],
-        "method_mismatch": rf["method_mismatch_count"], "auth_wrong": rf["auth_wrong_count"], "node_mismatch": rf["node_mismatch_count"],
-        "diagram_cite_wrong": f'{rf["diagram_cite_wrong_count"]}/{rf["diagram_cite_checked"]}',
+        "copied_diagrams": len(m["copies_across_pages"]),
+        "near_duplicate_pairs": len(m["near_duplicates"]),
+        "raw_cite_in_mermaid_tags": m["raw_cite_in_mermaid"]["tags"],
+        "empty_messages": m["empty_message_count"],
+        "method_mismatch": rf["method_mismatch_count"],
+        "auth_wrong": rf["auth_wrong_count"],
+        "node_mismatch": rf["node_mismatch_count"],
+        "diagram_cite_wrong": f"{rf['diagram_cite_wrong_count']}/{rf['diagram_cite_checked']}",
         "unknown_participants": rf["unknown_participants_count"],
-        "header_cites": c["header_cites"]["count"], "citation_only_lines": c["citation_only_lines"],
-        "route_exact_pct": c["route_cites"]["exact_pct"], "route_exact": f'{c["route_cites"]["exact"]}/{c["route_cites"]["known_route"]}',
+        "header_cites": c["header_cites"]["count"],
+        "citation_only_lines": c["citation_only_lines"],
+        "route_exact_pct": c["route_cites"]["exact_pct"],
+        "route_exact": f"{c['route_cites']['exact']}/{c['route_cites']['known_route']}",
         "empty_handler_cite": c["missing_route_cites"]["empty_handler_cite"],
-        "compose_invented_edges": report["compose"]["invented_edges"], "er_issues": report["er"]["issue_count"],
+        "compose_invented_edges": report["compose"]["invented_edges"],
+        "er_issues": report["er"]["issue_count"],
     }
     if a.repo == "go":
-        report["summary"]["struct_cites_exact"] = f'{report["structs"]["exact"]}/{report["structs"]["struct_cites"]}'
-        report["summary"]["models_struct_cites_exact"] = f'{report["structs"]["models_exact"]}/{report["structs"]["models_struct_cites"]}'
-        report["summary"]["frontend_routes_not_fetched"] = len(report["frontend_flow"].get("not_fetched_by_frontend", []))
+        report["summary"]["struct_cites_exact"] = (
+            f"{report['structs']['exact']}/{report['structs']['struct_cites']}"
+        )
+        report["summary"]["models_struct_cites_exact"] = (
+            f"{report['structs']['models_exact']}/{report['structs']['models_struct_cites']}"
+        )
+        report["summary"]["frontend_routes_not_fetched"] = len(
+            report["frontend_flow"].get("not_fetched_by_frontend", [])
+        )
     js = json.dumps(report, ensure_ascii=False, indent=1, default=list)
     if a.out:
         Path(a.out).write_text(js)
