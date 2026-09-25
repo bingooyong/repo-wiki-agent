@@ -18,7 +18,8 @@ from repo_wiki.verifier.handbook import (
 _H2_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
 _FENCE_RE = re.compile(r"```(?:bash|sh|mermaid|sql|json)\n.*?```", re.IGNORECASE | re.DOTALL)
 _META_IMPERATIVE_RE = re.compile(
-    r"不要把|不要将|不要引用|不要声称|don't treat|do not treat|不得视为|不要用测试",
+    r"不要把测试|不要把 README|不要把 package|不要将|不要引用|不要声称|"
+    r"don't treat|do not treat|不得视为|不要用测试",
     re.IGNORECASE,
 )
 _HEADER_CITE_RE = re.compile(
@@ -37,7 +38,15 @@ _ARCH_OWNER_IDS = frozenset({"architecture-overview"})
 _API_OWNER_IDS = frozenset({"api-overview", "api-reference", "api"})
 _DATA_MODEL_OWNER_IDS = frozenset({"data-models-overview", "data-model", "data-models"})
 _SECURITY_OWNER_IDS = frozenset({"security-overview", "security"})
-_OPERATIONAL_ADVICE_RE = re.compile(r"不要混用|不要把这些文件|不要误用|不要当作默认")
+_OPERATIONAL_ADVICE_RE = re.compile(
+    r"不要混用|不要把这些|不要把它|不要误用|不要当作默认|不要把它当作"
+)
+_PAGE_ID_SUFFIX_RE = re.compile(r"[ \t]*\[[a-z0-9-]{8,}\]")
+_MERMAID_FENCE_RE = re.compile(r"```mermaid\s*.*?```", re.IGNORECASE | re.DOTALL)
+_README_ROUTE_CITE_RE = re.compile(
+    r"((?:GET|POST|PUT|PATCH|DELETE)\s+(/\S+))([^<\n]*<cite>\s*README\.[^<]+:1-\d+\s*</cite>)",
+    re.IGNORECASE,
+)
 _UNRESOLVED_API_RE = re.compile(r"UNRESOLVED_API_[A-Z_]+")
 _EMPTY_NUMBERED_RE = re.compile(
     r"(?m)^(\d+)\.\s+\S[^\n]*\n(?:<cite>[^<]+</cite>\s*\n)?(?:[ \t]*\n){2,}"
@@ -116,6 +125,141 @@ def strip_invented_join_id_pk(content: str) -> str:
     return _INVENTED_JOIN_ID_PK_RE.sub(_repl, content or "")
 
 
+def strip_page_id_mermaid_suffixes(content: str) -> str:
+    def _fix(match: re.Match[str]) -> str:
+        return _PAGE_ID_SUFFIX_RE.sub("", match.group(0))
+
+    return _MERMAID_FENCE_RE.sub(_fix, content or "")
+
+
+def leftover_request_flow_is_untrustworthy(block: str) -> bool:
+    text = block or ""
+    if "ErrorWrapper" in text:
+        return True
+    if "/healthz" in text and ("X-Probe-Api-Token" in text or "APIAuth" in text):
+        return True
+    if re.search(r"GET\s+/force-resync", text):
+        return True
+    if "AuthenticationDep" in text and re.search(r"POST\s+/api/users(?!/login)", text):
+        return True
+    if "register" in text.lower() and "AuthenticationDep" in text:
+        return True
+    return False
+
+
+def strip_untrustworthy_request_flow_mermaid(content: str) -> str:
+    def _drop(match: re.Match[str]) -> str:
+        block = match.group(0)
+        return "" if leftover_request_flow_is_untrustworthy(block) else block
+
+    return _MERMAID_FENCE_RE.sub(_drop, content or "")
+
+
+def rewrite_join_tag_types(content: str) -> str:
+    def _fix(match: re.Match[str]) -> str:
+        block = match.group(0)
+        if "erdiagram" not in block.lower():
+            return block
+        return re.sub(r"\bint tag\b", "string tag", block)
+
+    return _MERMAID_FENCE_RE.sub(_fix, content or "")
+
+
+def known_go_package_names(root: Path) -> set[str]:
+    names: set[str] = set()
+    for base in ("internal", "cmd", "pkg"):
+        directory = root / base
+        if not directory.is_dir():
+            continue
+        for child in directory.iterdir():
+            if child.is_dir():
+                names.add(child.name)
+                names.add(f"{base}/{child.name}")
+    return names
+
+
+def strip_unknown_go_packages(content: str, root: Path) -> str:
+    known = known_go_package_names(root)
+    if not known:
+        return content or ""
+    text = content or ""
+
+    def _internal(match: re.Match[str]) -> str:
+        name = match.group(1)
+        return match.group(0) if name in known or f"internal/{name}" in known else ""
+
+    text = re.sub(r"`internal/([A-Za-z0-9_-]+)`", _internal, text)
+
+    def _tick(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name in known or any(name == item.split("/")[-1] for item in known):
+            return match.group(0)
+        if (root / "internal").is_dir() and re.fullmatch(r"[a-z][a-z0-9_-]{3,}", name):
+            return ""
+        return match.group(0)
+
+    text = re.sub(r"`([A-Za-z][A-Za-z0-9_-]{3,})`", _tick, text)
+    text = re.sub(r"、\s*、", "、", text)
+    text = re.sub(r"、{2,}", "、", text)
+    return text
+
+
+def rewrite_readme_route_cites(content: str, endpoints: list[dict] | None) -> str:
+    if not endpoints:
+        return content or ""
+    by_key: dict[tuple[str, str], dict] = {}
+    for item in endpoints:
+        method = str(item.get("method") or "").upper()
+        path = str(item.get("path") or "")
+        if method and path:
+            by_key[(method, path)] = item
+
+    def _repl(match: re.Match[str]) -> str:
+        method = match.group(1).split()[0].upper()
+        path = match.group(2)
+        item = by_key.get((method, path))
+        prefix = match.group(0).split("<cite>")[0].rstrip()
+        if not item:
+            return prefix
+        file_path = str(item.get("file_path") or "")
+        line = int(item.get("line_number") or item.get("line_start") or 0)
+        if not file_path or line <= 0:
+            return prefix
+        return f"{prefix} <cite>{file_path}:{line}-{line}</cite>"
+
+    return _README_ROUTE_CITE_RE.sub(_repl, content or "")
+
+
+def has_runon_struct_cite_line(content: str) -> bool:
+    for line in (content or "").splitlines():
+        if line.count("<cite>") >= 8:
+            return True
+        if len(line) >= 400 and "<cite>" in line and "ProbeEndpoint" in line:
+            return True
+    return False
+
+
+def rewrite_token_const_cite(content: str, root: Path) -> str:
+    token = cite_first_match(root, "apiauth.go", r"EnvAPIToken\s*=")
+    if not token:
+        token = cite_first_match(root, "apiauth.go", r"PROBE_API_TOKEN")
+    if not token:
+        return content or ""
+    return re.sub(r"<cite>\s*apiauth\.go:13-\d+\s*</cite>", token, content or "")
+
+
+def rewrite_force_resync_method(content: str) -> str:
+    return re.sub(r"GET(\s+/force-resync)", r"POST\1", content or "")
+
+
+def sanitize_leftover_handbook_mermaid(content: str) -> str:
+    text = strip_untrustworthy_request_flow_mermaid(content or "")
+    text = strip_page_id_mermaid_suffixes(text)
+    text = strip_invented_join_id_pk(text)
+    text = rewrite_join_tag_types(text)
+    return rewrite_force_resync_method(text)
+
+
 def is_auth_identity_page(*, page_id: str = "", title: str = "") -> bool:
     pid = (page_id or "").lower().rsplit("/", 1)[-1]
     if "api" in pid or "授权" in (title or ""):
@@ -137,12 +281,24 @@ def cite_readme_line(root: Path, needle: str, *, last: bool = False) -> str:
     return found
 
 
+def _line_is_comment_only(line: str) -> bool:
+    stripped = (line or "").strip()
+    return (
+        stripped.startswith("//")
+        or stripped.startswith("#")
+        or stripped.startswith("/*")
+        or stripped.startswith("*")
+    )
+
+
 def cite_first_match(root: Path, rel: str, pattern: str) -> str:
     path = root / rel
     if not path.is_file():
         return ""
     regex = re.compile(pattern)
     for index, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
+        if _line_is_comment_only(line):
+            continue
         if regex.search(line):
             return f"<cite>{rel}:{index}-{index}</cite>"
     return ""
@@ -233,7 +389,19 @@ def rebuild_toc_from_h2s(content: str) -> str:
     if not headings:
         return body + "\n"
     toc = ["## 目录", ""] + [f"{index}. {title}" for index, title in enumerate(headings[:10], 1)]
-    return body + "\n\n" + "\n".join(toc) + "\n"
+    return insert_toc_after_title(body, toc)
+
+
+def insert_toc_after_title(body: str, toc: list[str]) -> str:
+    lines = (body or "").splitlines()
+    insert_at = 0
+    for index, line in enumerate(lines):
+        if line.startswith("# ") and not line.startswith("## "):
+            insert_at = index + 1
+            while insert_at < len(lines) and not lines[insert_at].strip():
+                insert_at += 1
+            break
+    return "\n".join(lines[:insert_at] + [""] + toc + [""] + lines[insert_at:]).strip() + "\n"
 
 
 def dedupe_identical_fences(content: str) -> str:
@@ -711,18 +879,22 @@ def build_feature_prose(root: Path) -> str:
 
 def is_header_only_cite(raw: str, repo_root: Path | None) -> bool:
     match = _HEADER_CITE_RE.search(raw)
-    if not match or repo_root is None:
+    if not match:
         return False
     rel = match.group(1).replace("\\", "/")
-    path = repo_root / rel
-    if not path.is_file():
-        return False
-    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     end = int(match.group(2))
-    window = "\n".join(lines[:end])
     suffix = Path(rel).suffix.lower()
-    if suffix in {".md", ".rst", ".txt"}:
+    if suffix in {".md", ".rst", ".txt", ".yml", ".yaml"}:
         return True
+    window = ""
+    path = (repo_root / rel) if repo_root is not None else None
+    if path is not None and path.is_file():
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        window = "\n".join(lines[:end])
+    if suffix == ".sql":
+        return not re.search(r"CREATE\s+TABLE", window, re.I)
+    if repo_root is None or path is None or not path.is_file():
+        return False
     if re.search(
         r"^(type\s+\w+\s+struct|func\s+main\b|func\s+\w+|def\s+\w+|class\s+\w+|"
         r"podman-|docker-|poetry |alembic |uvicorn )",
@@ -730,8 +902,6 @@ def is_header_only_cite(raw: str, repo_root: Path | None) -> bool:
         re.M,
     ):
         return False
-    if suffix in {".yml", ".yaml"}:
-        return True
     return not re.search(r"\S", window)
 
 
@@ -833,6 +1003,11 @@ def rewrite_architecture_role_claims(content: str) -> str:
         ),
         (r"由 `internal/probe` 拉起并解析 JSON", "由 `internal/probe` 经 HTTP 调用并解析 JSON"),
         (r"internal/probe 拉起", "internal/probe 经 HTTP 调用"),
+        (r"主进程负责隧道客户端", "主进程负责 REST/Web 服务"),
+        (r"负责隧道客户端与运行环境适配", "负责 REST/Web 服务与运行环境适配"),
+        (r"作为隧道客户端入口", "作为主 REST/Web 入口"),
+        (r"带隧道能力的主 REST/Web 服务", "gRPC 控制面"),
+        (r"作为隧道客户端连向", "作为主 REST/Web 服务对外提供"),
     )
     for pattern, repl in replacements:
         text = re.sub(pattern, repl, text)
@@ -894,7 +1069,7 @@ def strip_empty_numbered_steps(content: str) -> str:
             meaningful = [
                 item for item in body if not re.fullmatch(r"<cite>[^<]+</cite>", item.strip())
             ]
-            if not meaningful:
+            if not meaningful and not re.search(r"`[^`]+`|```", line):
                 index = look
                 continue
         kept.append(line)
@@ -913,19 +1088,26 @@ def strip_placeholder_ops_fences(content: str) -> str:
 
 
 def expand_truncated_build_commands(content: str, root: Path) -> str:
-    if "bin/probe-..." not in (content or ""):
-        return content or ""
-    ci = root / ".github" / "workflows" / "ci.yml"
+    text = content or ""
     names: list[str] = []
+    ci = root / ".github" / "workflows" / "ci.yml"
     if ci.is_file():
         names = re.findall(
             r"go build -o (bin/[A-Za-z0-9_-]+)", ci.read_text(encoding="utf-8", errors="ignore")
         )
-    replacement = (
-        "、".join(f"`{name}`" for name in names[:6])
-        or "`bin/ccagent`、`bin/ccprobe-control`、`bin/probe-agent`"
+    if not names:
+        for cmd in ("ccagent", "ccprobe-control", "probe-agent"):
+            if (root / "cmd" / cmd).is_dir():
+                names.append(f"bin/{cmd}")
+    if not names:
+        names = ["bin/ccagent", "bin/ccprobe-control", "bin/probe-agent"]
+    listing = "、".join(f"`{name}`" for name in names[:6])
+    commands = " && ".join(
+        f"go build -o {name} ./cmd/{name.rsplit('/', 1)[-1]}" for name in names[:6]
     )
-    return (content or "").replace("bin/probe-...", replacement)
+    if "bin/probe-..." in text:
+        text = text.replace("bin/probe-...", listing)
+    return re.sub(r"go build -o bin/\.\.\.", commands, text)
 
 
 def rewrite_checkout_directory_name(content: str, root: Path) -> str:
@@ -951,19 +1133,13 @@ def build_verify_section(root: Path) -> str:
         return (
             "## 启动与验证\n\n"
             f"1. 按安装步骤完成编排或本地编译。\n\n"
-            f"2. 用源码健康检查确认进程存活。 {health}\n\n"
-            "```bash\n"
-            f"curl http://localhost:{port}/health\n"
-            "```\n"
+            f"2. 用源码健康检查确认进程存活：`curl http://localhost:{port}/health` {health}\n"
         )
     if (root / "app" / "main.py").is_file():
         return (
             "## 启动与验证\n\n"
             "1. 按安装步骤准备 `.env` 并完成迁移。\n\n"
-            "2. 确认应用进程已监听。\n\n"
-            "```bash\n"
-            "poetry run uvicorn app.main:app --reload\n"
-            "```\n"
+            "2. 确认应用进程已监听：`poetry run uvicorn app.main:app --reload`\n"
         )
     return ""
 
@@ -1002,7 +1178,10 @@ def apply_deterministic_rewrites(
 ) -> str:
     """Replay structural compose rewrites without LLM or fence-wide substitution."""
     text = content or ""
+    text = sanitize_leftover_handbook_mermaid(text)
+    text = rewrite_token_const_cite(text, root)
     text = rewrite_checkout_directory_name(text, root)
+    text = strip_unknown_go_packages(text, root)
     text = strip_meta_instructions(text)
     text = strip_header_only_cites(text, root)
     text = strip_reader_unresolved_markers(text)

@@ -2376,6 +2376,11 @@ class RepoWikiService:
         content = markdown.strip() or f"# {page.title}\n"
         if not content.startswith("#"):
             content = f"# {page.title}\n\n{content}"
+        from repo_wiki.generator.deterministic_sections import (
+            sanitize_leftover_handbook_mermaid,
+        )
+
+        content = sanitize_leftover_handbook_mermaid(content)
         content = self._strip_reading_notes_boilerplate(content)
         content = self._strip_readme_english_note(content)
 
@@ -2441,11 +2446,22 @@ class RepoWikiService:
 
         from repo_wiki.generator.deterministic_sections import (
             rewrite_architecture_role_claims,
+            rewrite_readme_route_cites,
+            rewrite_token_const_cite,
             strip_dangling_colon_leads,
             strip_empty_sections_and_footnotes,
+            strip_unknown_go_packages,
         )
 
         content = rewrite_architecture_role_claims(content)
+        content = strip_unknown_go_packages(content, self.root)
+        content = rewrite_token_const_cite(content, self.root)
+        content = rewrite_readme_route_cites(
+            content,
+            list(getattr(composition_context, "endpoints", []) or [])
+            if composition_context is not None
+            else [],
+        )
         try:
             from repo_wiki.generator.compose_evidence import (
                 load_repo_import_edges,
@@ -2485,6 +2501,7 @@ class RepoWikiService:
 
         content = rewrite_checkout_directory_name(content, self.root)
         content = strip_meta_instructions(content)
+        content = self._reduce_hedging_when_cited(content)
         content = strip_header_only_cites(content, self.root)
         content = strip_reader_unresolved_markers(content)
         content = strip_placeholder_ops_fences(content)
@@ -2524,7 +2541,11 @@ class RepoWikiService:
 
         # CiteBlock.render() and leftover LLM markup can still carry
         # ``path:start-end (label)`` after composer normalize; strip before write.
-        return normalize_citation_markup(content, self.root).strip() + "\n"
+        from repo_wiki.generator.deterministic_sections import strip_header_only_cites
+
+        content = normalize_citation_markup(content, self.root)
+        content = strip_header_only_cites(content, self.root)
+        return content.strip() + "\n"
 
     def _cite_existing_path(self, rel: str, hint_lines: int = 8) -> str:  # noqa: ARG002
         from repo_wiki.generator.deterministic_sections import cite_existing_meaningful
@@ -2576,6 +2597,7 @@ class RepoWikiService:
         )
         from repo_wiki.planner.schema import WikiTaxonomyCategory
         from repo_wiki.verifier.handbook import (
+            architecture_core_packages,
             architecture_required_packages,
             has_architecture_core_citation,
         )
@@ -2603,10 +2625,16 @@ class RepoWikiService:
             for rel in architecture_required_packages(self.root)
             if rel.lower() not in content.lower()
         ]
-        extra = [cite_existing_meaningful(self.root, rel) for rel in missing]
-        extra = [item for item in extra if item]
+        cores = architecture_core_packages(self.root)
+        cited = " ".join(re.findall(r"<cite>\s*([^<]+?)\s*</cite>", content, flags=re.I)).lower()
+        extra_rels = [
+            rel for rel in list(dict.fromkeys([*missing, *cores])) if rel.lower() not in cited
+        ]
+        extra = [(rel, cite_existing_meaningful(self.root, rel)) for rel in extra_rels]
+        extra = [(rel, item) for rel, item in extra if item]
         if extra:
-            content = content.rstrip() + f"\n核心包见 {extra[0]}。\n"
+            bullets = "\n".join(f"- `{rel}` {cite}" for rel, cite in extra[:8])
+            content = content.rstrip() + f"\n\n## 核心包\n\n{bullets}\n"
         return content
 
     def _ensure_data_model_source_cites(self, page: Any, content: str) -> str:
@@ -2619,9 +2647,14 @@ class RepoWikiService:
         block = build_data_model_cite_block(self.root)
         if not block:
             return content
-        from repo_wiki.generator.deterministic_sections import replace_h2_section
+        from repo_wiki.generator.deterministic_sections import (
+            has_runon_struct_cite_line,
+            replace_h2_section,
+        )
 
-        if not has_data_model_source_citation(content, self.root):
+        if not has_data_model_source_citation(content, self.root) or has_runon_struct_cite_line(
+            content
+        ):
             content = replace_h2_section(
                 content, ("实体定义", "持久化表", "数据库与迁移策略"), block
             )
@@ -3046,7 +3079,9 @@ class RepoWikiService:
         toc_lines = ["## 目录", ""]
         for idx, heading in enumerate(h2_sections, 1):
             toc_lines.append(f"{idx}. {heading}")
-        return "\n".join([content, "", *toc_lines]).strip()
+        from repo_wiki.generator.deterministic_sections import insert_toc_after_title
+
+        return insert_toc_after_title(content, toc_lines).strip()
 
     def _strip_qoder_toc_section(self, content: str) -> str:
         kept: list[str] = []
@@ -3400,7 +3435,12 @@ class RepoWikiService:
                 out.append(line)
                 continue
             if stripped.startswith("-") or stripped.startswith("*"):
-                sentence = as_sentence(stripped.lstrip("-*").strip())
+                item = stripped.lstrip("-*").strip()
+                if re.match(r"[A-Z][A-Za-z0-9_]*\s+<cite>", item):
+                    flush()
+                    out.append(line)
+                    continue
+                sentence = as_sentence(item)
                 if sentence:
                     pending.append(sentence)
                 continue

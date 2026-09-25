@@ -17,7 +17,8 @@ _PLACEHOLDER_OPS_RE = re.compile(
 )
 _GENERIC_OPS_LABEL_RE = re.compile(r"\[(start|build|test|lint)\]", re.IGNORECASE)
 _ROLE_CCAGENT_TUNNEL_RE = re.compile(
-    r"ccagent[^。\n]{0,80}(?<!不)(?<!不作为)(?<!探针)隧道客户端",
+    r"ccagent(?:(?!probe-agent|探针|才是)[^。\n]){0,80}"
+    r"(?<!不)(?<!不作为)(?<!探针)(?<!才是)隧道客户端",
     re.IGNORECASE,
 )
 _ROLE_CCAGENT_REVERSE_RE = re.compile(

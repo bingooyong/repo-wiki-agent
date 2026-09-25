@@ -590,7 +590,10 @@ def normalize_mermaid_block(block: str) -> str:
         for line in (block or "").splitlines()
         if line.strip() and not line.strip().startswith("%%")
     ]
-    return "\n".join(lines).casefold()
+    text = "\n".join(lines).casefold()
+    # Page-id / label suffixes like [frontend-application-api] must not mint
+    # a distinct key — otherwise the 30% bar is gamed by template copies.
+    return re.sub(r"\s*\[[a-z0-9-]{8,}\]", "", text)
 
 
 def extract_mermaid_blocks(text: str) -> list[str]:
