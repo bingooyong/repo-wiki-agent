@@ -3147,7 +3147,11 @@ class RepoWikiService:
                 continue
             self._seen_mermaid_hashes.add(mermaid_key)
             rendered_blocks.append(f"```mermaid\n{rendered}\n```")
-        if not rendered_blocks and self._page_requires_hard_mermaid(page):
+        if (
+            not rendered_blocks
+            and self._page_requires_hard_mermaid(page)
+            and getattr(page, "category", None) == WikiTaxonomyCategory.API_REFERENCE
+        ):
             from repo_wiki.generator.mermaid_planner import MermaidPlanner
 
             fallback_planner = MermaidPlanner(str(self.root))

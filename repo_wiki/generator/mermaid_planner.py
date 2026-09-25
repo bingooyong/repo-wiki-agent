@@ -958,7 +958,7 @@ class MermaidPlanner:
             if compose:
                 diagrams.append(compose)
 
-        if not diagrams:
+        if not diagrams and page_type == "api":
             fallback = self._plan_request_flow_sequence(page_id, evidence_binding, context)
             if fallback:
                 diagrams.append(fallback)
