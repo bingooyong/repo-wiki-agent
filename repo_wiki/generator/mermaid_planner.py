@@ -1831,8 +1831,6 @@ class MermaidPlanner:
                 for item in (model.get("primary_keys") or [])
                 if mermaid_er_field(str(item))
             ]
-            if not attributes:
-                attributes = [{"name": "id", "type": "int"}]
             er_entities.append(
                 {
                     "entity": entity_name,
@@ -1883,8 +1881,6 @@ class MermaidPlanner:
                     continue
                 raw = raw_types[index] if index < len(raw_types) else "string"
                 dest_attrs.append({"name": name, "type": _join_key_scalar(name, raw)})
-            if not dest_attrs:
-                dest_attrs = [{"name": "id", "type": "int"}]
             er_entities.append(
                 {
                     "entity": dest,
@@ -2186,7 +2182,7 @@ class MermaidPlanner:
             er_entities.append(
                 {
                     "entity": entity_name,
-                    "attributes": attributes or [{"name": "id", "type": "int"}],
+                    "attributes": attributes,
                     "primary_key": mermaid_er_field(str(model.get("primary_key") or "")),
                     "primary_keys": extra_pks or [],
                 }
@@ -2545,8 +2541,6 @@ class MermaidPlanner:
                         continue
                     raw = raw_types[index] if index < len(raw_types) else "string"
                     dest_attrs.append({"name": name, "type": _join_key_scalar(name, raw)})
-                if not dest_attrs:
-                    dest_attrs = [{"name": "id", "type": "int"}]
                 er_entities.append(
                     {
                         "entity": dest,

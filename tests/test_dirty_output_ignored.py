@@ -18,7 +18,8 @@ from tests.handbook_pad import pad_handbook_markdown
 
 runner = CliRunner()
 
-_PASSING_PAGE = pad_handbook_markdown("""# {title}
+_PASSING_PAGE = pad_handbook_markdown(
+    """# {title}
 
 ## Table of Contents
 - [Intro](#intro)
@@ -41,9 +42,14 @@ graph LR
 ```
 
 Relationship entity ERD schema 关系 实体 数据库 表 字段.
+Item is persisted as items.
 
 <cite>src/app.py:12</cite>
-""")
+<cite>src/models/item.py:1-6</cite>
+<cite>db/schema.sql:1-2</cite>
+""",
+    minimum=1100,
+)
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -58,10 +64,36 @@ def _init_repo(repo: Path) -> None:
     (repo / "README.md").write_text("sample\n", encoding="utf-8")
     (repo / "src").mkdir()
     (repo / "src" / "app.py").write_text(
-        "\n".join(f"line {i}" for i in range(1, 41)), encoding="utf-8"
+        "from fastapi import FastAPI\n\n"
+        "app = FastAPI()\n\n"
+        '@app.get("/health")\n'
+        "def health() -> None:\n"
+        "    return None\n\n"
+        '@app.post("/users")\n'
+        "def create_user() -> None:\n"
+        "    return None\n\n"
+        '@app.put("/users/{id}")\n'
+        "def update_user() -> None:\n"
+        "    return None\n\n" + "\n".join(f"line {i}" for i in range(1, 21)),
+        encoding="utf-8",
     )
+    (repo / "src" / "models").mkdir()
+    (repo / "src" / "models" / "item.py").write_text(
+        'class Item:\n    __tablename__ = "items"\n    id = 1\n',
+        encoding="utf-8",
+    )
+    (repo / "db").mkdir()
+    (repo / "db" / "schema.sql").write_text("CREATE TABLE items (id int);\n", encoding="utf-8")
     (repo / "repo-wiki.yaml").write_text(f"project:\n  root: {repo}\n", encoding="utf-8")
-    _git(repo, "add", "README.md", "src/app.py", "repo-wiki.yaml")
+    _git(
+        repo,
+        "add",
+        "README.md",
+        "src/app.py",
+        "src/models/item.py",
+        "db/schema.sql",
+        "repo-wiki.yaml",
+    )
     _git(repo, "commit", "-m", "init")
 
 

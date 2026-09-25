@@ -1073,21 +1073,21 @@ def all_go_model_struct_cites(root: Path) -> list[tuple[str, str]]:
 def build_data_model_cite_block(root: Path) -> str:
     from repo_wiki.verifier.handbook import discover_model_classes
 
-    named = all_go_model_struct_cites(root)[:8]
+    named = all_go_model_struct_cites(root)
     models = load_alembic_migration_models(root)[:8]
     classes = [name for name, rel in discover_model_classes(root) if not rel.endswith(".sql")]
-    if not named and not models and not classes:
-        return ""
-    cites = " ".join(cite for _name, cite in named)
-    tables = "、".join(
+    names = list(
         dict.fromkeys(
             [
-                *[name for name, _cite in named],
+                *(n for n, _c in named),
                 *classes,
-                *[str(item.get("name") or "") for item in models if item.get("name")],
+                *(str(m.get("name") or "") for m in models if m.get("name")),
             ]
         )
     )
+    if not names:
+        return ""
+    cites = " ".join(c for _n, c in named[:8])
     up = ""
     for path in sorted(root.rglob("*.sql")):
         if any(part in {".git", "vendor", "node_modules"} for part in path.parts):
@@ -1096,14 +1096,22 @@ def build_data_model_cite_block(root: Path) -> str:
         if re.search(r"CREATE\s+TABLE", path.read_text(encoding="utf-8", errors="ignore"), re.I):
             up = cite_existing_meaningful(root, rel) or f"<cite>{rel}:1-1</cite>"
             break
-    if models:
+    if models and not up:
         rel = str(models[0].get("file_path") or "")
-        up = (
-            up
-            or cite_first_match(root, rel, r"op\.create_table\(")
-            or (f"<cite>{rel}:1-1</cite>" if rel and (root / rel).is_file() else "")
+        up = cite_first_match(root, rel, r"op\.create_table\(") or (
+            f"<cite>{rel}:1-1</cite>" if rel and (root / rel).is_file() else ""
         )
-    return f"## 实体定义\n\n真实表：{tables} {cites} {up}\n"
+    listed = "、".join(names)
+    rows = "\n".join(f"| {name} | 源码已声明成员 |" for name in names[:12])
+    return (
+        "## 实体定义\n\n"
+        f"核心实体包括 {listed}。"
+        "名字来自 models 包或带表声明的类，字段只引用源码已有成员，不发明列。"
+        "真实表仅收录 SQLModel table=True、SQLAlchemy __tablename__、"
+        "已被数据库使用的 GORM 结构体，以及 SQL 中的 CREATE TABLE。\n\n"
+        f"| 类型 | 定义 |\n| --- | --- |\n{rows}\n\n"
+        f"真实表：{'、'.join(classes or names)} {cites} {up}\n"
+    )
 
 
 def build_security_cite_block(root: Path) -> str:
