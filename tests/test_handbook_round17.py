@@ -248,6 +248,14 @@ def test_code_integrity_matches_raw_replies_by_any_path(tmp_path: Path) -> None:
     flat = [unit for units in offenders.values() for unit in units]
     assert "FastAPI()" not in flat
     assert "pool.close()" not in flat
+    (content / "部署.md").write_text(
+        "# 部署\n\n`docker-compose.ymlapp` 与 `，不会安装配置文件）` 不是代码。\n",
+        encoding="utf-8",
+    )
+    more = handbook_code_integrity_offenders(content, tmp_path)
+    flat = [unit for units in more.values() for unit in units]
+    assert "docker-compose.ymlapp" not in flat
+    assert "，不会安装配置文件）" not in flat
 
 
 def test_readme_header_range_cite_is_rewritten(tmp_path: Path) -> None:

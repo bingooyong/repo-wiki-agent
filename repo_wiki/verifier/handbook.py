@@ -1284,6 +1284,10 @@ def _code_unit_is_doc_ref(body: str) -> bool:
         return True
     if re.fullmatch(r"[\u4e00-\u9fff，。；：、\s]+", body):
         return True
+    if re.match(r"[\u4e00-\u9fff，。；：、）]", body):
+        return True
+    if re.search(r"\.(ya?ml|py|go|md|rst)[A-Za-z]", body):
+        return True
     if re.fullmatch(r"\d+", body):
         return True
     return len(body) < 3
