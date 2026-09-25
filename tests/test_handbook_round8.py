@@ -143,6 +143,25 @@ def test_25h_hygiene_catches_repeated_deterministic_blocks(tmp_path: Path) -> No
     assert offenders.get("repeated_paragraphs")
     fixture_hits = handbook_reader_hygiene_offenders(_FIXTURES / "probe-25h", None)
     assert fixture_hits.get("meta_instructions")
+    fixture_repeated = {Path(path).name for path in (fixture_hits.get("repeated_paragraphs") or [])}
+    assert "api.md" in fixture_repeated
+    assert "auth-api.md" in fixture_repeated
+
+
+def test_hygiene_flags_owner_block_copied_to_one_satellite(tmp_path: Path) -> None:
+    content = tmp_path / "content"
+    content.mkdir()
+    block = (
+        "按资源分组的接口：GET /api/articles 列出文章，"
+        "GET /api/articles/{slug} 读取单篇，这是产品路由目录中的真实接口说明，不得抄到卫星页。"
+    )
+    assert len(block) >= 80
+    (content / "api.md").write_text(f"# API参考\n\n{block}\n", encoding="utf-8")
+    (content / "auth-api.md").write_text(f"# 认证授权API\n\n{block}\n", encoding="utf-8")
+    (content / "install.md").write_text("# 安装指南\n\n独立安装说明，没有重复目录。\n", encoding="utf-8")
+    offenders = handbook_reader_hygiene_offenders(content, None)
+    names = {Path(path).name for path in (offenders.get("repeated_paragraphs") or [])}
+    assert names == {"api.md", "auth-api.md"}
 
 
 def test_25h_dry_verify_catches_invented_compose_and_placeholder() -> None:
