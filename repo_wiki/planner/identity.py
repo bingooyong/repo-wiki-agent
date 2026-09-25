@@ -147,7 +147,7 @@ def _is_product_sentence(text: str | None) -> bool:
     if _RST_FIELD_LIST_RE.match(stripped) or _RST_SUBSTITUTION_LINE_RE.fullmatch(stripped):
         return False
     if re.search(
-        r"more modern|other repositories|not actively maintained|can be found in"
+        r"more modern|other repositories|can be found in"
         r"|^(?:first,|then |run |set environment|create database|for example using)",
         stripped,
         flags=re.I,
