@@ -113,7 +113,10 @@ _PAGE_SCOPE_ALIASES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
         ("前端", "frontend", "web", "frontend-application"),
         ("web", "frontend", "static", "html"),
     ),
-    (("核心服务", "core", "service"), ("services", "repository", "exporter", "app/api", "app/services")),
+    (
+        ("核心服务", "core", "service"),
+        ("services", "repository", "exporter", "app/api", "app/services"),
+    ),
     (("python", "python-service"), ("app/services", "app/api", "/api/")),
     (("agent", "探针", "tunnel"), ("agent", "probe", "tunnel")),
     (("控制", "control", "grpc"), ("control", "grpc", "tunnel")),
@@ -218,9 +221,7 @@ def frontend_fetch_paths(root: Path | None) -> list[str]:
     return list(dict.fromkeys(found))
 
 
-def _honest_method_path(
-    endpoint: dict[str, Any], root: Path | None = None
-) -> tuple[str, str]:
+def _honest_method_path(endpoint: dict[str, Any], root: Path | None = None) -> tuple[str, str]:
     path = str(endpoint.get("path") or "").strip()
     method = str(endpoint.get("method") or "").upper()
     table = load_route_method_table(root)
@@ -915,7 +916,9 @@ class MermaidPlanner:
                 diagrams.append(diagram)
             if is_join_er_owner_page(page_id=pid, title="") or (
                 not is_data_model_owner_page(page_id=pid, title="")
-                and any(token in pid.lower() for token in ("schema", "database", "migration", "迁移"))
+                and any(
+                    token in pid.lower() for token in ("schema", "database", "migration", "迁移")
+                )
             ):
                 keys = self._plan_join_key_diagram(page_id, evidence_binding, context)
                 if keys:
@@ -1776,9 +1779,7 @@ class MermaidPlanner:
                 selected = list(endpoints[:1])
             elif "python" in leaf:
                 selected = [
-                    item
-                    for item in endpoints
-                    if "app/" in str(item.get("file_path") or "")
+                    item for item in endpoints if "app/" in str(item.get("file_path") or "")
                 ][:1]
             elif "core" in leaf or "核心" in leaf:
                 selected = [

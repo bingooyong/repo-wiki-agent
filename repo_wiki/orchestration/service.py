@@ -2659,7 +2659,8 @@ class RepoWikiService:
         missing = [
             rel
             for rel in required
-            if rel.lower() not in " ".join(re.findall(r"<cite>\s*([^<]+?)\s*</cite>", content, flags=re.I)).lower()
+            if rel.lower()
+            not in " ".join(re.findall(r"<cite>\s*([^<]+?)\s*</cite>", content, flags=re.I)).lower()
         ]
         extra = [(rel, cite_existing_meaningful(self.root, rel)) for rel in missing]
         extra = [(rel, item) for rel, item in extra if item]

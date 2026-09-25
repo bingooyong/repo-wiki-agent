@@ -210,9 +210,7 @@ def dangling_rewrite_artifacts(content: str) -> list[str]:
     return found
 
 
-def audit_text_rewrite(
-    before: str, after: str, *, target_spans: list[str]
-) -> dict[str, int]:
+def audit_text_rewrite(before: str, after: str, *, target_spans: list[str]) -> dict[str, int]:
     """Count removed characters; anything outside an exact target span is collateral."""
     if before == after:
         return {"removed": 0, "targeted": 0, "collateral": 0}
@@ -324,7 +322,11 @@ def load_route_method_table(root: Path) -> dict[str, str]:
         for match in handle.finditer(text):
             route = match.group(1)
             window = text[match.start() : match.start() + 480]
-            if "MethodPost" in window or 'Method != "POST"' in window or "http.MethodPost" in window:
+            if (
+                "MethodPost" in window
+                or 'Method != "POST"' in window
+                or "http.MethodPost" in window
+            ):
                 table[route] = "POST"
             elif "MethodGet" in window or "http.MethodGet" in window:
                 table[route] = "GET"
@@ -1156,61 +1158,61 @@ def strip_empty_sections_and_footnotes(content: str) -> str:
 
 
 ARCHITECTURE_ROLE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
-        (r"边缘 Agent\s*`?cmd/ccagent", "主 REST/Web 服务 `cmd/ccagent"),
-        (r"边缘 Agent\s*`?ccagent`?", "主 REST/Web 服务 ccagent"),
-        (r"边缘 Agent ccagent", "主 REST/Web 服务 ccagent"),
-        (r"`ccagent`\s*作为隧道客户端", "`ccagent` 作为主 REST/Web 服务"),
-        (r"ccagent 作为隧道客户端", "ccagent 作为主 REST/Web 服务"),
-        (r"`ccprobe-control`\s*作为主 REST/Web", "`ccprobe-control` 作为 gRPC 控制面"),
-        (r"ccprobe-control 作为主 REST/Web", "ccprobe-control 作为 gRPC 控制面"),
-        (r"ccagent / agent：客户端代理", "ccagent：主 REST/Web 服务；probe-agent：隧道客户端"),
-        (r"single Go backend process", "four Go binaries under cmd/"),
-        (r"单一 Go 后端进程", "cmd/ 下多个独立二进制"),
-        (r"未提供显式迁移脚本", "db/migrations 提供 SQL 迁移"),
-        (r"核心表包括 `users`、`profiles`", "核心表包括 `users`"),
-        (r"、`profiles`", ""),
-        (r"不存在 ORM 映射实体", "Pydantic 领域模型不是 ORM"),
-        (
-            r"`?internal/control`?\s*依赖\s*`?internal/services`?\s*与\s*`?internal/repository`?",
-            "`internal/services` 依赖 `internal/control`；`internal/control` 不依赖 services/repository",
-        ),
-        (
-            r"`?ccprobe-control`?[^。\n]{0,80}via services/repository/exporter",
-            "ccprobe-control 的 import 图不含 services/repository/exporter",
-        ),
-        (r"via services/repository/exporter", "不经过 services/repository/exporter"),
-        (
-            r"`cmd/ccagent`（探针 Agent，作为隧道客户端连接到控制面）",
-            "`cmd/ccagent`（主 REST/Web 服务）",
-        ),
-        (r"cmd/ccagent`?（探针 Agent，作为隧道客户端[^）]*）", "`cmd/ccagent`（主 REST/Web 服务）"),
-        (r"\*\*ccagent 隧道客户端\*\*", "**ccagent 主 REST/Web 服务**"),
-        (r"ccagent 隧道客户端", "ccagent 主 REST/Web 服务"),
-        (
-            r"`?ccagent`?[^。\n]{0,40}通过 `-agent-url`/`-agent-token` 与 `ccprobe-control` 建立反向控制链路",
-            "ccagent 作为主 REST/Web 服务对外提供 HTTP，不反连控制面",
-        ),
-        (
-            r"作为外部进程被拉起以返回 JSON 探针结果",
-            "由 `internal/probe` 经 HTTP 调用并解析 JSON 结果",
-        ),
-        (r"由 `internal/probe` 拉起并解析 JSON", "由 `internal/probe` 经 HTTP 调用并解析 JSON"),
-        (r"internal/probe 拉起", "internal/probe 经 HTTP 调用"),
-        (r"主进程负责隧道客户端", "主进程负责 REST/Web 服务"),
-        (r"负责隧道客户端与运行环境适配", "负责 REST/Web 服务与运行环境适配"),
-        (r"作为隧道客户端入口", "作为主 REST/Web 入口"),
-        (r"带隧道能力的主 REST/Web 服务", "gRPC 控制面"),
-        (r"作为隧道客户端连向", "作为主 REST/Web 服务对外提供"),
-        (r"`cmd/ccagent` 是与采集端配套的客户端入口", "`cmd/ccagent` 是主 REST/Web 入口"),
-        (r"是与采集端配套的客户端入口", "是主 REST/Web 入口"),
-        (r"\*\*客户端入口 `cmd/ccagent`\*\*", "**主 REST/Web 入口 `cmd/ccagent`**"),
-        (r"客户端入口 `cmd/ccagent`", "主 REST/Web 入口 `cmd/ccagent`"),
-        (
-            r"隧道客户端\s*\(`?probe-agent`?\)\s*不在仓库范围内",
-            "隧道客户端 `probe-agent` 位于 `cmd/probe-agent`",
-        ),
-        (r"`?probe-agent`?[^。\n]{0,24}不在仓库范围内", "`probe-agent` 位于 `cmd/probe-agent`"),
-        (r"不在仓库范围内，由 `ccprobe-control`", "位于 `cmd/probe-agent`，由 `ccprobe-control`"),
+    (r"边缘 Agent\s*`?cmd/ccagent", "主 REST/Web 服务 `cmd/ccagent"),
+    (r"边缘 Agent\s*`?ccagent`?", "主 REST/Web 服务 ccagent"),
+    (r"边缘 Agent ccagent", "主 REST/Web 服务 ccagent"),
+    (r"`ccagent`\s*作为隧道客户端", "`ccagent` 作为主 REST/Web 服务"),
+    (r"ccagent 作为隧道客户端", "ccagent 作为主 REST/Web 服务"),
+    (r"`ccprobe-control`\s*作为主 REST/Web", "`ccprobe-control` 作为 gRPC 控制面"),
+    (r"ccprobe-control 作为主 REST/Web", "ccprobe-control 作为 gRPC 控制面"),
+    (r"ccagent / agent：客户端代理", "ccagent：主 REST/Web 服务；probe-agent：隧道客户端"),
+    (r"single Go backend process", "four Go binaries under cmd/"),
+    (r"单一 Go 后端进程", "cmd/ 下多个独立二进制"),
+    (r"未提供显式迁移脚本", "db/migrations 提供 SQL 迁移"),
+    (r"核心表包括 `users`、`profiles`", "核心表包括 `users`"),
+    (r"、`profiles`", ""),
+    (r"不存在 ORM 映射实体", "Pydantic 领域模型不是 ORM"),
+    (
+        r"`?internal/control`?\s*依赖\s*`?internal/services`?\s*与\s*`?internal/repository`?",
+        "`internal/services` 依赖 `internal/control`；`internal/control` 不依赖 services/repository",
+    ),
+    (
+        r"`?ccprobe-control`?[^。\n]{0,80}via services/repository/exporter",
+        "ccprobe-control 的 import 图不含 services/repository/exporter",
+    ),
+    (r"via services/repository/exporter", "不经过 services/repository/exporter"),
+    (
+        r"`cmd/ccagent`（探针 Agent，作为隧道客户端连接到控制面）",
+        "`cmd/ccagent`（主 REST/Web 服务）",
+    ),
+    (r"cmd/ccagent`?（探针 Agent，作为隧道客户端[^）]*）", "`cmd/ccagent`（主 REST/Web 服务）"),
+    (r"\*\*ccagent 隧道客户端\*\*", "**ccagent 主 REST/Web 服务**"),
+    (r"ccagent 隧道客户端", "ccagent 主 REST/Web 服务"),
+    (
+        r"`?ccagent`?[^。\n]{0,40}通过 `-agent-url`/`-agent-token` 与 `ccprobe-control` 建立反向控制链路",
+        "ccagent 作为主 REST/Web 服务对外提供 HTTP，不反连控制面",
+    ),
+    (
+        r"作为外部进程被拉起以返回 JSON 探针结果",
+        "由 `internal/probe` 经 HTTP 调用并解析 JSON 结果",
+    ),
+    (r"由 `internal/probe` 拉起并解析 JSON", "由 `internal/probe` 经 HTTP 调用并解析 JSON"),
+    (r"internal/probe 拉起", "internal/probe 经 HTTP 调用"),
+    (r"主进程负责隧道客户端", "主进程负责 REST/Web 服务"),
+    (r"负责隧道客户端与运行环境适配", "负责 REST/Web 服务与运行环境适配"),
+    (r"作为隧道客户端入口", "作为主 REST/Web 入口"),
+    (r"带隧道能力的主 REST/Web 服务", "gRPC 控制面"),
+    (r"作为隧道客户端连向", "作为主 REST/Web 服务对外提供"),
+    (r"`cmd/ccagent` 是与采集端配套的客户端入口", "`cmd/ccagent` 是主 REST/Web 入口"),
+    (r"是与采集端配套的客户端入口", "是主 REST/Web 入口"),
+    (r"\*\*客户端入口 `cmd/ccagent`\*\*", "**主 REST/Web 入口 `cmd/ccagent`**"),
+    (r"客户端入口 `cmd/ccagent`", "主 REST/Web 入口 `cmd/ccagent`"),
+    (
+        r"隧道客户端\s*\(`?probe-agent`?\)\s*不在仓库范围内",
+        "隧道客户端 `probe-agent` 位于 `cmd/probe-agent`",
+    ),
+    (r"`?probe-agent`?[^。\n]{0,24}不在仓库范围内", "`probe-agent` 位于 `cmd/probe-agent`"),
+    (r"不在仓库范围内，由 `ccprobe-control`", "位于 `cmd/probe-agent`，由 `ccprobe-control`"),
 )
 
 

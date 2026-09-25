@@ -91,7 +91,9 @@ def test_rewrites_are_text_safe_on_25j_and_25k(tmp_path: Path) -> None:
     import re
 
     root = _go_repo(tmp_path)
-    corpora = [path for path in (_PROBE_25J, _PROBE_25K, _FASTAPI_25J, _FASTAPI_25K) if path.is_dir()]
+    corpora = [
+        path for path in (_PROBE_25J, _PROBE_25K, _FASTAPI_25J, _FASTAPI_25K) if path.is_dir()
+    ]
     for corpus in corpora:
         for page in corpus.rglob("*.md"):
             text = page.read_text(encoding="utf-8")
@@ -150,7 +152,12 @@ def test_generate_does_not_blank_backticked_identifiers(tmp_path: Path) -> None:
     )
     out = _render(
         _service(root),
-        _page("data-models-overview", "数据模型", WikiTaxonomyCategory.DATA_MODELS, "数据模型/数据模型.md"),
+        _page(
+            "data-models-overview",
+            "数据模型",
+            WikiTaxonomyCategory.DATA_MODELS,
+            "数据模型/数据模型.md",
+        ),
         raw,
         _go_context(root),
         add_mermaid=False,
@@ -187,7 +194,9 @@ def test_route_methods_come_from_source_table(tmp_path: Path) -> None:
         "GET /force-resync 与 GET /publish，以及 GET /v1/tasks/diff、GET /v1/tasks/trigger。\n"
         "```mermaid\nsequenceDiagram\n    Client->>Route: GET /force-resync (list flow)\n```\n"
     )
-    page = _page("api-reference", "API参考", WikiTaxonomyCategory.API_REFERENCE, "API参考/API参考.md")
+    page = _page(
+        "api-reference", "API参考", WikiTaxonomyCategory.API_REFERENCE, "API参考/API参考.md"
+    )
     ctx = _go_context(root)
     ctx.endpoints.extend(
         [
@@ -253,14 +262,16 @@ def test_request_flows_are_page_scoped_with_real_auth(tmp_path: Path) -> None:
             "error-handling-status-codes", None, ctx
         ),
     }
-    rendered = {
-        name: renderer.render_diagram(plan) if plan else "" for name, plan in pages.items()
-    }
+    rendered = {name: renderer.render_diagram(plan) if plan else "" for name, plan in pages.items()}
     assert pages["frontend-application-api"] is not None
     assert pages["authentication-authorization-api"] is not None
     assert "force-resync" not in rendered["frontend-application-api"]
-    assert any(token in rendered["frontend-application-api"] for token in ("/probe", "/tag", "/api/v1"))
-    assert "X-Probe-Api-Token" in rendered["authentication-authorization-api"] or "X-Agent-Token" in (
+    assert any(
+        token in rendered["frontend-application-api"] for token in ("/probe", "/tag", "/api/v1")
+    )
+    assert "X-Probe-Api-Token" in rendered[
+        "authentication-authorization-api"
+    ] or "X-Agent-Token" in (
         rendered["agent-proxy-api"] + rendered["authentication-authorization-api"]
     )
     catalog = planner._plan_api_sequence_diagram("api-reference", None, ctx)
@@ -422,7 +433,12 @@ def test_fastapi_verify_uses_curl_not_uvicorn_repeat(tmp_path: Path) -> None:
     assert "curl" in section
     out = _render(
         _service(root),
-        _page("installation", "安装与配置", WikiTaxonomyCategory.DEVELOPMENT_GUIDE, "项目概述/安装与配置.md"),
+        _page(
+            "installation",
+            "安装与配置",
+            WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
+            "项目概述/安装与配置.md",
+        ),
         "# 安装与配置\n\n## 启动与验证\n\n1. 准备。\n\n2. 确认应用进程已监听：`poetry run uvicorn app.main:app --reload`\n",
         _py_context(root),
         add_mermaid=False,
@@ -434,9 +450,7 @@ def test_fastapi_verify_uses_curl_not_uvicorn_repeat(tmp_path: Path) -> None:
 
 def test_generate_attaches_diagrams_even_when_leftover_exists(tmp_path: Path) -> None:
     root = _fastapi_repo(tmp_path)
-    leftover = (
-        "# 错误处理与状态码\n\n```mermaid\nsequenceDiagram\n    Client->>Route:\n```\n"
-    )
+    leftover = "# 错误处理与状态码\n\n```mermaid\nsequenceDiagram\n    Client->>Route:\n```\n"
     out = _render(
         _service(root),
         _page(
@@ -463,7 +477,12 @@ def test_missing_route_cites_are_attached(tmp_path: Path) -> None:
     raw = "# Agent代理API\n\n## 简介\n\nGET /healthz 健康检查。\n"
     out = _render(
         _service(root),
-        _page("agent-proxy-api", "Agent代理API", WikiTaxonomyCategory.API_REFERENCE, "API参考/Agent代理API.md"),
+        _page(
+            "agent-proxy-api",
+            "Agent代理API",
+            WikiTaxonomyCategory.API_REFERENCE,
+            "API参考/Agent代理API.md",
+        ),
         raw,
         _go_context(root),
     )
