@@ -270,7 +270,7 @@ def _flag_target_mismatches(text: str, flags: dict[str, str], cmd_names: set[str
         if any(leaf.lower().replace("_", "-") in help_l for leaf in mentioned):
             continue
         help_cmds = [leaf for leaf in leaves if leaf.lower().replace("_", "-") in help_l]
-        if help_cmds or "probe-agent" in help_l or "control url" in help_l:
+        if help_cmds or "control url" in help_l:
             hits.append(f"flag:{flag}")
     return hits
 

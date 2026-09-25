@@ -2559,6 +2559,16 @@ class RepoWikiService:
             )
         except Exception:
             pass
+        content = restore_code_units(content, _sacred_code)
+        try:
+            from repo_wiki.generator.compose_evidence import (
+                load_repo_import_edges,
+                rewrite_false_import_claims,
+            )
+
+            content = rewrite_false_import_claims(content, load_repo_import_edges(self.root))
+        except Exception:
+            pass
         content = self._rewrite_install_page_contract(page, content)
         content = self._ensure_architecture_core_cites(page, content)
         content = self._ensure_data_model_source_cites(page, content)
@@ -3049,15 +3059,7 @@ class RepoWikiService:
                     )
                 details = []
                 if handler:
-                    source = ""
-                    if file_path and (self.root / file_path).is_file():
-                        source = (self.root / file_path).read_text(
-                            encoding="utf-8", errors="ignore"
-                        )
-                    if handler in source:
-                        details.append(f"handler `{handler}`")
-                    else:
-                        details.append(f"handler {handler}")
+                    details.append(f"handler `{handler}`")
                 cite = ""
                 if file_path:
                     start = int(endpoint.get("line_number") or endpoint.get("line_start") or 0)
@@ -3738,7 +3740,7 @@ class RepoWikiService:
                 continue
             if stripped.startswith("-") or stripped.startswith("*"):
                 item = stripped.lstrip("-*").strip()
-                if item.startswith("**") or re.match(r"[A-Z][A-Za-z0-9_]*\s+<cite>", item):
+                if item.startswith("**"):
                     flush()
                     out.append(line)
                     continue

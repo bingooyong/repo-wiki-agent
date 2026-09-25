@@ -1733,9 +1733,9 @@ def apply_deterministic_rewrites(
     page_id: str = "",
 ) -> str:
     """Replay structural compose rewrites without LLM or fence-wide substitution."""
-    from repo_wiki.generator.code_safe import protect_code_units, restore_code_units
+    from repo_wiki.generator.code_safe import map_outside_code
 
-    text, held = protect_code_units(content or "")
+    text = content or ""
     text = sanitize_leftover_handbook_mermaid(text)
     text = rewrite_token_const_cite(text, root)
     text = rewrite_checkout_directory_name(text, root)
@@ -1746,8 +1746,11 @@ def apply_deterministic_rewrites(
     text = strip_reader_unresolved_markers(text)
     text = strip_placeholder_ops_fences(text)
     text = expand_truncated_build_commands(text, root)
-    text = rewrite_architecture_role_claims(text)
-    text = rewrite_frontend_consumer_claims(text, root, page_id=page_id, title=title)
+    text = map_outside_code(text, rewrite_architecture_role_claims)
+    text = map_outside_code(
+        text,
+        lambda body: rewrite_frontend_consumer_claims(body, root, page_id=page_id, title=title),
+    )
     try:
         from repo_wiki.generator.compose_evidence import (
             load_repo_import_edges,
@@ -1842,5 +1845,4 @@ def apply_deterministic_rewrites(
     text = strip_empty_sections_and_footnotes(text)
     text = strip_reader_unresolved_markers(text)
     text = dedupe_identical_fences(text)
-    text = restore_code_units(text, held)
     return rebuild_toc_from_h2s(text)

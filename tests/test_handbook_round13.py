@@ -264,7 +264,8 @@ def test_host_port_backticks_are_not_turned_into_cites() -> None:
     assert "`0.0.0.0:8200`" in out
     assert "<cite>127.0.0.1:3306</cite>" not in out
     assert "<cite>0.0.0.0:8200</cite>" not in out
-    assert "<cite>internal/models/endpoint.go:12</cite>" in out
+    assert "`internal/models/endpoint.go:12`" in out
+    assert "<cite>internal/models/endpoint.go:12</cite>" not in out
 
 
 def test_role_regex_accepts_25m_probe_agent_after_tunnel_client(tmp_path: Path) -> None:
