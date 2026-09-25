@@ -237,28 +237,28 @@ def extract_fastapi_endpoints_simple(files: Sequence[tuple[str, str]]) -> list[F
         if key in seen:
             continue
         seen.add(key)
-        router = routers.get(node_id)
-        if router is None:
+        current = routers.get(node_id)
+        if current is None:
             continue
-        local_prefix = join_http_paths(prefix, router.constructor_prefix)
-        for method, path, handler, lineno in router.routes:
+        local_prefix = join_http_paths(prefix, current.constructor_prefix)
+        for method, path, handler, lineno in current.routes:
             endpoints.append(
                 FastAPIEndpoint(
                     method=method,
                     path=join_http_paths(local_prefix, path),
                     handler=handler,
-                    file_path=router.file_path,
+                    file_path=current.file_path,
                     lineno=lineno,
                 )
             )
-        for mount in router.mounts:
-            child = resolve_child(router.file_path, mount.child_ref)
+        for mount in current.mounts:
+            child = resolve_child(current.file_path, mount.child_ref)
             if child is None:
                 continue
             queue.append(
                 (
                     child,
-                    join_http_paths(local_prefix, resolve_mount_prefix(router.file_path, mount)),
+                    join_http_paths(local_prefix, resolve_mount_prefix(current.file_path, mount)),
                 )
             )
     if not endpoints:

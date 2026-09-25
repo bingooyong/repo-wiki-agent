@@ -1403,7 +1403,7 @@ class RepoWikiService:
 
         pages: list[tuple[str, str]] = []
         page_metadata_by_idx: dict[int, dict[str, Any]] = {}
-        failed_pages: list[dict[str, str]] = []
+        failed_pages: list[dict[str, Any]] = []
         cache_hits = 0
         cache_misses = 0
         llm_call_count = 0
