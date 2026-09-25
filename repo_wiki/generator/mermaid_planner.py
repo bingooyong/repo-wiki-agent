@@ -2249,13 +2249,13 @@ class MermaidPlanner:
         jwt_fn = re.search(
             r"def\s+(get_\w+|decode_\w+|verify_\w+|[A-Za-z_][A-Za-z0-9_]*)", jwt_text
         )
-        dep_name = auth_class or auth_fn or jwt_class
-        if not dep_name:
+        dep_match = auth_class or auth_fn or jwt_class
+        if not dep_match:
             return None
         from repo_wiki.generator.compose_evidence import jwt_token_prefix
 
         prefix = jwt_token_prefix(root)
-        dep_name = dep_name.group(1)
+        dep_name = dep_match.group(1)
         fn_name = jwt_fn.group(1) if jwt_fn else dep_name
         return DiagramPlan(
             diagram_id=f"{page_id}-jwt-sequence",
