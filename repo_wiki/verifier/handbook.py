@@ -914,7 +914,9 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
                 path.read_text(encoding="utf-8", errors="ignore")
             ):
                 _add(normalize_go_build_command(item, root))
-    makefile = next((path for path in (root / "Makefile", root / "makefile") if path.is_file()), None)
+    makefile = next(
+        (path for path in (root / "Makefile", root / "makefile") if path.is_file()), None
+    )
     if makefile is not None:
         text = makefile.read_text(encoding="utf-8", errors="ignore")
         if re.search(r"^install:", text, re.M):
@@ -1078,7 +1080,9 @@ def discover_model_classes(repo_root: Path) -> list[tuple[str, str]]:
             for match in _SQL_CREATE_RE.finditer(text):
                 found.append((match.group(1), rel))
     for path in repo_root.rglob("*.go"):
-        if any(part in _SKIP_DISCOVERY_DIRS for part in path.parts) or path.name.endswith("_test.go"):
+        if any(part in _SKIP_DISCOVERY_DIRS for part in path.parts) or path.name.endswith(
+            "_test.go"
+        ):
             continue
         rel = path.relative_to(repo_root).as_posix()
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -1203,9 +1207,7 @@ def has_data_model_source_citation(markdown: str, repo_root: Path) -> bool:
     required = data_model_required_sources(repo_root)
     optional = data_model_optional_sources(repo_root)
     classes = [
-        (name, rel)
-        for name, rel in discover_model_classes(repo_root)
-        if not rel.endswith(".sql")
+        (name, rel) for name, rel in discover_model_classes(repo_root) if not rel.endswith(".sql")
     ]
     if not required and not optional and not classes:
         return not repo_has_routes_or_db(repo_root)
@@ -1245,7 +1247,9 @@ def data_model_absence_offenders(markdown: str, repo_root: Path) -> list[str]:
             if re.search(r"\bsql\b", raw) and any("sql" in item for item in existing):
                 hits.append("absence:sql")
             continue
-        if token in existing or any(item == token or item.endswith("/" + token) for item in existing):
+        if token in existing or any(
+            item == token or item.endswith("/" + token) for item in existing
+        ):
             hits.append(f"absence:{token}")
     return hits
 

@@ -3190,7 +3190,11 @@ class QoderLikeVerifierService(VerifierService):
             name = page.name.lower()
             if not any(token in name for token in ("api", "接口")):
                 continue
-            mismatch.extend(handbook_route_crosscheck_mismatches(page.read_text(encoding="utf-8", errors="ignore"), files))
+            mismatch.extend(
+                handbook_route_crosscheck_mismatches(
+                    page.read_text(encoding="utf-8", errors="ignore"), files
+                )
+            )
         if mismatch:
             return self._handbook_fail(
                 "qoder-handbook-route-crosscheck",
@@ -3202,6 +3206,7 @@ class QoderLikeVerifierService(VerifierService):
             "qoder-handbook-route-crosscheck",
             "Handbook HTTP paths match the independent source extraction",
         )
+
     def _check_handbook_dropped_cores(self) -> CheckResult:
         for path in self._candidate_artifact_paths("quality-report.json"):
             try:

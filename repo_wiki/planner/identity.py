@@ -243,7 +243,9 @@ def _readme_visible_lines(content: str) -> list[str]:
             or _VERSION_BULLET_RE.match(heading)
         ):
             continue
-        if _VERSION_BULLET_RE.match(stripped) or _NUMBERED_HEADING_RE.match(stripped.lstrip("#").strip()):
+        if _VERSION_BULLET_RE.match(stripped) or _NUMBERED_HEADING_RE.match(
+            stripped.lstrip("#").strip()
+        ):
             continue
         if (
             _is_rst_noise_line(stripped)
