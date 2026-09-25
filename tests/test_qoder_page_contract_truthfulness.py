@@ -66,6 +66,11 @@ def test_qoder_page_contract_does_not_emit_unsupported_generic_api_claims(tmp_pa
 
 def test_qoder_page_contract_preserves_evidence_backed_endpoint_data(tmp_path):
     service = _service(tmp_path)
+    (tmp_path / "src" / "inventory").mkdir(parents=True)
+    (tmp_path / "src" / "inventory" / "api.py").write_text(
+        "\n".join(f"line {i}" for i in range(1, 50)),
+        encoding="utf-8",
+    )
     context = ComposerContext(
         repository_name="repo",
         primary_language="python",
@@ -80,7 +85,8 @@ def test_qoder_page_contract_preserves_evidence_backed_endpoint_data(tmp_path):
                 "file_path": "src/inventory/api.py",
                 "line_number": 42,
                 "auth_type": "api-key",
-                "response_type": "json",
+                "request_body": True,
+                "response_type": "application/xml",
                 "error_codes": [404],
             }
         ],
@@ -96,9 +102,10 @@ def test_qoder_page_contract_preserves_evidence_backed_endpoint_data(tmp_path):
 
     assert "GET /inventory/items" in rendered
     assert "handler `list_items`" in rendered
-    assert "`src/inventory/api.py`:42" in rendered
+    assert "<cite>src/inventory/api.py:42</cite>" in rendered
     assert "认证: api-key" in rendered
-    assert "response_type=json" in rendered
+    assert "request_body=true" in rendered
+    assert "response_type=application/xml" in rendered
     assert "error_codes=[404]" in rendered
     assert "/resources" not in rendered
     assert "Bearer token" not in rendered
