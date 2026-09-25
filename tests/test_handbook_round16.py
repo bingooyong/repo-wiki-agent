@@ -356,10 +356,85 @@ def test_intro_cites_search_readme_and_upgrade_range(tmp_path: Path) -> None:
     )
     out = _service(root)._enforce_qoder_page_contract(page, markdown, binding, add_mermaid=False)
     intro = out.split("## 核心数据模型")[0]
+    note_line = next(
+        index
+        for index, line in enumerate((root / "README.rst").read_text().splitlines(), 1)
+        if "not actively maintained" in line
+    )
     assert "README.rst:1-10" not in intro
-    assert "README.rst:28" in intro or "NOTE" in (root / "README.rst").read_text()
+    assert f"README.rst:{note_line}" in intro
     assert "fdf8821871d7_main_tables.py:1-19" not in out
     assert "fdf8821871d7_main_tables.py:54-" in out
+
+
+def test_api_intro_rewrites_identity_cite_and_strips_dangling_readme(tmp_path: Path) -> None:
+    root = _fastapi_repo(tmp_path)
+    (root / "README.rst").write_text(
+        ".. image:: logo.png\n\n"
+        + "\n".join(f"badge {i}" for i in range(1, 26))
+        + "\n\n**NOTE**: This repository is not actively maintained "
+        "because this example is quite complete and does its primary goal "
+        "- passing Conduit testsuite.\n",
+        encoding="utf-8",
+    )
+    page = _page(
+        "core-service-apis",
+        "核心服务API",
+        WikiTaxonomyCategory.API_REFERENCE,
+        "API参考/核心服务API/核心服务API.md",
+    )
+    markdown = (
+        "# 核心服务API\n\n"
+        "## 简介\n\n"
+        "本页围绕 `fastapi-realworld-example-app` 展开，仓库根说明文件 `README.rst` "
+        "已明确这一产品身份。`README.rst`。路由模块承担认证入口。\n"
+        "<cite>app/api/routes/authentication.py:23-26</cite>\n\n"
+        "## 项目结构\n\n"
+        "错误响应采用 Conduit 风格的统一信封结构。\n"
+        "<cite>app/api/errors/http_error.py:1-3</cite>\n"
+    )
+    out = _service(root)._enforce_qoder_page_contract(page, markdown, None, add_mermaid=False)
+    intro = out.split("## 项目结构")[0]
+    rest = out.split("## 项目结构")[1]
+    note_line = next(
+        index
+        for index, line in enumerate((root / "README.rst").read_text().splitlines(), 1)
+        if "not actively maintained" in line
+    )
+    assert f"README.rst:{note_line}" in intro
+    assert "authentication.py:23-26" not in intro
+    assert "`README.rst`" not in intro
+    assert "。。" not in intro
+    assert "http_error.py:1-3" in rest
+    assert "README.rst:28" not in rest
+
+
+def test_conduit_error_page_keeps_local_cite(tmp_path: Path) -> None:
+    root = _fastapi_repo(tmp_path)
+    (root / "README.rst").write_text(
+        ".. image:: logo.png\n\n"
+        + "\n".join(f":target: https://example/{i}/fastapi-realworld-example-app" for i in range(5))
+        + "\n\n**NOTE**: This repository is not actively maintained "
+        "because this example is quite complete and does its primary goal "
+        "- passing Conduit testsuite.\n",
+        encoding="utf-8",
+    )
+    page = _page(
+        "api-issues",
+        "API问题",
+        WikiTaxonomyCategory.TROUBLESHOOTING,
+        "故障排除/API问题.md",
+    )
+    markdown = (
+        "# API问题\n\n"
+        "## 简介\n\n"
+        "所有 HTTP 异常最终会被转换为 Conduit 风格的 JSON 负载。\n"
+        "<cite>app/api/errors/http_error.py:1-3</cite>\n"
+    )
+    out = _service(root)._enforce_qoder_page_contract(page, markdown, None, add_mermaid=False)
+    assert "http_error.py:1-3" in out
+    assert "README.rst:28" not in out
+    assert "README.rst:6" not in out
 
 
 def test_empty_cite_parens_are_stripped() -> None:

@@ -52,8 +52,13 @@ _GENERIC_IDENTIFIERS = frozenset(
 )
 _FILE_LINE_RE = re.compile(r"^((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+):(\d+)(?:-(\d+))?$")
 _MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\n]+)\)")
-_PRODUCT_IDENTITY_RE = re.compile(r"产品身份|不再积极维护|Conduit|RealWorld|fastapi-realworld")
+_PRODUCT_IDENTITY_RE = re.compile(
+    r"产品身份|不再积极维护|不再活跃维护|not actively maintained|fastapi-realworld"
+)
+_DANGLING_README_RE = re.compile(r"`README\.(?:rst|md)`")
+_HEADER_README_CITE_RE = re.compile(r"README\.(?:rst|md):1-(?:8|9|10|19|20)\b")
 _SEVEN_TABLES_RE = re.compile(r"7\s*张业务表")
+_RST_SKIP_RE = re.compile(r"^(?:\.\.|:|\||---+)")
 
 
 def sentence_identifiers(text: str) -> set[str]:
@@ -310,16 +315,14 @@ def rewrite_fastapi_intro_cites(
         for name in ("README.rst", "README.md", "README.txt", "README")
         if (root / name).is_file()
     ]
-    identity_indexes = [
-        index
-        for index, line in enumerate(lines)
-        if _PRODUCT_IDENTITY_RE.search(line) or re.search(r"`README\.(?:rst|md)`", line)
-    ]
+    identity_indexes = [index for index, line in enumerate(lines) if _is_identity_intro_line(line)]
     if intro_owner:
         intro_bounds = _section_bounds(lines, "简介")
         if intro_bounds:
             start, end = intro_bounds
-            identity_indexes.extend(range(start, end))
+            identity_indexes.extend(
+                index for index in range(start, end) if _is_identity_intro_line(lines[index])
+            )
     if readme_names and identity_indexes:
         claim = "\n".join(lines[i] for i in identity_indexes if 0 <= i < len(lines))
         readme_cite = ""
@@ -333,13 +336,12 @@ def rewrite_fastapi_intro_cites(
                 if index in seen or index < 0 or index >= len(lines):
                     continue
                 seen.add(index)
-                if _PRODUCT_IDENTITY_RE.search(lines[index]) or re.search(
-                    r"`README\.(?:rst|md)`|README\.rst:1-|README\.md:1-", lines[index]
-                ):
-                    _replace_adjacent_cite(lines, index, readme_cite)
-                    lines[index] = re.sub(r"`README\.(?:rst|md)`", "", lines[index])
-                    lines[index] = re.sub(r"。\s*。", "。", lines[index])
-                    changed = True
+                if not _is_identity_intro_line(lines[index]):
+                    continue
+                _replace_adjacent_cite(lines, index, readme_cite)
+                lines[index] = _DANGLING_README_RE.sub("", lines[index])
+                lines[index] = re.sub(r"。\s*。", "。", lines[index])
+                changed = True
     if (root / alembic_rel).is_file():
         mig_cite = cite_alembic_upgrade_range(root, alembic_rel) or (
             cite_existing_meaningful(root, alembic_rel)
@@ -360,6 +362,19 @@ def rewrite_fastapi_intro_cites(
     return rewritten
 
 
+def _is_identity_intro_line(line: str) -> bool:
+    """True only for product-identity prose, a dangling README name, or a logo/badge cite."""
+    return bool(
+        _PRODUCT_IDENTITY_RE.search(line)
+        or _DANGLING_README_RE.search(line)
+        or _HEADER_README_CITE_RE.search(line)
+    )
+
+
+def _readme_line_is_skippable(stripped: str) -> bool:
+    return (not stripped) or bool(_RST_SKIP_RE.match(stripped))
+
+
 def cite_readme_supporting_line(root: Path, readme: str, claim: str) -> str:
     """Cite the README line that actually supports the identity sentence."""
     path = Path(root) / readme
@@ -369,26 +384,28 @@ def cite_readme_supporting_line(root: Path, readme: str, claim: str) -> str:
         rows = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError:
         return ""
+    lowered = (claim or "").lower()
     keywords = [
         token
         for token in (
             "not actively maintained",
             "不再积极维护",
-            "Conduit",
-            "RealWorld",
+            "不再活跃维护",
             "NOTE",
         )
-        if token.lower() in (claim or "").lower() or token in (claim or "")
-    ] or ["not actively maintained", "Conduit", "NOTE"]
+        if token.lower() in lowered or token in (claim or "")
+    ] or ["not actively maintained", "NOTE"]
     for index, line in enumerate(rows, 1):
         stripped = line.strip()
-        if not stripped or stripped.startswith(".. image::") or stripped.startswith("|"):
+        if _readme_line_is_skippable(stripped):
             continue
         if any(token.lower() in stripped.lower() for token in keywords):
             return f"<cite>{readme}:{index}-{index}</cite>"
     for index, line in enumerate(rows, 1):
         stripped = line.strip()
-        if len(stripped) > 40 and not stripped.startswith(".. image::"):
+        if _readme_line_is_skippable(stripped):
+            continue
+        if len(stripped) > 40:
             return f"<cite>{readme}:{index}-{index}</cite>"
     return ""
 
