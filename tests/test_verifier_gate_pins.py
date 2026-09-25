@@ -85,8 +85,8 @@ def test_architecture_cores_are_entries_not_every_package(tmp_path) -> None:
     (tmp_path / "cmd" / "example-probe").mkdir(parents=True)
     (tmp_path / "internal" / "services").mkdir(parents=True)
     (tmp_path / "cmd" / "web" / "main.go").write_text(
-        "package main\nfunc main() { http.ListenAndServe(\":80\", mux) }\n"
-        "mux.HandleFunc(\"/health\", h)\n",
+        'package main\nfunc main() { http.ListenAndServe(":80", mux) }\n'
+        'mux.HandleFunc("/health", h)\n',
         encoding="utf-8",
     )
     (tmp_path / "cmd" / "worker" / "main.go").write_text(

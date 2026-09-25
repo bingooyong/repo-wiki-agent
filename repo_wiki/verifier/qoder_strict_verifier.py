@@ -1711,7 +1711,9 @@ class QoderLikeVerifierService(VerifierService):
             page: state
             for page, state in page_states.items()
             if state.lower() not in {"ready", "pass", "passed", "ok"}
-            or any(token in state.lower() for token in QoderLikeVerifierService.DEGRADED_STATE_TOKENS)
+            or any(
+                token in state.lower() for token in QoderLikeVerifierService.DEGRADED_STATE_TOKENS
+            )
         }
         if bad_states:
             return CheckResult(

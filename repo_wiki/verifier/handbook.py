@@ -938,7 +938,9 @@ def architecture_core_packages(repo_root: Path) -> list[str]:
 
     if (repo_root / "app" / "api" / "routes").exists():
         cores.append("app/api/routes")
-    if (repo_root / "app" / "services").exists() and (repo_root / "app" / "api" / "routes").exists():
+    if (repo_root / "app" / "services").exists() and (
+        repo_root / "app" / "api" / "routes"
+    ).exists():
         try:
             from repo_wiki.generator.compose_evidence import load_repo_import_edges
 
