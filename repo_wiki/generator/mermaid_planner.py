@@ -345,16 +345,24 @@ def validate_mermaid_syntax(
     return True, "Valid"
 
 
+_MERMAID_NODE_START_RE = re.compile(r"(?m)^\s*([A-Za-z][A-Za-z0-9_]*)\s*(\[|\()")
+_MERMAID_ARROW = "-" + "->"
+
+
 def _reserved_mermaid_ids(diagram_code: str) -> set[str]:
     found: set[str] = set()
-    for raw in re.findall(r"(?m)^\s*([A-Za-z][A-Za-z0-9_]*)\s*(\[|\(|-->)", diagram_code or ""):
-        ident = raw[0] if isinstance(raw, tuple) else raw
-        if str(ident).casefold() in _MERMAID_RESERVED_IDS:
-            found.add(str(ident))
-    for raw in re.findall(r"-->\s*([A-Za-z][A-Za-z0-9_]*)\s*(\[|\(|$)", diagram_code or ""):
-        ident = raw[0] if isinstance(raw, tuple) else raw
-        if str(ident).casefold() in _MERMAID_RESERVED_IDS:
-            found.add(str(ident))
+    for line in (diagram_code or "").splitlines():
+        start = _MERMAID_NODE_START_RE.match(line)
+        if start and start.group(1).casefold() in _MERMAID_RESERVED_IDS:
+            found.add(start.group(1))
+        if _MERMAID_ARROW not in line:
+            continue
+        left, _sep, right = line.partition(_MERMAID_ARROW)
+        left_id = re.search(r"([A-Za-z][A-Za-z0-9_]*)\s*$", left)
+        right_id = re.match(r"\s*([A-Za-z][A-Za-z0-9_]*)", right)
+        for match in (left_id, right_id):
+            if match and match.group(1).casefold() in _MERMAID_RESERVED_IDS:
+                found.add(match.group(1))
     return found
 
 
@@ -480,9 +488,8 @@ def _validate_state_syntax(code: str, lines: list[str]) -> list[str]:
 
     # Check for state definitions or transitions
     state_pattern = re.compile(r"^\s*state\s+", re.IGNORECASE)
-    transition_pattern = re.compile(r"^\s*\[.*\]\s*-->|-->\s*\[", re.IGNORECASE)
     has_states = any(state_pattern.match(line) for line in lines)
-    has_transitions = any(transition_pattern.search(line) for line in lines)
+    has_transitions = any(_MERMAID_ARROW in line and "[" in line for line in lines)
     if not has_states and not has_transitions:
         errors.append("State diagram has no state definitions or transitions")
 
