@@ -2742,7 +2742,36 @@ class QoderLikeVerifierService(VerifierService):
             target = Path(payload["target_repo"])
             if target.exists() and target.is_dir():
                 return target
-        return self.root
+        inferred = self._infer_repo_root_from_eval_layout(self.root)
+        if inferred is not None:
+            return inferred
+        if payload:
+            for key in ("eval_root", "candidate_repowiki_zh_root", "candidate_content_root"):
+                raw = payload.get(key)
+                if not isinstance(raw, str) or not raw:
+                    continue
+                inferred = self._infer_repo_root_from_eval_layout(Path(raw))
+                if inferred is not None:
+                    return inferred
+        return self._handbook_repo_root()
+
+    @staticmethod
+    def _infer_repo_root_from_eval_layout(path: Path) -> Path | None:
+        """Treat ``<repo>/.repo-agent-eval/runs/<id>/...`` as a handbook run."""
+        try:
+            parts = path.resolve().parts
+        except OSError:
+            return None
+        for index, part in enumerate(parts):
+            if part != ".repo-agent-eval":
+                continue
+            if index == 0:
+                return None
+            root = Path(*parts[:index])
+            if root.exists() and root.is_dir():
+                return root
+            return None
+        return None
 
     def _load_manifest_payload(self, root: Path) -> dict[str, Any] | None:
         candidates = [root / "manifest.json", root / "meta.json", root / "metadata.json"]

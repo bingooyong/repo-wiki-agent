@@ -554,3 +554,19 @@ def test_source_evidence_skips_without_enough_source_files(tmp_path: Path) -> No
     result = QoderLikeVerifierService(tmp_path, strict=True)._check_qoder_source_evidence()
     assert result.status == "PASS"
     assert "Skip" in result.message or "Skipped" in result.message
+
+
+def test_source_evidence_uses_eval_parent_when_target_repo_stale(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    run = tmp_path / ".repo-agent-eval" / "runs" / "old-run"
+    content = run / "repowiki" / "zh" / "content"
+    content.mkdir(parents=True)
+    body = "\n".join("仓库有探针能力。 <cite>README.md:1-1</cite>" for _ in range(20))
+    (content / "项目概述.md").write_text("# 概述\n\n" + body + "\n", encoding="utf-8")
+    (run / "manifest.json").write_text(
+        '{"readiness_state":"READY","target_repo":"/workspace/probe_exporter"}',
+        encoding="utf-8",
+    )
+    result = QoderLikeVerifierService(run, strict=True)._check_qoder_source_evidence()
+    assert result.status == "FAIL"
+    assert result.reason_code == "QODER_SOURCE_EVIDENCE_LOW"
