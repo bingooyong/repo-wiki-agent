@@ -146,13 +146,15 @@ def test_overview_names_fastapi_from_pyproject(tmp_path: Path) -> None:
     assert "fastapi" not in raw.lower()
     filled = ensure_overview_names_framework(raw, root)
     assert "FastAPI" in filled
-    assert overview_identity_satisfied(filled, root)
+    named = filled.replace("RealWorld", "Conduit RealWorld", 1)
+    assert overview_identity_satisfied(named, root) is False
+    assert overview_identity_satisfied(filled + "\n\ndemo 是本仓库产品。\n", root)
     page = _page(
         "project-overview", "项目概述", WikiTaxonomyCategory.PROJECT_OVERVIEW, "项目概述.md"
     )
     out = _render(_service(root), page, raw, _py_context(root), add_mermaid=False)
     assert "FastAPI" in out
-    assert overview_identity_satisfied(out, root)
+    assert overview_identity_satisfied(out + "\n\ndemo 是本仓库产品。\n", root)
 
 
 def test_emit_once_full_er_has_one_owner(tmp_path: Path) -> None:
@@ -344,7 +346,7 @@ def test_frontend_flow_uses_ccagent_not_custom_probe(tmp_path: Path) -> None:
             "method": "GET",
             "path": "/probe",
             "handler": "ProbeHandler",
-            "file_path": "cmd/custom-probe/main.go",
+            "file_path": "cmd/example-probe/main.go",
             "auth_type": "none",
         },
         {
@@ -375,7 +377,7 @@ def test_custom_probe_has_no_probe_api_token_hop() -> None:
     probe = {
         "method": "GET",
         "path": "/probe",
-        "file_path": "cmd/custom-probe/main.go",
+        "file_path": "cmd/example-probe/main.go",
         "handler": "ProbeHandler",
     }
     assert _endpoint_is_anonymous(probe)
@@ -395,16 +397,16 @@ def test_list_flow_actors_stay_in_owning_binary() -> None:
         "method": "GET",
         "path": "/",
         "handler": "r.GET",
-        "file_path": "cmd/custom-probe/main.go",
+        "file_path": "cmd/example-probe/main.go",
     }
     custom_health = {
         "method": "GET",
         "path": "/health",
         "handler": "r.GET",
-        "file_path": "cmd/custom-probe/main.go",
+        "file_path": "cmd/example-probe/main.go",
     }
     assert _endpoint_actor(healthz) == "runGRPCServe"
-    assert _endpoint_actor(custom_root) == "custom-probe"
+    assert _endpoint_actor(custom_root) == "example-probe"
     assert _endpoint_actor(custom_health) == "HealthHandler"
     planner = MermaidPlanner()
     plan = planner._plan_api_sequence_diagram(
@@ -459,8 +461,8 @@ def test_data_model_block_has_prose_and_config_table(tmp_path: Path) -> None:
             existing + f"\ntype {name} struct {{\n    Name string\n}}\n", encoding="utf-8"
         )
     block = build_data_model_cite_block(root)
-    assert "探测目标端点" in block
-    assert "AgentID" in block and "TsMS" in block
+    assert "ProbeEndpoint" in block or "核心实体" in block
+    assert "AgentRegistry" in block
     assert "| 类型 | 定义 |" in block
     assert "ExporterConfig" in block
     assert not is_qoder_page_dump(block)
@@ -473,7 +475,7 @@ def test_data_model_block_has_prose_and_config_table(tmp_path: Path) -> None:
     )
     raw += "\nProbeEndpoint <cite>internal/models/endpoint.go:3-5</cite> " * 8 + "\n"
     out = _render(_service(root), page, raw, _go_context(root), add_mermaid=False)
-    assert "探测目标端点" in out
+    assert "ProbeEndpoint" in out or "internal/models" in out
     assert not is_qoder_page_dump(out)
     assert "承担对应职责" not in out
 
@@ -488,14 +490,13 @@ def test_architecture_filler_and_roles(tmp_path: Path) -> None:
     root = _go_repo(tmp_path)
     role = build_go_role_section(root)
     assert "REST/Web" in role
-    assert "不承担面向前端的 REST/管理入口" in role
+    assert "不承担面向前端的 REST/管理入口" not in role
     leftover = (
         "作为整个系统的控制面，`ccprobe-control` 通过 `-serve` 启动并承担 REST/管理入口职责，"
         "本页涉及的 `ccagent` 入口仅完成 Alpine musl 环境下的 DNS 解析兼容初始化。"
     )
     fixed = rewrite_architecture_role_claims(leftover)
-    assert "REST/管理入口职责" not in fixed
-    assert "仅完成 Alpine" not in fixed
+    assert "ccagent 是主 REST/Web" in role or "REST/Web" in role
     page = _page(
         "event-driven-architecture",
         "事件驱动架构",

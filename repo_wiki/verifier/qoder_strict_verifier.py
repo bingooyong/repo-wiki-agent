@@ -341,6 +341,8 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_PLACEHOLDER_MERMAID",
         "QODER_HANDBOOK_READER_HYGIENE",
         "QODER_HANDBOOK_UNKNOWN_PROCESS",
+        "QODER_HANDBOOK_CODE_INTEGRITY",
+        "QODER_HANDBOOK_DOC_CODE_MISMATCH",
         "QODER_HANDBOOK_DIAGRAM_EVIDENCE",
         "QODER_HANDBOOK_INSTALL_PATH",
         "QODER_HANDBOOK_IMPORT_CONSISTENCY",
@@ -503,6 +505,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_reader_hygiene(),
             self._check_handbook_unknown_process(),
             self._check_handbook_code_integrity(),
+            self._check_handbook_doc_code_mismatch(),
             self._check_handbook_diagram_evidence(),
             self._check_handbook_install_path(),
             self._check_handbook_import_consistency(),
@@ -2964,6 +2967,25 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-code-integrity",
             "Code spans and fences match the raw reply or repository source",
+        )
+
+    def _check_handbook_doc_code_mismatch(self) -> CheckResult:
+        from repo_wiki.verifier.handbook import handbook_doc_code_mismatches
+
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("qoder-handbook-doc-code-mismatch", "No markdown pages")
+        offenders = handbook_doc_code_mismatches(content_dir, self._handbook_repo_root())
+        if offenders:
+            return self._handbook_fail(
+                "qoder-handbook-doc-code-mismatch",
+                "QODER_HANDBOOK_DOC_CODE_MISMATCH",
+                "Handbook presents README-only identifiers as code contracts",
+                offenders,
+            )
+        return self._handbook_pass(
+            "qoder-handbook-doc-code-mismatch",
+            "Documented identifiers that appear only in docs are not treated as code",
         )
 
     def _check_handbook_diagram_evidence(self) -> CheckResult:

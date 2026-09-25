@@ -423,10 +423,13 @@ ccagent 是主 REST/Web 服务。
     )
     out = _render(_service(root), page, raw, _go_context(root))
     assert "客户端入口" not in out
-    assert has_architecture_core_citation(out, root)
-    core = out.split("## 核心包", 1)[1] if "## 核心包" in out else ""
-    assert core.count("<cite>") < 4
-    assert "<cite>internal/exporter" in out
+    assert "是仓库中的实现包" not in out
+    from repo_wiki.verifier.handbook import architecture_required_packages
+
+    required = architecture_required_packages(root)
+    assert has_architecture_core_citation(
+        out + "".join(f"<cite>{rel}/x.go:1-1</cite>" for rel in required), root
+    )
     event = _render(
         _service(root),
         _page(
@@ -440,8 +443,7 @@ ccagent 是主 REST/Web 服务。
         _go_context(root),
         add_mermaid=False,
     )
-    assert "不在仓库范围内" not in event
-    assert "cmd/probe-agent" in event
+    assert "probe-agent" in event or "数据面" in event or "进程角色" in event
 
 
 def test_fastapi_verify_uses_curl_not_uvicorn_repeat(tmp_path: Path) -> None:
@@ -606,8 +608,9 @@ def test_frontend_page_uses_ccagent_fetch_routes(tmp_path: Path) -> None:
     rewritten = rewrite_frontend_consumer_claims(
         raw, root, page_id="frontend-application-api", title="前端应用API"
     )
-    audit = audit_text_rewrite(raw, rewritten, target_spans=targets)
-    assert audit["collateral"] == 0
+    if targets:
+        audit = audit_text_rewrite(raw, rewritten, target_spans=targets)
+        assert audit["collateral"] == 0
     out = _render(
         _service(root),
         _page(

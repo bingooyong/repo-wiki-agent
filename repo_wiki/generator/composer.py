@@ -557,7 +557,9 @@ class LLMPageComposer:
             completion_tokens = 0
             total_tokens = 0
             last_rejected: ComposerOutput | None = None
-            best_structured: ComposerOutput | None = None
+            best_clean: ComposerOutput | None = None
+            best_clean_score = (-1, -1, -1)
+            best_attempt: ComposerOutput | None = None
             best_score = (-1, -1, -1)
             rewrite_max_tokens: int | None = None
             rewrite_extra_body: dict[str, Any] | None = None
@@ -682,18 +684,39 @@ class LLMPageComposer:
                     raw_markdown=raw_reply,
                 )
                 score = self._attempt_structure_score(response_content)
-                prev_score = best_score
-                if best_structured is None or (
-                    score[0] >= prev_score[0] and score[1] >= prev_score[1]
-                ):
-                    best_structured = output
+                worse_than_earlier = best_score[0] >= 0 and (
+                    score[0] < best_score[0]
+                    or score[1] < best_score[1]
+                    or score[2] < best_score[2]
+                )
+                still_dirty = bool(output.rejected)
+                if still_dirty or worse_than_earlier:
+                    last_rejected = output
+                    extra_retry = validation_result.rejection_reason in {
+                        EVIDENCE_META_REJECTION,
+                        TINY_OR_TRUNCATED_REJECTION,
+                    }
+                    can_retry = (
+                        validation_result.rejection_reason in _PROSE_RECOVERY_REASONS
+                        or is_page_timeout_rejection(validation_result.rejection_reason)
+                    ) and (attempt == 0 or (attempt == 1 and extra_retry))
+                    if still_dirty and can_retry and best_clean is None:
+                        prompt = self._build_prose_recovery_prompt(
+                            input, context, response_content
+                        )
+                        if validation_result.rejection_reason == EMPTY_CONTENT_REJECTION:
+                            rewrite_max_tokens = self._resolve_empty_content_rewrite_max_tokens()
+                            rewrite_extra_body = self._empty_content_rewrite_extra_body()
+                        continue
+                    if best_clean is not None:
+                        return best_clean
+                    break
+                if best_attempt is None or score >= best_score:
+                    best_attempt = output
                     best_score = score
                 if not output.rejected:
-                    if prev_score[0] >= 0 and (
-                        score[0] < prev_score[0] or score[1] < prev_score[1]
-                    ):
-                        last_rejected = output
-                        break
+                    best_clean = output
+                    best_clean_score = score
                     return output
                 last_rejected = output
                 extra_retry = validation_result.rejection_reason in {
@@ -709,24 +732,11 @@ class LLMPageComposer:
                         rewrite_max_tokens = self._resolve_empty_content_rewrite_max_tokens()
                         rewrite_extra_body = self._empty_content_rewrite_extra_body()
                     continue
-                if (
-                    validation_result.rejection_reason in _KEEP_MARKDOWN_AFTER_RETRY
-                    and (response_content or "").strip()
-                ):
-                    output.rejected = False
-                    output.rejection_reason = None
-                    return output
                 break
 
-            chosen = best_structured or last_rejected or output
-            if (
-                chosen is not None
-                and chosen.rejected
-                and self._attempt_structure_score(chosen.markdown)[0] >= 1
-                and self._attempt_structure_score(chosen.markdown)[1] >= 1
-            ):
-                chosen.rejected = False
-                chosen.rejection_reason = None
+            if best_clean is not None:
+                return best_clean
+            chosen = last_rejected or best_attempt or output
             return chosen
 
         except Exception as e:
@@ -1002,66 +1012,49 @@ class LLMPageComposer:
                 )
         if page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
             root = Path(self.workspace_root or ".")
-            py_core = (root / "app" / "api" / "routes").is_dir()
-            go_internal = [
-                rel
-                for rel in (
-                    "internal/control",
-                    "internal/services",
-                    "internal/repository",
-                    "internal/exporter",
-                )
-                if (root / rel).is_dir()
-            ]
-            from repo_wiki.generator.process_roles import discover_cmd_processes
+            from repo_wiki.verifier.handbook import architecture_core_packages
 
-            cmd_refs = [f"cmd/{item.name}" for item in discover_cmd_processes(root)]
+            cores = architecture_core_packages(root)
             role_facts = self._process_role_facts()
-            cite_bits: list[str] = []
-            if py_core:
-                cite_bits.append("Python 必引 `app/api/routes` 与 `app/models`")
-            if cmd_refs or go_internal:
-                shown = "、".join(f"`{item}`" for item in [*cmd_refs, *go_internal])
-                cite_bits.append(f"Go 必引 {shown}" if shown else "")
-            cite_rule = "；".join(item for item in cite_bits if item)
+            shown = "、".join(f"`{item}`" for item in cores) if cores else "只写目录里有的包"
             extra = role_facts
-            control = next(
-                (item for item in discover_cmd_processes(root) if "EstablishTunnel" in item.text),
-                None,
-            )
-            if control is not None and re.search(r"-serve|transport", control.text):
-                extra += f"{control.name} 以 `-serve -transport grpc` 常驻时才是控制面，不要写成普通 CLI。"
             rules.append(
-                f"- 架构页：必须引用本仓库实际存在的核心包（{cite_rule or '只写目录里有的包'}）。"
+                f"- 架构页：必须在正文中点名并引用下列按 import 图/路由所有权排序的核心包：{shown}。"
                 f"{extra}"
                 "只写 import 图里存在的依赖。"
                 "不要引用 `*_test.go`，不要声称从 `package main` 导入类型。"
                 "不要把示例/demo/scaffold 二进制当成系统架构。"
+                "用段落写清各核心包职责，不要只贴包名清单。"
             )
         if page.category == WikiTaxonomyCategory.DATA_MODELS:
             root = Path(self.workspace_root or ".")
             go_models = (root / "internal" / "models").is_dir()
             python_domain = (root / "app" / "models" / "domain").is_dir()
             if go_models:
+                from repo_wiki.generator.deterministic_sections import discover_go_struct_names
+
+                structs = "、".join(discover_go_struct_names(root)[:12]) or "源码 type 声明"
                 rules.append(
                     "- 数据模型页：必须引用 `internal/models` 里 GORM 结构体的定义行"
                     "（不要只引文件头），可选引用 `db/schema.sql`。"
-                    "核心 11 个实体（ProbeEndpoint、ProbeResult、ProbeTag、ProbeSecret、"
-                    "ProbeBlackboxModule、BizTreeNode、BizInstanceEndpoint、ProbePolicy、"
-                    "ProbeRoutingBinding、AgentRegistry、AgentOpsSample）各写一段说明；"
+                    f"对源码中的业务 struct（{structs}）各写一段说明；"
                     "配置类型用表格，不要堆成无说明清单。"
-                    "AgentOpsSample 主键列为 AgentID 与 TsMS 两列并列，写成单列 TsMS 会与 GORM 定义不一致。"
+                    "主键列以 GORM tag 为准。"
                     "不要写 app/models 或 alembic。字段类型用源码真实类型，"
                     "关系按 `*_id` / gorm foreignKey / schema REFERENCES，不要猜测自环。"
                     "不要单独成行只写 `<cite>`。"
                 )
             elif python_domain:
+                from repo_wiki.generator.deterministic_sections import load_alembic_migration_models
+
+                tables = "、".join(
+                    str(item.get("name")) for item in load_alembic_migration_models(root)[:12]
+                ) or "迁移里 create_table 的表"
                 rules.append(
                     "- 数据模型页：ER 以 `app/db/migrations/versions` 的表为准"
-                    "（users、followers_to_followings、articles、tags、articles_to_tags、"
-                    "favorites、commentaries），并引用该 versions 文件与 `app/models/domain`。"
+                    f"（{tables}），并引用该 versions 文件与 `app/models/domain`。"
                     "这些是 Pydantic 领域模型 + asyncpg/raw SQL，不是 ORM 实体；"
-                    "不要发明 profiles 表，不要把 request/response schema 列成实体，"
+                    "不要发明不在迁移里的表，不要把 request/response schema 列成实体，"
                     "也不要只引用 alembic/env.py。"
                 )
             else:
@@ -1071,10 +1064,24 @@ class LLMPageComposer:
                 )
         if page.category == WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS:
             rules.append(
-                "- 部署页：提到 mysql 监听端口时必须写出 compose 里的真实端口数字，"
+                "- 部署页：提到数据库监听端口时必须写出 compose 里的真实端口数字，"
                 "不要留下「在  暴露」这类空缺；句子末不要在「使用」和句号之间留空格。"
                 "不要单独成行只写 `<cite>`。"
             )
+        blob = f"{page.page_id} {page.title}"
+        if "迁移" in blob or "migration" in blob.lower():
+            root = Path(self.workspace_root or ".")
+            alembic = (root / "alembic.ini").is_file()
+            versions = root / "app" / "db" / "migrations"
+            if alembic or versions.is_dir():
+                rules.append(
+                    "- 数据库迁移页：必须根据仓库搜索到的 Alembic 布局来写"
+                    "（`alembic.ini`、`app/db/migrations/`、命令 `alembic upgrade head`），"
+                    "不要猜测未出现的迁移工具或路径。每个 revision 的 upgrade 写清建了哪些表。"
+                )
+        mismatches = self._doc_only_identifier_note()
+        if mismatches:
+            rules.append(mismatches)
         return "\n".join(rules)
 
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
@@ -1153,9 +1160,9 @@ class LLMPageComposer:
 写作要求：
 - 输出完整 Markdown，不要解释你的过程。
 - 写给要改这个仓库的人看：用直陈句写代码里实际发生的事和调用关系，不要自我介绍本页写给谁。
-- 不要评论材料齐不齐，缺了的细节整段跳过。
+- 不要评论材料齐不齐或提示词有没有点名模块，缺了的细节整段跳过，也不要复述写作要求原文。
 - 必须以 `# {page.title}` 开头。
-- 正文控制在 900 到 1400 个中文字符之间，避免长篇泛化。
+- 正文控制在 900 到 1400 个中文字符之间；Git 工作流、性能、健康检查、核心服务等专题也必须写满可核对段落，不要短页。
 - 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
 - 至少保留 3 个 `<cite>` 引用，格式为仓库相对路径加行号范围，例如 `<cite>src/app.py:1-10</cite>`。
 {self._root_readme_cite_rule()}
@@ -1182,6 +1189,44 @@ class LLMPageComposer:
         if len(cleaned) > max_chars:
             return cleaned[: max_chars - 3].rstrip() + "..."
         return cleaned
+
+    def _doc_only_identifier_note(self) -> str:
+        """Tell the model which README identifiers are samples, not in code."""
+        root = Path(self.workspace_root or ".")
+        from repo_wiki.verifier.handbook import read_readme_text
+
+        readme = read_readme_text(root)
+        if not readme:
+            return ""
+        skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
+        source = []
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
+                continue
+            if any(part in skip for part in path.parts):
+                continue
+            try:
+                source.append(path.read_text(encoding="utf-8", errors="ignore"))
+            except OSError:
+                continue
+        blob = "\n".join(source)
+        names = []
+        for name in re.findall(r"\b([A-Z][A-Za-z0-9]{5,})\b", readme):
+            if name in blob:
+                continue
+            if re.search(
+                rf"\bdef\s+{re.escape(name)}\b|\bfunc\s+\([^)]+\)\s+{re.escape(name)}\b|\bfunc\s+{re.escape(name)}\b",
+                blob,
+            ):
+                continue
+            names.append(name)
+        if not names:
+            return ""
+        listed = "、".join(sorted(set(names))[:8])
+        return (
+            f"- 以下标识只出现在 README，源码中不存在（README sample, not in code）：{listed}。"
+            "不要写成接口合同，应标明为文档示例。"
+        )
 
     def _build_low_confidence_guidance(self, input: ComposerInput) -> str:
         """Build guidance text for low-confidence pages based on evidence quality.

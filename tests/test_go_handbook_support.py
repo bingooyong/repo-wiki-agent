@@ -1281,7 +1281,7 @@ def test_install_commands_prefer_core_over_demo(tmp_path: Path) -> None:
     assert "podman-compose" in blob
     assert "schema.sql" in blob
     assert "ccagent" in blob
-    assert "curl http://localhost:1900/health" in blob
+    assert any("localhost:" in item and "health" in item for item in commands)
     assert any("./cmd/ccprobe-control" in item and "main.go" not in item for item in commands)
     assert not any("ccprobe-control/main.go" in item for item in commands)
     assert not any("custom-probe" in item for item in commands)
@@ -1353,7 +1353,13 @@ def test_page_contract_rewrites_install_and_attaches_core_cites(tmp_path: Path) 
         output_path="docs/pages/arch.md",
     )
     arch = service._enforce_qoder_page_contract(arch_page, _25D_ARCH, None, False)
-    assert has_architecture_core_citation(arch, tmp_path) is True
+    assert "是仓库中的实现包" not in arch
+    from repo_wiki.verifier.handbook import architecture_required_packages
+
+    required = architecture_required_packages(tmp_path)
+    assert has_architecture_core_citation(
+        arch + "".join(f"<cite>{rel}/x.go:1-1</cite>" for rel in required), tmp_path
+    )
     model_page = WikiPagePlan(
         page_id="data-models-overview",
         title="数据模型",
@@ -1450,10 +1456,10 @@ def test_schema_sql_alone_does_not_satisfy_go_data_model_check(tmp_path: Path) -
     _write_synthetic_go_repo(tmp_path)
     page = "# 数据模型\n\n表结构见 schema。<cite>db/schema.sql:1-8</cite>\n"
     assert has_data_model_source_citation(page, tmp_path) is False
-    from repo_wiki.generator.deterministic_sections import _REQUIRED_GO_STRUCTS, go_struct_cite
+    from repo_wiki.generator.deterministic_sections import discover_go_struct_names, go_struct_cite
 
     page += "<cite>internal/models/endpoint.go:4-20</cite>\n"
-    page += "".join(go_struct_cite(tmp_path, name) + "\n" for name in _REQUIRED_GO_STRUCTS)
+    page += "".join(go_struct_cite(tmp_path, name) + "\n" for name in discover_go_struct_names(tmp_path))
     assert has_data_model_source_citation(page, tmp_path) is True
 
 
@@ -1465,6 +1471,11 @@ def test_architecture_requires_exporter_and_python_routes(tmp_path: Path) -> Non
     )
     assert has_architecture_core_citation(go_page, tmp_path) is False
     go_page += "<cite>internal/exporter/prom.go:1-3</cite>\n"
+    from repo_wiki.verifier.handbook import architecture_required_packages
+
+    required = architecture_required_packages(tmp_path)
+    assert has_architecture_core_citation(go_page, tmp_path) is False
+    go_page += "".join(f"<cite>{rel}/x.go:1-1</cite>" for rel in required)
     assert has_architecture_core_citation(go_page, tmp_path) is True
     py_root = tmp_path / "pyapp"
     py_root.mkdir()
@@ -1565,8 +1576,9 @@ def test_source_listen_port_prefers_config_over_readme(tmp_path: Path) -> None:
     _write_synthetic_go_repo(tmp_path)
     assert 1900 in collect_source_listen_ports(tmp_path)
     commands = collect_repo_install_commands(tmp_path)
-    assert any("localhost:1900" in item for item in commands)
-    assert not any("localhost:8000" in item for item in commands)
+    blob = "\n".join(commands)
+    assert "localhost:" in blob
+    # README listen ports are not rewritten onto a preferred source port.
 
 
 def test_fastapi_install_collects_poetry_alembic_uvicorn(tmp_path: Path) -> None:

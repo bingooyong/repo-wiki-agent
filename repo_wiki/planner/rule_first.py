@@ -619,7 +619,10 @@ class RuleFirstPlanner:
             title="核心服务",
             category=WikiTaxonomyCategory.CORE_SERVICES,
             parent=None,
-            source_requirements=SourceRequirement(modules=index_modules),
+            source_requirements=SourceRequirement(
+                modules=index_modules,
+                files=self._core_package_files(),
+            ),
             sort_order=0,
             tags=["index", "services"],
         )
@@ -872,6 +875,46 @@ class RuleFirstPlanner:
             if path and Path(self.identity.root_path, path).exists():
                 found.append(path)
         return found
+
+    def _topic_source_files(self, *needles: str) -> list[str]:
+        """Relative files whose path/name matches any needle (repo-agnostic)."""
+        root = Path(self.identity.root_path)
+        skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__", ".venv"}
+        found: list[str] = []
+        lowered = tuple(item.lower() for item in needles if item)
+        if not lowered or not root.is_dir():
+            return found
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if any(part in skip for part in path.parts):
+                continue
+            if path.suffix.lower() not in {
+                ".go",
+                ".py",
+                ".md",
+                ".rst",
+                ".yml",
+                ".yaml",
+                ".toml",
+                ".sh",
+            }:
+                continue
+            rel = path.relative_to(root).as_posix()
+            blob = rel.lower()
+            if any(needle in blob for needle in lowered):
+                found.append(rel)
+            if len(found) >= 12:
+                break
+        return found
+
+    def _core_package_files(self) -> list[str]:
+        try:
+            from repo_wiki.verifier.handbook import architecture_core_packages
+
+            return architecture_core_packages(Path(self.identity.root_path))
+        except Exception:
+            return []
 
     def _data_model_source_files(self) -> list[str]:
         files = self._existing_source_files(
@@ -1213,6 +1256,12 @@ class RuleFirstPlanner:
             title="性能优化",
             category=WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
             parent="development-guide",
+            source_requirements=SourceRequirement(
+                files=self._topic_source_files(
+                    "pool", "timeout", "cache", "worker", "concurrency", "benchmark"
+                )
+                or self._existing_source_files("Makefile", "go.mod", "pyproject.toml"),
+            ),
             sort_order=6,
             tags=["performance", "optimization"],
         )
@@ -1233,6 +1282,17 @@ class RuleFirstPlanner:
             title="Git工作流",
             category=WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
             parent="development-guide",
+            source_requirements=SourceRequirement(
+                files=self._existing_source_files(
+                    "CONTRIBUTING.md",
+                    "CONTRIBUTING.rst",
+                    ".github/CONTRIBUTING.md",
+                    "Makefile",
+                    ".github/workflows",
+                    ".gitlab-ci.yml",
+                )
+                or self._topic_source_files("contribut", "pull_request", "workflow"),
+            ),
             sort_order=8,
             tags=["git", "workflow"],
         )
@@ -1313,7 +1373,7 @@ class RuleFirstPlanner:
         for raw in files:
             low = raw.replace("\\", "/").lower()
             name = Path(low).name
-            if any(token in name for token in ("jwt", "apiauth", "auth")) or "/security.py" in low:
+            if any(token in name for token in ("jwt", "auth")) or "/security.py" in low:
                 kinds.add("auth")
             if any(token in low for token in ("rbac", "permission", "authorize")):
                 kinds.add("authz")
@@ -1463,6 +1523,16 @@ class RuleFirstPlanner:
             title="健康检查",
             category=WikiTaxonomyCategory.TROUBLESHOOTING,
             parent="troubleshooting-overview",
+            source_requirements=SourceRequirement(
+                files=self._existing_source_files(
+                    "README.md",
+                    "README.rst",
+                    "docker-compose.yml",
+                    "docker-compose.yaml",
+                    "compose.yaml",
+                )
+                + self._topic_source_files("health", "readyz", "livez", "heartbeat"),
+            ),
             sort_order=13,
             tags=["health", "monitoring"],
         )

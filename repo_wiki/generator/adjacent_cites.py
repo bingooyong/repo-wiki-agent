@@ -20,7 +20,7 @@ _GENERIC_IDENTIFIERS = frozenset(
     {
         "probe",
         "probes",
-        "probe_exporter",
+        "exporter",
         "config",
         "error",
         "errors",

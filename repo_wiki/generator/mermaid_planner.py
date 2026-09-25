@@ -109,7 +109,7 @@ def _join_key_scalar(name: str, raw_type: str = "") -> str:
 _PAGE_SCOPE_ALIASES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (
         ("auth", "jwt", "认证", "授权", "安全", "security"),
-        ("auth", "jwt", "security", "apiauth", "secrets", "netguard", "audit"),
+        ("auth", "jwt", "security", "secrets", "netguard", "audit"),
     ),
     (
         ("前端", "frontend", "web", "frontend-application"),
@@ -135,7 +135,7 @@ _PAGE_SCOPE_ALIASES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     ),
     (
         ("event-architecture", "event", "事件"),
-        ("internal/control", "internal/agent", "cmd/probe-agent"),
+        ("internal/control", "internal/agent"),
     ),
     (("database-schema", "数据库架构", "数据迁移"), ("migration", "models")),
 )
@@ -246,8 +246,36 @@ def _honest_method_path(endpoint: dict[str, Any], root: Path | None = None) -> t
     return method or "GET", path
 
 
+def _discover_auth_header_label(root: Path | None) -> str:
+    """First documented auth header in source; no sample-repo default."""
+    if root is None:
+        return "Authorization"
+    header_re = re.compile(r"""['"]((?:X-[A-Za-z0-9-]*Token)|Authorization)['"]""")
+    skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
+    found: list[str] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
+            continue
+        if any(part in skip for part in path.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for match in header_re.finditer(text):
+            token = match.group(1)
+            if token not in found:
+                found.append(token)
+    preferred = [item for item in found if item.startswith("X-")]
+    return (preferred or found or ["Authorization"])[0]
+
+
 def _auth_hop(
-    endpoint: dict[str, Any], *, go_auth: bool, py_auth: bool
+    endpoint: dict[str, Any],
+    *,
+    go_auth: bool,
+    py_auth: bool,
+    root: Path | None = None,
 ) -> tuple[str, str] | tuple[None, None]:
     if _endpoint_is_anonymous(endpoint):
         return None, None
@@ -257,9 +285,7 @@ def _auth_hop(
     if path_looks_like_example_cmd(file_path):
         return None, None
     if go_auth:
-        if "internal/agent" in file_path or "probe-agent" in file_path:
-            return "APIAuth", "X-Agent-Token"
-        return "APIAuth", "X-Probe-Api-Token"
+        return "APIAuth", _discover_auth_header_label(root)
     if py_auth:
         return "AuthenticationDep", "Authorization"
     return None, None
@@ -269,12 +295,18 @@ def _real_error_node(root: Path | None, endpoint: dict[str, Any]) -> str:
     file_path = str(endpoint.get("file_path") or "")
     if root and (root / "app" / "api" / "errors" / "http_error.py").is_file():
         return "HTTPException"
-    if "ccprobe-control" in file_path:
+    try:
+        text = Path(file_path).read_text(encoding="utf-8", errors="ignore") if file_path else ""
+    except OSError:
+        text = ""
+    if "writeAdminJSON" in text:
         return "writeAdminJSON"
-    if root and (root / "internal" / "agent").exists():
+    if "writeJSON" in text:
         return "writeJSON"
-    if root and (root / "apiauth.go").is_file():
-        return "writeJSON"
+    if root:
+        for rel in ("internal/agent", "internal/control"):
+            if (root / rel).exists():
+                return "writeJSON"
     return "HTTPException"
 
 
@@ -396,7 +428,7 @@ def _endpoint_actor(endpoint: dict[str, Any]) -> str:
     file_path = str(endpoint.get("file_path") or "").replace("\\", "/")
     handler = str(endpoint.get("handler") or endpoint.get("service") or "").strip()
     path = str(endpoint.get("path") or "")
-    if "ccprobe-control" in file_path:
+    if "control" in file_path and "cmd/" in file_path:
         if handler and handler not in _GENERIC_GO_HANDLERS and "NewHTTPHandler" not in handler:
             return handler
         return "runGRPCServe"
@@ -414,7 +446,7 @@ def _endpoint_actor(endpoint: dict[str, Any]) -> str:
         if leaf in {"ProbeHandler", "HealthHandler"}:
             return leaf
         return example_name or "example"
-    if "internal/agent" in file_path or "probe-agent" in file_path:
+    if "internal/agent" in file_path or (cmd_dir_name(file_path) and "agent" in cmd_dir_name(file_path)):
         if handler and handler not in _GENERIC_GO_HANDLERS:
             return handler
         return "NewHTTPHandler"
@@ -763,7 +795,7 @@ def _is_full_architecture_page(page_id: str) -> bool:
 def _architecture_prefer_tokens(page_id: str) -> tuple[str, ...] | None:
     pid = (page_id or "").lower()
     if any(token in pid for token in ("event", "事件")):
-        return ("control", "agent", "probe-agent", "cmd/probe-agent", "cmd/")
+        return ("control", "agent", "cmd/")
     if any(token in pid for token in ("data-flow", "数据流", "调用链")):
         return ("services", "repository", "exporter", "app/services", "app/db")
     if any(token in pid for token in ("module", "模块")):
@@ -823,11 +855,11 @@ def _import_edges_from_context(context: dict[str, Any]) -> list[tuple[str, str]]
 
 _OVERVIEW_NODE_CAP = 12
 _OVERVIEW_SKIP_PARTS = frozenset({"__init__.py", "tests", "test", "docs", "scripts"})
-_OVERVIEW_COMPOSE_LABELS = frozenset({"app", "db", "ccagent", "mysql", "blackbox", "postgres"})
+_OVERVIEW_COMPOSE_LABELS = frozenset({"app", "db", "mysql", "blackbox", "postgres"})
 
 
 def _overview_node_id(label: str) -> str:
-    """Prefix+suffix so node ids never collide with compose `app[` / `db[` / `ccagent`."""
+    """Prefix+suffix so node ids never collide with compose `app[` / `db[` labels."""
     return f"ovw_{mermaid_ident(label)}_n"
 
 
@@ -1933,7 +1965,10 @@ class MermaidPlanner:
         root = Path(self.workspace_root) if self.workspace_root else None
         if root is None:
             return None
-        if not (root / "cmd" / "probe-agent").exists():
+        from repo_wiki.generator.process_roles import derive_process_roles
+
+        roles = derive_process_roles(root)
+        if not any("tunnel_client" in item.kinds or "data_plane" in item.kinds for item in roles):
             return None
         hub_hit = False
         for base in (root / "internal", root / "cmd"):
@@ -1957,7 +1992,7 @@ class MermaidPlanner:
             diagram_id=f"{page_id}-grpc-tunnel",
             diagram_type=MermaidDiagramType.SEQUENCE_DIAGRAM,
             title="gRPC tunnel",
-            description="probe-agent heartbeats through TunnelHub",
+            description="data-plane heartbeats through TunnelHub",
             sequence_participants=["ProbeAgent", "TunnelHub", "ControlPlane"],
             sequence_messages=[
                 ("ProbeAgent", "TunnelHub", "Register/Heartbeat"),
@@ -2010,9 +2045,28 @@ class MermaidPlanner:
         root = Path(self.workspace_root) if self.workspace_root else None
         if root is None:
             return None
-        common = root / "app" / "api" / "routes" / "articles" / "articles_common.py"
-        profiles = root / "app" / "api" / "routes" / "profiles.py"
-        if not (common.is_file() and profiles.is_file()):
+        routes = root / "app" / "api" / "routes"
+        common = None
+        if routes.is_dir():
+            for path in routes.rglob("*.py"):
+                try:
+                    text = path.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    continue
+                if "favorite" in text.lower():
+                    common = path
+                    break
+        profiles = routes / "profiles.py" if routes.is_dir() else None
+        if profiles is not None and not profiles.is_file():
+            profiles = next(
+                (
+                    path
+                    for path in routes.rglob("*.py")
+                    if "follow" in path.read_text(encoding="utf-8", errors="ignore").lower()
+                ),
+                None,
+            ) if routes.is_dir() else None
+        if not (common and Path(common).is_file() and profiles and Path(profiles).is_file()):
             return None
         return DiagramPlan(
             diagram_id=f"{page_id}-favorite-follow",
@@ -2194,7 +2248,7 @@ class MermaidPlanner:
             description=".env loaded before alembic and app",
             nodes=[
                 DiagramNode(id="ovw_env_file_n", label="env-file", shape="rectangle"),
-                DiagramNode(id="ovw_settings_n", label="app/core/settings", shape="rectangle"),
+                DiagramNode(id="ovw_settings_n", label="settings", shape="rectangle"),
                 DiagramNode(id="ovw_alembic_n", label="alembic env.py", shape="rectangle"),
                 DiagramNode(id="ovw_app_main_n", label="app.main", shape="rectangle"),
             ],
@@ -2245,7 +2299,7 @@ class MermaidPlanner:
                         for item in endpoints
                         if "auth" in str(item.get("file_path") or "").lower()
                         or "login" in str(item.get("path") or "")
-                        or "apiauth" in str(item.get("file_path") or "").lower()
+                        or "authentication" in str(item.get("file_path") or "").lower()
                     ]
                     or [
                         item
@@ -2307,7 +2361,13 @@ class MermaidPlanner:
         if not method or not path:
             return None
         root = Path(self.workspace_root) if self.workspace_root else None
-        go_auth = bool(root and (root / "apiauth.go").is_file())
+        go_auth = bool(
+            root
+            and (
+                any(root.glob("*auth*.go"))
+                or (root / "internal" / "auth").is_dir()
+            )
+        )
         py_auth = bool(
             root and (root / "app" / "api" / "dependencies" / "authentication.py").is_file()
         )
@@ -2322,7 +2382,9 @@ class MermaidPlanner:
             ]
         else:
             handler = mermaid_ident(_endpoint_actor(sample), prefix="h")
-            auth_name, auth_label = _auth_hop(sample, go_auth=go_auth, py_auth=py_auth)
+            auth_name, auth_label = _auth_hop(
+                sample, go_auth=go_auth, py_auth=py_auth, root=root
+            )
             if auth_name and auth_label:
                 service = mermaid_ident(
                     _package_from_file(str(sample.get("file_path") or "")) or "Service",

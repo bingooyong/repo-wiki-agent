@@ -30,23 +30,91 @@ _HEADER_CITE_RE = re.compile(
 _PLANNING_LEAK_RE = re.compile(
     r"页面规划与证据绑定|页面基于仓库扫描|从提供的证据可见|证据中可确认的"
 )
-_REQUIRED_GO_STRUCTS = ("ProbeEndpoint", "ProbeResult", "ProbeTag", "ProbeSecret")
-_CORE_GO_STRUCTS: tuple[tuple[str, str], ...] = (
-    ("ProbeEndpoint", "探测目标端点，是拨测任务绑定的主实体，保存地址、模块与启用状态。"),
-    ("ProbeResult", "一次探测执行的结果记录，包含成功标志、状态码与耗时。"),
-    ("ProbeTag", "端点标签，用于分组检索与策略筛选。"),
-    ("ProbeSecret", "探测所需的密钥材料，不以明文写入配置文件。"),
-    ("ProbeBlackboxModule", "Blackbox Exporter 模块配置，描述 HTTP/ICMP 等探测方式。"),
-    ("BizTreeNode", "业务树节点，描述服务与实例的层级归属。"),
-    ("BizInstanceEndpoint", "业务实例与探测端点的绑定关系。"),
-    ("ProbePolicy", "探测策略，约束周期、超时与校验规则。"),
-    ("ProbeRoutingBinding", "探测路由绑定，把策略落到具体端点。"),
-    ("AgentRegistry", "已注册 probe-agent 的控制面记录。"),
-    (
-        "AgentOpsSample",
-        "按分钟聚合的 Agent 运维采样点，主键是 AgentID 与 TsMS 的复合键，而不是单独的 TsMS。",
-    ),
+_REQUIRED_GO_STRUCTS: tuple[str, ...] = ()
+_AUTH_ENV_RE = re.compile(
+    r"Env[A-Z][A-Za-z0-9]*(?:Token|Key)|[A-Z][A-Z0-9_]+(?:API_TOKEN|AUTH_TOKEN|SECRET_KEY)"
 )
+_AUTH_HEADER_RE = re.compile(r'["\'](X-[A-Za-z0-9-]*Token)["\']')
+_AUTH_FILE_HINT_RE = re.compile(
+    r"apiAuthMiddleware|Bearer|Authorization|jwt|Authenticate|Apply\b",
+    re.I,
+)
+
+
+def _repo_is_go(root: Path) -> bool:
+    from repo_wiki.generator.process_roles import repo_has_go_cmd_binaries
+
+    return repo_has_go_cmd_binaries(root)
+
+
+def _repo_is_python(root: Path) -> bool:
+    from repo_wiki.generator.process_roles import repo_has_python_app
+
+    return repo_has_python_app(root)
+
+
+def discover_go_struct_names(root: Path) -> list[str]:
+    models = root / "internal" / "models"
+    if not models.is_dir():
+        return []
+    names: list[str] = []
+    for path in sorted(models.glob("*.go")):
+        if path.name.endswith("_test.go"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        names.extend(re.findall(r"type\s+([A-Z][A-Za-z0-9]+)\s+struct\b", text))
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        ordered.append(name)
+    return ordered
+
+
+def discover_auth_implementation(root: Path) -> str:
+    """Positive auth facts from source files, no sample-repo file names."""
+    skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
+    best = ""
+    best_cite = ""
+    header = ""
+    env_name = ""
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
+            continue
+        if any(part in skip for part in path.parts) or path.name.endswith("_test.go"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if not _AUTH_FILE_HINT_RE.search(text) and not _AUTH_ENV_RE.search(text):
+            continue
+        rel = path.relative_to(root).as_posix()
+        env_hit = _AUTH_ENV_RE.search(text)
+        header_hit = _AUTH_HEADER_RE.search(text)
+        if env_hit:
+            env_name = env_hit.group(0)
+        if header_hit:
+            header = header_hit.group(1)
+        cite = cite_first_match(root, rel, r"Env[A-Z][A-Za-z0-9]*Token|apiAuthMiddleware|Bearer")
+        if cite and (env_hit or header_hit or "middleware" in text.lower()):
+            best = rel
+            best_cite = cite
+            if env_hit and header_hit:
+                break
+    if not best_cite:
+        return ""
+    bits = ["管理接口鉴权读取源码中的令牌环境变量"]
+    if env_name:
+        bits.append(f"`{env_name}`")
+    if header:
+        bits.append(f"请求头 `{header}` 或 Bearer")
+    return "，".join(bits) + f"。 {best_cite}\n"
 _INSTALL_OWNER_IDS = frozenset({"installation"})
 _INSTALL_SATELLITE_IDS = frozenset(
     {"quick-start", "quickstart", "getting-started", "local-setup", "environment-setup"}
@@ -69,7 +137,6 @@ _EMPTY_NUMBERED_RE = re.compile(
     r"(?m)^(\d+)\.\s+\S[^\n]*\n(?:<cite>[^<]+</cite>\s*\n)?(?:[ \t]*\n){2,}"
 )
 _GO_SECURITY_HINTS = (
-    "apiauth.go",
     "internal/auth",
     "internal/secrets",
     "internal/audit",
@@ -198,7 +265,7 @@ def leftover_request_flow_is_untrustworthy(block: str) -> bool:
     text = block or ""
     if "ErrorWrapper" in text:
         return True
-    if "/healthz" in text and ("X-Probe-Api-Token" in text or "APIAuth" in text):
+    if "/healthz" in text and re.search(r"X-[A-Za-z0-9-]*Token|APIAuth", text):
         return True
     if re.search(r"GET\s+/force-resync", text):
         return True
@@ -627,18 +694,23 @@ def has_runon_struct_cite_line(content: str) -> bool:
     for line in (content or "").splitlines():
         if line.count("<cite>") >= 8:
             return True
-        if len(line) >= 400 and "<cite>" in line and "ProbeEndpoint" in line:
+        if len(line) >= 400 and "<cite>" in line and "struct" in line.lower():
             return True
     return False
 
 
 def rewrite_token_const_cite(content: str, root: Path) -> str:
-    token = cite_first_match(root, "apiauth.go", r"EnvAPIToken\s*=")
-    if not token:
-        token = cite_first_match(root, "apiauth.go", r"PROBE_API_TOKEN")
-    if not token:
+    auth = discover_auth_implementation(root)
+    cite = re.search(r"<cite>[^<]+</cite>", auth or "")
+    if not cite:
         return content or ""
-    return re.sub(r"<cite>\s*apiauth\.go:13-\d+\s*</cite>", token, content or "")
+    return re.sub(
+        r"<cite>\s*[^<]*auth[^<]*:\d+-\d+\s*</cite>",
+        cite.group(0),
+        content or "",
+        count=1,
+        flags=re.I,
+    )
 
 
 def rewrite_force_resync_method(content: str) -> str:
@@ -864,10 +936,7 @@ def _go_local_db_start_lines(root: Path) -> list[str]:
             lines.extend(chunk)
         index += 1
     if not lines:
-        lines = [
-            "podman run --name mysql-db -d -e MYSQL_ROOT_PASSWORD=rootpassword "
-            "-e MYSQL_DATABASE=probe_exporter -p 3306:3306 mysql:8.0",
-        ]
+        lines = []
     return lines
 
 
@@ -889,7 +958,7 @@ def _primary_go_binary(root: Path) -> str:
 
 
 def build_go_install_section(root: Path) -> str:
-    port = preferred_source_listen_port(root) or 1900
+    port = preferred_source_listen_port(root)
     binary = _primary_go_binary(root)
     compose = cite_readme_line(root, "podman-compose up")
     schema = cite_readme_line(root, "schema.sql")
@@ -898,7 +967,7 @@ def build_go_install_section(root: Path) -> str:
     )
     run = cite_readme_line(root, f"./bin/{binary}") or cite_readme_line(root, "./bin/")
     health = cite_readme_line(root, "/health")
-    schema_cmd = "podman exec mysql-db mysql -uroot -prootpassword probe_exporter < db/schema.sql"
+    schema_cmd = "podman exec mysql-db mysql < db/schema.sql"
     if (root / "db" / "schema.sql").is_file() is False:
         schema_cmd = "mysql < db/schema.sql"
     return "\n".join(
@@ -925,7 +994,7 @@ def build_go_install_section(root: Path) -> str:
             f"3. 用源码监听端口检查健康状态。 {health}",
             "",
             "```bash",
-            f"curl http://localhost:{port}/health",
+            f"curl {('http://localhost:' + str(port) + '/health') if port else '/health'}",
             "```",
             "",
             "### 路径 B：本地编译",
@@ -953,7 +1022,7 @@ def build_go_install_section(root: Path) -> str:
             "",
             "```bash",
             f"./bin/{binary}",
-            f"curl http://localhost:{port}/health",
+            f"curl {('http://localhost:' + str(port) + '/health') if port else '/health'}",
             "```",
             "",
         ]
@@ -1035,9 +1104,9 @@ def build_fastapi_install_section(root: Path) -> str:
 
 
 def build_install_section(root: Path) -> str:
-    if (root / "cmd" / "ccagent").is_dir():
+    if _repo_is_go(root):
         return build_go_install_section(root)
-    if (root / "app" / "main.py").is_file():
+    if _repo_is_python(root):
         return build_fastapi_install_section(root)
     return ""
 
@@ -1060,14 +1129,9 @@ def build_go_role_section(root: Path) -> str:
         )
         if cite:
             cites.append(cite)
-    extra = ""
-    control = next((item for item in roles if "control_plane" in item.kinds), None)
-    if control is not None:
-        extra = f"{control.name} 不承担面向前端的 REST/管理入口。"
     return (
         "## 进程角色\n\n"
         + facts
-        + (" " + extra if extra else "")
         + (" " + " ".join(cites) if cites else "")
         + "\n"
     )
@@ -1241,7 +1305,8 @@ def build_data_model_cite_block(root: Path) -> str:
     if (root / "internal" / "models").is_dir():
         named = all_go_model_struct_cites(root)
         by_name = {name: cite for name, cite in named}
-        required = [go_struct_cite(root, name) for name in _REQUIRED_GO_STRUCTS]
+        discovered = discover_go_struct_names(root)
+        required = [go_struct_cite(root, name) for name in discovered[:8]]
         required = [item for item in required if item]
         if not named and not required:
             return ""
@@ -1252,15 +1317,15 @@ def build_data_model_cite_block(root: Path) -> str:
             if sqls:
                 rel = sqls[0].relative_to(root).as_posix()
                 migrations = f" `db/migrations` 含 {len(sqls)} 个 SQL 迁移，例如 {cite_first_match(root, rel, r'CREATE TABLE|create table') or f'<cite>{rel}:1-1</cite>'}。"
-        core_names = {name for name, _desc in _CORE_GO_STRUCTS}
+        core_names = set(discovered[:8])
         paragraphs: list[str] = []
-        for name, desc in _CORE_GO_STRUCTS:
+        for name in discovered[:8]:
             cite = by_name.get(name) or go_struct_cite(root, name)
             if not cite:
                 continue
-            paragraphs.append(f"{name} {desc} {cite}")
+            paragraphs.append(f"{name} 定义在 internal/models。 {cite}")
         if not paragraphs and required:
-            paragraphs = [f"核心探测实体定义见 internal/models。 {item}" for item in required[:4]]
+            paragraphs = [f"核心实体定义见 internal/models。 {item}" for item in required[:4]]
         config_rows = [f"| {name} | {cite} |" for name, cite in named if name not in core_names]
         table = ""
         if config_rows:
@@ -1271,8 +1336,9 @@ def build_data_model_cite_block(root: Path) -> str:
         body = "\n\n".join(paragraphs)
         return (
             "## 实体定义\n\n"
-            "GORM 结构体定义在 internal/models。核心实体各自描述探测目标、结果、策略与控制面状态，"
-            "配置类结构则集中在下表，避免把 50+ 个类型堆成无说明清单。\n\n"
+            "GORM 结构体定义在 internal/models。"
+            f"核心实体包括 {'、'.join(discovered[:8]) or '源码 type 声明'}，"
+            "配置类结构则集中在下表，避免把类型堆成无说明清单。\n\n"
             f"{body}\n\n"
             f"{table}\n"
             f"表结构见 db/schema.sql。{migrations}\n"
@@ -1299,36 +1365,25 @@ def build_data_model_cite_block(root: Path) -> str:
 
 def build_security_cite_block(root: Path) -> str:
     cites: list[str] = []
-    hints: tuple[str, ...] = (
-        _GO_SECURITY_HINTS if (root / "cmd" / "ccagent").is_dir() else _FASTAPI_SECURITY_HINTS
-    )
+    hints = _GO_SECURITY_HINTS if _repo_is_go(root) else _FASTAPI_SECURITY_HINTS
     for rel in hints:
         path = root / rel
         if path.exists():
             cite = cite_existing_meaningful(root, rel)
             if cite:
                 cites.append(cite)
+    auth = discover_auth_implementation(root)
+    if _repo_is_go(root):
+        if not auth and not cites:
+            return ""
+        extras = " ".join(cites[:4])
+        return "## 安全实现\n\n" + (auth or "") + (f"\n{extras}\n" if extras else "")
     if not cites:
         return ""
-    if (root / "cmd" / "ccagent").is_dir():
-        token = cite_first_match(
-            root, "apiauth.go", r"EnvAPIToken|PROBE_API_TOKEN|apiAuthMiddleware"
-        ) or next((item for item in cites if "apiauth.go" in item), "")
-        secrets = next((item for item in cites if "secrets" in item), "")
-        audit = next((item for item in cites if "audit" in item), "")
-        netguard = next((item for item in cites if "netguard" in item), "")
-        return (
-            "## 安全实现\n\n"
-            f"请求鉴权走 `apiauth` 中间件，校验环境变量 `PROBE_API_TOKEN`"
-            f"（`X-Probe-Api-Token` 或 Bearer）。 {token}\n\n"
-            f"密钥以 AES/Vault 存储，不把明文写进配置。 {secrets}\n\n"
-            f"审计事件写入 internal/audit，出站目标由 netguard 约束，敏感字段在日志中脱敏。"
-            f" {audit} {netguard}\n"
-        )
     return (
         "## 安全实现\n\n"
-        f"路由依赖从 Authorization 头读取 JWT（前缀见 settings.jwt_token_prefix）。 {cites[0]}\n\n"
-        f"口令哈希与令牌校验在 app/services/security.py 与 authentication 依赖中完成。"
+        f"路由依赖从 Authorization 头读取 JWT。 {cites[0]}\n\n"
+        f"口令哈希与令牌校验在认证依赖中完成。"
         f" {' '.join(cites[1:])}\n"
     )
 
@@ -1347,7 +1402,14 @@ def build_feature_prose(root: Path) -> str:
                 + " 等请求入口，再进入服务与仓储完成读写。"
             )
     if (root / "internal" / "services").is_dir():
-        return "核心功能由 ccagent 对外提供 REST/Web 接口，并由 services 与 repository 完成探针、策略和结果处理。"
+        from repo_wiki.generator.process_roles import derive_process_roles
+
+        rest = next(
+            (item for item in derive_process_roles(root) if "rest_entry" in item.kinds),
+            None,
+        )
+        owner = rest.name if rest is not None else "主 HTTP 入口"
+        return f"核心功能由 {owner} 对外提供 REST/Web 接口，并由 services 与 repository 完成请求处理。"
     return ""
 
 
@@ -1434,76 +1496,21 @@ def strip_empty_sections_and_footnotes(content: str) -> str:
     return "".join(kept)
 
 
+FRONTEND_CONSUMER_REPLACEMENTS: tuple[tuple[str, str], ...] = ()
+
 ARCHITECTURE_ROLE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
-    (r"边缘 Agent\s*`?(?:cmd/)?ccagent", "主 REST/Web 服务 ccagent"),
-    (r"边缘 Agent\s*`?ccagent`?", "主 REST/Web 服务 ccagent"),
-    (r"边缘 Agent ccagent", "主 REST/Web 服务 ccagent"),
-    (r"`ccagent`\s*作为隧道客户端", "`ccagent` 作为主 REST/Web 服务"),
-    (r"ccagent 作为隧道客户端", "ccagent 作为主 REST/Web 服务"),
-    (r"`ccprobe-control`\s*作为主 REST/Web", "`ccprobe-control` 作为 gRPC 控制面"),
-    (r"ccprobe-control 作为主 REST/Web", "ccprobe-control 作为 gRPC 控制面"),
-    (r"ccagent / agent：客户端代理", "ccagent：主 REST/Web 服务；probe-agent：隧道客户端"),
-    (r"single Go backend process", "four Go binaries under cmd/"),
+    (r"single Go backend process", "multiple Go binaries under cmd/"),
     (r"单一 Go 后端进程", "cmd/ 下多个独立二进制"),
-    (r"未提供显式迁移脚本", "db/migrations 提供 SQL 迁移"),
+    (r"未提供显式迁移脚本", "仓库内的迁移文件提供 schema 变更"),
     (r"不存在 ORM 映射实体", "Pydantic 领域模型不是 ORM"),
-    (
-        r"`?internal/control`?\s*依赖\s*`?internal/services`?\s*与\s*`?internal/repository`?",
-        "`internal/services` 依赖 `internal/control`；`internal/control` 不依赖 services/repository",
-    ),
-    (
-        r"`?ccprobe-control`?[^。\n]{0,80}via services/repository/exporter",
-        "ccprobe-control 的 import 图不含 services/repository/exporter",
-    ),
     (r"via services/repository/exporter", "不经过 services/repository/exporter"),
-    (
-        r"`(?:cmd/)?ccagent`（探针 Agent，作为隧道客户端连接到控制面）",
-        "`ccagent`（主 REST/Web 服务）",
-    ),
-    (
-        r"(?:cmd/)?ccagent`?（探针 Agent，作为隧道客户端[^）]*）",
-        "`ccagent`（主 REST/Web 服务）",
-    ),
-    (r"\*\*ccagent 隧道客户端\*\*", "**ccagent 主 REST/Web 服务**"),
-    (r"ccagent 隧道客户端", "ccagent 主 REST/Web 服务"),
-    (
-        r"`?ccagent`?[^。\n]{0,40}通过 `-agent-url`/`-agent-token` 与 `ccprobe-control` 建立反向控制链路",
-        "ccagent 作为主 REST/Web 服务对外提供 HTTP，不反连控制面",
-    ),
-    (
-        r"作为外部进程被拉起以返回 JSON 探针结果",
-        "由 `internal/probe` 经 HTTP 调用并解析 JSON 结果",
-    ),
-    (r"由 `internal/probe` 拉起并解析 JSON", "由 `internal/probe` 经 HTTP 调用并解析 JSON"),
-    (r"internal/probe 拉起", "internal/probe 经 HTTP 调用"),
+    (r"作为外部进程被拉起以返回 JSON 探针结果", "由探测包经 HTTP 调用并解析 JSON 结果"),
     (r"主进程负责隧道客户端", "主进程负责 REST/Web 服务"),
     (r"负责隧道客户端与运行环境适配", "负责 REST/Web 服务与运行环境适配"),
     (r"作为隧道客户端入口", "作为主 REST/Web 入口"),
     (r"带隧道能力的主 REST/Web 服务", "gRPC 控制面"),
     (r"作为隧道客户端连向", "作为主 REST/Web 服务对外提供"),
-    (r"`(?:cmd/)?ccagent` 是与采集端配套的客户端入口", "`ccagent` 是主 REST/Web 入口"),
     (r"是与采集端配套的客户端入口", "是主 REST/Web 入口"),
-    (r"\*\*客户端入口 `(?:cmd/)?ccagent`\*\*", "**主 REST/Web 入口 `ccagent`**"),
-    (r"客户端入口 `(?:cmd/)?ccagent`", "主 REST/Web 入口 `ccagent`"),
-    (
-        r"隧道客户端\s*\(`?probe-agent`?\)\s*不在仓库范围内",
-        "隧道客户端 `probe-agent` 位于 `cmd/probe-agent`",
-    ),
-    (r"`?probe-agent`?[^。\n]{0,24}不在仓库范围内", "`probe-agent` 位于 `cmd/probe-agent`"),
-    (r"不在仓库范围内，由 `ccprobe-control`", "位于 `cmd/probe-agent`，由 `ccprobe-control`"),
-    (r"承担 REST/管理入口职责", "承担 gRPC 控制面职责"),
-    (
-        r"`?ccprobe-control`?[^。\n]{0,80}承担 REST/管理入口",
-        "`ccprobe-control` 承担 gRPC 控制面",
-    ),
-    (
-        r"`?ccagent`? 入口仅完成 Alpine musl 环境下的 DNS 解析兼容初始化",
-        "`ccagent` 是主 REST/Web 服务，其 `init` 中的 DNS 设置仅用于 Alpine musl 兼容",
-    ),
-    (
-        r"本页涉及的 `ccagent` 入口仅完成 Alpine musl 环境下的 DNS 解析兼容初始化",
-        "`ccagent` 是主 REST/Web 服务；DNS 设置仅用于 Alpine musl 兼容",
-    ),
 )
 
 
@@ -1512,30 +1519,6 @@ def rewrite_architecture_role_claims(content: str) -> str:
     for pattern, repl in ARCHITECTURE_ROLE_REPLACEMENTS:
         text = re.sub(pattern, repl, text)
     return text
-
-
-FRONTEND_CONSUMER_REPLACEMENTS: tuple[tuple[str, str], ...] = (
-    (
-        r"ccprobe-control 模块面向前端应用的 HTTP API 入口",
-        "ccagent 面向前端应用的 HTTP API 入口",
-    ),
-    (
-        r"围绕 `ccprobe-control` 的 Go handler 与请求/响应结构展开 API 参考说明",
-        "围绕 `web/` 与 `static/` 对 ccagent `/probe`、`/tag`、`/api/v1` 的调用展开 API 参考说明",
-    ),
-    (
-        r"前端应用通过 HTTP 调用 ccprobe-control 暴露的查询与控制端点（`/force-resync`、`/healthz`、`/publish`、`/status`）",
-        "前端应用通过 `web/`、`static/` 调用 ccagent 的 `/probe`、`/tag`、`/api/v1` 路由",
-    ),
-    (
-        r"整体链路是“前端 → 控制面 handler → TunnelHub/服务 → 响应”",
-        "整体链路是“前端 fetch → ccagent `/probe` `/tag` `/api/v1` → 响应”",
-    ),
-    (
-        r"前端应用通过一组轻量的查询与控制端点完成状态查看、强制再同步与探测任务发布",
-        "前端应用通过 `/probe`、`/tag`、`/api/v1` 完成状态查看与标签查询",
-    ),
-)
 
 
 def rewrite_frontend_consumer_claims(
@@ -1548,17 +1531,25 @@ def rewrite_frontend_consumer_claims(
     blob = f"{page_id} {title} {content[:80]}"
     if not any(token in blob for token in ("前端", "frontend", "web")):
         return content or ""
-    text = content or ""
-    for pattern, repl in FRONTEND_CONSUMER_REPLACEMENTS:
-        text = re.sub(pattern, repl, text)
     from repo_wiki.generator.mermaid_planner import frontend_fetch_paths
+    from repo_wiki.generator.process_roles import derive_process_roles
 
+    text = content or ""
+    roles = derive_process_roles(root)
+    rest = next((item for item in roles if "rest_entry" in item.kinds), None)
+    control = next((item for item in roles if "control_plane" in item.kinds), None)
     fetches = frontend_fetch_paths(root)
-    if fetches and "ccprobe-control 暴露的查询与控制端点" in text:
-        listed = "、".join(f"`{path}`" for path in fetches[:6])
+    listed = "、".join(f"`{path}`" for path in fetches[:6]) if fetches else ""
+    if rest is not None and control is not None and control.name in text:
+        if listed:
+            text = re.sub(
+                rf"{re.escape(control.name)} 暴露的查询与控制端点",
+                f"{rest.name} 的 {listed} 路由",
+                text,
+            )
         text = text.replace(
-            "ccprobe-control 暴露的查询与控制端点",
-            f"ccagent 的 {listed} 路由",
+            f"{control.name} 模块面向前端应用的 HTTP API 入口",
+            f"{rest.name} 面向前端应用的 HTTP API 入口",
         )
     return text
 
@@ -1645,11 +1636,9 @@ def expand_truncated_build_commands(content: str, root: Path) -> str:
             r"go build -o (bin/[A-Za-z0-9_-]+)", ci.read_text(encoding="utf-8", errors="ignore")
         )
     if not names:
-        for cmd in ("ccagent", "ccprobe-control", "probe-agent"):
-            if (root / "cmd" / cmd).is_dir():
-                names.append(f"bin/{cmd}")
-    if not names:
-        names = ["bin/ccagent", "bin/ccprobe-control", "bin/probe-agent"]
+        from repo_wiki.generator.process_roles import discover_cmd_processes
+
+        names = [f"bin/{item.name}" for item in discover_cmd_processes(root)]
     listing = "、".join(f"`{name}`" for name in names[:6])
     commands = " && ".join(
         f"go build -o {name} ./cmd/{name.rsplit('/', 1)[-1]}" for name in names[:6]
@@ -1674,15 +1663,16 @@ def rewrite_checkout_directory_name(content: str, root: Path) -> str:
 
 
 def build_verify_section(root: Path) -> str:
-    if (root / "cmd" / "ccagent").is_dir():
+    if _repo_is_go(root):
         from repo_wiki.verifier.handbook import preferred_source_listen_port
 
-        port = preferred_source_listen_port(root) or 1900
+        port = preferred_source_listen_port(root)
         health = cite_readme_line(root, "/health")
+        url = f"http://localhost:{port}/health" if port else "/health"
         return (
             "## 启动与验证\n\n"
             f"1. 按安装步骤完成编排或本地编译。\n\n"
-            f"2. 用源码健康检查确认进程存活：`curl http://localhost:{port}/health` {health}\n"
+            f"2. 用源码健康检查确认进程存活：`curl {url}` {health}\n"
         )
     if (root / "app" / "main.py").is_file():
         return (
@@ -1795,16 +1785,12 @@ def apply_deterministic_rewrites(
             flags=re.I | re.S,
         )
     if is_auth_identity_page(page_id=page_id, title=title):
-        token = cite_first_match(
-            root, "apiauth.go", r"EnvAPIToken|PROBE_API_TOKEN|apiAuthMiddleware"
-        )
-        if token and "PROBE_API_TOKEN" not in text:
+        auth = discover_auth_implementation(root)
+        if auth:
             text = replace_h2_section(
                 text,
                 ("身份认证", "认证实现", "核心组件"),
-                "## 认证实现\n\n"
-                f"管理接口鉴权读取环境变量 `PROBE_API_TOKEN`，"
-                f"请求头为 `X-Probe-Api-Token` 或 Bearer。 {token}\n",
+                "## 认证实现\n\n" + auth,
             )
     core = build_core_service_section(root, page_id=page_id, title=title)
     if core:

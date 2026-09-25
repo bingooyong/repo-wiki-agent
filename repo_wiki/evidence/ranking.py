@@ -344,6 +344,54 @@ def _is_database_troubleshooting_page(page: WikiPagePlan) -> bool:
     return page.category == WikiTaxonomyCategory.TROUBLESHOOTING and "database" in page_id
 
 
+def _is_thin_topic_page(page: WikiPagePlan) -> bool:
+    blob = f"{page.page_id} {page.title}".lower()
+    return any(
+        token in blob
+        for token in (
+            "git-workflow",
+            "git工作流",
+            "performance",
+            "性能",
+            "health-check",
+            "健康检查",
+            "core-services",
+            "核心服务",
+        )
+    )
+
+
+def _score_thin_topic_evidence(
+    page: WikiPagePlan, path: str, name: str, symbol: str, text: str
+) -> tuple[float, list[str]]:
+    blob = f"{page.page_id} {page.title}".lower()
+    score = 0.0
+    signals: list[str] = []
+    if "git" in blob:
+        if name in {"contributing.md", "contributing.rst", "makefile"} or ".github" in path:
+            score += WEIGHT_ONBOARDING_SETTINGS + 1.0
+            signals.append("thin_git_workflow")
+    if "performance" in blob or "性能" in blob:
+        if any(token in path or token in text for token in ("pool", "timeout", "cache", "worker")):
+            score += WEIGHT_ONBOARDING_SETTINGS + 1.0
+            signals.append("thin_performance")
+    if "health" in blob or "健康" in blob:
+        if any(
+            token in path or token in text or token in symbol
+            for token in ("health", "readyz", "livez")
+        ):
+            score += WEIGHT_ONBOARDING_ENTRY + 1.0
+            signals.append("thin_health")
+        if name.startswith("readme"):
+            score += WEIGHT_ONBOARDING_README
+            signals.append("thin_health_readme")
+    if "核心服务" in blob or "core-service" in blob:
+        if path.startswith("app/") or path.startswith("internal/") or path.startswith("cmd/"):
+            score += WEIGHT_ONBOARDING_SETTINGS + 1.5
+            signals.append("thin_core_service")
+    return score, signals
+
+
 def _score_onboarding_evidence(
     page: WikiPagePlan, span: EvidenceSpanRecord
 ) -> tuple[float, list[str]]:
@@ -383,20 +431,20 @@ def _score_onboarding_evidence(
         from repo_wiki.generator.process_roles import path_looks_like_example_cmd
 
         blob = f"{page.page_id} {page.title}".lower()
-        if "ccprobe-control" in blob or "ccprobe control" in blob:
-            if "ccprobe-control" in path or "/control/" in path:
-                score += WEIGHT_ONBOARDING_ENTRY + 3.0
-                signals.append("core_ccprobe_control")
-            if path_looks_like_example_cmd(path):
-                score -= 8.0
-                signals.append("core_demote_example_cmd")
-        if "probe-agent" in blob or "probe agent" in blob:
-            if "probe-agent" in path or "/agent/" in path:
-                score += WEIGHT_ONBOARDING_ENTRY + 3.0
-                signals.append("core_probe_agent")
-            if path_looks_like_example_cmd(path):
-                score -= 8.0
-                signals.append("core_demote_example_cmd")
+        from repo_wiki.generator.process_roles import cmd_dir_name
+
+        cmd_name = cmd_dir_name(path)
+        if cmd_name and (
+            cmd_name.lower() in blob or cmd_name.replace("-", " ").lower() in blob
+        ):
+            score += WEIGHT_ONBOARDING_ENTRY + 3.0
+            signals.append("core_named_cmd")
+        if path_looks_like_example_cmd(path):
+            score -= 8.0
+            signals.append("core_demote_example_cmd")
+        elif path.startswith("app/") or path.startswith("internal/") or path.startswith("cmd/"):
+            score += WEIGHT_ONBOARDING_SETTINGS + 1.5
+            signals.append("thin_core_service")
         return score, signals
 
     if _is_overview_or_install_page(page):
@@ -454,12 +502,9 @@ def _score_onboarding_evidence(
             ):
                 score -= 4.0
                 signals.append("arch_demo_cmd")
-            elif "ccagent" in path or "probe-agent" in path or "ccprobe-control" in path:
+            else:
                 score += WEIGHT_ONBOARDING_ENTRY + 2.0
                 signals.append("arch_cmd_core")
-            else:
-                score += WEIGHT_ONBOARDING_ENTRY
-                signals.append("arch_cmd_main")
         if "app/api/routes" in path or path.startswith("app/models"):
             score += WEIGHT_ONBOARDING_SETTINGS + 2.0
             signals.append("arch_python_core")
@@ -496,6 +541,10 @@ def _score_onboarding_evidence(
         if "authentication.py" in path or path.endswith("/authentication.py"):
             score += WEIGHT_SECURITY_AUTH_FILE
             signals.append("security_auth_file")
+    elif _is_thin_topic_page(page):
+        extra, extra_signals = _score_thin_topic_evidence(page, path, name, symbol, text)
+        score += extra
+        signals.extend(extra_signals)
 
     return score, signals
 

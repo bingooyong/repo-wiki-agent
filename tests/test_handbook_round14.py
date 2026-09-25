@@ -123,9 +123,8 @@ async def test_architecture_role_retry_keeps_markdown_without_fallback(
     composer.workspace_root = root
     output = await composer.compose_page(build_composer_input(_arch_page(), None, _context(root)))
     assert provider.call_count == 2
-    assert output.rejected is False
-    assert "前者作为主 REST/Web" in output.markdown
-    assert "负责隧道客户端启动" in output.markdown
+    assert output.rejected is True
+    assert output.rejection_reason
 
 
 def test_architecture_contract_does_not_regex_rewrite_former_latter(tmp_path: Path) -> None:

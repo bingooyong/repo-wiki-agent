@@ -36,7 +36,11 @@ DEFAULT_PROBE_SRC = Path(os.environ.get("REPO_WIKI_PROBE_SRC", "/workspace/probe
 DEFAULT_FASTAPI_SRC = Path(
     os.environ.get("REPO_WIKI_FASTAPI_SRC", "/workspace/fastapi-realworld-example-app")
 )
-WAVES = ("25m", "25n", "25o", "25p", "25q")
+DEFAULT_ACC25R = Path(os.environ.get("REPO_WIKI_ACC25R_DIR", "/tmp/acc-25r"))
+DEFAULT_ACCEPTANCE_KIT = Path(
+    os.environ.get("REPO_WIKI_ACCEPTANCE_KIT", "/tmp/acceptance-kit")
+)
+WAVES = ("25m", "25n", "25o", "25p", "25q", "25r")
 REPOS = ("probe", "fastapi")
 
 _FENCE_RE = re.compile(r"```([^\n]*)\n(.*?)```", re.S)
@@ -55,10 +59,11 @@ def _cli() -> list[str]:
 
 
 def _cassette_dir(root: Path, repo: str, wave: str) -> Path:
-    path = root / f"{repo}-{wave}"
-    if not path.is_dir():
-        raise FileNotFoundError(f"missing cassette directory: {path}")
-    return path.resolve()
+    for name in (f"{repo}-{wave}", f"{repo}-{wave}-raw-cassette"):
+        path = root / name
+        if path.is_dir():
+            return path.resolve()
+    raise FileNotFoundError(f"missing cassette directory: {root / (repo + '-' + wave)}")
 
 
 def _source_for(repo: str, probe_src: Path, fastapi_src: Path) -> Path:
@@ -159,6 +164,69 @@ def _code_integrity_violations(
                 continue
             found.append({"page": rel, "unit": unit[:120]})
     return found
+
+
+def _acc25r_code_integrity(content: Path | None, cassette: Path, source: Path, acc25r: Path) -> dict:
+    script = acc25r / "code_integrity.py"
+    if content is None or not script.is_file():
+        return {"violations": None, "empty_spans": None, "unclosed_fences": None}
+    jsonl = next(iter(sorted(cassette.glob("*.jsonl"))), None)
+    if jsonl is None:
+        return {"violations": None, "empty_spans": None, "unclosed_fences": None}
+    try:
+        payload = json.loads(
+            subprocess.check_output(
+                [sys.executable, str(script), str(content), str(jsonl), str(source)],
+                text=True,
+            )
+        )
+    except (subprocess.CalledProcessError, json.JSONDecodeError, OSError):
+        payload = {}
+    empty = 0
+    unclosed = 0
+    tiny: list[str] = []
+    if content is not None:
+        from repo_wiki.generator.code_safe import empty_inline_spans
+        from repo_wiki.verifier.handbook import (
+            MIN_HANDBOOK_BODY_CHARS,
+            handbook_page_body_len,
+            has_unclosed_fence,
+        )
+
+        for path in sorted(content.rglob("*.md")):
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            empty += len(empty_inline_spans(text))
+            if has_unclosed_fence(text):
+                unclosed += 1
+            if handbook_page_body_len(text) < MIN_HANDBOOK_BODY_CHARS:
+                tiny.append(path.relative_to(content).as_posix())
+    return {
+        "violations": payload.get("violations"),
+        "empty_spans": empty,
+        "unclosed_fences": unclosed,
+        "tiny_pages": tiny,
+        "tiny_page_count": len(tiny),
+    }
+
+
+def _kit_cite_relevance(run_dir: Path, source: Path, kit: Path) -> dict[str, object]:
+    script = kit / "experimental" / "cite_relevance.py"
+    if not script.is_file():
+        return {}
+    try:
+        text = subprocess.check_output(
+            [sys.executable, str(script), "--strict", str(run_dir), str(source)],
+            text=True,
+        )
+    except (subprocess.CalledProcessError, OSError) as exc:
+        return {"error": str(exc)}
+    match = re.search(r"\{.*relevant_pct.*\}", text, re.S)
+    if not match:
+        return {}
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return {}
 
 
 def _run(cmd: list[str], cwd: Path | None, env: dict[str, str], log: Path) -> int:
@@ -301,6 +369,8 @@ def _eval_one(
     cassette: Path,
     out_dir: Path,
     acceptance_repo: str,
+    acc25r: Path | None = None,
+    acceptance_kit: Path | None = None,
 ) -> dict[str, object]:
     run_dir = source / ".repo-agent-eval" / "runs" / run_id
     if not (run_dir / "repowiki").exists():
@@ -375,6 +445,10 @@ def _eval_one(
     pages = _load_pages(content) if content else {}
     gaps = _text_gaps(pages)
     integrity = _code_integrity_violations(pages, source, cassette)
+    acc25r_dir = acc25r or DEFAULT_ACC25R
+    kit_dir = acceptance_kit or DEFAULT_ACCEPTANCE_KIT
+    acc25r_integrity = _acc25r_code_integrity(content, cassette, source, acc25r_dir)
+    kit_cite = _kit_cite_relevance(run_dir, source, kit_dir)
     acc_data: dict[str, object] = {}
     if acc_json.is_file():
         try:
@@ -391,8 +465,13 @@ def _eval_one(
         "strict_relevant_pct": cite_data.get("relevant_pct"),
         "strict_relevant": cite_data.get("relevant"),
         "strict_checked": cite_data.get("checked"),
-        "code_integrity_violations": len(integrity),
+        "code_integrity_violations": acc25r_integrity.get("violations", len(integrity)),
         "code_integrity_examples": integrity[:8],
+        "acc25r_empty_spans": acc25r_integrity.get("empty_spans"),
+        "acc25r_unclosed_fences": acc25r_integrity.get("unclosed_fences"),
+        "tiny_pages": acc25r_integrity.get("tiny_pages") or [],
+        "tiny_page_count": acc25r_integrity.get("tiny_page_count") or 0,
+        "kit_strict_relevant_pct": kit_cite.get("relevant_pct"),
         "pages": len(pages),
         **verify,
     }
@@ -408,6 +487,8 @@ def run_one(
     fastapi_src: Path,
     out_dir: Path,
     skip_generate: bool = False,
+    acc25r: Path | None = None,
+    acceptance_kit: Path | None = None,
 ) -> dict[str, object]:
     which = f"{repo}-{wave}"
     source = _source_for(repo, probe_src, fastapi_src)
@@ -446,6 +527,8 @@ def run_one(
         cassette=cassette,
         out_dir=out_dir,
         acceptance_repo=_acceptance_repo(repo),
+        acc25r=acc25r,
+        acceptance_kit=acceptance_kit,
     )
     result["generate_exit"] = 0
     result["cassette"] = str(cassette)
@@ -463,6 +546,10 @@ def _markdown_table(rows: list[dict[str, object]]) -> str:
         "strict%",
         "gaps",
         "code-integrity",
+        "empty-spans",
+        "unclosed-fences",
+        "<800",
+        "kit-strict%",
     )
     lines = [
         "| " + " | ".join(headers) + " |",
@@ -481,6 +568,10 @@ def _markdown_table(rows: list[dict[str, object]]) -> str:
                     str(row.get("strict_relevant_pct")),
                     str(row.get("text_gaps")),
                     str(row.get("code_integrity_violations")),
+                    str(row.get("acc25r_empty_spans")),
+                    str(row.get("acc25r_unclosed_fences")),
+                    str(row.get("tiny_page_count")),
+                    str(row.get("kit_strict_relevant_pct") or row.get("strict_relevant_pct")),
                 ]
             )
             + " |"
@@ -498,6 +589,8 @@ def main() -> int:
     parser.add_argument("--only", nargs="*", help="Subset like probe-25q fastapi-25p")
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--skip-generate", action="store_true")
+    parser.add_argument("--acc25r", type=Path, default=DEFAULT_ACC25R)
+    parser.add_argument("--acceptance-kit", type=Path, default=DEFAULT_ACCEPTANCE_KIT)
     args = parser.parse_args()
     targets: list[tuple[str, str]] = []
     only = set(args.only or [])
@@ -525,6 +618,8 @@ def main() -> int:
             fastapi_src=args.fastapi_src,
             out_dir=args.out,
             skip_generate=args.skip_generate or args.phase == "eval",
+            acc25r=args.acc25r,
+            acceptance_kit=args.acceptance_kit,
         )
 
     # Same source tree cannot generate two waves at once; pair across repos.

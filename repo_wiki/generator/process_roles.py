@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 _DATA_PLANE_RE = re.compile(
-    r"data-plane|dataplane|execution pool|execution-pool",
+    r"data-plane|dataplane|execution pool|execution-pool|probe execution|executionPool",
     re.IGNORECASE,
 )
 _CONTROL_PLANE_RE = re.compile(
@@ -23,7 +23,8 @@ _HTTP_SERVER_RE = re.compile(
     re.IGNORECASE,
 )
 _ROUTE_RE = re.compile(
-    r"""(?:HandleFunc|Handle|GET|POST|PUT|DELETE|PATCH|OPTIONS)\s*\(\s*['\"](/[^'\"]*)['\"]"""
+    r"""(?:HandleFunc|Handle|RegisterService|RegisterRawRoute|GET|POST|PUT|DELETE|PATCH|OPTIONS)"""
+    r"""\s*\(\s*(?:[A-Za-z0-9_.,\s]+,\s*)?['\"](/[^'\"]*)['\"]"""
     r"""|(?:@\w+\.(?:get|post|put|delete|patch)\(\s*['\"](/[^'\"]*)['\"])""",
     re.IGNORECASE,
 )
@@ -171,18 +172,29 @@ def _readme_run_blob(root: Path) -> str:
 
 def _imported_route_text(root: Path, main_text: str) -> str:
     extra: list[str] = []
+    seen: set[Path] = set()
     for match in re.finditer(r'"([A-Za-z0-9._/-]+)"', main_text or ""):
         spec = match.group(1)
-        if spec.startswith(".") or "/" not in spec and spec.count(".") == 0:
+        if spec.startswith("."):
             continue
         local = spec.split("/")[-1]
-        for candidate in (
+        candidates = [
             root / f"{local}.go",
             root / local / "controller.go",
             root / "controller.go",
-        ):
-            if candidate.is_file():
-                extra.append(_read_text(candidate)[:12000])
+        ]
+        if "/" in spec:
+            suffix = spec.split("/", 1)[-1]
+            candidates.append(root / f"{suffix}.go")
+            candidates.append(root / suffix)
+        for candidate in candidates:
+            if not candidate.is_file() or candidate in seen:
+                continue
+            seen.add(candidate)
+            extra.append(_read_text(candidate)[:12000])
+    controller = root / "controller.go"
+    if controller.is_file() and controller not in seen:
+        extra.append(_read_text(controller)[:12000])
     return "\n".join(extra)
 
 
@@ -315,16 +327,19 @@ def is_example_process(item: RepoProcess) -> bool:
 
 
 def _main_entry_candidates(processes: list[RepoProcess]) -> list[RepoProcess]:
+    """HTTP server + real routes is the REST/Web entry even if it also embeds gRPC."""
     eligible = [
         item
         for item in processes
-        if not item.example
-        and "http_server" in item.kinds
-        and "control_plane" not in item.kinds
-        and "data_plane" not in item.kinds
+        if not item.example and "http_server" in item.kinds and item.route_count > 0
     ]
-    with_routes = [item for item in eligible if item.route_count > 0]
-    return with_routes or eligible
+    if eligible:
+        return eligible
+    return [
+        item
+        for item in processes
+        if not item.example and "http_server" in item.kinds
+    ]
 
 
 def _score_main_entry(item: RepoProcess) -> tuple[int, int, int, str]:
@@ -397,9 +412,21 @@ def cmd_dir_name(file_path: str) -> str:
 def path_looks_like_example_cmd(file_path: str) -> bool:
     """True when a cmd/* path is an example/demo/scaffold tool."""
     name = cmd_dir_name(file_path)
-    if not name:
-        return bool(_EXAMPLE_HINT_RE.search(str(file_path or "")))
-    return bool(_EXAMPLE_HINT_RE.search(name) or name.startswith("custom"))
+    blob = name or str(file_path or "")
+    return bool(_EXAMPLE_HINT_RE.search(blob))
+
+
+def repo_has_go_cmd_binaries(root: Path | str | None) -> bool:
+    return bool(discover_cmd_processes(root))
+
+
+def repo_has_python_app(root: Path | str | None) -> bool:
+    if root is None:
+        return False
+    base = Path(root)
+    return (base / "app").is_dir() and (
+        (base / "app" / "main.py").is_file() or any((base / "app").rglob("*.py"))
+    )
 
 
 def unknown_process_mentions(markdown: str, allowed: set[str]) -> list[str]:
@@ -459,6 +486,8 @@ def _fact_for(item: RepoProcess, control: RepoProcess | None) -> str:
     bits: list[str] = []
     if item.example:
         bits.append("是示例工具")
+    elif "rest_entry" in item.kinds:
+        bits.append("是主 REST/Web 服务与管理入口")
     elif "data_plane" in item.kinds:
         bits.append("是数据面进程")
         pool = _execution_pool_label(item.text)
@@ -471,8 +500,6 @@ def _fact_for(item: RepoProcess, control: RepoProcess | None) -> str:
             bits.append("是 gRPC 控制面")
         else:
             bits.append("是控制面")
-    elif "rest_entry" in item.kinds:
-        bits.append("是主 REST/Web 服务与管理入口")
     if not bits:
         return ""
     return f"{item.name} {'，'.join(bits)}"

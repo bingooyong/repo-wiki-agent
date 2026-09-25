@@ -1585,36 +1585,13 @@ class RepoWikiService:
             actual_tokens += output.tokens_used
 
             if output.rejected:
-                # Quality rejects after a successful HTTP 200, and page LLM
-                # timeouts, are page-local fallbacks, not provider outages.
+                # Dirty or structurally worse re-asks are not shipped as READY.
                 if not is_page_local_quality_rejection(output.rejection_reason):
                     note_provider_failure()
-                markdown = (output.markdown or "").strip()
-                if markdown:
-                    enriched = self._enforce_qoder_page_contract(
-                        page=page,
-                        markdown=output.markdown,
-                        binding=binding,
-                        add_mermaid=_should_add_mermaid(page_idx, page),
-                        composition_context=context,
-                        inject_planner_mermaid=False,
-                    )
+                if getattr(output, "raw_markdown", "") or output.markdown:
                     self._write_raw_reply(
                         page, getattr(output, "raw_markdown", "") or output.markdown
                     )
-                    from repo_wiki.verifier.handbook import handbook_page_is_fallback_stub
-
-                    page_results[page_idx] = (page.output_path, enriched)
-                    stub = handbook_page_is_fallback_stub(enriched)
-                    page_metadata_by_idx[page_idx] = {
-                        "page_id": page.page_id,
-                        "source_path": page.output_path,
-                        "generation_mode": "fallback" if stub else "llm",
-                        "quality_state": "DEGRADED" if stub else "READY",
-                        "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
-                        "reasons": [output.rejection_reason or "llm_output_rejected"],
-                    }
-                    return
                 write_fallback(
                     page,
                     binding,
@@ -1645,15 +1622,7 @@ class RepoWikiService:
             from repo_wiki.verifier.handbook import handbook_page_is_fallback_stub
 
             if handbook_page_is_fallback_stub(enriched):
-                page_results[page_idx] = (page.output_path, enriched)
-                page_metadata_by_idx[page_idx] = {
-                    "page_id": page.page_id,
-                    "source_path": page.output_path,
-                    "generation_mode": "fallback",
-                    "quality_state": "DEGRADED",
-                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
-                    "reasons": ["tiny_or_stub_page"],
-                }
+                write_fallback(page, binding, page_idx, "tiny_or_stub_page")
                 return
             self._store_composer_cache_page(
                 cache,
@@ -2541,6 +2510,7 @@ class RepoWikiService:
             for candidate in binding.candidates[:8]:
                 cites.append(citation_renderer.render_cite_block_from_candidate(candidate))
 
+        from repo_wiki.generator.code_safe import map_outside_code
         from repo_wiki.generator.deterministic_sections import (
             attach_missing_route_cites,
             rewrite_architecture_role_claims,
@@ -2553,33 +2523,50 @@ class RepoWikiService:
             strip_unknown_go_packages,
         )
 
-        content = rewrite_architecture_role_claims(content)
-        content = rewrite_frontend_consumer_claims(
+        content = map_outside_code(content, rewrite_architecture_role_claims)
+        content = map_outside_code(
             content,
-            self.root,
-            page_id=str(getattr(page, "page_id", "") or ""),
-            title=str(getattr(page, "title", "") or ""),
+            lambda text: rewrite_frontend_consumer_claims(
+                text,
+                self.root,
+                page_id=str(getattr(page, "page_id", "") or ""),
+                title=str(getattr(page, "title", "") or ""),
+            ),
         )
-        content = rewrite_route_methods_from_table(content, self.root)
-        content = strip_unknown_go_packages(content, self.root)
-        content = rewrite_token_const_cite(content, self.root)
+        content = map_outside_code(
+            content, lambda text: rewrite_route_methods_from_table(text, self.root)
+        )
+        content = map_outside_code(
+            content, lambda text: strip_unknown_go_packages(text, self.root)
+        )
+        content = map_outside_code(content, lambda text: rewrite_token_const_cite(text, self.root))
         endpoints_for_cites = (
             list(getattr(composition_context, "endpoints", []) or [])
             if composition_context is not None
             else []
         )
-        content = rewrite_readme_route_cites(content, endpoints_for_cites)
-        content = attach_missing_route_cites(content, endpoints_for_cites)
+        content = map_outside_code(
+            content, lambda text: rewrite_readme_route_cites(text, endpoints_for_cites)
+        )
+        content = map_outside_code(
+            content, lambda text: attach_missing_route_cites(text, endpoints_for_cites)
+        )
         from repo_wiki.generator.deterministic_sections import rewrite_route_cites_from_endpoints
 
-        content = rewrite_route_cites_from_endpoints(content, endpoints_for_cites, self.root)
+        content = map_outside_code(
+            content,
+            lambda text: rewrite_route_cites_from_endpoints(text, endpoints_for_cites, self.root),
+        )
         try:
             from repo_wiki.generator.compose_evidence import (
                 load_repo_import_edges,
                 rewrite_false_import_claims,
             )
 
-            content = rewrite_false_import_claims(content, load_repo_import_edges(self.root))
+            content = map_outside_code(
+                content,
+                lambda text: rewrite_false_import_claims(text, load_repo_import_edges(self.root)),
+            )
         except Exception:
             pass
         content = self._rewrite_install_page_contract(page, content)
@@ -2742,35 +2729,22 @@ class RepoWikiService:
             )
         else:
             return content
-        if "make install" in content and "go install" not in content.lower():
-            content = content.replace(
-                "make install",
-                "make install（该目标执行 `go install`，不会安装配置文件）",
-                1,
-            )
-        return re.sub(r"app/core/settings/test\.py", "app/core/settings/app.py", content)
+        return content
 
     def _ensure_architecture_core_cites(self, page: Any, content: str) -> str:
         from repo_wiki.generator.deterministic_sections import (
             build_go_role_section,
-            cite_existing_meaningful,
             replace_h2_section,
         )
         from repo_wiki.planner.schema import WikiTaxonomyCategory
-        from repo_wiki.verifier.handbook import (
-            architecture_core_packages,
-            architecture_required_packages,
-            has_architecture_core_citation,
-        )
 
         if getattr(page, "category", None) != WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
             return content
         from repo_wiki.generator.deterministic_sections import is_architecture_owner_page
+        from repo_wiki.generator.process_roles import derive_process_role_facts
 
         page_id = str(getattr(page, "page_id", "") or "")
         title = str(getattr(page, "title", "") or "")
-        from repo_wiki.generator.process_roles import derive_process_role_facts
-
         role_facts = derive_process_role_facts(self.root)
         if is_architecture_owner_page(page_id=page_id, title=title):
             role = build_go_role_section(self.root)
@@ -2782,40 +2756,6 @@ class RepoWikiService:
                 ("进程角色",),
                 "## 角色说明\n\n进程角色见整体架构概览。\n",
             )
-        cores = architecture_core_packages(self.root)
-        for rel in cores:
-            cite = cite_existing_meaningful(self.root, rel)
-            if not cite:
-                continue
-            if rel.lower() not in content.lower():
-                continue
-            if f"<cite>{rel}" in content.replace("\\", "/"):
-                continue
-            content = re.sub(
-                rf"`{re.escape(rel)}`(?!\s*<cite>)",
-                f"`{rel}` {cite}",
-                content,
-                count=1,
-            )
-        content = re.sub(
-            r"\n## 核心包\n\n(?:(?:- )?`[^`]+`\s*<cite>[^<]+</cite>[。.\s]*)+",
-            "\n",
-            content,
-        )
-        if has_architecture_core_citation(content, self.root):
-            return content
-        required = architecture_required_packages(self.root)
-        missing = [
-            rel
-            for rel in required
-            if rel.lower()
-            not in " ".join(re.findall(r"<cite>\s*([^<]+?)\s*</cite>", content, flags=re.I)).lower()
-        ]
-        extra = [(rel, cite_existing_meaningful(self.root, rel)) for rel in missing]
-        extra = [(rel, item) for rel, item in extra if item]
-        sentences = " ".join(f"`{rel}` 是仓库中的实现包。 {cite}" for rel, cite in extra[:4])
-        if sentences:
-            content = content.rstrip() + f"\n\n{sentences}\n"
         return content
 
     def _ensure_data_model_source_cites(self, page: Any, content: str) -> str:
@@ -2848,7 +2788,6 @@ class RepoWikiService:
         if getattr(page, "category", None) != WikiTaxonomyCategory.SECURITY_COMPLIANCE:
             return content
         from repo_wiki.generator.deterministic_sections import (
-            cite_first_match,
             is_auth_identity_page,
             is_security_owner_page,
             replace_h2_section,
@@ -2858,16 +2797,14 @@ class RepoWikiService:
         title = str(getattr(page, "title", "") or "")
         content = re.sub(r"^.*安全实现见.*$", "", content, flags=re.M)
         if is_auth_identity_page(page_id=page_id, title=title):
-            token = cite_first_match(
-                self.root, "apiauth.go", r"EnvAPIToken|PROBE_API_TOKEN|apiAuthMiddleware"
-            )
-            if token:
+            from repo_wiki.generator.deterministic_sections import discover_auth_implementation
+
+            auth = discover_auth_implementation(self.root)
+            if auth:
                 content = replace_h2_section(
                     content,
                     ("身份认证", "认证实现", "核心组件", "安全实现"),
-                    "## 认证实现\n\n"
-                    f"管理接口鉴权读取环境变量 `PROBE_API_TOKEN`，"
-                    f"请求头为 `X-Probe-Api-Token` 或 Bearer。 {token}\n",
+                    "## 认证实现\n\n" + auth,
                 )
             return content
         if not is_security_owner_page(page_id=page_id, title=title):
@@ -2881,11 +2818,11 @@ class RepoWikiService:
 
     def _data_model_struct_cites(self) -> list[str]:
         from repo_wiki.generator.deterministic_sections import (
-            _REQUIRED_GO_STRUCTS,
+            discover_go_struct_names,
             go_struct_cite,
         )
 
-        cites = [go_struct_cite(self.root, name) for name in _REQUIRED_GO_STRUCTS]
+        cites = [go_struct_cite(self.root, name) for name in discover_go_struct_names(self.root)[:8]]
         return [item for item in cites if item]
 
     def _drop_uninventoried_snapshot_api_claims(
@@ -3603,25 +3540,8 @@ class RepoWikiService:
         return re.sub(r"<cite>\s*[^<]*_test\.go:[^<]*</cite>", "", content, flags=re.I)
 
     def _rewrite_health_check_ports(self, content: str, page: Any) -> str:
-        from repo_wiki.verifier.handbook import (
-            preferred_source_listen_port,
-            rewrite_install_command_ports,
-        )
-
-        title = str(getattr(page, "title", "") or "")
-        page_id = str(getattr(page, "page_id", "") or "")
-        if "健康" not in title and "health" not in page_id.lower() and "安装" not in title:
-            return content
-        port = preferred_source_listen_port(self.root)
-        if port is None:
-            return content
-        rewritten = []
-        for line in content.splitlines():
-            if "localhost:" in line.lower():
-                rewritten.append(rewrite_install_command_ports(line, self.root))
-            else:
-                rewritten.append(line)
-        return "\n".join(rewritten)
+        """Do not rewrite listen ports in generated pages; keep the model's URL."""
+        return content
 
     def _strip_reading_notes_boilerplate(self, content: str) -> str:
         lines = content.splitlines()

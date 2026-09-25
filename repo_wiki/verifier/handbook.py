@@ -42,11 +42,12 @@ _INSTRUCTION_VOICE_RE = re.compile(
     r"|进程角色必须|禁止写 cmd/|禁止用「前者"
 )
 _EVIDENCE_META_TALK_RE = re.compile(
-    r"证据片段|"
-    r"提供的证据范围|证据范围(?:只|仅|不足)|"
-    r"当前证据(?:只|仅|覆盖|不足|片段|范围|可见|可用)|"
-    r"当前(?:可用|可见|提供的)的?(?:源码)?证据|"
-    r"(?:可用|可见|提供的)的?源码证据"
+    r"证据片段|证据范围|"
+    r"当前证据|提供的证据|"
+    r"当前(?:可用|可见|提供的)(?:源码)?证据|"
+    r"(?:可用|可见|提供的)源码证据|"
+    r"(当前|可用|可见|提供的)的?(源码)?证据|"
+    r"用户当前没有指定"
 )
 _FALLBACK_STUB_MARKERS = (
     "面向接手仓库的人，用来定位这个主题在仓库里的实现",
@@ -232,19 +233,14 @@ def page_contains_identity_token(markdown: str, token: str) -> bool:
 
 
 def overview_identity_satisfied(markdown: str, repo_root: Path) -> bool:
-    """Return True when overview page states README/module/directory identity."""
-    from repo_wiki.generator.process_roles import derive_repo_identity_names
+    """Return True when the overview states the resolved product identity.
 
-    tokens = list(identity_match_tokens(repo_root))
-    tokens.extend(sorted(derive_repo_identity_names(repo_root)))
-    readme = read_readme_text(repo_root)
-    skip = {"this", "that", "with", "from", "backend", "readme", "note", "image"}
-    tokens.extend(
-        word
-        for word in re.findall(r"[A-Za-z][A-Za-z0-9_-]{3,}", readme)
-        if word.lower() not in skip
+    Only ``identity_match_tokens`` (display_name, package name, directory)
+    count. Any 4+ character README word is not an identity token.
+    """
+    return any(
+        page_contains_identity_token(markdown, token) for token in identity_match_tokens(repo_root)
     )
-    return any(page_contains_identity_token(markdown, token) for token in tokens if token)
 
 
 def _repo_run_source_text(repo_root: Path) -> str:
@@ -594,16 +590,7 @@ def preferred_source_listen_port(repo_root: Path) -> int | None:
     ports = collect_source_listen_ports(repo_root)
     if not ports:
         return None
-    if 1900 in ports:
-        return 1900
     return min(ports)
-
-
-def rewrite_install_command_ports(command: str, repo_root: Path) -> str:
-    port = preferred_source_listen_port(repo_root)
-    if port is None or "localhost:" not in command.lower():
-        return command
-    return _DOC_LOCALHOST_PORT_RE.sub(f"localhost:{port}", command)
 
 
 _MERMAID_FENCE_RE = re.compile(r"```mermaid\s*(.*?)```", re.IGNORECASE | re.DOTALL)
@@ -909,12 +896,7 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
                 if command and len(command) <= 120:
                     if _EXAMPLE_CMD_HINT_RE.search(command) and core_mains:
                         continue
-                    _add(
-                        rewrite_install_command_ports(
-                            normalize_go_build_command(command, root),
-                            root,
-                        )
-                    )
+                    _add(normalize_go_build_command(command, root))
     has_compose = any(
         token in item.lower()
         for item in commands
@@ -936,49 +918,85 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
 
 
 def architecture_core_packages(repo_root: Path) -> list[str]:
-    """Product packages an architecture page should cite when they exist."""
-    found: list[str] = []
+    """Product packages ranked by import-graph centrality and route ownership."""
+    from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+
+    scores: dict[str, int] = {}
+
     cmd = repo_root / "cmd"
     if cmd.is_dir():
         for child in sorted(cmd.iterdir()):
-            if child.is_dir() and any(child.glob("*.go")):
-                found.append(f"cmd/{child.name}")
+            if not child.is_dir() or not any(child.glob("*.go")):
+                continue
+            rel = f"cmd/{child.name}"
+            if path_looks_like_example_cmd(rel):
+                continue
+            scores[rel] = 2
     internal = repo_root / "internal"
     if internal.is_dir():
         for child in sorted(internal.iterdir()):
             if child.is_dir() and child.name not in {"testdata", "test", "__pycache__"}:
-                found.append(f"internal/{child.name}")
-    for rel in ("app/api/routes", "app/models"):
+                scores[f"internal/{child.name}"] = 1
+    for rel in ("app/api/routes", "app/models", "app/core", "app/db", "app/services"):
         if (repo_root / rel).exists():
-            found.append(rel)
-    return found
+            scores[rel] = 4
+
+    try:
+        from repo_wiki.generator.compose_evidence import load_repo_import_edges
+
+        edges = load_repo_import_edges(repo_root)
+    except Exception:
+        edges = set()
+    for _src, dest in edges:
+        dest_text = str(dest or "").replace("\\", "/")
+        for rel in scores:
+            leaf = rel.rsplit("/", 1)[-1]
+            if dest_text in {rel, leaf} or dest_text.endswith("/" + leaf):
+                scores[rel] += 3
+
+    route_re = re.compile(
+        r"HandleFunc|RegisterService|APIRouter|@(?:router|app)\.(?:get|post|put|delete|patch)",
+        re.I,
+    )
+    for rel in list(scores):
+        folder = repo_root / rel
+        files: list[Path] = []
+        if folder.is_dir():
+            files = [path for path in folder.rglob("*") if path.suffix.lower() in {".go", ".py"}]
+        elif folder.is_file():
+            files = [folder]
+        for path in files[:40]:
+            if path.name.endswith("_test.go") or path.name.endswith("_test.py"):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if route_re.search(text):
+                scores[rel] += 8
+                break
+
+    ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+    cores = [rel for rel, score in ranked if score >= 4]
+    if not cores:
+        cores = [rel for rel, _score in ranked[:4]]
+    return cores
 
 
 def architecture_required_packages(repo_root: Path) -> list[str]:
-    """Packages that must appear on the architecture page when they exist."""
-    cores = architecture_core_packages(repo_root)
-    preferred = [rel for rel in cores if rel.startswith("app/")]
-    if preferred:
-        return preferred[:2]
-    internal = [rel for rel in cores if rel.startswith("internal/")]
-    return (internal or cores)[:4]
+    """Every derived core package must appear on the architecture page."""
+    return list(architecture_core_packages(repo_root))
 
 
 def has_architecture_core_citation(markdown: str, repo_root: Path) -> bool:
-    """True when an architecture page cites real core packages, not only demos."""
+    """True when an architecture page cites every derived core package."""
     cores = architecture_core_packages(repo_root)
-    if len(cores) < 2:
+    if not cores:
         return True
     cited = " ".join(
         match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")
     ).lower()
-    needed = architecture_required_packages(repo_root)
-    if needed:
-        required_hits = sum(1 for rel in needed if rel.lower() in cited)
-        if required_hits < min(2, len(needed)):
-            return False
-    hits = sum(1 for rel in cores if rel.lower() in cited)
-    return hits >= min(2, len(cores))
+    return all(rel.lower() in cited for rel in cores)
 
 
 def data_model_required_sources(repo_root: Path) -> list[str]:
@@ -1083,10 +1101,10 @@ def _has_go_struct_definition_cite(markdown: str, repo_root: Path) -> bool:
 
 
 def _has_required_go_struct_cites(markdown: str, repo_root: Path) -> bool:
-    from repo_wiki.generator.deterministic_sections import _REQUIRED_GO_STRUCTS, go_struct_cite
+    from repo_wiki.generator.deterministic_sections import discover_go_struct_names, go_struct_cite
 
     text = markdown or ""
-    needed = [go_struct_cite(repo_root, name) for name in _REQUIRED_GO_STRUCTS]
+    needed = [go_struct_cite(repo_root, name) for name in discover_go_struct_names(repo_root)[:8]]
     needed = [item for item in needed if item]
     if not needed:
         return True
@@ -1262,54 +1280,22 @@ def handbook_unknown_process_offenders(
     return found
 
 
-_FENCE_BODY_RE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
-_INLINE_BODY_RE = re.compile(r"`([^`\n]+)`")
 _STALE_METHOD_RE = re.compile(r"`([A-Z][A-Za-z0-9]+)`")
 
 
 def _iter_page_code_units(markdown: str) -> list[str]:
+    """Inline/fence bodies for integrity, matching acc-25r (incl. bash, A.B, spaces)."""
+    from repo_wiki.generator.code_safe import iter_integrity_code_units
+
     units: list[str] = []
-    for match in re.finditer(r"```([^\n]*)\n(.*?)```", markdown or "", flags=re.S):
-        lang = (match.group(1) or "").strip().split()[0].lower() if match.group(1) else ""
-        if lang in {"mermaid", "plantuml", "graphviz", "bash", "sh", "shell", "markdown", "md"}:
+    for kind, body in iter_integrity_code_units(markdown):
+        if kind == "empty":
             continue
-        body = match.group(2).strip()
-        if body:
-            units.append(body)
-    stripped = _FENCE_BODY_RE.sub("", markdown or "")
-    stripped = _CITE_RE.sub("", stripped)
-    for match in _INLINE_BODY_RE.finditer(stripped):
-        body = match.group(1).strip()
-        if not body or _code_unit_is_doc_ref(body):
+        normalized = re.sub(r"\s+", " ", body).strip()
+        if len(normalized) < 3:
             continue
         units.append(body)
     return units
-
-
-def _code_unit_is_doc_ref(body: str) -> bool:
-    if "/" in body or body.startswith("-"):
-        return True
-    if re.search(r"\.(py|go|rst|md|yml|yaml|toml|sql|json)$", body):
-        return True
-    if re.fullmatch(r"[\w./-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?", body):
-        return True
-    if re.search(r"[A-Za-z0-9]\.[A-Za-z][A-Za-z0-9]+[A-Z]", body):
-        return True
-    if "..." in body or "*" in body or body.startswith("folder"):
-        return True
-    if " " in body and not re.search(r"\w+\(", body):
-        return True
-    if re.fullmatch(r"[A-Z][A-Za-z0-9]+(?:\.[A-Z][A-Za-z0-9]+)+", body):
-        return True
-    if re.fullmatch(r"[\u4e00-\u9fff，。；：、\s]+", body):
-        return True
-    if re.match(r"[\u4e00-\u9fff，。；：、）]", body):
-        return True
-    if re.search(r"\.(ya?ml|py|go|md|rst)[A-Za-z]", body):
-        return True
-    if re.fullmatch(r"\d+", body):
-        return True
-    return len(body) < 3
 
 
 def handbook_code_integrity_offenders(
@@ -1317,7 +1303,14 @@ def handbook_code_integrity_offenders(
     repo_root: Path | None,
     raw_replies: dict[str, str] | None = None,
 ) -> dict[str, list[str]]:
-    """Code spans/fences in the final page that are in neither raw reply nor source."""
+    """Code spans/fences mutated away from the raw reply and repository source.
+
+    Also flags empty inline spans and unclosed fences. Thresholds match
+    acc-25r/code_integrity.py: mermaid excluded, bash fences and A.B / spaced
+    spans included, whitespace-normalised membership.
+    """
+    from repo_wiki.generator.code_safe import empty_inline_spans, iter_integrity_code_units
+
     if content_dir is None or not content_dir.exists() or repo_root is None:
         return {}
     source_blob = _repo_source_blob(repo_root)
@@ -1327,22 +1320,36 @@ def handbook_code_integrity_offenders(
     raw_norm = _norm_code_blob(all_raw)
     found: dict[str, list[str]] = {}
     for path in iter_markdown_pages(content_dir):
-        rel = path.relative_to(content_dir).as_posix()
         text = path.read_text(encoding="utf-8", errors="ignore")
-        raw = (raw_replies or {}).get(rel) or (raw_replies or {}).get(path.stem) or ""
+        raw = (raw_replies or {}).get(path.relative_to(content_dir).as_posix()) or (
+            raw_replies or {}
+        ).get(path.stem) or ""
         missing: list[str] = []
-        for unit in _iter_page_code_units(text):
+        if has_unclosed_fence(text):
+            missing.append("unclosed-fence")
+        empty_count = len(empty_inline_spans(text))
+        if empty_count:
+            missing.append(f"empty-span x{empty_count}")
+        for kind, body in iter_integrity_code_units(text):
+            if kind == "empty":
+                continue
+            normalized = re.sub(r"\s+", " ", body).strip()
+            if len(normalized) < 3:
+                continue
             if (
-                unit in raw
-                or unit in all_raw
-                or unit in source_blob
-                or _norm_code_blob(unit) in raw_norm
-                or _norm_code_blob(unit) in source_norm
+                body in raw
+                or body in all_raw
+                or body in source_blob
+                or normalized in re.sub(r"\s+", " ", raw)
+                or normalized in re.sub(r"\s+", " ", all_raw)
+                or normalized in re.sub(r"\s+", " ", source_blob)
+                or _norm_code_blob(body) in raw_norm
+                or _norm_code_blob(body) in source_norm
             ):
                 continue
-            missing.append(unit[:160])
+            missing.append(f"{kind}: {normalized[:120]}")
         if missing:
-            found[path.as_posix()] = missing[:12]
+            found[path.as_posix()] = missing[:16]
     return found
 
 
@@ -1352,7 +1359,7 @@ def handbook_doc_code_mismatches(
     """Stale README method names that do not appear in repository source."""
     if content_dir is None or not content_dir.exists() or repo_root is None:
         return {}
-    source_blob = _repo_source_blob(repo_root)
+    source_blob = _repo_code_blob(repo_root)
     found: dict[str, list[str]] = {}
     for path in iter_markdown_pages(content_dir):
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -1431,6 +1438,24 @@ def _repo_source_blob(repo_root: Path) -> str:
             ".toml",
             ".sql",
         }:
+            continue
+        try:
+            parts.append(path.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            continue
+    return "\n".join(parts)
+
+
+def _repo_code_blob(repo_root: Path) -> str:
+    """Code files only; docs are excluded so README samples can be flagged."""
+    skip = {".git", ".repo-agent-eval", "node_modules", "vendor", "__pycache__", ".venv"}
+    parts: list[str] = []
+    for path in repo_root.rglob("*"):
+        if not path.is_file() or any(part in skip for part in path.parts):
+            continue
+        if path.suffix.lower() not in {".go", ".py"}:
+            continue
+        if path.name.endswith("_test.go") or path.name.endswith("_test.py"):
             continue
         try:
             parts.append(path.read_text(encoding="utf-8", errors="ignore"))

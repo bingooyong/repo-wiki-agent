@@ -168,7 +168,7 @@ def invented_compose_edges(markdown: str, allowed: list[tuple[str, str]]) -> lis
     for block in re.findall(r"```mermaid\s*(.*?)```", markdown or "", flags=re.I | re.S):
         if "erDiagram" in block or "sequenceDiagram" in block:
             continue
-        if "ccagent" not in block and "mysql" not in block and "blackbox" not in block:
+        if "mysql" not in block and "blackbox" not in block:
             if "app[" not in block and "db[" not in block:
                 continue
         for src, dest in mermaid_compose_edges(block):
@@ -178,7 +178,7 @@ def invented_compose_edges(markdown: str, allowed: list[tuple[str, str]]) -> lis
                 continue
             if (
                 (src, dest) not in allowed_set
-                and {src, dest} & (allowed_names | {"probe-network", "mysql-data", "ccagent-logs"})
+                and {src, dest} & (allowed_names | {"probe-network", "mysql-data"})
                 or src.endswith("-network")
                 or dest.endswith("-data")
                 or dest.endswith("-logs")

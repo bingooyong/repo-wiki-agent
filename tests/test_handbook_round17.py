@@ -33,16 +33,30 @@ from tests.test_handbook_round16 import _pad, _write_probe_mains
 from tests.test_llm_compose_retry import SequenceLLMProvider
 
 _FORBIDDEN_LITERALS = (
+    "ccagent",
+    "ccprobe-control",
+    "probe-agent",
+    "apiauth",
+    "X-Probe-Api-Token",
+    "probe_exporter",
+    "app/core/settings",
+    "ProbeBlackbox",
+    "articles_common",
+    "拨测",
     "conduit",
     "realworld",
     "fdf8821871d7",
-    "cmd/ccagent",
-    "cmd/ccprobe-control",
-    "custom-probe",
     "not actively maintained",
     "不再积极维护",
-    "拨测执行",
-    "探测执行池",
+    "1900",
+)
+_FORBIDDEN_PATH_JOINS = (
+    r"""["']cmd["']\s*,\s*["']ccagent["']""",
+    r"""["']cmd["']\s*/\s*["']ccagent["']""",
+    r"""["']cmd["']\s*,\s*["']ccprobe-control["']""",
+    r"""["']cmd["']\s*/\s*["']ccprobe-control["']""",
+    r"""["']cmd["']\s*,\s*["']probe-agent["']""",
+    r"""["']cmd["']\s*/\s*["']probe-agent["']""",
 )
 
 
@@ -123,11 +137,11 @@ def test_example_binary_is_not_main_entry(tmp_path: Path) -> None:
 
 
 def test_best_structured_attempt_is_kept(tmp_path: Path) -> None:
-    (tmp_path / "apiauth.go").write_text("package api\nfunc Apply() {}\n", encoding="utf-8")
+    (tmp_path / "auth.go").write_text("package api\nfunc Apply() {}\n", encoding="utf-8")
     good = _pad(
         "# 认证授权API\n\n## 简介\n\n"
-        "当前可见的源码证据只覆盖令牌解析。"
-        "完整说明令牌解析与控制器注册。<cite>apiauth.go:1-2</cite>\n"
+        "令牌解析发生在请求进入控制器之前。"
+        "完整说明令牌解析与控制器注册。<cite>auth.go:1-2</cite>\n"
         "## 核心组件\n\n控制器把凭证接入请求生命周期。\n",
         minimum=1100,
     )
@@ -250,13 +264,12 @@ def test_code_integrity_matches_raw_replies_by_any_path(tmp_path: Path) -> None:
     assert "FastAPI()" not in flat
     assert "pool.close()" not in flat
     (content / "部署.md").write_text(
-        "# 部署\n\n`docker-compose.ymlapp` 与 `，不会安装配置文件）` 不是代码。\n",
+        "# 部署\n\n调用 `FastAPI()`。\n\n```bash\nmake install\n```\n",
         encoding="utf-8",
     )
     more = handbook_code_integrity_offenders(content, tmp_path)
     flat = [unit for units in more.values() for unit in units]
-    assert "docker-compose.ymlapp" not in flat
-    assert "，不会安装配置文件）" not in flat
+    assert not any(unit.startswith("empty-span") for unit in flat)
 
 
 def test_readme_header_range_cite_is_rewritten(tmp_path: Path) -> None:
@@ -284,6 +297,8 @@ def test_readme_header_range_cite_is_rewritten(tmp_path: Path) -> None:
 
 
 def test_no_repo_specific_literals_in_audited_source() -> None:
+    import re
+
     repo = Path(__file__).resolve().parents[1]
     hits: list[str] = []
     for path in sorted((repo / "repo_wiki").rglob("*.py")):
@@ -292,21 +307,24 @@ def test_no_repo_specific_literals_in_audited_source() -> None:
         for token in _FORBIDDEN_LITERALS:
             if token in text:
                 hits.append(f"{rel}:{token}")
+        for pattern in _FORBIDDEN_PATH_JOINS:
+            if re.search(pattern, text):
+                hits.append(f"{rel}:path-join:{pattern}")
     assert hits == []
 
 
 def test_generator_version_is_r17() -> None:
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r17-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r18-")
 
 
-def test_hedged_current_evidence_is_not_meta_talk() -> None:
+def test_hedged_current_evidence_is_meta_talk() -> None:
     from repo_wiki.verifier.handbook import contains_evidence_meta_talk
 
     assert contains_evidence_meta_talk("当前可见的源码证据只覆盖令牌解析。")
     assert contains_evidence_meta_talk("本页限定在提供的证据范围内描述迁移。")
-    assert not contains_evidence_meta_talk("其余状态码在当前证据之外，不再推断。")
-    assert not contains_evidence_meta_talk("当前证据集中在迁移 revision 的 upgrade。")
-    assert not contains_evidence_meta_talk("额外模块不在源码证据范围内，应避免凭空假设。")
+    assert contains_evidence_meta_talk("其余状态码在当前证据之外，不再推断。")
+    assert contains_evidence_meta_talk("当前证据集中在迁移 revision 的 upgrade。")
+    assert contains_evidence_meta_talk("额外模块不在源码证据范围内，应避免凭空假设。")
 
 
 def test_fallback_stub_detector_ignores_short_llm() -> None:

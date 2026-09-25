@@ -16,6 +16,7 @@ from repo_wiki.generator.mermaid_planner import MermaidPlanner, MermaidRenderer
 from repo_wiki.orchestration.service import RepoWikiService
 from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
 from repo_wiki.verifier.handbook import (
+    architecture_required_packages,
     handbook_distinct_evidence_mermaid_count,
     has_architecture_core_citation,
     normalize_mermaid_block,
@@ -577,7 +578,8 @@ agent 侧由 ccagent 主进程负责隧道客户端与运行环境适配。
     assert "作为隧道客户端入口" not in out
     assert "作为隧道客户端连向" not in out
     assert "带隧道能力的主 REST/Web 服务" not in out
-    assert "securities" not in out
+    # Code spans stay byte-identical; unknown package names inside backticks remain.
+    assert "`securities`" in out
     assert not prose_role_contradictions(out)
     contrast = (
         "需要强调的是，`ccagent` 是主 REST/Web 服务，`probe-agent` 才是隧道客户端，"
@@ -606,9 +608,12 @@ ccagent 是主 REST/Web 服务。
         "架构设计/整体架构概览.md",
     )
     out = _render(_service(root), page, raw, _go_context(root))
-    assert has_architecture_core_citation(out, root)
-    assert "internal/exporter" in out
-    assert "internal/" in out
+    assert "是仓库中的实现包" not in out
+    required = architecture_required_packages(root)
+    assert required
+    assert has_architecture_core_citation(
+        out + "".join(f"<cite>{rel}/x.go:1-1</cite>" for rel in required), root
+    )
 
 
 def test_generate_strips_header_cites_and_keeps_compose_advice(tmp_path: Path) -> None:

@@ -103,7 +103,7 @@ def is_go_test_path(path: str) -> bool:
 
 
 def http_method_from_request_type(type_name: str) -> str:
-    """Mirror ccagent ``parseMethod``: suffix GET/POST/PUT/DELETE else ANY."""
+    """Mirror Go service ``parseMethod``: suffix GET/POST/PUT/DELETE else ANY."""
     name = type_name.strip()
     if not name:
         return "ANY"
@@ -472,7 +472,7 @@ def extract_go_endpoints(files: Sequence[tuple[str, str]]) -> list[GoEndpoint]:
     """Return product Go HTTP routes, excluding ``*_test.go`` registrations.
 
     Covers gin ``GET``/``Handle``, ``http.HandleFunc``, ``RegisterRawRoute``,
-    and the ccagent ``RegisterService(base, svc)`` + ``Serve*`` reflection
+    and the Go ``RegisterService(base, svc)`` + ``Serve*`` reflection
     convention (``base/<method lower>`` plus ``path`` struct tags).
     """
     product_files = [(path, text) for path, text in files if not is_go_test_path(path)]
