@@ -752,7 +752,14 @@ _GENERIC_GO_INSTALL = re.compile(
     r"\bgo\s+(?:build|run|mod\s+download)\s+(?:-o\s+\S+\s+)?(?:\.|./\.\.\.)\b",
     re.IGNORECASE,
 )
-_EXAMPLE_CMD_HINT_RE = re.compile(r"example|示例|demo|scaffold|sample|hello", re.I)
+_EXAMPLE_CMD_HINT_RE = re.compile(
+    r"example|示例|demo|scaffold|sample|hello|custom[-_]",
+    re.I,
+)
+_STUB_MAIN_RE = re.compile(
+    r"^\s*package\s+main\s*(?:import\s+\([^)]*\)\s*)?func\s+main\s*\(\s*\)\s*\{\s*\}\s*$",
+    re.S,
+)
 _REPO_INSTALL_LINE_PATTERNS = (
     re.compile(r"docker(?:-|\s+)compose(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
     re.compile(r"\bpodman-compose(?:\s+[A-Za-z0-9_-]+){0,6}", re.I),
@@ -838,7 +845,12 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
                 docs = candidate.read_text(encoding="utf-8", errors="ignore")
                 break
         hint = f"{main.parent.name}\n{docs[:400]}"
-        if _EXAMPLE_CMD_HINT_RE.search(hint):
+        stub = False
+        try:
+            stub = bool(_STUB_MAIN_RE.match(main.read_text(encoding="utf-8", errors="ignore")))
+        except OSError:
+            stub = False
+        if _EXAMPLE_CMD_HINT_RE.search(hint) or stub:
             demo_mains.append(main)
         else:
             core_mains.append(main)
@@ -869,6 +881,8 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
                     continue
                 command = " ".join(match.group(0).split()).rstrip(".,;:)")
                 if command and len(command) <= 120:
+                    if _EXAMPLE_CMD_HINT_RE.search(command) and core_mains:
+                        continue
                     _add(
                         rewrite_install_command_ports(
                             normalize_go_build_command(command, root),

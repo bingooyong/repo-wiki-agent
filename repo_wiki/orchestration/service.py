@@ -3503,8 +3503,14 @@ class RepoWikiService:
             content,
             flags=re.IGNORECASE,
         )
-        return re.sub(
+        cleaned = re.sub(
             r"^NOTE\s*:.*?(?=\n|$)",
+            "",
+            cleaned,
+            flags=re.IGNORECASE | re.M,
+        )
+        return re.sub(
+            r"^[A-Za-z][^\n]*\brepository\b[^\n]*\bmaintain\w*[^\n]*$",
             "",
             cleaned,
             flags=re.IGNORECASE | re.M,
