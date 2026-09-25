@@ -28,6 +28,10 @@ _PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
 )
 
 _CITE_RE = re.compile(r"<cite>\s*([^<]+?)\s*</cite>", re.IGNORECASE)
+_INSTRUCTION_VOICE_RE = re.compile(
+    r"不要只标|如果证据不足|不要在此凭空扩展|不要用套话填空|不要过度推断"
+)
+_EVIDENCE_META_TALK_RE = re.compile(r"证据片段|当前证据|提供的证据")
 _README_NAMES = ("README.md", "README.rst", "README.txt", "README")
 _OVERVIEW_PAGE_TOKENS = ("project-overview", "项目概述")
 _INSTALL_PAGE_TOKENS = ("installation", "安装指南", "安装与配置")
@@ -1076,6 +1080,8 @@ def handbook_reader_hygiene_offenders(
         "header_only_cites": [],
         "meta_instructions": [],
         "repeated_fences": [],
+        "instruction_voice": [],
+        "evidence_meta_talk": [],
     }
     if content_dir is None or not content_dir.exists():
         return {}
@@ -1087,6 +1093,10 @@ def handbook_reader_hygiene_offenders(
             found["meta_instructions"].append(rel)
         if page_has_repeated_fences(text):
             found["repeated_fences"].append(rel)
+        if _INSTRUCTION_VOICE_RE.search(text):
+            found["instruction_voice"].append(rel)
+        if _EVIDENCE_META_TALK_RE.search(text):
+            found["evidence_meta_talk"].append(rel)
         if repo_root is not None:
             for match in _CITE_RE.finditer(text):
                 raw = match.group(0)

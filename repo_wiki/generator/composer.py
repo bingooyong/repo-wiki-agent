@@ -155,7 +155,7 @@ _HANDBOOK_INSTALL_STRUCTURE = """推荐结构：
 用产品身份说明仓库是什么、读者按本页做完后能得到什么。不要用仓库 slug 或通用 api-server 表述代替产品名。
 
 ## 环境要求
-列出仓库文档里出现的运行时、语言版本、包管理器和外部依赖。证据不足时省略该事实，不要用套话填空。
+列出仓库文档里出现的运行时、语言版本、包管理器和外部依赖。文档对不上的条目整段跳过。
 
 ## 安装步骤
 使用编号步骤。每一步若涉及命令，必须给出可复制的 ```bash 或 ```sh 围栏，不要只把命令写在行内反引号里。命令必须使用仓库里真实存在的路径、二进制和 flag。
@@ -172,7 +172,7 @@ _HANDBOOK_OVERVIEW_STRUCTURE = """推荐结构：
 用产品身份说明仓库是什么、给谁用。不要用仓库 slug 或通用 api-server 表述代替产品名。不要写成安装手册。
 
 ## 能做什么
-概括仓库文档里已经出现的能力与边界。证据不足时省略该事实，不要用套话填空。
+概括仓库文档里已经出现的能力与边界。文档对不上的条目整段跳过。
 
 ## 仓库怎么组织
 说明主要目录、模块或文档入口如何对应，不另画未出现在仓库里的架构。
@@ -945,7 +945,7 @@ class LLMPageComposer:
                     "ProbeBlackboxModule、BizTreeNode、BizInstanceEndpoint、ProbePolicy、"
                     "ProbeRoutingBinding、AgentRegistry、AgentOpsSample）各写一段说明；"
                     "配置类型用表格，不要堆成无说明清单。"
-                    "AgentOpsSample 的主键是 AgentID+TsMS，不要只标 TsMS。"
+                    "AgentOpsSample 主键列为 AgentID 与 TsMS 两列并列，写成单列 TsMS 会与 GORM 定义不一致。"
                     "不要写 app/models 或 alembic。字段类型用源码真实类型，"
                     "关系按 `*_id` / gorm foreignKey / schema REFERENCES，不要猜测自环。"
                     "不要单独成行只写 `<cite>`。"
@@ -1050,7 +1050,7 @@ class LLMPageComposer:
 - 至少保留 3 个 `<cite>` 引用，格式为仓库相对路径加行号范围，例如 `<cite>src/app.py:1-10</cite>`。
 {self._root_readme_cite_rule()}
 {handbook_cite_rules}{list_rule}
-- 如果证据不足，省略该事实，不要用套话填空，也不要过度推断。
+- 只写能在源码里对上的事实；对不上的细节整段跳过，改用空话补齐没有意义。
 - {identity_slot}必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
 {api_quality_rules}
 

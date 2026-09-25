@@ -24,6 +24,30 @@ _DROP_CITATION_SCHEMES = ("file:", "path:", "relpath:")
 _PLACEHOLDER_CITE_BODY = "start-end"
 _CITE_BLOCK_RE = re.compile(r"(<cite>\s*)([^<]+?)(\s*</cite>)")
 _BACKTICK_CITE_RE = re.compile(r"`((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?)`")
+_SOURCE_FILE_SUFFIXES = frozenset(
+    {
+        ".go",
+        ".py",
+        ".md",
+        ".rst",
+        ".txt",
+        ".yml",
+        ".yaml",
+        ".json",
+        ".toml",
+        ".sql",
+        ".sh",
+        ".proto",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".rs",
+        ".java",
+        ".kt",
+    }
+)
+_HOST_PORT_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}:\d+(?:-\d+)?$")
 _BACKTICK_WRAPPED_CITE_RE = re.compile(
     r"`\s*(<cite>\s*[^<]+?\s*</cite>)\s*`",
     re.IGNORECASE,
@@ -194,6 +218,30 @@ def is_placeholder_citation_ref(raw: str) -> bool:
     return value.lower() == _PLACEHOLDER_CITE_BODY
 
 
+def _looks_like_source_cite(value: str, workspace_root: str | Path | None = None) -> bool:
+    """True for repo paths with a real suffix or an existing file — not host:port."""
+    body = value.strip()
+    if body.lower().startswith("source:"):
+        body = body[len("source:") :].lstrip()
+    if _HOST_PORT_RE.fullmatch(body):
+        return False
+    match = _VALID_CITE_BODY_RE.fullmatch(body)
+    if not match:
+        return False
+    path_text = match.group("path").strip().replace("\\", "/")
+    if not path_text or path_text[:1].isdigit():
+        return False
+    suffix = Path(path_text).suffix.lower()
+    if suffix in _SOURCE_FILE_SUFFIXES:
+        return True
+    if workspace_root is None:
+        return False
+    try:
+        return (Path(workspace_root) / path_text).is_file()
+    except OSError:
+        return False
+
+
 def normalize_citation_markup(text: str, workspace_root: str | Path | None = None) -> str:
     """Rewrite cite blocks so verify sees only ``path:start-end`` targets.
 
@@ -209,11 +257,21 @@ def normalize_citation_markup(text: str, workspace_root: str | Path | None = Non
         payloads = sanitize_citation_payloads(match.group(2), workspace_root)
         return "".join(f"[cite: {item}]" for item in payloads)
 
+    def _backtick_path_then_line(match: re.Match[str]) -> str:
+        path_text = match.group(1)
+        if not _looks_like_source_cite(f"{path_text}:{match.group(2)}", workspace_root):
+            return match.group(0)
+        return f"<cite>{path_text}:{match.group(2)}</cite>"
+
+    def _backtick_cite(match: re.Match[str]) -> str:
+        body = match.group(1)
+        if not _looks_like_source_cite(body, workspace_root):
+            return match.group(0)
+        return f"<cite>{body}</cite>"
+
     unwrapped = _BACKTICK_WRAPPED_CITE_RE.sub(lambda match: match.group(1), text)
-    unwrapped = _BACKTICK_PATH_THEN_LINE_RE.sub(
-        lambda match: f"<cite>{match.group(1)}:{match.group(2)}</cite>", unwrapped
-    )
-    unwrapped = _BACKTICK_CITE_RE.sub(lambda match: f"<cite>{match.group(1)}</cite>", unwrapped)
+    unwrapped = _BACKTICK_PATH_THEN_LINE_RE.sub(_backtick_path_then_line, unwrapped)
+    unwrapped = _BACKTICK_CITE_RE.sub(_backtick_cite, unwrapped)
     rewritten = _CITE_BLOCK_RE.sub(_rewrite_blocks, unwrapped)
     return _BRACKET_CITE_RE.sub(_rewrite_brackets, rewritten)
 

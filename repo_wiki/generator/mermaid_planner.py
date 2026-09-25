@@ -810,6 +810,100 @@ def _import_edges_from_context(context: dict[str, Any]) -> list[tuple[str, str]]
     return edges
 
 
+_OVERVIEW_NODE_CAP = 12
+_OVERVIEW_SKIP_PARTS = frozenset({"__init__.py", "tests", "test", "docs", "scripts"})
+_OVERVIEW_COMPOSE_LABELS = frozenset({"app", "db", "ccagent", "mysql", "blackbox", "postgres"})
+
+
+def _overview_node_id(label: str) -> str:
+    """Prefix+suffix so node ids never collide with compose `app[` / `db[` / `ccagent`."""
+    return f"ovw_{mermaid_ident(label)}_n"
+
+
+def _overview_package_label(raw: str) -> str | None:
+    text = (raw or "").strip().replace("\\", "/")
+    if not text or text in _OVERVIEW_SKIP_PARTS:
+        return None
+    parts = [part for part in text.split("/") if part and part not in _OVERVIEW_SKIP_PARTS]
+    if not parts:
+        return None
+    leaf = parts[-1]
+    if leaf.endswith(("_test.go", "_test.py")):
+        parts = parts[:-1]
+        if not parts:
+            return None
+        leaf = parts[-1]
+    if _is_filename_like_module_name(leaf):
+        parts = parts[:-1]
+        if not parts:
+            return None
+    label = ""
+    if (parts[0] in {"cmd", "internal", "pkg"} and len(parts) >= 2) or (
+        parts[0] == "app" and len(parts) >= 2 and not _is_filename_like_module_name(parts[1])
+    ):
+        label = "/".join(parts[:2])
+    elif parts[0] in {"cmd", "internal", "web"} and len(parts) == 1:
+        label = parts[0]
+    else:
+        return None
+    if label in _OVERVIEW_COMPOSE_LABELS:
+        return None
+    return label
+
+
+def _overview_package_graph(context: dict[str, Any]) -> tuple[list[str], list[tuple[str, str]]]:
+    seen: set[str] = set()
+    counts: dict[str, int] = {}
+    raw_edges: list[tuple[str, str]] = []
+
+    def _touch(label: str) -> None:
+        if label not in seen:
+            seen.add(label)
+            counts[label] = 0
+
+    for index, module in enumerate(context.get("modules") or []):
+        name, path = _module_name_and_path(module, index)
+        label = _overview_package_label(path or name)
+        if label:
+            _touch(label)
+        if isinstance(module, dict):
+            for dest in module.get("depends_on") or module.get("dependencies") or []:
+                other = _overview_package_label(str(dest))
+                if label and other and label != other:
+                    raw_edges.append((label, other))
+                    _touch(other)
+    for src, dst in _import_edges_from_context(context):
+        left = _overview_package_label(str(src))
+        right = _overview_package_label(str(dst))
+        if left and right and left != right:
+            raw_edges.append((left, right))
+            _touch(left)
+            _touch(right)
+    for src, dst in raw_edges:
+        counts[src] = counts.get(src, 0) + 1
+        counts[dst] = counts.get(dst, 0) + 1
+
+    def _rank(label: str) -> tuple[int, int, str]:
+        bucket = 3
+        if label.startswith("cmd/"):
+            bucket = 0
+        elif label.startswith("internal/"):
+            bucket = 1
+        elif label.startswith("app/"):
+            bucket = 2
+        return (bucket, -counts.get(label, 0), label)
+
+    labels = sorted(seen, key=_rank)[:_OVERVIEW_NODE_CAP]
+    keep = set(labels)
+    edges = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for src, dst in raw_edges:
+        if src in keep and dst in keep and (src, dst) not in seen_pairs:
+            seen_pairs.add((src, dst))
+            edges.append((src, dst))
+    return labels, edges
+
+
 def _product_module_labels(modules: list[Any]) -> list[str]:
     """Return scanned product packages, not __init__.py / main.go filename dumps."""
     labels: list[str] = []
@@ -935,7 +1029,7 @@ class MermaidPlanner:
                 if diagram:
                     diagrams.append(diagram)
             settings = self._plan_settings_flow(page_id, evidence_binding, context)
-            if settings:
+            if settings and not modules:
                 diagrams.append(settings)
         elif page_type == "architecture":
             diagram = self._plan_overview_architecture_diagram(page_id, evidence_binding, context)
@@ -960,6 +1054,9 @@ class MermaidPlanner:
         elif page_type == "api":
             diagrams.extend(self.plan_api_diagrams(page_id, evidence_binding, context))
             pid = (page_id or "").lower()
+            favorite = self._plan_favorite_follow_sequence(page_id, evidence_binding, context)
+            if favorite:
+                diagrams.append(favorite)
             request_flow = self._plan_request_flow_sequence(page_id, evidence_binding, context)
             if request_flow:
                 diagrams.append(request_flow)
@@ -982,6 +1079,10 @@ class MermaidPlanner:
             )
 
             pid = page_id or ""
+            schema_page = any(
+                token in pid.lower()
+                for token in ("database-schema", "数据库架构", "database-architecture")
+            )
             satellite = any(
                 token in pid.lower()
                 for token in (
@@ -992,7 +1093,11 @@ class MermaidPlanner:
                     "迁移",
                 )
             )
-            if is_data_model_owner_page(page_id=pid, title="") or not satellite:
+            if schema_page:
+                schema = self._plan_database_schema_diagram(page_id, evidence_binding, context)
+                if schema:
+                    diagrams.append(schema)
+            elif is_data_model_owner_page(page_id=pid, title="") or not satellite:
                 diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
                 if diagram:
                     diagrams.append(diagram)
@@ -1854,59 +1959,154 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        """Product package map for 项目概述 — not the architecture import graph."""
-        skip = {"__init__.py", "tests", "test", "docs", "scripts"}
-        nodes: list[DiagramNode] = []
-        edges: list[DiagramEdge] = []
-        seen_nodes: set[str] = set()
-        seen_edges: set[tuple[str, str]] = set()
-
-        def _add_edge(src_label: str, dest_label: str) -> None:
-            if not src_label or not dest_label:
-                return
-            if src_label in skip or dest_label in skip:
-                return
-            if src_label.endswith(".py") or dest_label.endswith(".py"):
-                return
-            src_id = mermaid_ident(src_label)
-            dest_id = mermaid_ident(dest_label)
-            if src_id not in seen_nodes:
-                seen_nodes.add(src_id)
-                nodes.append(DiagramNode(id=src_id, label=src_label, shape="rectangle"))
-            if dest_id not in seen_nodes:
-                seen_nodes.add(dest_id)
-                nodes.append(DiagramNode(id=dest_id, label=dest_label, shape="rectangle"))
-            pair = (src_id, dest_id)
-            if pair not in seen_edges and src_id != dest_id:
-                seen_edges.add(pair)
-                edges.append(DiagramEdge(from_node=src_id, to_node=dest_id))
-
-        for index, module in enumerate(context.get("modules") or []):
-            name, path = _module_name_and_path(module, index)
-            label = name if not name.endswith(".py") else (path.strip("/").split("/")[0] or name)
-            if not label or label in skip or label.endswith(".py"):
-                continue
-            ident = mermaid_ident(label)
-            if ident not in seen_nodes:
-                seen_nodes.add(ident)
-                nodes.append(DiagramNode(id=ident, label=label, shape="rectangle"))
-            depends = []
-            if isinstance(module, dict):
-                depends = list(module.get("depends_on") or module.get("dependencies") or [])
-            for dest in depends:
-                _add_edge(label, str(dest).strip())
-        for src, dst in _import_edges_from_context(context):
-            _add_edge(str(src).strip(), str(dst).strip())
-        if not edges:
+        """Top-level package map for 项目概述 — one granularity, no files/tests."""
+        labels, raw_edges = _overview_package_graph(context)
+        if len(labels) < 2 or not raw_edges:
             return None
-        used = {edge.from_node for edge in edges} | {edge.to_node for edge in edges}
+        nodes = [
+            DiagramNode(id=_overview_node_id(label), label=label, shape="rectangle")
+            for label in labels
+        ]
+        edges = [
+            DiagramEdge(from_node=_overview_node_id(src), to_node=_overview_node_id(dst))
+            for src, dst in raw_edges
+        ]
         return DiagramPlan(
             diagram_id=f"{page_id}-overview-modules",
             diagram_type=MermaidDiagramType.FLOWCHART,
             title="Product modules",
-            description="Application packages named on the overview page",
-            nodes=[node for node in nodes if node.id in used],
+            description="Top-level packages named on the overview page",
+            nodes=nodes,
             edges=edges,
+            evidence_spans=[c.span for c in evidence_binding.candidates]
+            if evidence_binding
+            else [],
+        )
+
+    def _plan_favorite_follow_sequence(
+        self,
+        page_id: str,
+        evidence_binding: PageEvidenceBinding | None,
+        context: dict[str, Any],
+    ) -> DiagramPlan | None:
+        pid = (page_id or "").lower()
+        if not any(token in pid for token in ("python", "python-service", "python服务")):
+            return None
+        root = Path(self.workspace_root) if self.workspace_root else None
+        if root is None:
+            return None
+        common = root / "app" / "api" / "routes" / "articles" / "articles_common.py"
+        profiles = root / "app" / "api" / "routes" / "profiles.py"
+        if not (common.is_file() and profiles.is_file()):
+            return None
+        return DiagramPlan(
+            diagram_id=f"{page_id}-favorite-follow",
+            diagram_type=MermaidDiagramType.SEQUENCE_DIAGRAM,
+            title="Favorite and follow dispatch",
+            description="POST/DELETE favorite and follow hit distinct handlers",
+            sequence_participants=[
+                "Client",
+                "articles_common",
+                "profiles",
+                "ArticlesRepository",
+                "ProfilesRepository",
+            ],
+            sequence_messages=[
+                ("Client", "articles_common", "POST /api/articles/{slug}/favorite"),
+                ("articles_common", "ArticlesRepository", "add_article_into_favorites"),
+                ("Client", "articles_common", "DELETE /api/articles/{slug}/favorite"),
+                ("articles_common", "ArticlesRepository", "remove_article_from_favorites"),
+                ("Client", "profiles", "POST /api/profiles/{username}/follow"),
+                ("profiles", "ProfilesRepository", "add_user_into_followers"),
+                ("Client", "profiles", "DELETE /api/profiles/{username}/follow"),
+                ("profiles", "ProfilesRepository", "remove_user_from_followers"),
+            ],
+            evidence_spans=[c.span for c in evidence_binding.candidates]
+            if evidence_binding
+            else [],
+        )
+
+    def _plan_database_schema_diagram(
+        self,
+        page_id: str,
+        evidence_binding: PageEvidenceBinding | None,
+        context: dict[str, Any],
+    ) -> DiagramPlan | None:
+        """Alembic table / FK / index view — not the domain ER copy."""
+        models = [item for item in (context.get("data_models") or []) if isinstance(item, dict)]
+        if not models:
+            root = Path(self.workspace_root) if self.workspace_root else None
+            if root is not None:
+                from repo_wiki.generator.deterministic_sections import load_alembic_migration_models
+
+                models = load_alembic_migration_models(root)
+        tables = [
+            item
+            for item in models
+            if str(item.get("type") or "") in {"", "migration_table"}
+            and mermaid_er_field(str(item.get("name") or item.get("table") or "")).lower()
+            in {"users", "articles", "commentaries"}
+        ]
+        if not any(
+            mermaid_er_field(str(item.get("name") or "")).lower() == "articles" for item in tables
+        ):
+            return None
+        er_entities = []
+        relationships: list[tuple[str, str, str]] = []
+        have: set[str] = set()
+        for model in tables:
+            entity_name = mermaid_er_field(str(model.get("name") or model.get("table") or ""))
+            if entity_name.lower() in have:
+                continue
+            have.add(entity_name.lower())
+            attr_types = [str(item) for item in (model.get("attribute_types") or [])]
+            attributes = []
+            for index, item in enumerate(model.get("attributes") or []):
+                name = mermaid_er_field(str(item))
+                if not name:
+                    continue
+                raw_type = attr_types[index] if index < len(attr_types) else "string"
+                attributes.append({"name": name, "type": _mermaid_scalar_type(raw_type)})
+            if entity_name.lower() == "articles" and not any(
+                attr["name"] == "author_id" for attr in attributes
+            ):
+                attributes.append({"name": "author_id", "type": "int"})
+            if entity_name.lower() == "articles" and not any(
+                attr["name"] == "slug" for attr in attributes
+            ):
+                attributes.append({"name": "slug", "type": "string"})
+            extra_pks = [
+                mermaid_er_field(str(item))
+                for item in (model.get("primary_keys") or [])
+                if mermaid_er_field(str(item))
+            ]
+            er_entities.append(
+                {
+                    "entity": entity_name,
+                    "attributes": attributes or [{"name": "id", "type": "int"}],
+                    "primary_key": mermaid_er_field(str(model.get("primary_key") or "id")),
+                    "primary_keys": extra_pks or ["id"],
+                }
+            )
+            for target in model.get("relationships") or []:
+                raw = str(target)
+                parts = raw.split(":")
+                dest = mermaid_er_field(parts[1] if len(parts) >= 2 else raw)
+                label = mermaid_er_field(parts[2] if len(parts) >= 3 else "fk")
+                if dest.lower() in {"users", "articles", "commentaries"} and dest != entity_name:
+                    relationships.append((dest, entity_name, label or "fk"))
+        if "users" in have and "articles" in have:
+            if not any(label == "author_id" for _src, _dst, label in relationships):
+                relationships.append(("users", "articles", "author_id"))
+        if not er_entities:
+            return None
+        return DiagramPlan(
+            diagram_id=f"{page_id}-schema-tables",
+            diagram_type=MermaidDiagramType.ER_DIAGRAM,
+            title="Migration tables",
+            description="Alembic table, FK and index view",
+            er_entities=er_entities,
+            er_relationships=relationships,
             evidence_spans=[c.span for c in evidence_binding.candidates]
             if evidence_binding
             else [],
@@ -1967,15 +2167,15 @@ class MermaidPlanner:
             title="Settings loading",
             description=".env loaded before alembic and app",
             nodes=[
-                DiagramNode(id="env_file", label=".env", shape="rectangle"),
-                DiagramNode(id="settings", label="app/core/settings", shape="rectangle"),
-                DiagramNode(id="alembic", label="alembic env.py", shape="rectangle"),
-                DiagramNode(id="app", label="app.main", shape="rectangle"),
+                DiagramNode(id="ovw_env_file_n", label="env-file", shape="rectangle"),
+                DiagramNode(id="ovw_settings_n", label="app/core/settings", shape="rectangle"),
+                DiagramNode(id="ovw_alembic_n", label="alembic env.py", shape="rectangle"),
+                DiagramNode(id="ovw_app_main_n", label="app.main", shape="rectangle"),
             ],
             edges=[
-                DiagramEdge(from_node="env_file", to_node="settings"),
-                DiagramEdge(from_node="settings", to_node="alembic"),
-                DiagramEdge(from_node="settings", to_node="app"),
+                DiagramEdge(from_node="ovw_env_file_n", to_node="ovw_settings_n"),
+                DiagramEdge(from_node="ovw_settings_n", to_node="ovw_alembic_n"),
+                DiagramEdge(from_node="ovw_settings_n", to_node="ovw_app_main_n"),
             ],
             evidence_spans=[c.span for c in evidence_binding.candidates]
             if evidence_binding

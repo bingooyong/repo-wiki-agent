@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 ENV_CASSETTE_DIR = "REPO_WIKI_LLM_CASSETTE_DIR"
 ENV_CASSETTE_RUN_ID = "REPO_WIKI_LLM_CASSETTE_RUN_ID"
+ENV_CASSETTE_WRITE_DIR = "REPO_WIKI_LLM_CASSETTE_WRITE_DIR"
 
 _write_lock = threading.Lock()
 
@@ -106,8 +107,19 @@ def cassette_dir() -> Path | None:
     return Path(raw) if raw else None
 
 
+def cassette_write_dir() -> Path | None:
+    raw = os.environ.get(ENV_CASSETTE_WRITE_DIR, "").strip()
+    return Path(raw) if raw else None
+
+
 def cassette_jsonl_path(directory: Path | None = None) -> Path | None:
-    root = directory or cassette_dir()
+    write_root = cassette_write_dir()
+    if write_root is not None:
+        root = write_root
+    else:
+        if os.environ.get("LLM_PROVIDER", "").strip().lower() == "cassette":
+            return None
+        root = directory or cassette_dir()
     if root is None:
         return None
     run_id = os.environ.get(ENV_CASSETTE_RUN_ID, "").strip()
@@ -258,7 +270,7 @@ class CassetteLLMProvider(LLMProvider):
             exact = [row for row in attempt_rows if row.get("prompt_hash") == prompt_hash]
             if exact:
                 return exact[-1], False
-            return page_rows[-1], True
+            return attempt_rows[-1], True
         return page_rows[-1], True
 
     def _note_mismatch(self, page_id: str, attempt: int, expected: str, recorded: Any) -> None:

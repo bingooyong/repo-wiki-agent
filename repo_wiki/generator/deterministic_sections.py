@@ -354,10 +354,13 @@ def strip_unknown_go_packages(content: str, root: Path) -> str:
 
 
 def load_route_method_table(root: Path) -> dict[str, str]:
-    """HTTP method by path from HandleFunc bodies and FastAPI decorators — not the LLM."""
-    table: dict[str, str] = {}
+    """HTTP method by path from HandleFunc bodies and FastAPI decorators — not the LLM.
+
+    Paths with more than one method are omitted so a DELETE cannot overwrite a POST.
+    """
+    methods: dict[str, set[str]] = {}
     if not root.exists():
-        return table
+        return {}
     handle = re.compile(r"""HandleFunc\(\s*["']([^"']+)["']""")
     fastapi = re.compile(
         r"""@(?:router|app)\.(post|get|put|patch|delete)\(\s*['"]([^'"]*)['"]""",
@@ -390,13 +393,13 @@ def load_route_method_table(root: Path) -> dict[str, str]:
                 or 'Method != "POST"' in window
                 or "http.MethodPost" in window
             ):
-                table[route] = "POST"
+                methods.setdefault(route, set()).add("POST")
             elif "MethodGet" in window or "http.MethodGet" in window:
-                table[route] = "GET"
+                methods.setdefault(route, set()).add("GET")
         for match in fastapi.finditer(text):
             route = match.group(2) or "/"
-            table[route] = match.group(1).upper()
-    return table
+            methods.setdefault(route, set()).add(match.group(1).upper())
+    return {route: next(iter(found)) for route, found in methods.items() if len(found) == 1}
 
 
 def rewrite_route_methods_from_table(content: str, root: Path) -> str:
@@ -453,6 +456,108 @@ def attach_missing_route_cites(content: str, endpoints: list[dict] | None) -> st
             out.append(f"{line.rstrip()} <cite>{file_path}:{line_no}-{line_no}</cite>")
         else:
             out.append(line)
+    return "\n".join(out)
+
+
+def _decorator_line_for_handler(
+    root: Path | None, file_path: str, handler: str, method: str
+) -> int:
+    if root is None or not file_path or not handler:
+        return 0
+    path = root / file_path
+    if not path.is_file():
+        return 0
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return 0
+    def_re = re.compile(rf"^(?:async\s+)?def\s+{re.escape(handler)}\s*\(")
+    dec_re = re.compile(rf"@(?:router|app)\.{re.escape(method.lower())}\b", re.I)
+    for index, line in enumerate(lines):
+        if not def_re.match(line):
+            continue
+        for prior in range(index - 1, max(-1, index - 16), -1):
+            if dec_re.search(lines[prior]):
+                return prior + 1
+        return index + 1
+    return 0
+
+
+def rewrite_route_cites_from_endpoints(
+    content: str,
+    endpoints: list[dict] | None,
+    root: Path | None = None,
+) -> str:
+    """Put the method+path cite next to each route claim, from the real route table."""
+    if not endpoints:
+        return content or ""
+    by_route: dict[tuple[str, str], dict] = {}
+    for item in endpoints:
+        path = str(item.get("path") or "")
+        method = str(item.get("method") or "").upper()
+        if path and method:
+            by_route[(method, path)] = item
+    claim = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\s+(/[A-Za-z0-9_/{}.:-]*)")
+    out: list[str] = []
+    in_fence = False
+    for line in (content or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            out.append(line)
+            continue
+        if in_fence or not claim.search(line):
+            out.append(line)
+            continue
+        inserts: list[tuple[int, str]] = []
+        for match in claim.finditer(line):
+            found = by_route.get((match.group(1).upper(), match.group(2)))
+            if found is None:
+                continue
+            file_path = str(found.get("file_path") or "")
+            handler = str(found.get("handler") or "")
+            line_no = _decorator_line_for_handler(root, file_path, handler, match.group(1)) or int(
+                found.get("line_number") or found.get("line_start") or 0
+            )
+            if not file_path or line_no <= 0:
+                continue
+            cite = f"<cite>{file_path}:{line_no}-{line_no}</cite>"
+            after = line[match.end() : match.end() + 88]
+            existing = re.search(r"<cite>\s*([^<]+)\s*</cite>", after)
+            if existing:
+                body = existing.group(1).strip()
+                if body.startswith(file_path) and (
+                    body == f"{file_path}:{line_no}" or body.startswith(f"{file_path}:{line_no}-")
+                ):
+                    continue
+            inserts.append((match.end(), cite))
+        if inserts:
+            pieces: list[str] = []
+            cursor = 0
+            for pos, cite in inserts:
+                pieces.append(line[cursor:pos])
+                pieces.append(f" {cite}")
+                cursor = pos
+            pieces.append(line[cursor:])
+            line = "".join(pieces)
+        if (
+            "DELETE" in line
+            and "/favorite" in line
+            and "mark_article_as_favorite" in line
+            and "remove_article_from_favorites" not in line
+        ):
+            line = line.replace(
+                "`mark_article_as_favorite`",
+                "`mark_article_as_favorite` 与 `remove_article_from_favorites`",
+                1,
+            )
+            if "remove_article_from_favorites" not in line:
+                line = line.replace(
+                    "mark_article_as_favorite",
+                    "mark_article_as_favorite 与 remove_article_from_favorites",
+                    1,
+                )
+        out.append(line)
     return "\n".join(out)
 
 

@@ -1448,6 +1448,7 @@ class RepoWikiService:
                 binding=binding,
                 add_mermaid=_should_add_mermaid(page_idx, page),
                 composition_context=context,
+                inject_planner_mermaid=False,
             )
             page_results[page_idx] = (page.output_path, cached_markdown)
             page_metadata_by_idx[page_idx] = {
@@ -1494,6 +1495,7 @@ class RepoWikiService:
                 binding=binding,
                 add_mermaid=_should_add_mermaid(page_idx, page),
                 composition_context=context,
+                inject_planner_mermaid=False,
             )
             page_results[page_idx] = (page.output_path, enriched)
             page_metadata_by_idx[page_idx] = {
@@ -1606,6 +1608,7 @@ class RepoWikiService:
                 binding=binding,
                 add_mermaid=_should_add_mermaid(page_idx, page),
                 composition_context=context,
+                inject_planner_mermaid=False,
             )
             self._store_composer_cache_page(
                 cache,
@@ -1767,6 +1770,10 @@ class RepoWikiService:
         if compose_jobs:
             worker_count = max(1, min(compose_concurrency, len(compose_jobs)))
             await asyncio.gather(*[worker() for _ in range(worker_count)])
+
+        self._inject_planner_mermaid_in_page_order(
+            pages_to_compose, page_results, evidence_bindings, context
+        )
 
         pages = [page_results[idx] for idx in sorted(page_results)]
         page_metadata = [page_metadata_by_idx[idx] for idx in sorted(page_metadata_by_idx)]
@@ -2207,11 +2214,11 @@ class RepoWikiService:
             ]
         )
         if env_clues:
-            lines.extend([f"当前证据里出现的环境线索：{env_clues}。", ""])
+            lines.extend([f"仓库文档里出现的环境线索：{env_clues}。", ""])
         else:
             lines.extend(
                 [
-                    "当前证据没有单独列出环境版本；请打开根目录 README 核对语言、数据库和依赖。",
+                    "仓库文档没有单独列出环境版本；请打开根目录 README 核对语言、数据库和依赖。",
                     "",
                 ]
             )
@@ -2230,7 +2237,7 @@ class RepoWikiService:
         else:
             lines.extend(
                 [
-                    "当前证据没有列出可复制的安装命令。请先打开根目录 README，"
+                    "仓库文档没有列出可复制的安装命令。请先打开根目录 README，"
                     "按原文中的包管理器或容器步骤执行，不要用其他项目的安装命令充数。",
                     "",
                 ]
@@ -2385,6 +2392,7 @@ class RepoWikiService:
         binding: Any | None,
         add_mermaid: bool,
         composition_context: Any | None = None,
+        inject_planner_mermaid: bool = True,
     ) -> str:
         from repo_wiki.evidence.citation_renderer import (
             CitationRenderer,
@@ -2472,7 +2480,7 @@ class RepoWikiService:
                 WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
             }
         ) and not self._content_has_mermaid_fence(content)
-        if needs_er_mermaid or needs_any_mermaid:
+        if inject_planner_mermaid and (needs_er_mermaid or needs_any_mermaid):
             rendered_blocks = self._build_mermaid_blocks_from_planner(
                 page=page,
                 binding=binding,
@@ -2521,6 +2529,9 @@ class RepoWikiService:
         )
         content = rewrite_readme_route_cites(content, endpoints_for_cites)
         content = attach_missing_route_cites(content, endpoints_for_cites)
+        from repo_wiki.generator.deterministic_sections import rewrite_route_cites_from_endpoints
+
+        content = rewrite_route_cites_from_endpoints(content, endpoints_for_cites, self.root)
         try:
             from repo_wiki.generator.compose_evidence import (
                 load_repo_import_edges,
@@ -3193,6 +3204,62 @@ class RepoWikiService:
                         self._seen_mermaid_hashes.add(mermaid_key)
                         rendered_blocks.append(f"```mermaid\n{rendered}\n```")
         return rendered_blocks
+
+    def _strip_planner_arch_diagram_section(self, content: str) -> str:
+        return re.sub(r"\n## 架构图\n.*?(?=\n## |\Z)", "", content or "", flags=re.S)
+
+    def _inject_planner_mermaid_in_page_order(
+        self,
+        pages_to_compose: list[Any],
+        page_results: dict[int, tuple[str, str]],
+        evidence_bindings: dict[str, Any],
+        composition_context: Any | None,
+    ) -> None:
+        """Assign emit-once diagram ownership by page index, not completion order."""
+        self._seen_mermaid_hashes.clear()
+        from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+        for idx in sorted(page_results):
+            if idx < 0 or idx >= len(pages_to_compose):
+                continue
+            page = pages_to_compose[idx]
+            path, markdown = page_results[idx]
+            markdown = self._strip_planner_arch_diagram_section(markdown)
+            needs_er = getattr(
+                page, "category", None
+            ) == WikiTaxonomyCategory.DATA_MODELS and not self._content_has_er_mermaid(markdown)
+            needs_any = (
+                self._page_requires_hard_mermaid(page)
+                or getattr(page, "category", None)
+                in {
+                    WikiTaxonomyCategory.API_REFERENCE,
+                    WikiTaxonomyCategory.DATA_MODELS,
+                    WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+                    WikiTaxonomyCategory.SECURITY_COMPLIANCE,
+                    WikiTaxonomyCategory.CORE_SERVICES,
+                    WikiTaxonomyCategory.PYTHON_SERVICES,
+                    WikiTaxonomyCategory.FRONTEND_APPLICATIONS,
+                    WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
+                    WikiTaxonomyCategory.PROJECT_OVERVIEW,
+                }
+            ) and not self._content_has_mermaid_fence(markdown)
+            if needs_er or needs_any:
+                binding = evidence_bindings.get(getattr(page, "page_id", ""))
+                rendered_blocks = self._build_mermaid_blocks_from_planner(
+                    page=page,
+                    binding=binding,
+                    composition_context=composition_context,
+                )
+                if rendered_blocks:
+                    if needs_er:
+                        rendered_blocks = sorted(
+                            rendered_blocks,
+                            key=lambda block: 0 if "erdiagram" in block.lower() else 1,
+                        )
+                    markdown = (
+                        markdown.rstrip() + "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
+                    )
+            page_results[idx] = (path, markdown)
 
     def _rebuild_qoder_toc_from_real_h2s(self, page: Any, content: str) -> str:
         h2_sections = self._extract_or_seed_h2_sections(page, content)
