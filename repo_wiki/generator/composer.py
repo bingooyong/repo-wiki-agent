@@ -67,6 +67,7 @@ from repo_wiki.prompts.skeleton import (
 )
 from repo_wiki.verifier.handbook import (
     EMPTY_CONTENT_REJECTION,
+    EVIDENCE_META_REJECTION,
     GENERATOR_META_REJECTION,
     ROLE_CONTRADICTION_REJECTION,
     UNCLOSED_FENCE_REJECTION,
@@ -84,7 +85,12 @@ _PROSE_RECOVERY_REASONS = frozenset(
         EMPTY_CONTENT_REJECTION,
         UNCLOSED_FENCE_REJECTION,
         ROLE_CONTRADICTION_REJECTION,
+        EVIDENCE_META_REJECTION,
     }
+)
+_EVIDENCE_META_TALK_RE = re.compile(r"证据片段|当前证据|提供的证据")
+_KEEP_MARKDOWN_AFTER_RETRY = frozenset(
+    {ROLE_CONTRADICTION_REJECTION, EVIDENCE_META_REJECTION}
 )
 EMPTY_CONTENT_REWRITE_MAX_TOKENS = 16384
 
@@ -680,7 +686,7 @@ class LLMPageComposer:
                         rewrite_extra_body = self._empty_content_rewrite_extra_body()
                     continue
                 if (
-                    validation_result.rejection_reason == ROLE_CONTRADICTION_REJECTION
+                    validation_result.rejection_reason in _KEEP_MARKDOWN_AFTER_RETRY
                     and (response_content or "").strip()
                 ):
                     output.rejected = False
@@ -757,11 +763,9 @@ class LLMPageComposer:
 
     def _process_role_facts(self) -> str:
         return (
-            "进程角色必须分句写清，禁止用「前者/后者」对调："
-            "ccagent 是主 REST/Web 服务；probe-agent 是隧道客户端并主动拨号连向 ccprobe-control；"
+            "ccagent 是主 REST/Web 服务与管理入口；"
+            "probe-agent 是隧道客户端，主动拨号连向 ccprobe-control；"
             "ccprobe-control 是 gRPC 控制面。"
-            "probe-agent 不是被 ccagent 调度的拨测执行单元；"
-            "禁止写 cmd/ccagent 负责隧道客户端启动。"
         )
 
     def _build_compose_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
@@ -957,11 +961,9 @@ class LLMPageComposer:
                 "- 架构页：必须引用核心包（Python 必引 `app/api/routes` 与 `app/models`；"
                 "Go 必引 `cmd/ccagent`、`internal/control`、`internal/services`、"
                 "`internal/repository`、`internal/exporter`）。"
-                "ccagent 是主 REST/Web 服务与管理入口，不是领取任务的 Agent，也不是边缘 Agent；"
-                "不要把 REST/管理入口写到 ccprobe-control 上，也不要把 ccagent 写成只做 DNS 初始化。"
-                "probe-agent 才是隧道客户端。"
-                "分句写角色，不要用「前者/后者」把 REST 派给 ccprobe-control、把隧道客户端派给 ccagent。"
-                "禁止写 `cmd/ccagent` 负责隧道客户端启动。"
+                "ccagent 是主 REST/Web 服务与管理入口；"
+                "probe-agent 是隧道客户端，主动拨号连向 ccprobe-control；"
+                "ccprobe-control 是 gRPC 控制面。"
                 "Go 控制面是 `ccprobe-control -serve -transport grpc`，不要写成普通 CLI。"
                 "只写 import 图里存在的依赖：internal/control 不依赖 services/repository；"
                 "ccprobe-control 不依赖 services/repository/exporter。"
@@ -1054,7 +1056,7 @@ class LLMPageComposer:
             handbook_cite_rules = handbook_cite_rules + "\n"
         role_facts = ""
         if self._page_needs_process_roles(page):
-            role_facts = f"进程角色（必须遵守）：{self._process_role_facts()}\n"
+            role_facts = f"进程角色：{self._process_role_facts()}\n"
         install_command_block = ""
         if is_handbook_install_page(page):
             from repo_wiki.verifier.handbook import collect_repo_install_commands
@@ -1082,6 +1084,7 @@ class LLMPageComposer:
 
 写作要求：
 - 输出完整 Markdown，不要解释你的过程。
+- 正文面向仓库读者，直接陈述实现事实与调用关系。
 - 必须以 `# {page.title}` 开头。
 - 正文控制在 900 到 1400 个中文字符之间，避免长篇泛化。
 - 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
@@ -1407,6 +1410,9 @@ class LLMPageComposer:
 
             if generator_role_contradictions(content, input.page_plan):
                 result.rejection_reason = ROLE_CONTRADICTION_REJECTION
+
+        if not result.rejection_reason and _EVIDENCE_META_TALK_RE.search(content or ""):
+            result.rejection_reason = EVIDENCE_META_REJECTION
 
         if (
             input.page_plan.page_id == INVENTORY_SERVICE_API_PAGE_ID

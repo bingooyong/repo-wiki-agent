@@ -313,11 +313,26 @@ def rewrite_false_import_claims(markdown: str, edges: set[tuple[str, str]]) -> s
     return text
 
 
+_TUNNEL_CLAUSE_NEGATION_RE = re.compile(
+    r"不负责|并不承担|不承担|不是|不作为|误认为|而非|不要把|不在[^。\n]{0,24}承担"
+)
+
+
+def _clause_negates_tunnel_role(window: str) -> bool:
+    """True when the matched clause denies the ccagent-as-tunnel reading."""
+    if "而是" in window and "隧道客户端" in window.split("而是")[-1]:
+        return False
+    return bool(_TUNNEL_CLAUSE_NEGATION_RE.search(window))
+
+
 def prose_role_contradictions(markdown: str) -> list[str]:
     """Flag architecture prose that contradicts the deterministic process roles."""
     text = markdown or ""
     found: list[str] = []
-    if _ROLE_CCAGENT_TUNNEL_RE.search(text):
+    if any(
+        not _clause_negates_tunnel_role(match.group(0))
+        for match in _ROLE_CCAGENT_TUNNEL_RE.finditer(text)
+    ):
         found.append("ccagent-as-tunnel-client")
     if _ROLE_CCAGENT_REVERSE_RE.search(text):
         found.append("ccagent-reverse-agent-url")

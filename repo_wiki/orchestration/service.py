@@ -273,7 +273,6 @@ class RepoWikiService:
         self.config = config
         self.root = Path(config.project.root).resolve()
         self._seen_mermaid_hashes: set[str] = set()
-        self._seen_schema_hashes: set[str] = set()
 
     def init(self) -> dict[str, Any]:
         stage = StageTimer()
@@ -1777,6 +1776,7 @@ class RepoWikiService:
         self._inject_planner_mermaid_in_page_order(
             pages_to_compose, page_results, evidence_bindings, context
         )
+        self._dedupe_schema_summaries_in_page_order(pages_to_compose, page_results)
 
         pages = [page_results[idx] for idx in sorted(page_results)]
         page_metadata = [page_metadata_by_idx[idx] for idx in sorted(page_metadata_by_idx)]
@@ -2448,11 +2448,6 @@ class RepoWikiService:
                 )
             if "## Schema 摘要" not in content:
                 summary = self._build_truthful_api_schema_summary(api_endpoints)
-                schema_key = re.sub(r"\s+", " ", summary).strip().casefold()
-                if schema_key and schema_key in self._seen_schema_hashes:
-                    summary = "本节 Schema 与 API 参考中已给出的摘要相同，见该节，避免重复粘贴。"
-                elif schema_key:
-                    self._seen_schema_hashes.add(schema_key)
                 content += "\n\n## Schema 摘要\n\n" + summary
 
         is_api_page = page.category == WikiTaxonomyCategory.API_REFERENCE
@@ -2604,16 +2599,25 @@ class RepoWikiService:
         from repo_wiki.generator.adjacent_cites import (
             attach_adjacent_cites,
             is_cite_realign_page,
+            promote_file_line_links,
             realign_irrelevant_cites,
+            rewrite_fastapi_intro_cites,
         )
         from repo_wiki.generator.deterministic_sections import is_header_only_cite
 
+        content = promote_file_line_links(content, self.root)
         if cites:
             cites = [item for item in cites if not is_header_only_cite(item, self.root)]
             if cites:
-                content = attach_adjacent_cites(content, cites, workspace_root=self.root)
+                content = attach_adjacent_cites(
+                    content,
+                    cites,
+                    workspace_root=self.root,
+                    strict_match=is_cite_realign_page(page),
+                )
         if is_cite_realign_page(page):
             content = realign_irrelevant_cites(content, cites, self.root)
+        content = rewrite_fastapi_intro_cites(content, page, self.root)
 
         content = self._drop_uninventoried_snapshot_api_claims(content, composition_context)
         content = self._rebuild_qoder_toc_from_real_h2s(page, content)
@@ -3277,6 +3281,52 @@ class RepoWikiService:
             markdown = self._ensure_minimum_prose_density(markdown, page)
             markdown = self._rebuild_qoder_toc_from_real_h2s(page, markdown)
             page_results[idx] = (path, markdown)
+
+    def _schema_summary_owner_rank(self, page: Any, page_idx: int) -> tuple[int, str, int]:
+        page_id = str(getattr(page, "page_id", "") or "")
+        title = str(getattr(page, "title", "") or "")
+        output = str(getattr(page, "output_path", "") or "")
+        blob = f"{page_id} {title} {output}".lower()
+        api_ref_owner = 0 if ("api-overview" in blob or "api参考" in blob) else 1
+        return (api_ref_owner, page_id, page_idx)
+
+    def _dedupe_schema_summaries_in_page_order(
+        self,
+        pages_to_compose: list[Any],
+        page_results: dict[int, tuple[str, str]],
+    ) -> None:
+        """Keep one Schema 摘要 owner by page order / page_id, not completion order."""
+        heading_re = re.compile(r"^##\s+Schema 摘要\s*$", re.M)
+        groups: dict[str, list[tuple[int, Any, str, str, str]]] = {}
+        for idx in sorted(page_results):
+            if idx < 0 or idx >= len(pages_to_compose):
+                continue
+            page = pages_to_compose[idx]
+            path, markdown = page_results[idx]
+            match = heading_re.search(markdown or "")
+            if not match:
+                continue
+            after = markdown[match.end() :]
+            next_h2 = re.search(r"\n##\s+", after)
+            body = after[: next_h2.start()] if next_h2 else after
+            key = re.sub(r"\s+", " ", body).strip().casefold()
+            if not key or key == "字段摘要见 api参考。":
+                continue
+            groups.setdefault(key, []).append((idx, page, path, markdown, body))
+        pointer = "字段摘要见 API参考。"
+        for items in groups.values():
+            if len(items) < 2:
+                continue
+            owner_idx, _, _, _, _ = min(
+                items, key=lambda item: self._schema_summary_owner_rank(item[1], item[0])
+            )
+            for idx, _page, path, markdown, body in items:
+                if idx == owner_idx:
+                    continue
+                page_results[idx] = (
+                    path,
+                    markdown.replace(body, f"\n\n{pointer}\n", 1),
+                )
 
     def _rebuild_qoder_toc_from_real_h2s(self, page: Any, content: str) -> str:
         h2_sections = self._extract_or_seed_h2_sections(page, content)

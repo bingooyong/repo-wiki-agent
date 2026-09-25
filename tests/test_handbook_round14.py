@@ -73,10 +73,10 @@ def test_architecture_and_overview_prompts_state_roles(tmp_path: Path) -> None:
     composer.workspace_root = root
     arch_input = build_composer_input(_arch_page(), None, _context(root))
     arch_prompt = composer._build_compose_prompt(arch_input, composer._build_context(arch_input))
-    assert "前者" in arch_prompt and "后者" in arch_prompt
     assert "主 REST/Web" in arch_prompt
     assert "probe-agent" in arch_prompt and "隧道客户端" in arch_prompt
     assert "ccprobe-control" in arch_prompt
+    assert "前者" not in arch_prompt and "后者" not in arch_prompt
     overview_input = build_composer_input(_overview_page(), None, _context(root))
     overview_prompt = composer._build_compose_prompt(
         overview_input, composer._build_context(overview_input)
