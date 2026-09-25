@@ -1154,8 +1154,7 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        """Page-scoped request flows replace the shared list-flow catalog."""
-        return self._plan_request_flow_sequence(page_id, evidence_binding, context)
+        """Map endpoint list/detail/count/parameter retrieval flows into a sequence."""
         endpoints = context.get("endpoints", [])
 
         participants: list[str] = ["Client"]
@@ -1190,7 +1189,6 @@ class MermaidPlanner:
         if not selected:
             return None
 
-        return None
         for endpoint in selected[:16]:
             path = str(endpoint.get("path", "/unknown"))
             method, path = _honest_method_path(
