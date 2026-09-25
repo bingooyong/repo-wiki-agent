@@ -84,6 +84,11 @@ _PROMPT_LEAK_PHRASES = (
     "从提供的证据可见",
     "证据中可确认的 schema 相关元数据",
     "证据中可确认的",
+    "UNRESOLVED_API_FLOW",
+    "UNRESOLVED_API_ENDPOINTS",
+    "UNRESOLVED_API_AUTH",
+    "UNRESOLVED_API_SCHEMA",
+    "UNRESOLVED_API_CALLING_CONVENTIONS",
 )
 _QUALITY_METRIC_LEAK = re.compile(
     r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b|\b21\s*/\s*25\b",
@@ -2379,23 +2384,27 @@ class RepoWikiService:
             api_endpoints = self._evidence_backed_api_endpoints(page, composition_context)
             content = self._strip_unsupported_generic_api_claims(content, api_endpoints)
             page_id = str(getattr(page, "page_id", "") or "")
-            if not api_endpoints:
-                leaf = page_id.lower().rsplit("/", 1)[-1]
-                if leaf in {
-                    "authentication-authorization-api",
-                    "frontend-application-api",
-                    "agent-proxy-api",
-                    "error-handling-status-codes",
-                    "error-codes",
-                }:
-                    if "## API 分组" not in content:
-                        content += "\n\n## API 分组\n\n本组接口见 API参考。\n"
-                else:
-                    content = self._ensure_unresolved_api_evidence_marker(content)
+            from repo_wiki.generator.deterministic_sections import is_api_catalog_owner_page
+
+            leaf = page_id.lower().rsplit("/", 1)[-1]
+            group_leaves = {
+                "authentication-authorization-api",
+                "frontend-application-api",
+                "agent-proxy-api",
+                "ccprobe-control-api-reference",
+                "error-handling-status-codes",
+                "error-codes",
+            }
             if "## API 分组" not in content:
-                content += "\n\n## API 分组\n\n" + self._build_truthful_api_group_section(
-                    api_endpoints
+                owner = is_api_catalog_owner_page(
+                    page_id=page_id, title=str(getattr(page, "title", "") or "")
                 )
+                if api_endpoints and (owner or leaf in group_leaves):
+                    content += "\n\n## API 分组\n\n" + self._build_truthful_api_group_section(
+                        api_endpoints
+                    )
+                else:
+                    content += "\n\n## API 分组\n\n本组接口见 API参考。\n"
             if "## 调用约定" not in content:
                 content += "\n\n## 调用约定\n\n" + self._build_truthful_calling_conventions(
                     api_endpoints
@@ -2413,10 +2422,19 @@ class RepoWikiService:
         is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
         if self._existing_mermaid_is_thin(content):
             content = self._strip_mermaid_fences(content)
-        needs_er_mermaid = is_data_model_page and not self._content_has_er_mermaid(content)
+        from repo_wiki.generator.deterministic_sections import is_data_model_owner_page
+
+        page_id_for_er = str(getattr(page, "page_id", "") or "")
+        title_for_er = str(getattr(page, "title", "") or "")
+        needs_er_mermaid = (
+            is_data_model_page
+            and is_data_model_owner_page(page_id=page_id_for_er, title=title_for_er)
+            and not self._content_has_er_mermaid(content)
+        )
         needs_any_mermaid = (
             add_mermaid
             or is_api_page
+            or is_data_model_page
             or page.category
             in {
                 WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
@@ -2425,16 +2443,11 @@ class RepoWikiService:
             }
         ) and not self._content_has_mermaid_fence(content)
         if needs_er_mermaid or needs_any_mermaid:
-            if is_api_like_page and not self._evidence_backed_api_endpoints(
-                page, composition_context
-            ):
-                rendered_blocks = []
-            else:
-                rendered_blocks = self._build_mermaid_blocks_from_planner(
-                    page=page,
-                    binding=binding,
-                    composition_context=composition_context,
-                )
+            rendered_blocks = self._build_mermaid_blocks_from_planner(
+                page=page,
+                binding=binding,
+                composition_context=composition_context,
+            )
             if rendered_blocks:
                 if needs_er_mermaid:
                     rendered_blocks = sorted(
@@ -2442,8 +2455,6 @@ class RepoWikiService:
                         key=lambda block: 0 if "erdiagram" in block.lower() else 1,
                     )
                 content += "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
-            elif is_api_like_page and needs_any_mermaid:
-                content += "\n\nUNRESOLVED_API_FLOW：缺少可验证调用链证据，不生成占位流程图。\n"
 
         citation_renderer = CitationRenderer(workspace_root=self.root)
         cites: list[str] = []
@@ -2481,13 +2492,41 @@ class RepoWikiService:
         content = self._rewrite_health_check_ports(content, page)
         content = self._strip_reading_notes_boilerplate(content)
         from repo_wiki.generator.deterministic_sections import (
+            build_core_service_section,
+            build_verify_section,
             dedupe_identical_fences,
+            expand_truncated_build_commands,
+            is_install_owner_page,
+            replace_h2_section,
+            rewrite_checkout_directory_name,
+            strip_empty_numbered_steps,
             strip_header_only_cites,
             strip_meta_instructions,
+            strip_placeholder_ops_fences,
+            strip_reader_unresolved_markers,
         )
 
+        content = rewrite_checkout_directory_name(content, self.root)
         content = strip_meta_instructions(content)
         content = strip_header_only_cites(content, self.root)
+        content = strip_reader_unresolved_markers(content)
+        content = strip_placeholder_ops_fences(content)
+        content = expand_truncated_build_commands(content, self.root)
+        content = strip_empty_numbered_steps(content)
+        core = build_core_service_section(
+            self.root,
+            page_id=str(getattr(page, "page_id", "") or ""),
+            title=str(getattr(page, "title", "") or ""),
+        )
+        if core:
+            content = replace_h2_section(content, ("服务概述",), core)
+        if is_install_owner_page(
+            page_id=str(getattr(page, "page_id", "") or ""),
+            title=str(getattr(page, "title", "") or ""),
+        ):
+            verify = build_verify_section(self.root)
+            if verify:
+                content = replace_h2_section(content, ("启动与验证",), verify)
         content = dedupe_identical_fences(content)
         content = self._fold_citation_only_lines(content)
         content = self._reduce_hedging_when_cited(content)
@@ -2560,7 +2599,7 @@ class RepoWikiService:
         )
         from repo_wiki.planner.schema import WikiTaxonomyCategory
         from repo_wiki.verifier.handbook import (
-            architecture_core_packages,
+            architecture_required_packages,
             has_architecture_core_citation,
         )
 
@@ -2582,29 +2621,16 @@ class RepoWikiService:
             )
         if has_architecture_core_citation(content, self.root):
             return content
-        from repo_wiki.verifier.handbook import architecture_required_packages
-
-        preferred = architecture_required_packages(self.root) + architecture_core_packages(
-            self.root
-        )
-        seen: set[str] = set()
-        cites = []
-        for rel in preferred:
-            if rel in seen:
-                continue
-            seen.add(rel)
-            cite = cite_existing_meaningful(self.root, rel)
-            if cite:
-                cites.append(cite)
-        if not cites:
-            return content
-        python_repo = (self.root / "app" / "api" / "routes").exists()
-        prose = (
-            "HTTP 请求从路由包进入，再由模型与服务完成业务与持久化。"
-            if python_repo
-            else "入口二进制与核心包见源码："
-        )
-        return content.rstrip() + "\n" + prose + " " + " ".join(cites[:8]) + "\n"
+        missing = [
+            rel
+            for rel in architecture_required_packages(self.root)
+            if rel.lower() not in content.lower()
+        ]
+        extra = [cite_existing_meaningful(self.root, rel) for rel in missing]
+        extra = [item for item in extra if item]
+        if extra:
+            content = content.rstrip() + f"\n核心包见 {extra[0]}。\n"
+        return content
 
     def _ensure_data_model_source_cites(self, page: Any, content: str) -> str:
         from repo_wiki.generator.deterministic_sections import build_data_model_cite_block
@@ -2631,6 +2657,8 @@ class RepoWikiService:
         if getattr(page, "category", None) != WikiTaxonomyCategory.SECURITY_COMPLIANCE:
             return content
         from repo_wiki.generator.deterministic_sections import (
+            cite_first_match,
+            is_auth_identity_page,
             is_security_owner_page,
             replace_h2_section,
         )
@@ -2638,14 +2666,25 @@ class RepoWikiService:
         page_id = str(getattr(page, "page_id", "") or "")
         title = str(getattr(page, "title", "") or "")
         content = re.sub(r"^.*安全实现见.*$", "", content, flags=re.M)
+        if is_auth_identity_page(page_id=page_id, title=title):
+            token = cite_first_match(
+                self.root, "apiauth.go", r"EnvAPIToken|PROBE_API_TOKEN|apiAuthMiddleware"
+            )
+            if token:
+                content = replace_h2_section(
+                    content,
+                    ("身份认证", "认证实现", "核心组件", "安全实现"),
+                    "## 认证实现\n\n"
+                    f"管理接口鉴权读取环境变量 `PROBE_API_TOKEN`，"
+                    f"请求头为 `X-Probe-Api-Token` 或 Bearer。 {token}\n",
+                )
+            return content
         if not is_security_owner_page(page_id=page_id, title=title):
             return replace_h2_section(
                 content, ("安全实现",), "## 安全说明\n\n实现细节见安全合规。\n"
             )
         block = build_security_cite_block(self.root)
         if not block:
-            return content
-        if "AK/SK" in content or "jwt_token_prefix" in content:
             return content
         return replace_h2_section(content, ("安全实现",), block)
 
@@ -2735,12 +2774,12 @@ class RepoWikiService:
             "error-handling-status-codes",
             "error-codes",
         }
-        if leaf not in group_pages:
-            return self._order_api_endpoints_for_pages(normalized)
         if leaf in {"error-handling-status-codes", "error-codes"}:
             return []
         tokens = _page_scope_needles(page_id) | _page_scope_needles(title)
         filtered = [item for item in normalized if _endpoint_matches_page(item, tokens)]
+        if leaf not in group_pages:
+            return []
         return self._order_api_endpoints_for_pages(filtered)
 
     def _strip_unsupported_generic_api_claims(
@@ -2772,26 +2811,14 @@ class RepoWikiService:
                 if (method, path) not in evidence_pairs:
                     continue
             if generic_auth_line.match(line) and not has_bearer_evidence:
-                cleaned_lines.append(
-                    "- 认证: <!-- repo-wiki:unresolved api-auth --> "
-                    "UNRESOLVED_API_AUTH（缺少认证证据，不能视为 Bearer Token 事实）"
-                )
                 continue
             if not has_bearer_evidence:
-                line = line.replace('"auth": "Bearer token"', '"auth": "UNRESOLVED_API_AUTH"')
+                line = line.replace('"auth": "Bearer token"', '"auth": "unspecified"')
             cleaned_lines.append(line)
         return "\n".join(cleaned_lines).strip()
 
     def _ensure_unresolved_api_evidence_marker(self, content: str) -> str:
-        if "UNRESOLVED_API_ENDPOINTS" in content:
-            return content
-        return (
-            content.rstrip()
-            + "\n\n## API 证据状态\n\n"
-            + "<!-- repo-wiki:unresolved api-endpoints -->\n"
-            + "UNRESOLVED_API_ENDPOINTS：未解析到证据支持的 API 端点；"
-            + "现有结构内容均不得视为已验证接口事实。"
-        )
+        return content
 
     def _is_qoder_api_contract_page(self, page: Any) -> bool:
         """True only for API reference pages, not titles/paths that merely contain 'API'."""
@@ -2829,11 +2856,7 @@ class RepoWikiService:
 
     def _build_truthful_api_group_section(self, endpoints: list[dict[str, Any]]) -> str:
         if not endpoints:
-            return (
-                "<!-- repo-wiki:unresolved api-endpoints -->\n"
-                "UNRESOLVED_API_ENDPOINTS：未在证据上下文中解析到接口端点；本节仅为结构占位，"
-                "不得视为已验证 API 清单。"
-            )
+            return "本组接口见 API参考。"
 
         lines = ["按资源分组的接口：", ""]
         grouped: dict[str, list[dict[str, Any]]] = {}
@@ -2882,11 +2905,7 @@ class RepoWikiService:
 
     def _build_truthful_calling_conventions(self, endpoints: list[dict[str, Any]]) -> str:
         if not endpoints:
-            return (
-                "<!-- repo-wiki:unresolved api-calling-conventions -->\n"
-                "UNRESOLVED_API_CALLING_CONVENTIONS：缺少端点、认证、幂等和错误处理证据；"
-                "本节不声明 Bearer、网关、重试或 CRUD 语义。"
-            )
+            return "认证与错误处理见各端点源码与 API参考。"
 
         methods = sorted(
             {str(ep.get("method") or "").upper().strip() for ep in endpoints if ep.get("method")}
@@ -2903,19 +2922,12 @@ class RepoWikiService:
         if auth_values:
             lines.append(f"- 认证: {', '.join(auth_values)}")
         else:
-            lines.append(
-                "- 认证: <!-- repo-wiki:unresolved api-auth --> "
-                "UNRESOLVED_API_AUTH（证据中未声明认证方式）"
-            )
+            lines.append("- 认证: 见各端点源码")
         return "\n".join(lines)
 
     def _build_truthful_api_schema_summary(self, endpoints: list[dict[str, Any]]) -> str:
         if not endpoints:
-            return (
-                "<!-- repo-wiki:unresolved api-schema -->\n"
-                "UNRESOLVED_API_SCHEMA：缺少请求体、响应体或 OpenAPI/源码字段证据；"
-                "本节不合成通用 request/response/error schema。"
-            )
+            return "字段摘要见 API参考。"
 
         body_endpoints = [
             ep
@@ -2927,11 +2939,7 @@ class RepoWikiService:
             )
         ]
         if not body_endpoints:
-            return (
-                "<!-- repo-wiki:unresolved api-schema -->\n"
-                "UNRESOLVED_API_SCHEMA：端点证据未提供请求体、响应体或错误码字段；"
-                "未生成通用 schema。"
-            )
+            return "字段摘要见 API参考。"
 
         lines = ["已扫描到请求或响应字段的端点：", ""]
         for endpoint in body_endpoints[:10]:
@@ -3046,12 +3054,11 @@ class RepoWikiService:
             mermaid_key = normalize_mermaid_block(rendered)
             is_er = "erDiagram" in rendered
             is_seq = "sequenceDiagram" in rendered and "->>" in rendered
-            if mermaid_key in self._seen_mermaid_hashes and not is_er:
+            if mermaid_key in self._seen_mermaid_hashes:
                 continue
             if not is_er and not is_seq and mermaid_edge_count(rendered) < 2:
                 continue
-            if not is_er:
-                self._seen_mermaid_hashes.add(mermaid_key)
+            self._seen_mermaid_hashes.add(mermaid_key)
             rendered_blocks.append(f"```mermaid\n{rendered}\n```")
         return rendered_blocks
 
@@ -3112,13 +3119,7 @@ class RepoWikiService:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
 
         if page.category == WikiTaxonomyCategory.API_REFERENCE:
-            return (
-                "```mermaid\n"
-                "flowchart TD\n"
-                '    A["UNRESOLVED_API_FLOW: 缺少可验证调用链证据"]\n'
-                '    A --> B["仅保留结构占位；不得视为已验证事实"]\n'
-                "```\n"
-            )
+            return ""
         if page.category == WikiTaxonomyCategory.DATA_MODELS:
             return (
                 "```mermaid\n"
@@ -3318,11 +3319,8 @@ class RepoWikiService:
     def _fold_citation_only_lines(self, content: str) -> str:
         out: list[str] = []
         for line in content.splitlines():
-            if self._line_is_citation_tags_only(line) and out:
-                prev = out[-1].rstrip()
-                if prev and not prev.startswith("```"):
-                    out[-1] = prev + " " + line.strip()
-                    continue
+            if self._line_is_citation_tags_only(line):
+                continue
             out.append(line)
         return "\n".join(out)
 

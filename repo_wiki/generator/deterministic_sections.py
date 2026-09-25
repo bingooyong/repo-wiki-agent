@@ -35,7 +35,13 @@ _INSTALL_SATELLITE_IDS = frozenset(
 )
 _ARCH_OWNER_IDS = frozenset({"architecture-overview"})
 _API_OWNER_IDS = frozenset({"api-overview", "api-reference", "api"})
+_DATA_MODEL_OWNER_IDS = frozenset({"data-models-overview", "data-model", "data-models"})
 _SECURITY_OWNER_IDS = frozenset({"security-overview", "security"})
+_OPERATIONAL_ADVICE_RE = re.compile(r"不要混用|不要把这些文件|不要误用|不要当作默认")
+_UNRESOLVED_API_RE = re.compile(r"UNRESOLVED_API_[A-Z_]+")
+_EMPTY_NUMBERED_RE = re.compile(
+    r"(?m)^(\d+)\.\s+\S[^\n]*\n(?:<cite>[^<]+</cite>\s*\n)?(?:[ \t]*\n){2,}"
+)
 _GO_SECURITY_HINTS = (
     "apiauth.go",
     "internal/auth",
@@ -76,6 +82,18 @@ def is_api_catalog_owner_page(*, page_id: str = "", title: str = "") -> bool:
 def is_security_owner_page(*, page_id: str = "", title: str = "") -> bool:
     pid = (page_id or "").lower().rsplit("/", 1)[-1]
     return pid in _SECURITY_OWNER_IDS or (title or "") in {"安全合规", "安全合规概览"}
+
+
+def is_data_model_owner_page(*, page_id: str = "", title: str = "") -> bool:
+    pid = (page_id or "").lower().rsplit("/", 1)[-1]
+    return pid in _DATA_MODEL_OWNER_IDS or (title or "") in {"数据模型"}
+
+
+def is_auth_identity_page(*, page_id: str = "", title: str = "") -> bool:
+    pid = (page_id or "").lower().rsplit("/", 1)[-1]
+    if "api" in pid or "授权" in (title or ""):
+        return False
+    return pid in {"identity-authentication", "authentication"} or (title or "") == "身份认证"
 
 
 def cite_readme_line(root: Path, needle: str, *, last: bool = False) -> str:
@@ -214,6 +232,9 @@ def strip_header_only_cites(content: str, root: Path) -> str:
 def strip_meta_instructions(content: str) -> str:
     kept: list[str] = []
     for line in content.splitlines():
+        if _OPERATIONAL_ADVICE_RE.search(line):
+            kept.append(line)
+            continue
         if _META_IMPERATIVE_RE.search(line) and (
             "package main" in line or "custom-probe" in line or "测试 settings" in line
         ):
@@ -435,6 +456,7 @@ def build_go_role_section(root: Path) -> str:
 def extract_alembic_tables(text: str) -> list[dict[str, object]]:
     tables: list[dict[str, object]] = []
     starts = list(re.finditer(r'op\.create_table\(\s*"(\w+)"', text or ""))
+    by_name: dict[str, dict[str, object]] = {}
     for index, match in enumerate(starts):
         name = match.group(1)
         end = starts[index + 1].start() if index + 1 < len(starts) else len(text or "")
@@ -453,6 +475,11 @@ def extract_alembic_tables(text: str) -> list[dict[str, object]]:
                 pks.append(col.group(1))
         for extra in re.findall(r"sa\.PrimaryKeyConstraint\(\s*([^)]+)\)", body):
             pks.extend(re.findall(r'"(\w+)"', extra))
+        if "*timestamps()" in body or "timestamps()" in body:
+            for stamp, stamp_type in (("created_at", "TIMESTAMP"), ("updated_at", "TIMESTAMP")):
+                if stamp not in attrs:
+                    attrs.append(stamp)
+                    types.append(stamp_type)
         fks = re.findall(
             r'sa\.Column\(\s*"(\w+)"[^)]*sa\.ForeignKey\(\s*"(\w+)\.(\w+)"',
             body,
@@ -466,19 +493,34 @@ def extract_alembic_tables(text: str) -> list[dict[str, object]]:
         for col_name, dest, _dest_col in fks:
             label = col_name or _dest_col
             relationships.append(f"belongs_to:{dest}:{label}" if label else f"belongs_to:{dest}")
-        tables.append(
-            {
-                "name": name,
-                "type": "migration_table",
-                "attributes": attrs,
-                "attribute_types": types,
-                "primary_key": pks[0] if len(pks) == 1 else "",
-                "primary_keys": list(dict.fromkeys(pks)),
-                "relationships": relationships,
-                "file_path": "",
-                "table_name": name,
-            }
-        )
+        table = {
+            "name": name,
+            "type": "migration_table",
+            "attributes": attrs,
+            "attribute_types": types,
+            "primary_key": pks[0] if len(pks) == 1 else "",
+            "primary_keys": list(dict.fromkeys(pks)),
+            "relationships": relationships,
+            "file_path": "",
+            "table_name": name,
+        }
+        tables.append(table)
+        by_name[name] = table
+    for match in re.finditer(
+        r'op\.create_primary_key\(\s*"[^"]+"\s*,\s*"(\w+)"\s*,\s*\[([^\]]+)\]',
+        text or "",
+    ):
+        current = by_name.get(match.group(1))
+        if current is None:
+            continue
+        extra = re.findall(r'"(\w+)"', match.group(2))
+        raw_pks = current.get("primary_keys")
+        pks = [str(item) for item in raw_pks] if isinstance(raw_pks, list) else []
+        for col in extra:
+            if col not in pks:
+                pks.append(col)
+        current["primary_keys"] = pks
+        current["primary_key"] = pks[0] if len(pks) == 1 else ""
     return tables
 
 
@@ -558,11 +600,13 @@ def build_data_model_cite_block(root: Path) -> str:
             if sqls:
                 rel = sqls[0].relative_to(root).as_posix()
                 migrations = f" `db/migrations` 含 {len(sqls)} 个 SQL 迁移，例如 {cite_first_match(root, rel, r'CREATE TABLE|create table') or f'<cite>{rel}:1-1</cite>'}。"
-        body = "、".join(named) if named else " ".join(required)
+        items = named or required
+        listing = "\n".join(f"- {item}" for item in items)
         return (
             "## 实体定义\n\n"
-            f"GORM 结构体定义在 internal/models：{body}。"
-            f" 表结构见 db/schema.sql。{migrations}\n"
+            "GORM 结构体定义在 internal/models：\n\n"
+            f"{listing}\n\n"
+            f"表结构见 db/schema.sql。{migrations}\n"
         )
     models = load_alembic_migration_models(root)
     if not models:
@@ -598,12 +642,19 @@ def build_security_cite_block(root: Path) -> str:
     if not cites:
         return ""
     if (root / "cmd" / "ccagent").is_dir():
+        token = cite_first_match(
+            root, "apiauth.go", r"EnvAPIToken|PROBE_API_TOKEN|apiAuthMiddleware"
+        ) or next((item for item in cites if "apiauth.go" in item), "")
+        secrets = next((item for item in cites if "secrets" in item), "")
+        audit = next((item for item in cites if "audit" in item), "")
+        netguard = next((item for item in cites if "netguard" in item), "")
         return (
             "## 安全实现\n\n"
-            f"请求鉴权走 API 网关 AK/SK 中间件与 internal/auth。 {cites[0] if cites else ''}\n\n"
-            f"密钥以 AES/Vault 存储，不把明文写进配置。 {cites[1] if len(cites) > 1 else ''}\n\n"
+            f"请求鉴权走 `apiauth` 中间件，校验环境变量 `PROBE_API_TOKEN`"
+            f"（`X-Probe-Api-Token` 或 Bearer）。 {token}\n\n"
+            f"密钥以 AES/Vault 存储，不把明文写进配置。 {secrets}\n\n"
             f"审计事件写入 internal/audit，出站目标由 netguard 约束，敏感字段在日志中脱敏。"
-            f" {' '.join(cites[2:])}\n"
+            f" {audit} {netguard}\n"
         )
     return (
         "## 安全实现\n\n"
@@ -642,6 +693,9 @@ def is_header_only_cite(raw: str, repo_root: Path | None) -> bool:
     lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     end = int(match.group(2))
     window = "\n".join(lines[:end])
+    suffix = Path(rel).suffix.lower()
+    if suffix in {".md", ".rst", ".txt"}:
+        return True
     if re.search(
         r"^(type\s+\w+\s+struct|func\s+main\b|func\s+\w+|def\s+\w+|class\s+\w+|"
         r"podman-|docker-|poetry |alembic |uvicorn )",
@@ -649,8 +703,7 @@ def is_header_only_cite(raw: str, repo_root: Path | None) -> bool:
         re.M,
     ):
         return False
-    suffix = Path(rel).suffix.lower()
-    if suffix in {".md", ".rst", ".yml", ".yaml", ".txt"}:
+    if suffix in {".yml", ".yaml"}:
         return True
     return not re.search(r"\S", window)
 
@@ -669,6 +722,8 @@ def page_has_repeated_fences(content: str) -> bool:
 
 def page_has_meta_instruction(content: str) -> bool:
     for line in (content or "").splitlines():
+        if _OPERATIONAL_ADVICE_RE.search(line):
+            continue
         if _PLANNING_LEAK_RE.search(line):
             return True
         if _META_IMPERATIVE_RE.search(line) and ("package main" in line or "custom-probe" in line):
@@ -734,10 +789,180 @@ def rewrite_architecture_role_claims(content: str) -> str:
             "ccprobe-control 的 import 图不含 services/repository/exporter",
         ),
         (r"via services/repository/exporter", "不经过 services/repository/exporter"),
+        (
+            r"`cmd/ccagent`（探针 Agent，作为隧道客户端连接到控制面）",
+            "`cmd/ccagent`（主 REST/Web 服务）",
+        ),
+        (r"cmd/ccagent`?（探针 Agent，作为隧道客户端[^）]*）", "`cmd/ccagent`（主 REST/Web 服务）"),
+        (r"\*\*ccagent 隧道客户端\*\*", "**ccagent 主 REST/Web 服务**"),
+        (r"ccagent 隧道客户端", "ccagent 主 REST/Web 服务"),
+        (
+            r"`?ccagent`?[^。\n]{0,40}通过 `-agent-url`/`-agent-token` 与 `ccprobe-control` 建立反向控制链路",
+            "ccagent 作为主 REST/Web 服务对外提供 HTTP，不反连控制面",
+        ),
+        (
+            r"作为外部进程被拉起以返回 JSON 探针结果",
+            "由 `internal/probe` 经 HTTP 调用并解析 JSON 结果",
+        ),
+        (r"由 `internal/probe` 拉起并解析 JSON", "由 `internal/probe` 经 HTTP 调用并解析 JSON"),
+        (r"internal/probe 拉起", "internal/probe 经 HTTP 调用"),
     )
     for pattern, repl in replacements:
         text = re.sub(pattern, repl, text)
     return text
+
+
+def strip_reader_unresolved_markers(content: str) -> str:
+    text = _UNRESOLVED_API_RE.sub("", content or "")
+    text = re.sub(r"^## API 证据状态\n\n<!-- repo-wiki:unresolved[^>]+-->\n?", "", text, flags=re.M)
+    text = re.sub(r"<!-- repo-wiki:unresolved[^>]+-->\s*", "", text)
+    text = re.sub(
+        r"：未解析到证据支持的 API 端点；现有结构内容均不得视为已验证接口事实。", "", text
+    )
+    text = re.sub(
+        r"：未在证据上下文中解析到接口端点；本节仅为结构占位，不得视为已验证 API 清单。",
+        "本组接口见 API参考。",
+        text,
+    )
+    text = re.sub(
+        r"：缺少端点、认证、幂等和错误处理证据；本节不声明 Bearer、网关、重试或 CRUD 语义。",
+        "认证与错误处理见各端点源码。",
+        text,
+    )
+    text = re.sub(
+        r"：缺少请求体、响应体或 OpenAPI/源码字段证据；本节不合成通用 request/response/error schema。",
+        "字段摘要见 API参考。",
+        text,
+    )
+    text = re.sub(
+        r"：端点证据未提供请求体、响应体或错误码字段；未生成通用 schema。",
+        "字段摘要见 API参考。",
+        text,
+    )
+    text = re.sub(r"：缺少可验证调用链证据，不生成占位流程图。\n?", "", text)
+    text = re.sub(r"（缺少认证证据，不能视为 Bearer Token 事实）", "", text)
+    text = re.sub(r"（证据中未声明认证方式）", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text
+
+
+def strip_empty_numbered_steps(content: str) -> str:
+    lines = (content or "").splitlines()
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        match = re.match(r"^(\d+)\.\s+\S", line)
+        if match:
+            body: list[str] = []
+            look = index + 1
+            while (
+                look < len(lines)
+                and not re.match(r"^(\d+)\.\s+", lines[look])
+                and not lines[look].startswith("## ")
+            ):
+                if lines[look].strip():
+                    body.append(lines[look])
+                look += 1
+            meaningful = [
+                item for item in body if not re.fullmatch(r"<cite>[^<]+</cite>", item.strip())
+            ]
+            if not meaningful:
+                index = look
+                continue
+        kept.append(line)
+        index += 1
+    return "\n".join(kept)
+
+
+def strip_placeholder_ops_fences(content: str) -> str:
+    from repo_wiki.generator.compose_evidence import is_placeholder_ops_diagram
+
+    def _drop(match: re.Match[str]) -> str:
+        block = match.group(0)
+        return "" if is_placeholder_ops_diagram(block) else block
+
+    return re.sub(r"```mermaid\s*.*?```", _drop, content or "", flags=re.I | re.S)
+
+
+def expand_truncated_build_commands(content: str, root: Path) -> str:
+    if "bin/probe-..." not in (content or ""):
+        return content or ""
+    ci = root / ".github" / "workflows" / "ci.yml"
+    names: list[str] = []
+    if ci.is_file():
+        names = re.findall(
+            r"go build -o (bin/[A-Za-z0-9_-]+)", ci.read_text(encoding="utf-8", errors="ignore")
+        )
+    replacement = (
+        "、".join(f"`{name}`" for name in names[:6])
+        or "`bin/ccagent`、`bin/ccprobe-control`、`bin/probe-agent`"
+    )
+    return (content or "").replace("bin/probe-...", replacement)
+
+
+def rewrite_checkout_directory_name(content: str, root: Path) -> str:
+    from repo_wiki.generator.compose_evidence import derive_product_name
+
+    product = derive_product_name(root)
+    if not product:
+        return content or ""
+    text = content or ""
+    leaks = {root.name, f"{product}-eval"}
+    for leak in leaks:
+        if leak and leak != product:
+            text = re.sub(rf"\b{re.escape(leak)}\b", product, text)
+    return text
+
+
+def build_verify_section(root: Path) -> str:
+    if (root / "cmd" / "ccagent").is_dir():
+        from repo_wiki.verifier.handbook import preferred_source_listen_port
+
+        port = preferred_source_listen_port(root) or 1900
+        health = cite_readme_line(root, "/health")
+        return (
+            "## 启动与验证\n\n"
+            f"1. 按安装步骤完成编排或本地编译。\n\n"
+            f"2. 用源码健康检查确认进程存活。 {health}\n\n"
+            "```bash\n"
+            f"curl http://localhost:{port}/health\n"
+            "```\n"
+        )
+    if (root / "app" / "main.py").is_file():
+        return (
+            "## 启动与验证\n\n"
+            "1. 按安装步骤准备 `.env` 并完成迁移。\n\n"
+            "2. 确认应用进程已监听。\n\n"
+            "```bash\n"
+            "poetry run uvicorn app.main:app --reload\n"
+            "```\n"
+        )
+    return ""
+
+
+def build_core_service_section(root: Path, *, page_id: str = "", title: str = "") -> str:
+    blob = f"{page_id} {title}".lower()
+    if "ccprobe-control" in blob or title.strip() in {"Ccprobe Control", "ccprobe-control"}:
+        serve = cite_existing_meaningful(root, "cmd/ccprobe-control/serve.go")
+        main = cite_existing_meaningful(root, "cmd/ccprobe-control/main.go")
+        hub = cite_existing_meaningful(root, "internal/control")
+        return (
+            "## 服务概述\n\n"
+            f"`ccprobe-control` 是 gRPC 控制面，通过 `-serve -transport grpc` 启动 TunnelHub，"
+            f"不把探测执行委托给 `cmd/custom-probe` 子进程。 {serve} {main}\n\n"
+            f"会话与心跳由 `internal/control` 维护。 {hub}\n"
+        )
+    if "probe-agent" in blob or title.strip() in {"Probe Agent", "probe-agent"}:
+        agent = cite_existing_meaningful(root, "cmd/probe-agent/main.go")
+        transport = cite_existing_meaningful(root, "internal/agent")
+        return (
+            "## 服务概述\n\n"
+            f"`probe-agent` 是隧道客户端，从 `cmd/probe-agent` 启动并向控制面拨号。"
+            f" 本页不描述 `cmd/custom-probe`。 {agent}\n\n"
+            f"传输与心跳实现见 `internal/agent`。 {transport}\n"
+        )
+    return ""
 
 
 def apply_deterministic_rewrites(
@@ -750,8 +975,12 @@ def apply_deterministic_rewrites(
 ) -> str:
     """Replay structural compose rewrites without LLM or fence-wide substitution."""
     text = content or ""
+    text = rewrite_checkout_directory_name(text, root)
     text = strip_meta_instructions(text)
     text = strip_header_only_cites(text, root)
+    text = strip_reader_unresolved_markers(text)
+    text = strip_placeholder_ops_fences(text)
+    text = expand_truncated_build_commands(text, root)
     text = rewrite_architecture_role_claims(text)
     try:
         from repo_wiki.generator.compose_evidence import (
@@ -796,12 +1025,45 @@ def apply_deterministic_rewrites(
         if block and "ProbeEndpoint" not in text and "fdf8821871d7" not in text:
             text = replace_h2_section(text, ("实体定义", "持久化表", "数据模型"), block)
     if is_security_owner_page(page_id=page_id, title=title) or (
-        not page_id and ("安全" in title or "security" in (category or "").lower())
+        not page_id and title in {"安全合规", "安全合规概览"}
     ):
         block = build_security_cite_block(root)
-        if block and "AK/SK" not in text and "jwt_token_prefix" not in text:
+        if block:
             text = replace_h2_section(text, ("安全实现",), block)
+    if is_auth_identity_page(page_id=page_id, title=title):
+        token = cite_first_match(
+            root, "apiauth.go", r"EnvAPIToken|PROBE_API_TOKEN|apiAuthMiddleware"
+        )
+        if token and "PROBE_API_TOKEN" not in text:
+            text = replace_h2_section(
+                text,
+                ("身份认证", "认证实现", "核心组件"),
+                "## 认证实现\n\n"
+                f"管理接口鉴权读取环境变量 `PROBE_API_TOKEN`，"
+                f"请求头为 `X-Probe-Api-Token` 或 Bearer。 {token}\n",
+            )
+    core = build_core_service_section(root, page_id=page_id, title=title)
+    if core:
+        text = replace_h2_section(text, ("服务概述",), core)
+    if is_install_owner_page(page_id=page_id, title=title) or (
+        not page_id and title in {"安装与配置", "安装指南"}
+    ):
+        verify = build_verify_section(root)
+        if verify:
+            text = replace_h2_section(text, ("启动与验证",), verify)
+    if not is_api_catalog_owner_page(page_id=page_id, title=title) and (
+        "API" in title or "api" in (page_id or "").lower() or "API" in (category or "")
+    ):
+        if "按资源分组的接口" in text:
+            text = replace_h2_section(text, ("API 分组",), "## API 分组\n\n本组接口见 API参考。\n")
+    if (
+        not is_data_model_owner_page(page_id=page_id, title=title)
+        and "followers_to_followings" in text
+    ):
+        text = re.sub(r"```mermaid\s*erDiagram.*?```", "", text, flags=re.I | re.S)
+    text = strip_empty_numbered_steps(text)
     text = strip_dangling_colon_leads(text)
     text = strip_empty_sections_and_footnotes(text)
+    text = strip_reader_unresolved_markers(text)
     text = dedupe_identical_fences(text)
     return rebuild_toc_from_h2s(text)

@@ -379,6 +379,24 @@ def _score_onboarding_evidence(
                 signals.append("go_entrypoint_not_handler")
         return score, signals
 
+    if page.category == WikiTaxonomyCategory.CORE_SERVICES:
+        blob = f"{page.page_id} {page.title}".lower()
+        if "ccprobe-control" in blob or "ccprobe control" in blob:
+            if "ccprobe-control" in path or "/control/" in path:
+                score += WEIGHT_ONBOARDING_ENTRY + 3.0
+                signals.append("core_ccprobe_control")
+            if "custom-probe" in path:
+                score -= 8.0
+                signals.append("core_demote_custom_probe")
+        if "probe-agent" in blob or "probe agent" in blob:
+            if "probe-agent" in path or "/agent/" in path:
+                score += WEIGHT_ONBOARDING_ENTRY + 3.0
+                signals.append("core_probe_agent")
+            if "custom-probe" in path:
+                score -= 8.0
+                signals.append("core_demote_custom_probe")
+        return score, signals
+
     if _is_overview_or_install_page(page):
         if name == "readme.md":
             score += WEIGHT_ONBOARDING_README + 1.5

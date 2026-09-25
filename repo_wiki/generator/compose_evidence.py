@@ -15,6 +15,20 @@ _PLACEHOLDER_OPS_RE = re.compile(
     r"cmd_start\[start\].*cmd_build\[build\].*cmd_test\[test\].*cmd_lint\[lint\]",
     re.IGNORECASE | re.DOTALL,
 )
+_GENERIC_OPS_LABEL_RE = re.compile(r"\[(start|build|test|lint)\]", re.IGNORECASE)
+_ROLE_CCAGENT_TUNNEL_RE = re.compile(
+    r"ccagent[^。\n]{0,80}(?<!不)(?<!不作为)(?<!探针)隧道客户端",
+    re.IGNORECASE,
+)
+_ROLE_CCAGENT_REVERSE_RE = re.compile(
+    r"ccagent[^。\n]{0,120}建立反向控制链路|"
+    r"ccagent[^。\n]{0,80}通过\s*`?-agent-url",
+    re.IGNORECASE,
+)
+_ROLE_CUSTOM_SUBPROCESS_RE = re.compile(
+    r"custom-probe[^。\n]{0,80}(?:子进程|外部进程被拉起|作为外部进程|subprocess)",
+    re.IGNORECASE,
+)
 _SVC_NODE_RE = re.compile(r"^\s*([A-Za-z][\w-]*)\[([^\]]+)\]\s*$", re.MULTILINE)
 _FLOW_EDGE_RE = re.compile(r"^\s*([A-Za-z][\w-]*)\s*-->\s*([A-Za-z][\w-]*)\s*$", re.MULTILINE)
 _STARTED_RE = re.compile(
@@ -151,13 +165,19 @@ def invented_compose_edges(markdown: str, allowed: list[tuple[str, str]]) -> lis
 
 
 def is_placeholder_ops_diagram(markdown: str) -> bool:
+    """True for invented Start→build→test→lint chains, even without a start node."""
     for block in re.findall(r"```mermaid\s*(.*?)```", markdown or "", flags=re.I | re.S):
         compact = re.sub(r"\s+", " ", block)
+        generic = _GENERIC_OPS_LABEL_RE.findall(block)
         if _PLACEHOLDER_OPS_RE.search(block) or (
             "cmd_start[start]" in compact
             and "cmd_build[build]" in compact
             and "cmd_test[test]" in compact
             and "cmd_lint[lint]" in compact
+        ):
+            return True
+        if len(generic) >= 2 and re.search(
+            r"start\s*-->|-->\s*(cmd_)?(build|test|lint)", compact, re.I
         ):
             return True
     return False
@@ -254,6 +274,54 @@ def rewrite_false_import_claims(markdown: str, edges: set[tuple[str, str]]) -> s
             repl = f"{src} 不依赖 {dest}"
         text = text[: match.start()] + repl + text[match.end() :]
     return text
+
+
+def prose_role_contradictions(markdown: str) -> list[str]:
+    """Flag architecture prose that contradicts the deterministic process roles."""
+    text = markdown or ""
+    found: list[str] = []
+    if _ROLE_CCAGENT_TUNNEL_RE.search(text):
+        found.append("ccagent-as-tunnel-client")
+    if _ROLE_CCAGENT_REVERSE_RE.search(text):
+        found.append("ccagent-reverse-agent-url")
+    if _ROLE_CUSTOM_SUBPROCESS_RE.search(text):
+        found.append("custom-probe-as-subprocess")
+    return found
+
+
+def derive_product_name(root: Path) -> str:
+    """Name the product from README / go.mod / pyproject / remote, never the checkout dir."""
+    readme_md = root / "README.md"
+    if readme_md.is_file():
+        for line in readme_md.read_text(encoding="utf-8", errors="ignore").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                title = re.sub(r"^#+\s*", "", stripped)
+                title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", title).strip()
+                title = re.sub(r"[`*]", "", title).strip()
+                if title and len(title) < 80:
+                    return title.split()[0]
+    go_mod = root / "go.mod"
+    if go_mod.is_file():
+        for line in go_mod.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.startswith("module "):
+                module = line.split()[1].strip().rstrip("/")
+                return module.split("/")[-1]
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file():
+        hit = re.search(
+            r'(?m)^name\s*=\s*["\']([^"\']+)["\']',
+            pyproject.read_text(encoding="utf-8", errors="ignore"),
+        )
+        if hit:
+            return hit.group(1)
+    git_config = root / ".git" / "config"
+    if git_config.is_file():
+        text = git_config.read_text(encoding="utf-8", errors="ignore")
+        hit = re.search(r"url\s*=\s*.+[/:]([^/\s]+?)(?:\.git)?\s*$", text, re.M)
+        if hit and hit.group(1) not in {".", "origin"}:
+            return hit.group(1)
+    return ""
 
 
 def jwt_token_prefix(root: Path) -> str:

@@ -343,6 +343,7 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_DIAGRAM_EVIDENCE",
         "QODER_HANDBOOK_INSTALL_PATH",
         "QODER_HANDBOOK_IMPORT_CONSISTENCY",
+        "QODER_HANDBOOK_ROLE_CONSISTENCY",
         "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -502,6 +503,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_diagram_evidence(),
             self._check_handbook_install_path(),
             self._check_handbook_import_consistency(),
+            self._check_handbook_role_consistency(),
             self._check_qoder_source_evidence(),
         ]
 
@@ -3005,6 +3007,32 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-import-consistency",
             "Dependency claims match the import graph",
+        )
+
+    def _check_handbook_role_consistency(self) -> CheckResult:
+        from repo_wiki.generator.compose_evidence import prose_role_contradictions
+
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("qoder-handbook-role-consistency", "No markdown pages")
+        found: dict[str, list[str]] = {}
+        for page in content_dir.rglob("*.md"):
+            rel = page.as_posix()
+            if "架构" not in rel and "architecture" not in rel.lower():
+                continue
+            hits = prose_role_contradictions(page.read_text(encoding="utf-8", errors="ignore"))
+            if hits:
+                found[rel] = hits
+        if found:
+            return self._handbook_fail(
+                "qoder-handbook-role-consistency",
+                "QODER_HANDBOOK_ROLE_CONSISTENCY",
+                "Architecture prose contradicts deterministic process roles",
+                found,
+            )
+        return self._handbook_pass(
+            "qoder-handbook-role-consistency",
+            "Architecture prose agrees with deterministic process roles",
         )
 
     def _handbook_backtick_cite_pages(self) -> list[str]:

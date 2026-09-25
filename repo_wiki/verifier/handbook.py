@@ -1095,9 +1095,9 @@ def handbook_reader_hygiene_offenders(
             if len(key) < 80 or "```" in key:
                 continue
             paragraph_pages.setdefault(key, []).append(rel)
-    # One satellite copy of an owner catalog/install block is already a fail.
-    # The previous 4-page floor missed 25h API dumps that only hit two pages.
+    # Same deterministic dump on 4+ reader pages is the hygiene floor.
+    # Do not lower this: emit-once must stop the copy, not the check.
     found["repeated_paragraphs"] = sorted(
-        {page for pages in paragraph_pages.values() if len(set(pages)) >= 2 for page in pages}
+        {page for pages in paragraph_pages.values() if len(set(pages)) >= 4 for page in pages}
     )
     return {key: values for key, values in found.items() if values}

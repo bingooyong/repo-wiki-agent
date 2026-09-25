@@ -141,14 +141,16 @@ def test_25h_hygiene_catches_repeated_deterministic_blocks(tmp_path: Path) -> No
         (content / name).write_text(f"# {name}\n\n{block}\n", encoding="utf-8")
     offenders = handbook_reader_hygiene_offenders(content, None)
     assert offenders.get("repeated_paragraphs")
+    two = tmp_path / "two"
+    two.mkdir()
+    (two / "api.md").write_text(f"# API参考\n\n{block}\n", encoding="utf-8")
+    (two / "auth-api.md").write_text(f"# 认证授权API\n\n{block}\n", encoding="utf-8")
+    assert not handbook_reader_hygiene_offenders(two, None).get("repeated_paragraphs")
     fixture_hits = handbook_reader_hygiene_offenders(_FIXTURES / "probe-25h", None)
     assert fixture_hits.get("meta_instructions")
-    fixture_repeated = {Path(path).name for path in (fixture_hits.get("repeated_paragraphs") or [])}
-    assert "api.md" in fixture_repeated
-    assert "auth-api.md" in fixture_repeated
 
 
-def test_hygiene_flags_owner_block_copied_to_one_satellite(tmp_path: Path) -> None:
+def test_hygiene_flags_owner_block_copied_to_four_pages(tmp_path: Path) -> None:
     content = tmp_path / "content"
     content.mkdir()
     block = (
@@ -156,14 +158,11 @@ def test_hygiene_flags_owner_block_copied_to_one_satellite(tmp_path: Path) -> No
         "GET /api/articles/{slug} 读取单篇，这是产品路由目录中的真实接口说明，不得抄到卫星页。"
     )
     assert len(block) >= 80
-    (content / "api.md").write_text(f"# API参考\n\n{block}\n", encoding="utf-8")
-    (content / "auth-api.md").write_text(f"# 认证授权API\n\n{block}\n", encoding="utf-8")
-    (content / "install.md").write_text(
-        "# 安装指南\n\n独立安装说明，没有重复目录。\n", encoding="utf-8"
-    )
+    for name in ("api.md", "auth-api.md", "python-api.md", "core-api.md"):
+        (content / name).write_text(f"# {name}\n\n{block}\n", encoding="utf-8")
     offenders = handbook_reader_hygiene_offenders(content, None)
     names = {Path(path).name for path in (offenders.get("repeated_paragraphs") or [])}
-    assert names == {"api.md", "auth-api.md"}
+    assert names == {"api.md", "auth-api.md", "python-api.md", "core-api.md"}
 
 
 def test_25h_dry_verify_catches_invented_compose_and_placeholder() -> None:
@@ -277,7 +276,8 @@ def test_replay_security_replaces_cite_dump(tmp_path: Path) -> None:
     raw = (_FIXTURES / "probe-25h" / "security.md").read_text(encoding="utf-8")
     out = apply_deterministic_rewrites(raw, root, title="安全合规", page_id="security-overview")
     assert "安全实现见" not in out
-    assert "AK/SK" in out or "internal/auth" in out
+    assert "PROBE_API_TOKEN" in out
+    assert "AK/SK" not in out
 
 
 def test_replay_owner_only_role_and_routes(tmp_path: Path) -> None:
@@ -459,3 +459,4 @@ def test_verifier_registers_round8_hard_checks() -> None:
     assert "QODER_HANDBOOK_DIAGRAM_EVIDENCE" in codes
     assert "QODER_HANDBOOK_INSTALL_PATH" in codes
     assert "QODER_HANDBOOK_IMPORT_CONSISTENCY" in codes
+    assert "QODER_HANDBOOK_ROLE_CONSISTENCY" in codes

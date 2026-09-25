@@ -342,7 +342,9 @@ class RepositoryScanner:
     ) -> RepositoryInfo:
         name = self.config.project.name
         if name == "auto":
-            name = self.root.name
+            from repo_wiki.generator.compose_evidence import derive_product_name
+
+            name = derive_product_name(self.root) or self.root.name
         language = self._detect_language(scanned_files)
         framework = self._detect_framework(scanned_files)
         package_manager = self._detect_package_manager()
@@ -442,7 +444,7 @@ class RepositoryScanner:
                 if value:
                     commands[key] = value
         fallback = {
-            "python": {"start": "python -m app", "test": "pytest -q", "lint": "ruff check ."},
+            "python": {"test": "pytest -q", "lint": "ruff check ."},
             "typescript": {
                 "start": "npm run start",
                 "build": "npm run build",
@@ -1283,11 +1285,12 @@ class RepositoryScanner:
                 404,
                 500,
             ]
-            if endpoint.line_number > 1 and self._line_matches_handler(
-                content, endpoint.line_number, endpoint.handler
+            if endpoint.line_number > 1 and (
+                self._line_is_route_registration(content, endpoint.line_number)
+                or self._line_matches_handler(content, endpoint.line_number, endpoint.handler)
             ):
                 if endpoint.line_end <= 0:
-                    endpoint.line_end = endpoint.line_number + 10
+                    endpoint.line_end = endpoint.line_number
             else:
                 found = self._find_handler_line(endpoint, content)
                 if found > 0:
@@ -1337,6 +1340,21 @@ class RepositoryScanner:
             return "bearer"
 
         return "bearer"  # Default for unknown
+
+    def _line_is_route_registration(self, file_content: str, line_number: int) -> bool:
+        if not file_content or line_number < 1:
+            return False
+        lines = file_content.splitlines()
+        if line_number > len(lines):
+            return False
+        line = lines[line_number - 1]
+        return bool(
+            re.search(
+                r"HandleFunc\(|\.Handle\(|\.(GET|POST|PUT|PATCH|DELETE|Any|Handle)\(|"
+                r"RegisterRawRoute\(|router\.(add|include)",
+                line,
+            )
+        )
 
     def _line_matches_handler(self, file_content: str, line_number: int, handler: str) -> bool:
         if not file_content or line_number < 1 or not handler or handler == "unknown":
