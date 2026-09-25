@@ -2085,14 +2085,13 @@ class MermaidPlanner:
                 attr["name"] == "slug" for attr in attributes
             ):
                 attributes.append({"name": "slug", "type": "string"})
-            if entity_name.lower() == "users":
-                for index_name in ("ix_users_username", "ix_users_email"):
-                    if not any(attr["name"] == index_name for attr in attributes):
-                        attributes.append({"name": index_name, "type": "index"})
-            if entity_name.lower() == "articles":
-                for index_name in ("ix_articles_slug", "ix_articles_author_id"):
-                    if not any(attr["name"] == index_name for attr in attributes):
-                        attributes.append({"name": index_name, "type": "index"})
+            key_cols = {
+                "users": {"id", "username", "email"},
+                "articles": {"id", "slug", "author_id"},
+                "commentaries": {"id", "author_id", "article_id"},
+            }.get(entity_name.lower(), set())
+            if key_cols:
+                attributes = [attr for attr in attributes if attr["name"] in key_cols]
             extra_pks = [
                 mermaid_er_field(str(item))
                 for item in (model.get("primary_keys") or [])

@@ -412,7 +412,8 @@ def test_database_schema_er_includes_author_id_and_differs(tmp_path: Path) -> No
     schema_txt, ok2, _ = MermaidRenderer().render_diagram_with_validation(schema)
     assert ok1 and ok2
     assert "author_id" in schema_txt
-    assert "ix_articles_slug" in schema_txt or "ix_articles_author_id" in schema_txt
+    assert "slug" in schema_txt
+    assert "hashed_password" not in schema_txt
     assert "users" in schema_txt and "articles" in schema_txt
     assert "favorites" not in schema_txt
     assert "followers_to_followings" not in schema_txt
