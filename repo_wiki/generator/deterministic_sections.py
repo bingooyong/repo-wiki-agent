@@ -98,7 +98,8 @@ def discover_auth_implementation(root: Path) -> str:
         env_hit = _AUTH_ENV_RE.search(text)
         header_hit = _AUTH_HEADER_RE.search(text)
         if env_hit:
-            env_name = env_hit.group(0)
+            quoted = re.search(r'"([A-Z][A-Z0-9_]*(?:API_TOKEN|AUTH_TOKEN|SECRET_KEY))"', text)
+            env_name = quoted.group(1) if quoted else env_hit.group(0)
         if header_hit:
             header = header_hit.group(1)
         cite = cite_first_match(root, rel, r"Env[A-Z][A-Za-z0-9]*Token|apiAuthMiddleware|Bearer")
@@ -942,6 +943,19 @@ def _go_local_db_start_lines(root: Path) -> list[str]:
     return lines
 
 
+def _health_check_url(root: Path) -> str:
+    """Prefer a source listen port; otherwise use a README localhost health URL."""
+    from repo_wiki.verifier.handbook import collect_doc_listen_ports
+
+    port = preferred_source_listen_port(root)
+    if port is None:
+        docs = collect_doc_listen_ports(read_readme_text(root))
+        port = min(docs) if docs else None
+    if port is None:
+        return "/health"
+    return f"http://localhost:{port}/health"
+
+
 def _primary_go_binary(root: Path) -> str:
     from repo_wiki.generator.process_roles import derive_process_roles
 
@@ -960,7 +974,7 @@ def _primary_go_binary(root: Path) -> str:
 
 
 def build_go_install_section(root: Path) -> str:
-    port = preferred_source_listen_port(root)
+    health_url = _health_check_url(root)
     binary = _primary_go_binary(root)
     compose = cite_readme_line(root, "podman-compose up")
     schema = cite_readme_line(root, "schema.sql")
@@ -996,7 +1010,7 @@ def build_go_install_section(root: Path) -> str:
             f"3. 用源码监听端口检查健康状态。 {health}",
             "",
             "```bash",
-            f"curl {('http://localhost:' + str(port) + '/health') if port else '/health'}",
+            f"curl {health_url}",
             "```",
             "",
             "### 路径 B：本地编译",
@@ -1024,7 +1038,7 @@ def build_go_install_section(root: Path) -> str:
             "",
             "```bash",
             f"./bin/{binary}",
-            f"curl {('http://localhost:' + str(port) + '/health') if port else '/health'}",
+            f"curl {health_url}",
             "```",
             "",
         ]
@@ -1509,6 +1523,8 @@ ARCHITECTURE_ROLE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     (r"作为隧道客户端入口", "作为主 REST/Web 入口"),
     (r"带隧道能力的主 REST/Web 服务", "gRPC 控制面"),
     (r"作为隧道客户端连向", "作为主 REST/Web 服务对外提供"),
+    (r"作为隧道客户端连接", "作为主 REST/Web 服务连接"),
+    (r"建立反向控制链路", "提供 REST/Web 管理入口"),
     (r"是与采集端配套的客户端入口", "是主 REST/Web 入口"),
 )
 
@@ -1663,11 +1679,8 @@ def rewrite_checkout_directory_name(content: str, root: Path) -> str:
 
 def build_verify_section(root: Path) -> str:
     if _repo_is_go(root):
-        from repo_wiki.verifier.handbook import preferred_source_listen_port
-
-        port = preferred_source_listen_port(root)
         health = cite_readme_line(root, "/health")
-        url = f"http://localhost:{port}/health" if port else "/health"
+        url = _health_check_url(root)
         return (
             "## 启动与验证\n\n"
             f"1. 按安装步骤完成编排或本地编译。\n\n"

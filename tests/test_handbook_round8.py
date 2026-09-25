@@ -266,7 +266,9 @@ def test_replay_probe_25h_install_path_b_starts_db(tmp_path: Path) -> None:
 def test_replay_security_replaces_cite_dump(tmp_path: Path) -> None:
     root = _go_root(tmp_path)
     (root / "apiauth.go").write_text(
-        "package ccagent\n\nfunc TokensEqual(got, want string) bool { return got == want }\n",
+        "package ccagent\n\n"
+        'const EnvAPIToken = "PROBE_API_TOKEN"\n'
+        "func TokensEqual(got, want string) bool { return got == want }\n",
         encoding="utf-8",
     )
     (root / "internal" / "auth").mkdir(parents=True, exist_ok=True)

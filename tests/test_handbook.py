@@ -124,7 +124,7 @@ def test_overview_identity_fails_without_identity(tmp_path: Path) -> None:
 
 def test_overview_identity_passes_with_identity(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text(
-        "Conduit is a RealWorld FastAPI backend.\n", encoding="utf-8"
+        "# Conduit\n\nConduit is a RealWorld FastAPI backend.\n", encoding="utf-8"
     )
     _write_page(
         tmp_path,
@@ -171,7 +171,7 @@ def test_overview_identity_ignores_key_features_sibling_under_overview_folder(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "README.md").write_text(
-        "Conduit is a RealWorld FastAPI backend.\n", encoding="utf-8"
+        "# Conduit\n\nConduit is a RealWorld FastAPI backend.\n", encoding="utf-8"
     )
     _write_page(
         tmp_path,
@@ -220,7 +220,7 @@ def test_page_matches_install_tokens_exclude_pure_overview(tmp_path: Path) -> No
 
 def test_overview_identity_passes_without_bash_fences(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text(
-        "Conduit is a RealWorld FastAPI backend.\n", encoding="utf-8"
+        "# Conduit\n\nConduit is a RealWorld FastAPI backend.\n", encoding="utf-8"
     )
     _write_page(
         tmp_path,
