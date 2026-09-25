@@ -29,7 +29,7 @@ from repo_wiki.evidence.citation_renderer import (
     normalize_citation_markup,
     unique_root_readme_name,
 )
-from repo_wiki.evidence.ranking import PageEvidenceBinding
+from repo_wiki.evidence.ranking import PageEvidenceBinding, wants_wide_evidence
 from repo_wiki.llm.cassette import (
     prompt_hash_for_messages,
     record_cassette_attempt,
@@ -842,16 +842,31 @@ class LLMPageComposer:
                 lines.append(line)
         return "\n".join(lines).strip()
 
+    def _binding_wants_wide_evidence(self, binding: PageEvidenceBinding | None) -> bool:
+        if binding is None:
+            return False
+        return wants_wide_evidence(
+            f"{getattr(binding, 'page_id', '')} {getattr(binding, 'doc_type', '')}"
+        )
+
+    def _page_wants_wide_evidence(self, page: WikiPagePlan | None) -> bool:
+        if page is None:
+            return False
+        return wants_wide_evidence(f"{page.page_id} {page.title} {page.category.value}")
+
     def _build_compact_recovery_evidence(self, binding: PageEvidenceBinding | None) -> str:
         """Short path+snippet list for rewrite. Full fence packs emptied the first call."""
         if not binding or not binding.candidates:
             return "（无）"
         lines: list[str] = []
-        for candidate in binding.candidates[:4]:
+        wide = self._binding_wants_wide_evidence(binding)
+        limit = 8 if wide else 4
+        snippet_chars = 140 if wide else 80
+        for candidate in binding.candidates[:limit]:
             span = candidate.span
             snippet = self._compact_snippet(
                 self._strip_fenced_blocks(getattr(span, "span_text", "") or ""),
-                max_chars=80,
+                max_chars=snippet_chars,
             )
             loc = f"{span.file_path}:{span.line_start}-{span.line_end}"
             if snippet:
@@ -891,14 +906,21 @@ class LLMPageComposer:
             role_facts = f"{self._process_role_facts()}\n"
         source_facts = self._source_fact_block()
         fact_block = f"源码事实：\n{source_facts}\n" if source_facts else ""
+        thin_rule = ""
+        if self._page_wants_wide_evidence(input.page_plan):
+            thin_rule = (
+                "专题页必须写满 900 字以上可核对段落，不要短页或回退成「这是什么」摘录。"
+                "能引用实现文件时不要只引用说明文档或 scaffold。"
+            )
         return (
             f"请重写 Wiki 页「{title}」为段落为主的中文 Markdown。\n"
             f"产品身份：{product}\n"
             f"{role_facts}{fact_block}"
             "禁止空回复，不要返回空正文；必须写出至少两段可读段落，不能只回标题或空白。\n"
-            "不要评论材料齐不齐，直接写实现；不要自我介绍本页写给谁。\n"
+            "不要评论手头材料齐不齐，缺的细节整段跳过；不要写过程句或自我介绍本页写给谁。\n"
+            f"{thin_rule}"
             f"{fence_rule}"
-            "每个事实句的 `<cite>` 必须写在该句同一行或下一行。不要解释过程。\n\n"
+            "每个可核对事实句都要带 `<cite>`，写在该句同一行或下一行。不要解释过程。\n\n"
             f"精简证据（仅路径与短摘录，不要复述源码围栏）：\n{compact_evidence}\n\n"
             f"上次草稿（已去掉代码围栏与 mermaid）：\n{previous_for_prompt or '（空）'}\n"
         )
@@ -910,7 +932,7 @@ class LLMPageComposer:
 
         lines = ["Evidence spans:"]
         page_blob = f"{getattr(binding, 'page_id', '')} {getattr(binding, 'doc_type', '')}"
-        wide = "migration" in page_blob.lower() or "迁移" in page_blob
+        wide = wants_wide_evidence(page_blob)
         limit = 16 if wide else 8
         snippet_chars = 900 if wide else 320
         for i, candidate in enumerate(binding.candidates[:limit]):
@@ -1077,6 +1099,16 @@ class LLMPageComposer:
                 "不要单独成行只写 `<cite>`。"
             )
         blob = f"{page.page_id} {page.title}"
+        if "调试" in blob or "debug-guide" in blob.lower() or "debug-tools" in blob.lower():
+            rules.append(
+                "- 调试页：优先引用实现文件（pprof / trace / debug 脚本或入口），"
+                "不要只摘说明文档或 scaffold。"
+            )
+        if "git-workflow" in blob.lower() or "git工作流" in blob.lower():
+            rules.append(
+                "- Git 工作流页：只写 CONTRIBUTING 与 CI 工作流里实际出现的步骤和命令，"
+                "缺的协作规则整段跳过，不要写过程句。"
+            )
         if "迁移" in blob or "migration" in blob.lower():
             root = Path(self.workspace_root or ".")
             alembic = (root / "alembic.ini").is_file()
@@ -1182,8 +1214,9 @@ class LLMPageComposer:
 - 写给要改这个仓库的人看：用直陈句写代码里实际发生的事和调用关系，不要自我介绍本页写给谁。
 - 不要评论材料齐不齐或提示词有没有点名模块，缺了的细节整段跳过，也不要复述写作要求原文。
 - 必须以 `# {page.title}` 开头。
-- 正文控制在 900 到 1400 个中文字符之间；Git 工作流、性能、健康检查、核心服务等专题也必须写满可核对段落，不要短页。
+- 正文控制在 900 到 1400 个中文字符之间；Git 工作流、调试指南、性能、健康检查、核心服务等专题也必须写满可核对段落，不要短页或回退成「这是什么」摘录页。
 - 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
+- 每个可核对事实句都要带 `<cite>`；能引用实现文件时不要只引用说明文档或 scaffold。
 - 至少保留 3 个 `<cite>` 引用，格式为仓库相对路径加行号范围，例如 `<cite>src/app.py:1-10</cite>`。
 {self._root_readme_cite_rule()}
 {handbook_cite_rules}{list_rule}

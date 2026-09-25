@@ -876,14 +876,14 @@ class RuleFirstPlanner:
                 found.append(path)
         return found
 
-    def _topic_source_files(self, *needles: str) -> list[str]:
+    def _topic_source_files(self, *needles: str, skip_scaffold: bool = False) -> list[str]:
         """Relative files whose path/name matches any needle (repo-agnostic)."""
         root = Path(self.identity.root_path)
         skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__", ".venv"}
-        found: list[str] = []
+        found: list[tuple[int, int, str]] = []
         lowered = tuple(item.lower() for item in needles if item)
         if not lowered or not root.is_dir():
-            return found
+            return []
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
@@ -902,11 +902,17 @@ class RuleFirstPlanner:
                 continue
             rel = path.relative_to(root).as_posix()
             blob = rel.lower()
-            if any(needle in blob for needle in lowered):
-                found.append(rel)
-            if len(found) >= 12:
-                break
-        return found
+            if skip_scaffold and (
+                "scaffold" in blob or "/demo/" in blob or blob.startswith("demo/")
+            ):
+                continue
+            hits = sum(1 for needle in lowered if needle in blob)
+            if not hits:
+                continue
+            impl = 0 if path.suffix.lower() in {".go", ".py", ".sh"} else 1
+            found.append((impl, -hits, rel))
+        found.sort()
+        return [rel for _impl, _hits, rel in found[:12]]
 
     def _core_package_files(self) -> list[str]:
         try:
@@ -1244,6 +1250,10 @@ class RuleFirstPlanner:
             title="调试指南",
             category=WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
             parent="development-guide",
+            source_requirements=SourceRequirement(
+                files=self._topic_source_files("pprof", "debug", "trace", "dlv", skip_scaffold=True)
+                or self._existing_source_files("Makefile", "CONTRIBUTING.md"),
+            ),
             sort_order=5,
             tags=["debug", "troubleshooting"],
         )

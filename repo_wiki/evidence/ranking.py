@@ -344,21 +344,35 @@ def _is_database_troubleshooting_page(page: WikiPagePlan) -> bool:
     return page.category == WikiTaxonomyCategory.TROUBLESHOOTING and "database" in page_id
 
 
+THIN_TOPIC_TOKENS = (
+    "git-workflow",
+    "git工作流",
+    "performance",
+    "性能",
+    "health-check",
+    "健康检查",
+    "core-services",
+    "核心服务",
+    "debug-guide",
+    "debug-tools",
+    "调试指南",
+    "调试工具",
+)
+WIDE_EVIDENCE_TOKENS = THIN_TOPIC_TOKENS + ("migration", "迁移")
+
+
+def is_thin_topic_blob(blob: str) -> bool:
+    lowered = (blob or "").lower()
+    return any(token in lowered for token in THIN_TOPIC_TOKENS)
+
+
+def wants_wide_evidence(blob: str) -> bool:
+    lowered = (blob or "").lower()
+    return any(token in lowered for token in WIDE_EVIDENCE_TOKENS)
+
+
 def _is_thin_topic_page(page: WikiPagePlan) -> bool:
-    blob = f"{page.page_id} {page.title}".lower()
-    return any(
-        token in blob
-        for token in (
-            "git-workflow",
-            "git工作流",
-            "performance",
-            "性能",
-            "health-check",
-            "健康检查",
-            "core-services",
-            "核心服务",
-        )
-    )
+    return is_thin_topic_blob(f"{page.page_id} {page.title}")
 
 
 def _score_thin_topic_evidence(
@@ -371,6 +385,22 @@ def _score_thin_topic_evidence(
         if name in {"contributing.md", "contributing.rst", "makefile"} or ".github" in path:
             score += WEIGHT_ONBOARDING_SETTINGS + 1.0
             signals.append("thin_git_workflow")
+    if "debug" in blob or "调试" in blob:
+        if (
+            any(
+                token in path or token in text or token in symbol
+                for token in ("pprof", "debug", "trace", "dlv", "breakpoint")
+            )
+            and "scaffold" not in path
+        ):
+            score += WEIGHT_ONBOARDING_ENTRY + 1.5
+            signals.append("thin_debug_source")
+            if path.endswith((".go", ".py", ".sh")):
+                score += 1.0
+                signals.append("thin_debug_impl")
+        if "scaffold" in path:
+            score -= 4.0
+            signals.append("thin_debug_scaffold")
     if "performance" in blob or "性能" in blob:
         if any(token in path or token in text for token in ("pool", "timeout", "cache", "worker")):
             score += WEIGHT_ONBOARDING_SETTINGS + 1.0
@@ -599,7 +629,7 @@ def score_evidence_for_page(
         signals.append("category_relevance")
 
     onboarding_score, onboarding_signals = _score_onboarding_evidence(page, span)
-    if onboarding_score > 0:
+    if onboarding_score != 0:
         score += onboarding_score
         signals.extend(onboarding_signals)
 

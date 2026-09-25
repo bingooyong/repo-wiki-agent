@@ -125,6 +125,34 @@ def test_database_issues_ranks_settings_over_unrelated_tests() -> None:
     assert settings_score > unrelated_score
 
 
+def test_debug_guide_ranks_pprof_over_scaffold() -> None:
+    page = _page("debug-guide", "调试指南", WikiTaxonomyCategory.DEVELOPMENT_GUIDE)
+    pprof_score, pprof_signals = score_evidence_for_page(
+        page,
+        _span("xstats/pprof.go", symbol="Register", span_text='http.HandleFunc("/debug/pprof/"'),
+    )
+    script_score, _ = score_evidence_for_page(
+        page,
+        _span(
+            "scripts/debug_container.sh",
+            symbol="debug",
+            span_text="pprof http://localhost:1900/debug/pprof/",
+        ),
+    )
+    scaffold_score, scaffold_signals = score_evidence_for_page(
+        page,
+        _span(
+            "README-scaffold.md",
+            symbol="pprof 端点说明",
+            span_text="/debug/pprof/profile go tool pprof",
+        ),
+    )
+    assert "thin_debug_source" in pprof_signals
+    assert "thin_debug_scaffold" in scaffold_signals
+    assert pprof_score > scaffold_score
+    assert script_score > scaffold_score
+
+
 def test_thin_api_page_ranks_routes_over_readme() -> None:
     page = _page("python-service-apis", "Python服务API", WikiTaxonomyCategory.API_REFERENCE)
     routes_score, _ = score_evidence_for_page(
