@@ -340,6 +340,7 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_DATA_MODEL_SOURCE",
         "QODER_HANDBOOK_PLACEHOLDER_MERMAID",
         "QODER_HANDBOOK_READER_HYGIENE",
+        "QODER_HANDBOOK_UNKNOWN_PROCESS",
         "QODER_HANDBOOK_DIAGRAM_EVIDENCE",
         "QODER_HANDBOOK_INSTALL_PATH",
         "QODER_HANDBOOK_IMPORT_CONSISTENCY",
@@ -500,6 +501,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_data_model_source(),
             self._check_handbook_placeholder_mermaid(),
             self._check_handbook_reader_hygiene(),
+            self._check_handbook_unknown_process(),
             self._check_handbook_diagram_evidence(),
             self._check_handbook_install_path(),
             self._check_handbook_import_consistency(),
@@ -2920,6 +2922,25 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-reader-hygiene",
             "No appended boilerplate, header-only cites, or duplicated fences",
+        )
+
+    def _check_handbook_unknown_process(self) -> CheckResult:
+        from repo_wiki.verifier.handbook import handbook_unknown_process_offenders
+
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("qoder-handbook-unknown-process", "No markdown pages")
+        offenders = handbook_unknown_process_offenders(content_dir, self._handbook_repo_root())
+        if offenders:
+            return self._handbook_fail(
+                "qoder-handbook-unknown-process",
+                "QODER_HANDBOOK_UNKNOWN_PROCESS",
+                "Page names a binary, package, or process that is not in the documented repo",
+                offenders,
+            )
+        return self._handbook_pass(
+            "qoder-handbook-unknown-process",
+            "Named processes exist in the documented repo",
         )
 
     def _check_handbook_diagram_evidence(self) -> CheckResult:

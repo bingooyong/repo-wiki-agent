@@ -26,7 +26,12 @@ from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
 from repo_wiki.verifier.handbook import EMPTY_CONTENT_REJECTION
 
-SUCCESS_MARKDOWN = "# Sample Page\n\nRetried LLM content with enough prose for validation."
+SUCCESS_MARKDOWN = (
+    "# Sample Page\n\n"
+    "Retried LLM content with enough prose for validation。"
+    + ("页面继续用足够长的中文段落说明模块边界、调用关系以及控制面与采集端如何协作。" * 20)
+    + "\n"
+)
 
 
 def _retryable(status: int) -> RetryableError:
@@ -337,7 +342,9 @@ This page explains how the FastAPI service authenticates requests and stores art
 The implementation lives in the application package and is described with paragraph prose
 rather than a bullet dump so the composer prose floor can pass. Readers should start at
 the settings module, then follow the request path into the route handlers.
-"""
+""" + (
+    "The request path continues through settings, routes, and persistence with enough detail. " * 16
+)
 
 
 def _list_heavy_response() -> ChatResponse:

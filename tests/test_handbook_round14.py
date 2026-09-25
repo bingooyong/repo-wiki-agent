@@ -74,7 +74,8 @@ def test_architecture_and_overview_prompts_state_roles(tmp_path: Path) -> None:
     arch_input = build_composer_input(_arch_page(), None, _context(root))
     arch_prompt = composer._build_compose_prompt(arch_input, composer._build_context(arch_input))
     assert "主 REST/Web" in arch_prompt
-    assert "probe-agent" in arch_prompt and "隧道客户端" in arch_prompt
+    assert "probe-agent" in arch_prompt and "数据面" in arch_prompt
+    assert "探测执行池" in arch_prompt
     assert "ccprobe-control" in arch_prompt
     assert "前者" not in arch_prompt and "后者" not in arch_prompt
     overview_input = build_composer_input(_overview_page(), None, _context(root))
@@ -93,8 +94,8 @@ async def test_architecture_role_contradiction_reasks_instead_of_regex(
     root = _go_repo(tmp_path)
     provider = SequenceLLMProvider(
         [
-            ChatResponse(content=_ARCH_WRONG, model="mock"),
-            ChatResponse(content=_ARCH_OK, model="mock"),
+            ChatResponse(content=_ARCH_WRONG + ("模块边界与调用关系继续写清。" * 60), model="mock"),
+            ChatResponse(content=_ARCH_OK + ("模块边界与调用关系继续写清。" * 60), model="mock"),
         ]
     )
     composer = create_composer(provider=provider)

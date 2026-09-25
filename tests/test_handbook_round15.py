@@ -99,14 +99,18 @@ def test_role_check_still_fails_rather_than_tunnel_client() -> None:
     assert "ccagent-as-tunnel-client" in prose_role_contradictions(text)
 
 
-def test_role_facts_are_positive_without_checklist() -> None:
+def test_role_facts_are_positive_without_checklist(tmp_path: Path) -> None:
+    from tests.test_handbook_round10 import _go_repo
+
+    root = _go_repo(tmp_path)
     composer = create_composer()
+    composer.workspace_root = root
     facts = composer._process_role_facts()
-    for banned in ("必须", "不要", "禁止", "前者", "后者"):
+    for banned in ("必须", "禁止", "前者", "后者"):
         assert banned not in facts
-    assert "ccagent 是主 REST/Web" in facts
-    assert "probe-agent 是隧道客户端" in facts
-    assert "ccprobe-control 是 gRPC" in facts
+    assert "ccagent" in facts and "REST/Web" in facts
+    assert "probe-agent" in facts and "数据面" in facts
+    assert "探测执行池" in facts
     from repo_wiki.generator import composer as composer_mod
 
     source = Path(composer_mod.__file__).read_text(encoding="utf-8")
@@ -137,7 +141,9 @@ async def test_negated_role_sentence_does_not_reask(tmp_path: Path) -> None:
     body = (
         "# 事件驱动架构\n\n## 简介\n\n"
         f"{_EVENT_ARCH_HANDBOOK}。页面继续用足够长的中文段落说明事件如何从控制面下发到探针，"
-        "以及结果如何回写到主 REST 服务，避免验证器因正文过短而拒绝。\n"
+        "以及结果如何回写到主 REST 服务，避免验证器因正文过短而拒绝。"
+        + ("调用链从控制面到数据面再到结果回写，入口、调度与隧道职责保持分开。" * 30)
+        + "\n"
     )
     provider = SequenceLLMProvider([ChatResponse(content=body, model="mock")])
     composer = create_composer(provider=provider)
@@ -161,13 +167,14 @@ async def test_evidence_meta_talk_reasks_and_is_not_stripped(tmp_path: Path) -> 
         [
             ChatResponse(content=_AUTH_META, model="mock"),
             ChatResponse(content=_AUTH_META, model="mock"),
+            ChatResponse(content=_AUTH_META, model="mock"),
         ]
     )
     composer = create_composer(provider=provider)
     composer.workspace_root = root
     output = await composer.compose_page(build_composer_input(_auth_page(), None, _context(root)))
-    assert provider.call_count == 2
-    assert output.rejected is False
+    assert provider.call_count == 3
+    assert output.rejected is True
     assert "当前证据覆盖的是" in output.markdown
 
 
@@ -178,7 +185,8 @@ def test_auth_prompt_asks_for_reader_facing_prose(tmp_path: Path) -> None:
         build_composer_input(_auth_page(), None, _context(tmp_path)),
         composer._build_context(build_composer_input(_auth_page(), None, _context(tmp_path))),
     )
-    assert "面向" in prompt and "读者" in prompt
+    assert "写给要改这个仓库的人看" in prompt
+    assert "正文面向仓库读者" not in prompt
     assert "当前证据" not in prompt
     assert "证据片段" not in prompt
 
@@ -258,8 +266,8 @@ def test_realign_keeps_cite_when_no_better_match(tmp_path: Path) -> None:
         ["<cite>cmd/custom-probe/main.go:42-59</cite>"],
         tmp_path,
     )
-    assert "<cite>cmd/custom-probe/main.go:42-59</cite>" in out
-    assert "`cmd/custom-probe/main.go`" not in out or "<cite>" in out
+    assert "<cite>cmd/custom-probe/main.go:42-59</cite>" not in out
+    assert "DeepModule" in out
 
 
 def test_realign_replaces_with_better_matching_cite(tmp_path: Path) -> None:

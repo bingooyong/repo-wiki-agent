@@ -319,10 +319,12 @@ _TUNNEL_CLAUSE_NEGATION_RE = re.compile(
 
 
 def _clause_negates_tunnel_role(window: str) -> bool:
-    """True when the matched clause denies the ccagent-as-tunnel reading."""
-    if "而是" in window and "隧道客户端" in window.split("而是")[-1]:
+    """True when the clause that contains the role phrase denies it."""
+    if re.search(r"而是\s*隧道客户端|而作为\s*隧道客户端", window):
         return False
-    return bool(_TUNNEL_CLAUSE_NEGATION_RE.search(window))
+    clauses = re.split(r"[，,；;。]", window)
+    target = next((item for item in clauses if "隧道客户端" in item), window)
+    return bool(_TUNNEL_CLAUSE_NEGATION_RE.search(target))
 
 
 def prose_role_contradictions(markdown: str) -> list[str]:

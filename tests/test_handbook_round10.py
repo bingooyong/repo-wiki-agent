@@ -55,13 +55,25 @@ def _go_repo(root: Path) -> Path:
     (root / "internal" / "probe").mkdir(parents=True)
     (root / "db" / "migrations").mkdir(parents=True)
     (root / "cmd" / "ccagent" / "main.go").write_text(
-        "package main\nfunc main() {}\n", encoding="utf-8"
+        "package main\nfunc main() {\n    ccagent.NewController(config).Run()\n}\n",
+        encoding="utf-8",
     )
     (root / "cmd" / "probe-agent" / "main.go").write_text(
-        "package main\nfunc main() {}\n", encoding="utf-8"
+        "// probe-agent is the database-independent CC-Probe data-plane process.\n"
+        "package main\n"
+        "// schedulerConfig sizes the probe execution pool.\n"
+        "type schedulerConfig struct{}\n"
+        "// Transport selects grpc (tunnel client).\n"
+        "func DialContext() {}\n"
+        "func main() {}\n",
+        encoding="utf-8",
     )
     (root / "cmd" / "ccprobe-control" / "main.go").write_text(
-        "package main\nfunc main() {}\n", encoding="utf-8"
+        "// ccprobe-control is a small control-plane publisher.\n"
+        "package main\n"
+        'var grpcListen = "gRPC EstablishTunnel listen address"\n'
+        "func main() {}\n",
+        encoding="utf-8",
     )
     (root / "cmd" / "ccprobe-control" / "serve.go").write_text(
         "package main\nfunc runGRPCServe() {}\n"
@@ -227,7 +239,12 @@ def create_updated_at_trigger():
     (root / "docker-compose.yml").write_text(
         "services:\n  api:\n    image: app\n", encoding="utf-8"
     )
-    (root / "README.md").write_text("# fastapi-realworld\n", encoding="utf-8")
+    (root / "README.md").write_text(
+        "# fastapi-realworld\n\n"
+        "**NOTE**: This repository is not actively maintained because this example "
+        "is quite complete and does its primary goal - passing Conduit testsuite.\n",
+        encoding="utf-8",
+    )
     return root
 
 

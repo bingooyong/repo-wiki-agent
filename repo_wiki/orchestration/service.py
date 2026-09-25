@@ -92,6 +92,8 @@ _PROMPT_LEAK_PHRASES = (
     "引用时写",
     "引用时使用",
     "本仓库根 README 是",
+    "正文面向仓库读者",
+    "本页面向仓库读者",
 )
 _QUALITY_METRIC_LEAK = re.compile(
     r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b|\b21\s*/\s*25\b",
@@ -2618,6 +2620,14 @@ class RepoWikiService:
         if is_cite_realign_page(page):
             content = realign_irrelevant_cites(content, cites, self.root)
         content = rewrite_fastapi_intro_cites(content, page, self.root)
+        from repo_wiki.evidence.citation_renderer import strip_empty_cite_parens
+        from repo_wiki.generator.process_roles import (
+            derive_repo_process_names,
+            strip_unknown_process_clauses,
+        )
+
+        content = strip_unknown_process_clauses(content, derive_repo_process_names(self.root))
+        content = strip_empty_cite_parens(content)
 
         content = self._drop_uninventoried_snapshot_api_claims(content, composition_context)
         content = self._rebuild_qoder_toc_from_real_h2s(page, content)
@@ -3709,7 +3719,7 @@ class RepoWikiService:
                 continue
             if stripped.startswith("-") or stripped.startswith("*"):
                 item = stripped.lstrip("-*").strip()
-                if re.match(r"[A-Z][A-Za-z0-9_]*\s+<cite>", item):
+                if item.startswith("**") or re.match(r"[A-Z][A-Za-z0-9_]*\s+<cite>", item):
                     flush()
                     out.append(line)
                     continue

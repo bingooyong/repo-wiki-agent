@@ -300,7 +300,14 @@ def normalize_citation_markup(text: str, workspace_root: str | Path | None = Non
     unwrapped = _BACKTICK_CITE_RE.sub(_backtick_cite, unwrapped)
     rewritten = _CITE_BLOCK_RE.sub(_rewrite_blocks, unwrapped)
     rewritten = _BRACKET_CITE_RE.sub(_rewrite_brackets, rewritten)
-    return collapse_citation_text_gaps(rewritten)
+    return strip_empty_cite_parens(collapse_citation_text_gaps(rewritten))
+
+
+def strip_empty_cite_parens(text: str) -> str:
+    """Remove empty fullwidth/halfwidth parens left after a dropped cite."""
+    cleaned = re.sub(r"（\s*）", "", text or "")
+    cleaned = re.sub(r"\(\s*\)", "", cleaned)
+    return cleaned
 
 
 # ============================================================================

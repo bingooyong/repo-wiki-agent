@@ -17,6 +17,8 @@ EMPTY_CONTENT_REJECTION = "Empty LLM assistant content"
 UNCLOSED_FENCE_REJECTION = "Unclosed fenced code block"
 ROLE_CONTRADICTION_REJECTION = "Architecture role contradiction"
 EVIDENCE_META_REJECTION = "Handbook evidence meta talk"
+TINY_OR_TRUNCATED_REJECTION = "Tiny or truncated page body"
+MIN_HANDBOOK_BODY_CHARS = 800
 PAGE_TIMEOUT_REJECTION_PREFIX = "LLM page timeout after"
 PAGE_SERVER_ERROR_REJECTION_PREFIX = "LLM page server error"
 
@@ -28,6 +30,7 @@ _PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
         UNCLOSED_FENCE_REJECTION,
         ROLE_CONTRADICTION_REJECTION,
         EVIDENCE_META_REJECTION,
+        TINY_OR_TRUNCATED_REJECTION,
     }
 )
 
@@ -37,7 +40,13 @@ _INSTRUCTION_VOICE_RE = re.compile(
     r"|引用时写|引用时使用"
     r"|进程角色必须|禁止写 cmd/ccagent|禁止用「前者"
 )
-_EVIDENCE_META_TALK_RE = re.compile(r"证据片段|当前证据|提供的证据")
+_EVIDENCE_META_TALK_RE = re.compile(
+    r"证据片段|证据范围|"
+    r"当前证据|提供的证据|"
+    r"当前(?:可用|可见|提供的)(?:源码)?证据|"
+    r"(?:可用|可见|提供的)源码证据"
+)
+_H1_RE = re.compile(r"^# [^#\n]", re.MULTILINE)
 _README_NAMES = ("README.md", "README.rst", "README.txt", "README")
 _OVERVIEW_PAGE_TOKENS = ("project-overview", "项目概述")
 _INSTALL_PAGE_TOKENS = ("installation", "安装指南", "安装与配置")
@@ -1088,6 +1097,8 @@ def handbook_reader_hygiene_offenders(
         "repeated_fences": [],
         "instruction_voice": [],
         "evidence_meta_talk": [],
+        "missing_h1": [],
+        "tiny_body": [],
     }
     if content_dir is None or not content_dir.exists():
         return {}
@@ -1103,6 +1114,12 @@ def handbook_reader_hygiene_offenders(
             found["instruction_voice"].append(rel)
         if _EVIDENCE_META_TALK_RE.search(text):
             found["evidence_meta_talk"].append(rel)
+        if not _H1_RE.search(text):
+            found["missing_h1"].append(rel)
+        if handbook_page_body_len(text) < MIN_HANDBOOK_BODY_CHARS or handbook_page_is_truncated(
+            text
+        ):
+            found["tiny_body"].append(rel)
         if repo_root is not None:
             for match in _CITE_RE.finditer(text):
                 raw = match.group(0)
@@ -1120,3 +1137,68 @@ def handbook_reader_hygiene_offenders(
         {page for pages in paragraph_pages.values() if len(set(pages)) >= 4 for page in pages}
     )
     return {key: values for key, values in found.items() if values}
+
+
+def handbook_page_body_len(markdown: str) -> int:
+    """Character count of reader body, excluding H1, TOC, and cite tags."""
+    text = re.sub(r"<cite>.*?</cite>", "", markdown or "", flags=re.IGNORECASE)
+    kept: list[str] = []
+    skip_toc = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if _H1_RE.match(stripped):
+            continue
+        if re.match(r"^##\s+目录\s*$", stripped):
+            skip_toc = True
+            continue
+        if skip_toc:
+            if re.match(r"^##\s+", stripped):
+                skip_toc = False
+            else:
+                continue
+        kept.append(line)
+    return len("".join(kept).strip())
+
+
+def handbook_page_is_truncated(markdown: str) -> bool:
+    """True when the last visible prose line stops mid-sentence."""
+    visible: list[str] = []
+    in_fence = False
+    for raw in (markdown or "").splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence or not stripped:
+            continue
+        visible.append(re.sub(r"<cite>.*?</cite>", "", stripped, flags=re.IGNORECASE).strip())
+    if not visible:
+        return True
+    last = visible[-1]
+    if last.startswith("#") or last.startswith("|") or last.startswith("-") or last.startswith("*"):
+        return False
+    if last[:2].isdigit() and "." in last[:4]:
+        return False
+    return not last.endswith(("。", "！", "？", ".", "!", "?", ":", "：", "）", ")", "`", ">"))
+
+
+def handbook_unknown_process_offenders(
+    content_dir: Path | None, repo_root: Path | None
+) -> dict[str, list[str]]:
+    """Pages that name a binary/process not present in the documented repo."""
+    from repo_wiki.generator.process_roles import (
+        derive_repo_process_names,
+        unknown_process_mentions,
+    )
+
+    if content_dir is None or not content_dir.exists() or repo_root is None:
+        return {}
+    allowed = derive_repo_process_names(repo_root)
+    found: dict[str, list[str]] = {}
+    for path in iter_markdown_pages(content_dir):
+        names = unknown_process_mentions(
+            path.read_text(encoding="utf-8", errors="ignore"), allowed
+        )
+        if names:
+            found[path.as_posix()] = names
+    return found

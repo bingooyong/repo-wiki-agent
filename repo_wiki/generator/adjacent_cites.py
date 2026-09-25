@@ -177,12 +177,14 @@ def attach_adjacent_cites(
         insert_at = min(max(claim.line, 0), len(lines))
         claim_text = claim.text or (lines[claim.line - 1] if 0 < claim.line <= len(lines) else "")
         idents = sentence_identifiers(claim_text) if root is not None else set()
+        if _is_multifile_summary(claim_text):
+            continue
         if root is not None:
             if idents:
                 tag = _first_matching_tag(idents, tags, root)
             else:
                 tag = _first_filename_matching_tag(claim_text, tags)
-            if tag is None and not strict_match:
+            if tag is None and not strict_match and not _is_multifile_summary(claim_text):
                 tag = tags[tag_index % len(tags)]
                 tag_index += 1
             if tag is None:
@@ -198,12 +200,19 @@ def attach_adjacent_cites(
     return rewritten
 
 
+def _is_multifile_summary(text: str) -> bool:
+    files = re.findall(r"`[^`]+?\.[A-Za-z0-9]+`", text or "")
+    if len(files) >= 2:
+        return True
+    return bool(re.search(r"总体入口|多个文件|各模块|分别在|分别落在", text or ""))
+
+
 def realign_irrelevant_cites(
     markdown: str,
     cite_tags: list[str],
     workspace_root: str | Path,
 ) -> str:
-    """Replace a cite with a better matching tag; keep it when none matches."""
+    """Replace a cite only when a sentence identifier appears in the target range."""
     root = Path(workspace_root)
     tags = [tag.strip() for tag in cite_tags if str(tag).strip()]
     if not markdown:
@@ -224,9 +233,12 @@ def realign_irrelevant_cites(
             if window and any(ident in window for ident in idents):
                 continue
             replacement = _first_matching_tag(idents, tags, root)
-            if not replacement or replacement == tag:
-                continue
-            new_line = new_line[: match.start()] + replacement + new_line[match.end() :]
+            if replacement and replacement != tag:
+                new_line = new_line[: match.start()] + replacement + new_line[match.end() :]
+            else:
+                new_line = new_line[: match.start()] + new_line[match.end() :]
+        new_line = re.sub(r"（\s*）", "", new_line)
+        new_line = re.sub(r"\s{2,}", " ", new_line).rstrip()
         lines[index] = new_line
     rewritten = "\n".join(lines)
     if markdown.endswith("\n") and not rewritten.endswith("\n"):
@@ -270,15 +282,13 @@ def rewrite_fastapi_intro_cites(
     if not (root / alembic_rel).is_file() and not (root / "app" / "main.py").is_file():
         return markdown
     from repo_wiki.evidence.citation_renderer import unique_root_readme_name
-    from repo_wiki.generator.deterministic_sections import (
-        cite_existing_meaningful,
-        cite_first_match,
-    )
+    from repo_wiki.generator.deterministic_sections import cite_existing_meaningful
 
     title = str(getattr(page, "title", "") or "")
     page_id = str(getattr(page, "page_id", "") or "")
     output = str(getattr(page, "output_path", "") or "")
-    blob = f"{title} {page_id} {output}"
+    category = str(getattr(getattr(page, "category", None), "value", "") or "")
+    blob = f"{title} {page_id} {output} {category}"
     intro_owner = any(
         token in blob
         for token in (
@@ -286,24 +296,44 @@ def rewrite_fastapi_intro_cites(
             "数据迁移策略",
             "database-architecture",
             "database-migration",
+            "核心服务API",
+            "Python服务API",
+            "api-overview",
+            "core-service-apis",
+            "API_REFERENCE",
+            "API参考",
         )
     )
     lines = markdown.splitlines()
     changed = False
-    readme = unique_root_readme_name(root)
+    readme_names = [
+        name
+        for name in ("README.rst", "README.md", "README.txt", "README")
+        if (root / name).is_file()
+    ]
+    readme = unique_root_readme_name(root) or (readme_names[0] if readme_names else "")
     intro_bounds = _section_bounds(lines, "简介")
-    if readme and intro_owner and intro_bounds:
+    if readme_names and intro_owner and intro_bounds:
         start, end = intro_bounds
-        # :1-10 survives header-only strip (:1-8) and matches official FastAPI intros.
-        readme_cite = f"<cite>{readme}:1-10</cite>"
+        claim = "\n".join(lines[start:end])
+        readme_cite = ""
+        for name in readme_names:
+            readme_cite = cite_readme_supporting_line(root, name, claim)
+            if readme_cite:
+                readme = name
+                break
         if readme_cite:
             for index in range(start, end):
-                if _PRODUCT_IDENTITY_RE.search(lines[index]):
+                if _PRODUCT_IDENTITY_RE.search(lines[index]) or re.search(
+                    r"`README\.(?:rst|md)`", lines[index]
+                ):
                     _replace_adjacent_cite(lines, index, readme_cite)
+                    lines[index] = re.sub(r"`README\.(?:rst|md)`", "", lines[index])
+                    lines[index] = re.sub(r"。\s*。", "。", lines[index])
                     changed = True
                     break
     if _SEVEN_TABLES_RE.search(markdown) and (root / alembic_rel).is_file():
-        mig_cite = cite_first_match(root, alembic_rel, r"op\.create_table") or (
+        mig_cite = cite_alembic_upgrade_range(root, alembic_rel) or (
             cite_existing_meaningful(root, alembic_rel)
         )
         if mig_cite:
@@ -315,6 +345,73 @@ def rewrite_fastapi_intro_cites(
     if not changed:
         return markdown
     rewritten = "\n".join(lines)
+    rewritten = re.sub(r"（\s*）", "", rewritten)
     if markdown.endswith("\n") and not rewritten.endswith("\n"):
         rewritten += "\n"
     return rewritten
+
+
+def cite_readme_supporting_line(root: Path, readme: str, claim: str) -> str:
+    """Cite the README line that actually supports the identity sentence."""
+    path = Path(root) / readme
+    if not path.is_file():
+        return ""
+    try:
+        rows = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return ""
+    keywords = [
+        token
+        for token in (
+            "not actively maintained",
+            "不再积极维护",
+            "Conduit",
+            "RealWorld",
+            "NOTE",
+        )
+        if token.lower() in (claim or "").lower() or token in (claim or "")
+    ] or ["not actively maintained", "Conduit", "NOTE"]
+    for index, line in enumerate(rows, 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(".. image::") or stripped.startswith("|"):
+            continue
+        if any(token.lower() in stripped.lower() for token in keywords):
+            return f"<cite>{readme}:{index}-{index}</cite>"
+    for index, line in enumerate(rows, 1):
+        stripped = line.strip()
+        if len(stripped) > 40 and not stripped.startswith(".. image::"):
+            return f"<cite>{readme}:{index}-{index}</cite>"
+    return ""
+
+
+def cite_alembic_upgrade_range(root: Path, rel: str) -> str:
+    """Cite the create_table / upgrade span, not the module docstring."""
+    path = Path(root) / rel
+    if not path.is_file():
+        return ""
+    try:
+        rows = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return ""
+    starts: list[int] = []
+    upgrade_line = 0
+    downgrade_line = 0
+    for index, line in enumerate(rows, 1):
+        if re.match(r"def upgrade\b", line):
+            upgrade_line = index
+        elif re.match(r"def downgrade\b", line):
+            downgrade_line = index
+        if re.search(r"\bop\.create_table\b", line):
+            starts.append(index)
+    if not starts and not upgrade_line:
+        return ""
+    start = min(starts) if starts else upgrade_line
+    if upgrade_line and start < upgrade_line:
+        end = upgrade_line - 1
+    elif downgrade_line:
+        end = downgrade_line - 1
+    else:
+        end = starts[-1]
+    while end > start and not rows[end - 1].strip():
+        end -= 1
+    return f"<cite>{rel}:{start}-{end}</cite>"

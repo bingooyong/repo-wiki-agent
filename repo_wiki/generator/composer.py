@@ -69,9 +69,13 @@ from repo_wiki.verifier.handbook import (
     EMPTY_CONTENT_REJECTION,
     EVIDENCE_META_REJECTION,
     GENERATOR_META_REJECTION,
+    MIN_HANDBOOK_BODY_CHARS,
     ROLE_CONTRADICTION_REJECTION,
+    TINY_OR_TRUNCATED_REJECTION,
     UNCLOSED_FENCE_REJECTION,
     contains_generator_meta,
+    handbook_page_body_len,
+    handbook_page_is_truncated,
     has_unclosed_fence,
     is_page_timeout_rejection,
     is_transient_server_error,
@@ -86,10 +90,16 @@ _PROSE_RECOVERY_REASONS = frozenset(
         UNCLOSED_FENCE_REJECTION,
         ROLE_CONTRADICTION_REJECTION,
         EVIDENCE_META_REJECTION,
+        TINY_OR_TRUNCATED_REJECTION,
     }
 )
-_EVIDENCE_META_TALK_RE = re.compile(r"证据片段|当前证据|提供的证据")
-_KEEP_MARKDOWN_AFTER_RETRY = frozenset({ROLE_CONTRADICTION_REJECTION, EVIDENCE_META_REJECTION})
+_EVIDENCE_META_TALK_RE = re.compile(
+    r"证据片段|证据范围|"
+    r"当前证据|提供的证据|"
+    r"当前(?:可用|可见|提供的)(?:源码)?证据|"
+    r"(?:可用|可见|提供的)源码证据"
+)
+_KEEP_MARKDOWN_AFTER_RETRY = frozenset({ROLE_CONTRADICTION_REJECTION})
 EMPTY_CONTENT_REWRITE_MAX_TOKENS = 16384
 
 _HANDBOOK_OVERVIEW_PAGE_IDS = frozenset({"project-overview"})
@@ -562,7 +572,7 @@ class LLMPageComposer:
                 max_tokens=self._resolve_request_max_tokens(),
             )
 
-            for attempt in range(2):
+            for attempt in range(3):
                 try:
                     response = await asyncio.wait_for(
                         self._call_llm(
@@ -674,10 +684,14 @@ class LLMPageComposer:
                 if not output.rejected:
                     return output
                 last_rejected = output
-                if attempt == 0 and (
+                extra_retry = validation_result.rejection_reason in {
+                    EVIDENCE_META_REJECTION,
+                    TINY_OR_TRUNCATED_REJECTION,
+                }
+                if (
                     validation_result.rejection_reason in _PROSE_RECOVERY_REASONS
                     or is_page_timeout_rejection(validation_result.rejection_reason)
-                ):
+                ) and (attempt == 0 or (attempt == 1 and extra_retry)):
                     prompt = self._build_prose_recovery_prompt(input, context, response_content)
                     if validation_result.rejection_reason == EMPTY_CONTENT_REJECTION:
                         rewrite_max_tokens = self._resolve_empty_content_rewrite_max_tokens()
@@ -752,6 +766,8 @@ class LLMPageComposer:
         return context
 
     def _page_needs_process_roles(self, page: WikiPagePlan) -> bool:
+        if not self._process_role_facts():
+            return False
         if is_handbook_overview_page(page):
             return True
         if page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
@@ -760,11 +776,9 @@ class LLMPageComposer:
         return "架构" in blob or "architecture" in blob.lower()
 
     def _process_role_facts(self) -> str:
-        return (
-            "ccagent 是主 REST/Web 服务与管理入口；"
-            "probe-agent 是隧道客户端，主动拨号连向 ccprobe-control；"
-            "ccprobe-control 是 gRPC 控制面。"
-        )
+        from repo_wiki.generator.process_roles import derive_process_role_facts
+
+        return derive_process_role_facts(self.workspace_root)
 
     def _build_compose_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         if self._use_compact_prompt():
@@ -846,6 +860,7 @@ class LLMPageComposer:
             f"产品身份：{product}\n"
             f"{role_facts}"
             "禁止空回复，不要返回空正文；必须写出至少两段可读段落，不能只回标题或空白。\n"
+            "不要评论材料齐不齐，直接写实现；不要自我介绍本页写给谁。\n"
             f"{fence_rule}"
             "每个事实句的 `<cite>` 必须写在该句同一行或下一行。不要解释过程。\n\n"
             f"精简证据（仅路径与短摘录，不要复述源码围栏）：\n{compact_evidence}\n\n"
@@ -924,15 +939,19 @@ class LLMPageComposer:
                 "禁止只引用徽章或标题行。命令必须使用仓库里真实存在的路径、二进制和 flag。",
             ]
         elif is_handbook_overview_page(page):
+            overview_roles = self._process_role_facts()
+            overview_extra = (
+                f"若仓库有多个 `cmd/` 二进制，不要写成单一 backend process。{overview_roles}"
+                if overview_roles
+                else "只写本仓库目录里实际存在的包与入口。"
+            )
             rules = [
                 "- 每个事实句的 `<cite>` 必须写在该句同一行或下一行（同行 / 下一行），"
                 "不要把引用只堆在文末「源码引用」列表里。",
                 "- 正文必须用段落解释；不要把项目概述写成安装步骤清单。列表行不计入 prose 下限。",
                 "- 不要把源码证据原文整段放进 Markdown 代码围栏；本页不要求 ```bash / ```sh 安装命令围栏。",
                 "- 概述页：README 的 `<cite>` 必须覆盖快速开始/运行章节，不要只引用徽章行。"
-                "若仓库有多个 `cmd/` 二进制，不要写成单一 backend process。"
-                "ccagent 是主 REST/Web 服务，不是边缘 Agent 或隧道客户端。"
-                "probe-agent 主动拨号连向 ccprobe-control 的隧道，不是被 ccagent 调度的拨测执行单元。",
+                f"{overview_extra}",
             ]
         else:
             rules = [
@@ -955,17 +974,41 @@ class LLMPageComposer:
                     "指向该 handler（例如 `internal/services/...`），不能只引用 SQL、docs 或配置。"
                 )
         if page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
+            root = Path(self.workspace_root or ".")
+            py_core = (root / "app" / "api" / "routes").is_dir()
+            go_internal = [
+                rel
+                for rel in (
+                    "internal/control",
+                    "internal/services",
+                    "internal/repository",
+                    "internal/exporter",
+                )
+                if (root / rel).is_dir()
+            ]
+            from repo_wiki.generator.process_roles import discover_cmd_processes
+
+            cmd_refs = [f"cmd/{item.name}" for item in discover_cmd_processes(root)]
+            role_facts = self._process_role_facts()
+            cite_bits: list[str] = []
+            if py_core:
+                cite_bits.append("Python 必引 `app/api/routes` 与 `app/models`")
+            if cmd_refs or go_internal:
+                shown = "、".join(f"`{item}`" for item in [*cmd_refs, *go_internal])
+                cite_bits.append(f"Go 必引 {shown}" if shown else "")
+            cite_rule = "；".join(item for item in cite_bits if item)
+            extra = role_facts
+            control = next(
+                (item for item in discover_cmd_processes(root) if "EstablishTunnel" in item.text),
+                None,
+            )
+            if control is not None and re.search(r"-serve|transport", control.text):
+                extra += f"{control.name} 以 `-serve -transport grpc` 常驻时才是控制面，不要写成普通 CLI。"
             rules.append(
-                "- 架构页：必须引用核心包（Python 必引 `app/api/routes` 与 `app/models`；"
-                "Go 必引 `cmd/ccagent`、`internal/control`、`internal/services`、"
-                "`internal/repository`、`internal/exporter`）。"
-                "ccagent 是主 REST/Web 服务与管理入口；"
-                "probe-agent 是隧道客户端，主动拨号连向 ccprobe-control；"
-                "ccprobe-control 是 gRPC 控制面。"
-                "Go 控制面是 `ccprobe-control -serve -transport grpc`，不要写成普通 CLI。"
-                "只写 import 图里存在的依赖：internal/control 不依赖 services/repository；"
-                "ccprobe-control 不依赖 services/repository/exporter。"
-                "不要引用 `*_test.go`，不要声称从 `package main`（如 custom-probe）导入类型。"
+                f"- 架构页：必须引用本仓库实际存在的核心包（{cite_rule or '只写目录里有的包'}）。"
+                f"{extra}"
+                "只写 import 图里存在的依赖。"
+                "不要引用 `*_test.go`，不要声称从 `package main` 导入类型。"
                 "不要把示例/demo/scaffold 二进制当成系统架构。"
             )
         if page.category == WikiTaxonomyCategory.DATA_MODELS:
@@ -1082,7 +1125,8 @@ class LLMPageComposer:
 
 写作要求：
 - 输出完整 Markdown，不要解释你的过程。
-- 正文面向仓库读者，直接陈述实现事实与调用关系。
+- 写给要改这个仓库的人看：用直陈句写代码里实际发生的事和调用关系，不要自我介绍本页写给谁。
+- 不要评论材料齐不齐，缺了的细节整段跳过。
 - 必须以 `# {page.title}` 开头。
 - 正文控制在 900 到 1400 个中文字符之间，避免长篇泛化。
 - 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
@@ -1332,7 +1376,7 @@ class LLMPageComposer:
         if is_empty_composer_markdown(stripped):
             # Empty / think-only must not become a titled stub that later PASSes.
             return ""
-        if not stripped.startswith("#"):
+        if not re.match(r"^# [^#]", stripped):
             stripped = f"# {title}\n\n{stripped}"
         stripped = _strip_handbook_filler(stripped)
         return normalize_citation_markup(stripped, self.workspace_root)
@@ -1411,6 +1455,12 @@ class LLMPageComposer:
 
         if not result.rejection_reason and _EVIDENCE_META_TALK_RE.search(content or ""):
             result.rejection_reason = EVIDENCE_META_REJECTION
+
+        if not result.rejection_reason and (
+            handbook_page_body_len(content or "") < MIN_HANDBOOK_BODY_CHARS
+            or handbook_page_is_truncated(content or "")
+        ):
+            result.rejection_reason = TINY_OR_TRUNCATED_REJECTION
 
         if (
             input.page_plan.page_id == INVENTORY_SERVICE_API_PAGE_ID
