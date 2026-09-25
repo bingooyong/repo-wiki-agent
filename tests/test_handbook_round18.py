@@ -87,7 +87,8 @@ def test_unclosed_fence_and_empty_span_are_integrity_violations(tmp_path: Path) 
 
 def test_doc_only_readme_methods_are_mismatches(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text(
-        "Implement CustomAuth and ApplyAuth on the handler.\n", encoding="utf-8"
+        "# Auth\n\n```go\nfunc (h *Handler) ApplyAuth() {}\ntype CustomAuth struct{}\n```\n",
+        encoding="utf-8",
     )
     (tmp_path / "auth.go").write_text(
         "package auth\nfunc (a Authenticator) Apply() {}\n", encoding="utf-8"

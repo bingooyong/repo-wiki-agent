@@ -23,7 +23,7 @@ from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 _DROP_CITATION_SCHEMES = ("file:", "path:", "relpath:")
 _PLACEHOLDER_CITE_BODY = "start-end"
 _CITE_BLOCK_RE = re.compile(r"(<cite>\s*)([^<]+?)(\s*</cite>)")
-_SOURCE_FILE_SUFFIXES = frozenset({
+_SOURCE_FILE_SUFFIXES = frozenset(
     {
         ".go",
         ".py",

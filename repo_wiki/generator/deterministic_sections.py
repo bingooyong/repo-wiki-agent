@@ -76,6 +76,32 @@ def discover_go_struct_names(root: Path) -> list[str]:
     return ordered
 
 
+def discover_core_domain_structs(root: Path) -> list[str]:
+    """Structs from the model layer that the route/service layer actually uses."""
+    names = discover_go_struct_names(root)
+    if not names:
+        return []
+    blob_parts: list[str] = []
+    for folder in (root / "internal" / "services", root / "internal" / "repository"):
+        if not folder.is_dir():
+            continue
+        for path in folder.rglob("*.go"):
+            if path.name.endswith("_test.go"):
+                continue
+            try:
+                blob_parts.append(path.read_text(encoding="utf-8", errors="ignore"))
+            except OSError:
+                continue
+    extra = root / "controller.go"
+    if extra.is_file():
+        blob_parts.append(extra.read_text(encoding="utf-8", errors="ignore"))
+    blob = "\n".join(blob_parts)
+    scored = [(name, blob.count(name)) for name in names]
+    used = [name for name, count in scored if count >= 2]
+    used.sort(key=lambda name: (-blob.count(name), name))
+    return used
+
+
 def discover_auth_implementation(root: Path) -> str:
     """Positive auth facts from source files, no sample-repo file names."""
     skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}

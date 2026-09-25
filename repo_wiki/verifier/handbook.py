@@ -47,7 +47,7 @@ _EVIDENCE_META_TALK_RE = re.compile(
     r"当前(?:可用|可见|提供的)(?:源码)?证据|"
     r"(?:可用|可见|提供的)源码证据|"
     r"(当前|可用|可见|提供的)的?(源码)?证据|"
-    r"用户当前没有指定"
+    r"用户(?:当前)?(?:没有|未)指定"
 )
 _FALLBACK_STUB_MARKERS = (
     "面向接手仓库的人，用来定位这个主题在仓库里的实现",
@@ -918,69 +918,48 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
 
 
 def architecture_core_packages(repo_root: Path) -> list[str]:
-    """Product packages ranked by import-graph centrality and route ownership."""
-    from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+    """Entry-point packages plus import-graph neighbors they own.
 
-    scores: dict[str, int] = {}
+    Example/demo/scaffold cmd trees are excluded. This is not "every
+    internal/* folder": on a Go cmd repo the cores are the REST/data-plane
+    entries discovered from ListenAndServe + routes.
+    """
+    from repo_wiki.generator.process_roles import derive_process_roles, path_looks_like_example_cmd
 
-    cmd = repo_root / "cmd"
-    if cmd.is_dir():
-        for child in sorted(cmd.iterdir()):
-            if not child.is_dir() or not any(child.glob("*.go")):
-                continue
-            rel = f"cmd/{child.name}"
-            if path_looks_like_example_cmd(rel):
-                continue
-            scores[rel] = 2
-    internal = repo_root / "internal"
-    if internal.is_dir():
-        for child in sorted(internal.iterdir()):
-            if child.is_dir() and child.name not in {"testdata", "test", "__pycache__"}:
-                scores[f"internal/{child.name}"] = 1
-    for rel in ("app/api/routes", "app/models", "app/core", "app/db", "app/services"):
+    cores: list[str] = []
+    for item in derive_process_roles(repo_root):
+        if item.example or path_looks_like_example_cmd(item.rel_main):
+            continue
+        if not ({"rest_entry", "data_plane"} & set(item.kinds)):
+            continue
+        rel = f"cmd/{item.name}"
+        if (repo_root / "cmd" / item.name).is_dir() and rel not in cores:
+            cores.append(rel)
+
+    if (repo_root / "app" / "api" / "routes").exists():
+        cores.append("app/api/routes")
+    if (repo_root / "app" / "services").exists() and (repo_root / "app" / "api" / "routes").exists():
+        try:
+            from repo_wiki.generator.compose_evidence import load_repo_import_edges
+
+            edges = load_repo_import_edges(repo_root)
+        except Exception:
+            edges = set()
+        if any(
+            str(src).replace("\\", "/").startswith("app/api")
+            and str(dest).replace("\\", "/").startswith("app/services")
+            for src, dest in edges
+        ):
+            cores.append("app/services")
+
+    if cores:
+        return cores
+
+    fallback: list[str] = []
+    for rel in ("app/api/routes", "app/services", "app/models", "app/db"):
         if (repo_root / rel).exists():
-            scores[rel] = 4
-
-    try:
-        from repo_wiki.generator.compose_evidence import load_repo_import_edges
-
-        edges = load_repo_import_edges(repo_root)
-    except Exception:
-        edges = set()
-    for _src, dest in edges:
-        dest_text = str(dest or "").replace("\\", "/")
-        for rel in scores:
-            leaf = rel.rsplit("/", 1)[-1]
-            if dest_text in {rel, leaf} or dest_text.endswith("/" + leaf):
-                scores[rel] += 3
-
-    route_re = re.compile(
-        r"HandleFunc|RegisterService|APIRouter|@(?:router|app)\.(?:get|post|put|delete|patch)",
-        re.I,
-    )
-    for rel in list(scores):
-        folder = repo_root / rel
-        files: list[Path] = []
-        if folder.is_dir():
-            files = [path for path in folder.rglob("*") if path.suffix.lower() in {".go", ".py"}]
-        elif folder.is_file():
-            files = [folder]
-        for path in files[:40]:
-            if path.name.endswith("_test.go") or path.name.endswith("_test.py"):
-                continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                continue
-            if route_re.search(text):
-                scores[rel] += 8
-                break
-
-    ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
-    cores = [rel for rel, score in ranked if score >= 4]
-    if not cores:
-        cores = [rel for rel, _score in ranked[:4]]
-    return cores
+            fallback.append(rel)
+    return fallback[:4]
 
 
 def architecture_required_packages(repo_root: Path) -> list[str]:
@@ -1101,22 +1080,24 @@ def _has_go_struct_definition_cite(markdown: str, repo_root: Path) -> bool:
 
 
 def _has_required_go_struct_cites(markdown: str, repo_root: Path) -> bool:
-    from repo_wiki.generator.deterministic_sections import discover_go_struct_names, go_struct_cite
+    from repo_wiki.generator.deterministic_sections import (
+        discover_core_domain_structs,
+        go_struct_cite,
+    )
 
     text = markdown or ""
-    needed = [go_struct_cite(repo_root, name) for name in discover_go_struct_names(repo_root)[:8]]
+    needed = [go_struct_cite(repo_root, name) for name in discover_core_domain_structs(repo_root)]
     needed = [item for item in needed if item]
     if not needed:
         return True
     cited = " ".join(match.group(1) for match in _CITE_RE.finditer(text))
-    hits = 0
     for cite in needed:
         raw = cite.replace("<cite>", "").replace("</cite>", "")
         path, _sep, rest = raw.partition(":")
         start_s = rest.split("-", 1)[0]
-        if path in cited and start_s in cited:
-            hits += 1
-    return hits >= min(4, len(needed))
+        if path not in cited or start_s not in cited:
+            return False
+    return True
 
 
 def has_api_routes_citation(
@@ -1281,6 +1262,18 @@ def handbook_unknown_process_offenders(
 
 
 _STALE_METHOD_RE = re.compile(r"`([A-Z][A-Za-z0-9]+)`")
+_DOC_MISMATCH_SKIP = frozenset(
+    {
+        "Docker",
+        "GitHub",
+        "LICENSE",
+        "Makefile",
+        "Caddyfile",
+        "TestClient",
+        "Readme",
+        "Bearer",
+    }
+)
 
 
 def _iter_page_code_units(markdown: str) -> list[str]:
@@ -1368,31 +1361,39 @@ def handbook_code_integrity_offenders(
     return found
 
 
+def _readme_code_identifiers(repo_root: Path) -> set[str]:
+    """Function/type names that appear in README fenced or indented code only."""
+    readme = read_readme_text(repo_root)
+    if not readme:
+        return set()
+    blocks: list[str] = re.findall(r"```[\w-]*\n(.*?)```", readme, flags=re.S)
+    blocks.extend(re.findall(r"(?m)^(?:    |\t)(.+)$", readme))
+    blob = "\n".join(blocks)
+    return {name for name in re.findall(r"\b([A-Z][A-Za-z0-9]{5,})\b", blob)}
+
+
 def handbook_doc_code_mismatches(
     content_dir: Path | None, repo_root: Path | None
 ) -> dict[str, list[str]]:
-    """Stale README method names that do not appear in repository source."""
+    """README-code identifiers presented as the code API but missing from source."""
     if content_dir is None or not content_dir.exists() or repo_root is None:
         return {}
     source_blob = _repo_code_blob(repo_root)
+    readme_ids = _readme_code_identifiers(repo_root)
     found: dict[str, list[str]] = {}
     for path in iter_markdown_pages(content_dir):
         text = path.read_text(encoding="utf-8", errors="ignore")
         stale: list[str] = []
         for name in _STALE_METHOD_RE.findall(text):
-            if len(name) < 6 or name.lower() in {"readme", "bearer"}:
+            if name in _DOC_MISMATCH_SKIP or len(name) < 6:
+                continue
+            if name not in readme_ids:
                 continue
             if name in source_blob:
                 continue
             if re.search(
                 rf"\bdef\s+{re.escape(name)}\b|\bfunc\s+\([^)]+\)\s+{re.escape(name)}\b|\bfunc\s+{re.escape(name)}\b",
                 source_blob,
-            ):
-                continue
-            if (
-                name.endswith("Repository")
-                or name.endswith("Controller")
-                or name.endswith("Service")
             ):
                 continue
             stale.append(name)

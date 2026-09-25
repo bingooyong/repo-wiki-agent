@@ -131,13 +131,19 @@ def page_has_prompt_leakage(content: str) -> bool:
     return bool(_QUALITY_METRIC_LEAK.search(content))
 
 
+REPEATED_FILLER_MIN_PARAGRAPH_LEN = 40
+REPEATED_FILLER_MIN_PARAGRAPH_REPEATS = 4
+REPEATED_FILLER_MIN_LINE_LEN = 40
+REPEATED_FILLER_MIN_LINE_REPEATS = 8
+
+
 def page_has_repeated_filler(
     content: str,
     *,
-    min_paragraph_len: int = 40,
-    min_paragraph_repeats: int = 4,
-    min_line_len: int = 40,
-    min_line_repeats: int = 8,
+    min_paragraph_len: int = REPEATED_FILLER_MIN_PARAGRAPH_LEN,
+    min_paragraph_repeats: int = REPEATED_FILLER_MIN_PARAGRAPH_REPEATS,
+    min_line_len: int = REPEATED_FILLER_MIN_LINE_LEN,
+    min_line_repeats: int = REPEATED_FILLER_MIN_LINE_REPEATS,
 ) -> bool:
     """True when the same long paragraph or line is pasted many times."""
     paragraph_counts: dict[str, int] = {}
@@ -390,6 +396,12 @@ class QoderLikeVerifierService(VerifierService):
     MIN_TOC_COVERAGE = 0.8
     MIN_FILE_LINE_COVERAGE = 0.7
     MIN_MERMAID_COVERAGE = 0.3
+    CLAIM_CITATION_FLOOR = 0.95
+    DEGRADED_STATE_TOKENS = ("fallback", "degraded")
+    REPEATED_FILLER_MIN_PARAGRAPH_LEN = 40
+    REPEATED_FILLER_MIN_PARAGRAPH_REPEATS = 4
+    REPEATED_FILLER_MIN_LINE_LEN = 40
+    REPEATED_FILLER_MIN_LINE_REPEATS = 8
     MERMAID_CODE_BLOCK_PATTERN = re.compile(r"```mermaid\s*(.*?)```", re.IGNORECASE | re.DOTALL)
     _FASTAPI_AUTODOC_PATHS = FASTAPI_AUTODOC_PATHS
     _RUNTIME_SERVICE_KINDS = frozenset(
@@ -1699,7 +1711,7 @@ class QoderLikeVerifierService(VerifierService):
             page: state
             for page, state in page_states.items()
             if state.lower() not in {"ready", "pass", "passed", "ok"}
-            or any(token in state.lower() for token in ("fallback", "degraded"))
+            or any(token in state.lower() for token in QoderLikeVerifierService.DEGRADED_STATE_TOKENS)
         }
         if bad_states:
             return CheckResult(
@@ -2010,7 +2022,7 @@ class QoderLikeVerifierService(VerifierService):
                 uncovered.extend(page_uncovered)
 
         ratio = 1.0 if total == 0 else covered / total
-        if ratio < 0.95:
+        if ratio < self.CLAIM_CITATION_FLOOR:
             return CheckResult(
                 name="qoder-claim-citation-coverage",
                 status="FAIL",

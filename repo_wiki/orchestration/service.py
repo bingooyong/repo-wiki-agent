@@ -2489,20 +2489,7 @@ class RepoWikiService:
                 WikiTaxonomyCategory.FRONTEND_APPLICATIONS,
                 WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
             }
-        ) and not self._content_has_mermaid_fence(content)
-        if inject_planner_mermaid and (needs_er_mermaid or needs_any_mermaid):
-            rendered_blocks = self._build_mermaid_blocks_from_planner(
-                page=page,
-                binding=binding,
-                composition_context=composition_context,
-            )
-            if rendered_blocks:
-                if needs_er_mermaid:
-                    rendered_blocks = sorted(
-                        rendered_blocks,
-                        key=lambda block: 0 if "erdiagram" in block.lower() else 1,
-                    )
-                content += "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
+        )
 
         citation_renderer = CitationRenderer(workspace_root=self.root)
         cites: list[str] = []
@@ -2671,6 +2658,30 @@ class RepoWikiService:
         content = strip_header_only_cites(content, self.root)
         content = self._append_short_migration_evidence(page, content)
         content = restore_code_units(content, _sacred_code)
+        if inject_planner_mermaid and (
+            needs_er_mermaid or (needs_any_mermaid and not self._content_has_mermaid_fence(content))
+        ):
+            rendered_blocks = self._build_mermaid_blocks_from_planner(
+                page=page,
+                binding=binding,
+                composition_context=composition_context,
+            )
+            if rendered_blocks:
+                if needs_er_mermaid:
+                    rendered_blocks = sorted(
+                        rendered_blocks,
+                        key=lambda block: 0 if "erdiagram" in block.lower() else 1,
+                    )
+                if "## 架构图" in content:
+                    from repo_wiki.generator.deterministic_sections import replace_h2_section
+
+                    content = replace_h2_section(
+                        content,
+                        ("架构图",),
+                        "## 架构图\n\n" + "\n\n".join(rendered_blocks) + "\n",
+                    )
+                else:
+                    content += "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
         return content.strip() + "\n"
 
     def _write_raw_reply(self, page: Any, raw_markdown: str) -> None:
@@ -3038,7 +3049,15 @@ class RepoWikiService:
                     )
                 details = []
                 if handler:
-                    details.append(f"handler `{handler}`")
+                    source = ""
+                    if file_path and (self.root / file_path).is_file():
+                        source = (self.root / file_path).read_text(
+                            encoding="utf-8", errors="ignore"
+                        )
+                    if handler in source:
+                        details.append(f"handler `{handler}`")
+                    else:
+                        details.append(f"handler {handler}")
                 cite = ""
                 if file_path:
                     start = int(endpoint.get("line_number") or endpoint.get("line_start") or 0)

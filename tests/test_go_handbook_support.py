@@ -684,7 +684,7 @@ def test_drop_citations_to_missing_files(tmp_path: Path) -> None:
     cleaned = normalize_citation_markup(text, tmp_path)
     assert "README.md:1-1" in cleaned
     assert "<cite>docs/DOCUMENTING_SUMMARY.md:545-618</cite>" not in cleaned
-    assert "`docs/DOCUMENTING_SUMMARY.md`" in cleaned
+    assert "DOCUMENTING_SUMMARY.md" not in cleaned
 
 
 def test_source_evidence_fails_docs_only_handbook(tmp_path: Path) -> None:
@@ -1179,11 +1179,10 @@ def test_api_route_file_fastapi_inventory_still_requires_routes(tmp_path: Path) 
     assert result.reason_code == "QODER_HANDBOOK_API_ROUTE_FILE"
 
 
-def test_backtick_path_line_is_normalized_to_cite() -> None:
+def test_backtick_path_line_stays_in_the_span() -> None:
     text = "路由在 `internal/services/serv_probe_endpoint.go:12`。"
     rewritten = normalize_citation_markup(text)
-    assert "<cite>internal/services/serv_probe_endpoint.go:12</cite>" in rewritten
-    assert "`internal/services/serv_probe_endpoint.go:12`" not in rewritten
+    assert "`internal/services/serv_probe_endpoint.go:12`" in rewritten
 
 
 def test_fact_conflict_placeholders_and_docs_plan_lookup(tmp_path: Path) -> None:
