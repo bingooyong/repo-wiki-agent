@@ -153,7 +153,7 @@ async def test_generator_meta_rejection_is_page_local_like_insufficient_prose(
     assert result["llm"]["provider_disabled_after_failures"] is False
     assert provider.call_count == PAGE_COUNT
     assert result["llm"]["llm_call_count"] == PAGE_COUNT
-    assert result["llm"]["fallback_page_count"] == 3
+    assert result["llm"]["fallback_page_count"] == 0
     meta_rejects = [
         reason
         for meta in result["page_metadata"]

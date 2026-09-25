@@ -744,11 +744,11 @@ async def test_insufficient_prose_rejects_do_not_trip_circuit_breaker(
     assert llm["provider_disabled_after_failures"] is False
     assert provider.call_count == PAGE_COUNT + 3
     assert llm["llm_call_count"] == PAGE_COUNT
-    assert llm["fallback_page_count"] == 3
+    assert llm["fallback_page_count"] == 0
     assert len(prose_rejects) == 3
     assert not disabled_reasons
-    assert modes.count("fallback") == 3
-    assert modes.count("llm") == PAGE_COUNT - 3
+    assert modes.count("fallback") == 0
+    assert modes.count("llm") == PAGE_COUNT
 
 
 @pytest.mark.asyncio

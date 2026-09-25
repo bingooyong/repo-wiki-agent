@@ -43,11 +43,29 @@ _INSTRUCTION_VOICE_RE = re.compile(
 )
 _EVIDENCE_META_TALK_RE = re.compile(
     r"证据片段|证据范围|"
-    r"当前证据|提供的证据|"
+    r"当前证据(?:只|仅|覆盖|不足|片段|范围|可见|可用)|"
     r"当前(?:可用|可见|提供的)的?(?:源码)?证据|"
     r"(?:可用|可见|提供的)的?源码证据"
 )
+_FALLBACK_STUB_MARKERS = (
+    "面向接手仓库的人，用来定位这个主题在仓库里的实现",
+    "在找到可核对的文件之前，请不要把本页当成",
+    "本页目前无法根据仓库内容写成可用的",
+    "说明这个仓库是什么产品、给谁用，而不是一份安装步骤清单",
+)
 _H1_RE = re.compile(r"^# [^#\n]", re.MULTILINE)
+
+
+def contains_evidence_meta_talk(text: str) -> bool:
+    return bool(_EVIDENCE_META_TALK_RE.search(text or ""))
+
+
+def handbook_page_is_fallback_stub(markdown: str) -> bool:
+    """True only for deterministic fallback stubs, not short structured LLM pages."""
+    text = markdown or ""
+    return any(marker in text for marker in _FALLBACK_STUB_MARKERS)
+
+
 _README_NAMES = ("README.md", "README.rst", "README.txt", "README")
 _OVERVIEW_PAGE_TOKENS = ("project-overview", "项目概述")
 _INSTALL_PAGE_TOKENS = ("installation", "安装指南", "安装与配置")
@@ -1147,7 +1165,7 @@ def handbook_reader_hygiene_offenders(
             found["repeated_fences"].append(rel)
         if _INSTRUCTION_VOICE_RE.search(text):
             found["instruction_voice"].append(rel)
-        if _EVIDENCE_META_TALK_RE.search(text):
+        if contains_evidence_meta_talk(text):
             found["evidence_meta_talk"].append(rel)
         if not _H1_RE.search(text):
             found["missing_h1"].append(rel)

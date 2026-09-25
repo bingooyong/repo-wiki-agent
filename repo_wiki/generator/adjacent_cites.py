@@ -52,7 +52,7 @@ _GENERIC_IDENTIFIERS = frozenset(
 )
 _FILE_LINE_RE = re.compile(r"^((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+):(\d+)(?:-(\d+))?$")
 _MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\n]+)\)")
-_PRODUCT_IDENTITY_RE = re.compile(r"产品身份|不再.{0,8}维护")
+_PRODUCT_IDENTITY_RE = re.compile(r"产品身份|不再.{0,8}维护|停止主动维护")
 _DANGLING_README_RE = re.compile(r"(?:(?<=[。；])|^)\s*`README\.(?:rst|md)`\s*[。；]?")
 _README_HEADER_CITE_RE = re.compile(r"<cite>\s*(README\.(?:rst|md|txt)):1-1?\d\s*</cite>", re.I)
 _SEVEN_TABLES_RE = re.compile(r"7\s*张业务表")
@@ -377,6 +377,16 @@ def rewrite_fastapi_intro_cites(
                 lines[index] = _DANGLING_README_RE.sub("", lines[index])
                 lines[index] = re.sub(r"。\s*。", "。", lines[index])
                 changed = True
+    for index, line in enumerate(lines):
+        match = _README_HEADER_CITE_RE.search(line)
+        if not match:
+            continue
+        readme = match.group(1)
+        support = cite_readme_supporting_line(root, readme, line)
+        if not support or support == match.group(0):
+            continue
+        _replace_adjacent_cite(lines, index, support)
+        changed = True
     if (root / alembic_rel).is_file():
         mig_cite = cite_alembic_upgrade_range(root, alembic_rel) or (
             cite_existing_meaningful(root, alembic_rel)
@@ -403,10 +413,7 @@ def _is_identity_intro_line(line: str) -> bool:
     """True for maintenance-status prose or a leftover README header-range cite."""
     if _PRODUCT_IDENTITY_RE.search(line) or _DANGLING_README_RE.search(line):
         return True
-    return bool(
-        _README_HEADER_CITE_RE.search(line)
-        and re.search(r"不再|维护|产品身份|参考实现|停止主动", line)
-    )
+    return bool(_README_HEADER_CITE_RE.search(line))
 
 
 def _readme_line_is_skippable(stripped: str) -> bool:
@@ -424,9 +431,14 @@ def cite_readme_supporting_line(root: Path, readme: str, claim: str) -> str:
         return ""
     note_line = _readme_note_line(rows)
     h1_line = _readme_h1_line(rows)
+    heading_line = _readme_heading_mentioned_in_claim(rows, claim or "")
     wants_note = bool(_PRODUCT_IDENTITY_RE.search(claim or "") or "维护" in (claim or ""))
+    if heading_line and not wants_note:
+        return f"<cite>{readme}:{heading_line}-{heading_line}</cite>"
     if wants_note and note_line:
         return f"<cite>{readme}:{note_line}-{note_line}</cite>"
+    if heading_line:
+        return f"<cite>{readme}:{heading_line}-{heading_line}</cite>"
     if h1_line:
         return f"<cite>{readme}:{h1_line}-{h1_line}</cite>"
     if note_line:
@@ -461,6 +473,22 @@ def _readme_h1_line(rows: list[str]) -> int:
         if index < len(rows) and re.fullmatch(r"[-=]{3,}", rows[index].strip()):
             if stripped and not stripped.startswith("..") and not stripped.startswith(":"):
                 return index
+    return 0
+
+
+def _readme_heading_mentioned_in_claim(rows: list[str], claim: str) -> int:
+    blob = (claim or "").casefold()
+    if not blob:
+        return 0
+    for index, line in enumerate(rows, 1):
+        stripped = line.strip().lstrip("#").strip()
+        if len(stripped) < 4 or stripped.startswith("..") or stripped.startswith(":"):
+            continue
+        is_heading = line.strip().startswith("# ") or (
+            index < len(rows) and bool(re.fullmatch(r"[-=]{3,}", rows[index].strip()))
+        )
+        if is_heading and stripped.casefold() in blob:
+            return index
     return 0
 
 

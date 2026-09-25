@@ -1602,18 +1602,15 @@ class RepoWikiService:
                     self._write_raw_reply(
                         page, getattr(output, "raw_markdown", "") or output.markdown
                     )
-                    from repo_wiki.verifier.handbook import (
-                        MIN_HANDBOOK_BODY_CHARS,
-                        handbook_page_body_len,
-                    )
+                    from repo_wiki.verifier.handbook import handbook_page_is_fallback_stub
 
                     page_results[page_idx] = (page.output_path, enriched)
-                    tiny = handbook_page_body_len(enriched) < MIN_HANDBOOK_BODY_CHARS
+                    stub = handbook_page_is_fallback_stub(enriched)
                     page_metadata_by_idx[page_idx] = {
                         "page_id": page.page_id,
                         "source_path": page.output_path,
-                        "generation_mode": "llm" if not tiny else "fallback",
-                        "quality_state": "DEGRADED" if tiny else "READY",
+                        "generation_mode": "fallback" if stub else "llm",
+                        "quality_state": "DEGRADED" if stub else "READY",
                         "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
                         "reasons": [output.rejection_reason or "llm_output_rejected"],
                     }
@@ -1645,9 +1642,9 @@ class RepoWikiService:
                 inject_planner_mermaid=False,
             )
             self._write_raw_reply(page, getattr(output, "raw_markdown", "") or output.markdown)
-            from repo_wiki.verifier.handbook import MIN_HANDBOOK_BODY_CHARS, handbook_page_body_len
+            from repo_wiki.verifier.handbook import handbook_page_is_fallback_stub
 
-            if handbook_page_body_len(enriched) < MIN_HANDBOOK_BODY_CHARS:
+            if handbook_page_is_fallback_stub(enriched):
                 page_results[page_idx] = (page.output_path, enriched)
                 page_metadata_by_idx[page_idx] = {
                     "page_id": page.page_id,
@@ -2682,6 +2679,7 @@ class RepoWikiService:
 
         content = normalize_citation_markup(content, self.root)
         content = strip_header_only_cites(content, self.root)
+        content = self._append_short_migration_evidence(page, content)
         return content.strip() + "\n"
 
     def _write_raw_reply(self, page: Any, raw_markdown: str) -> None:
@@ -3710,6 +3708,27 @@ class RepoWikiService:
                     continue
             kept.append(line)
         return "\n".join(kept)
+
+    def _append_short_migration_evidence(self, page: Any, content: str) -> str:
+        blob = " ".join(
+            [
+                str(getattr(page, "page_id", "") or ""),
+                str(getattr(page, "title", "") or ""),
+                str(getattr(page, "output_path", "") or ""),
+            ]
+        )
+        if "迁移" not in blob and "migration" not in blob.lower():
+            return content
+        from repo_wiki.verifier.handbook import MIN_HANDBOOK_BODY_CHARS, handbook_page_body_len
+
+        if handbook_page_body_len(content) >= MIN_HANDBOOK_BODY_CHARS:
+            return content
+        from repo_wiki.generator.deterministic_sections import build_alembic_migration_appendix
+
+        extra = build_alembic_migration_appendix(self.root)
+        if not extra or extra.strip() in content:
+            return content
+        return content.rstrip() + "\n\n" + extra.strip() + "\n"
 
     def _ensure_minimum_prose_density(self, content: str, _page: Any) -> str:
         """Lift list dumps and char density without repeating the same pad paragraph."""

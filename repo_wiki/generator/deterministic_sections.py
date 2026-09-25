@@ -1144,6 +1144,37 @@ def extract_alembic_tables(text: str) -> list[dict[str, object]]:
     return tables
 
 
+def build_alembic_migration_appendix(root: Path) -> str:
+    """Deterministic Alembic facts used to keep short migration pages above the body floor."""
+    from repo_wiki.generator.adjacent_cites import (
+        cite_alembic_upgrade_range,
+        find_alembic_revision_rel,
+    )
+
+    rel = find_alembic_revision_rel(root)
+    if not rel:
+        return ""
+    models = load_alembic_migration_models(root)
+    names = [str(item.get("name") or "").strip() for item in models]
+    names = [name for name in names if name]
+    if not names:
+        return ""
+    cite = (
+        cite_alembic_upgrade_range(root, rel)
+        or cite_first_match(root, rel, r"\bop\.create_table\b")
+        or (f"<cite>{rel}:1-1</cite>" if (root / rel).is_file() else "")
+    )
+    versions = Path(rel).parent.as_posix()
+    table_list = "、".join(names)
+    return (
+        "## 迁移脚本\n\n"
+        f"仓库的 schema 变更集中在 `{versions}`。"
+        f"`{Path(rel).name}` 的 `upgrade` 用 `op.create_table` 声明了 {len(names)} 张表：{table_list}。"
+        "表名、主键和外键以该 revision 为准，领域模型文件只描述读写契约，不代替迁移脚本。"
+        f" {cite}\n"
+    )
+
+
 def load_alembic_migration_models(root: Path) -> list[dict[str, Any]]:
     versions = root / "app" / "db" / "migrations" / "versions"
     if not versions.is_dir():

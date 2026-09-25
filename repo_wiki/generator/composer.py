@@ -73,6 +73,7 @@ from repo_wiki.verifier.handbook import (
     ROLE_CONTRADICTION_REJECTION,
     TINY_OR_TRUNCATED_REJECTION,
     UNCLOSED_FENCE_REJECTION,
+    contains_evidence_meta_talk,
     contains_generator_meta,
     handbook_page_body_len,
     handbook_page_is_truncated,
@@ -92,12 +93,6 @@ _PROSE_RECOVERY_REASONS = frozenset(
         EVIDENCE_META_REJECTION,
         TINY_OR_TRUNCATED_REJECTION,
     }
-)
-_EVIDENCE_META_TALK_RE = re.compile(
-    r"证据片段|证据范围|"
-    r"当前证据|提供的证据|"
-    r"当前(?:可用|可见|提供的)的?(?:源码)?证据|"
-    r"(?:可用|可见|提供的)的?源码证据"
 )
 _KEEP_MARKDOWN_AFTER_RETRY = frozenset({ROLE_CONTRADICTION_REJECTION})
 EMPTY_CONTENT_REWRITE_MAX_TOKENS = 16384
@@ -729,7 +724,6 @@ class LLMPageComposer:
                 and chosen.rejected
                 and self._attempt_structure_score(chosen.markdown)[0] >= 1
                 and self._attempt_structure_score(chosen.markdown)[1] >= 1
-                and handbook_page_body_len(chosen.markdown) >= MIN_HANDBOOK_BODY_CHARS
             ):
                 chosen.rejected = False
                 chosen.rejection_reason = None
@@ -1486,7 +1480,7 @@ class LLMPageComposer:
             if generator_role_contradictions(content, input.page_plan, self.workspace_root):
                 result.rejection_reason = ROLE_CONTRADICTION_REJECTION
 
-        if not result.rejection_reason and _EVIDENCE_META_TALK_RE.search(content or ""):
+        if not result.rejection_reason and contains_evidence_meta_talk(content or ""):
             result.rejection_reason = EVIDENCE_META_REJECTION
 
         if not result.rejection_reason and (

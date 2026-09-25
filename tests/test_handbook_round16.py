@@ -447,12 +447,13 @@ def test_conduit_error_page_keeps_local_cite(tmp_path: Path) -> None:
     assert "README.rst:6" not in out
 
 
-def test_quickstart_excerpt_keeps_header_readme_cite(tmp_path: Path) -> None:
+def test_quickstart_excerpt_rewrites_header_readme_cite(tmp_path: Path) -> None:
     root = _fastapi_repo(tmp_path)
     (root / "README.rst").write_text(
         ".. image:: logo.png\n\n"
         + "\n".join(f"badge {i}" for i in range(1, 26))
-        + "\n\n**NOTE**: This repository is not actively maintained "
+        + "\n\nQuickstart\n----------\n\n"
+        "**NOTE**: This repository is not actively maintained "
         "because this example is quite complete and does its primary goal "
         "- passing Conduit testsuite.\n",
         encoding="utf-8",
@@ -470,9 +471,8 @@ def test_quickstart_excerpt_keeps_header_readme_cite(tmp_path: Path) -> None:
         "<cite>README.rst:1-10</cite>\n"
     )
     out = _service(root)._enforce_qoder_page_contract(page, markdown, None, add_mermaid=False)
-    assert "README.rst:1-10" in out
-    assert "README.rst:28" not in out
-    assert "README.rst:29" not in out
+    assert "README.rst:1-10" not in out
+    assert "README.rst:" in out
 
 
 def test_empty_cite_parens_are_stripped() -> None:

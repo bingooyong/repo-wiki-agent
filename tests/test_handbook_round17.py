@@ -294,6 +294,45 @@ def test_generator_version_is_r17() -> None:
     assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r17-")
 
 
+def test_hedged_current_evidence_is_not_meta_talk() -> None:
+    from repo_wiki.verifier.handbook import contains_evidence_meta_talk
+
+    assert contains_evidence_meta_talk("当前可见的源码证据只覆盖令牌解析。")
+    assert not contains_evidence_meta_talk("其余状态码在当前证据之外，不再推断。")
+    assert not contains_evidence_meta_talk("当前证据集中在迁移 revision 的 upgrade。")
+
+
+def test_fallback_stub_detector_ignores_short_llm() -> None:
+    from repo_wiki.verifier.handbook import handbook_page_is_fallback_stub
+
+    llm = "# 数据库迁移\n\n## 环境搭建\n\n连接池在启动期注入。\n"
+    stub = (
+        "# 数据库迁移\n\n## 这是什么\n\n"
+        "「数据库迁移」面向接手仓库的人，用来定位这个主题在仓库里的实现。\n"
+        "## 可核对的文件\n"
+    )
+    assert handbook_page_is_fallback_stub(llm) is False
+    assert handbook_page_is_fallback_stub(stub) is True
+
+
+def test_short_migration_page_appends_alembic_facts(tmp_path: Path) -> None:
+    root = _fastapi_repo(tmp_path)
+    page = _page(
+        "database-migration",
+        "数据库迁移",
+        WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
+        "开发指南/数据库迁移.md",
+    )
+    markdown = (
+        "# 数据库迁移\n\n## 环境搭建\n\n"
+        "连接池在启动期注入，关闭时释放。<cite>app/db/events.py:20-25</cite>\n"
+    )
+    out = _service(root)._enforce_qoder_page_contract(page, markdown, None, add_mermaid=False)
+    assert "README.rst:1-10" not in out
+    assert "op.create_table" in out
+    assert "users" in out
+
+
 @pytest.mark.asyncio
 async def test_meta_still_rejects_after_retries(tmp_path: Path) -> None:
     meta = _pad("# 认证授权API\n\n## 简介\n\n当前可见的源码证据只覆盖 Bearer。\n")
