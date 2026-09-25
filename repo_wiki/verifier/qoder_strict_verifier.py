@@ -2026,11 +2026,14 @@ class QoderLikeVerifierService(VerifierService):
                 uncovered.extend(page_uncovered)
 
         ratio = 1.0 if total == 0 else covered / total
-        if ratio < 0.95:
+        if ratio < self.CLAIM_CITATION_FLOOR:
             return CheckResult(
                 name="qoder-claim-citation-coverage",
                 status="FAIL",
-                message=f"Claim-level repository citation coverage below 95%: {ratio:.2%}",
+                message=(
+                    f"Claim-level repository citation coverage below "
+                    f"{self.CLAIM_CITATION_FLOOR:.0%}: {ratio:.2%}"
+                ),
                 details={
                     "covered_claims": covered,
                     "total_claims": total,
