@@ -214,6 +214,15 @@ def test_hygiene_flags_available_source_evidence_and_scope(tmp_path: Path) -> No
     assert offenders.get("evidence_meta_talk")
 
 
+def test_truncation_is_mid_word_not_missing_period() -> None:
+    from repo_wiki.verifier.handbook import handbook_page_is_truncated
+
+    cut = "# IDE配置\n\n准备本地工具链，避免编译通过但无法与 Control/Agen"
+    complete = "# 健康检查\n\n" + ("探针周期上报健康状态，控制面按心跳判断在线。" * 10)
+    assert handbook_page_is_truncated(cut) is True
+    assert handbook_page_is_truncated(complete) is False
+
+
 def test_hygiene_flags_missing_h1_and_tiny_body(tmp_path: Path) -> None:
     content = tmp_path / "zh" / "content"
     content.mkdir(parents=True)

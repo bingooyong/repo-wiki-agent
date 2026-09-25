@@ -114,7 +114,7 @@ def discover_cmd_processes(root: Path | str | None) -> list[RepoProcess]:
 
 
 def derive_repo_process_names(root: Path | str | None) -> set[str]:
-    """Names of binaries and first-party packages that exist in this repo."""
+    """Names of binaries, packages, and process-like tokens found in this repo."""
     names = {item.name for item in discover_cmd_processes(root)}
     if root is None:
         return names
@@ -127,6 +127,28 @@ def derive_repo_process_names(root: Path | str | None) -> set[str]:
         for child in path.iterdir():
             if child.is_dir() and child.name not in {"__pycache__", "tests", "test"}:
                 names.add(child.name)
+    for path in base.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {
+            ".go",
+            ".py",
+            ".md",
+            ".rst",
+            ".yml",
+            ".yaml",
+            ".toml",
+            ".sh",
+        }:
+            continue
+        rel = path.relative_to(base).as_posix()
+        if rel.startswith(".") or "/." in rel or ".repo-agent-eval" in rel.split("/"):
+            continue
+        if any(part in {"vendor", "node_modules", "__pycache__", ".git"} for part in path.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        names.update(_KEBAB_NAME_RE.findall(text))
     return names
 
 

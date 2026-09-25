@@ -1161,7 +1161,7 @@ def handbook_page_body_len(markdown: str) -> int:
 
 
 def handbook_page_is_truncated(markdown: str) -> bool:
-    """True when the last visible prose line stops mid-sentence."""
+    """True when the last visible prose line is cut mid-word."""
     visible: list[str] = []
     in_fence = False
     for raw in (markdown or "").splitlines():
@@ -1179,7 +1179,13 @@ def handbook_page_is_truncated(markdown: str) -> bool:
         return False
     if last[:2].isdigit() and "." in last[:4]:
         return False
-    return not last.endswith(("。", "！", "？", ".", "!", "?", ":", "：", "）", ")", "`", ">"))
+    if last.endswith(("。", "！", "？", ".", "!", "?", ":", "：", "）", ")", "`", ">", "；", ";")):
+        return False
+    token = re.search(r"([A-Za-z]+)$", last)
+    if token is None:
+        return False
+    fragment = token.group(1)
+    return len(fragment) <= 5 and bool(re.search(r"[/\-]", last[-12:]))
 
 
 def handbook_unknown_process_offenders(
