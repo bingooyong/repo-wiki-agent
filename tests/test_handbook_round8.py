@@ -158,7 +158,9 @@ def test_hygiene_flags_owner_block_copied_to_one_satellite(tmp_path: Path) -> No
     assert len(block) >= 80
     (content / "api.md").write_text(f"# API参考\n\n{block}\n", encoding="utf-8")
     (content / "auth-api.md").write_text(f"# 认证授权API\n\n{block}\n", encoding="utf-8")
-    (content / "install.md").write_text("# 安装指南\n\n独立安装说明，没有重复目录。\n", encoding="utf-8")
+    (content / "install.md").write_text(
+        "# 安装指南\n\n独立安装说明，没有重复目录。\n", encoding="utf-8"
+    )
     offenders = handbook_reader_hygiene_offenders(content, None)
     names = {Path(path).name for path in (offenders.get("repeated_paragraphs") or [])}
     assert names == {"api.md", "auth-api.md"}
