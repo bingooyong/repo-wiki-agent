@@ -2743,7 +2743,7 @@ class QoderLikeVerifierService(VerifierService):
             if target.exists() and target.is_dir():
                 return target
         inferred = self._infer_repo_root_from_eval_layout(self.root)
-        if inferred is not None:
+        if inferred is not None and self._looks_like_product_source_root(inferred):
             return inferred
         if payload:
             for key in ("eval_root", "candidate_repowiki_zh_root", "candidate_content_root"):
@@ -2751,9 +2751,9 @@ class QoderLikeVerifierService(VerifierService):
                 if not isinstance(raw, str) or not raw:
                     continue
                 inferred = self._infer_repo_root_from_eval_layout(Path(raw))
-                if inferred is not None:
+                if inferred is not None and self._looks_like_product_source_root(inferred):
                     return inferred
-        return self._handbook_repo_root()
+        return self.root
 
     @staticmethod
     def _infer_repo_root_from_eval_layout(path: Path) -> Path | None:
@@ -2772,6 +2772,18 @@ class QoderLikeVerifierService(VerifierService):
                 return root
             return None
         return None
+
+    @staticmethod
+    def _looks_like_product_source_root(root: Path) -> bool:
+        """True when the eval-layout parent is a real code repo, not an empty tmp root."""
+        if not root.exists() or not root.is_dir():
+            return False
+        markers = ("go.mod", "pyproject.toml", "package.json", "Cargo.toml", "pom.xml")
+        if any((root / name).is_file() for name in markers):
+            return True
+        from repo_wiki.verifier.source_evidence import count_product_source_files
+
+        return count_product_source_files(root) >= 1
 
     def _load_manifest_payload(self, root: Path) -> dict[str, Any] | None:
         candidates = [root / "manifest.json", root / "meta.json", root / "metadata.json"]

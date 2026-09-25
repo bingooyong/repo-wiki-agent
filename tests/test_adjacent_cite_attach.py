@@ -36,8 +36,15 @@ def test_attach_adjacent_cites_covers_uncovered_claim() -> None:
     assert "app/api/routes/authentication.py" in rewritten
 
 
-def test_page_contract_attaches_cites_beside_claims_not_only_footer() -> None:
-    service = RepoWikiService(RepoWikiConfig())
+def test_page_contract_attaches_cites_beside_claims_not_only_footer(tmp_path) -> None:
+    routes = tmp_path / "app" / "api" / "routes"
+    routes.mkdir(parents=True)
+    (routes / "articles.py").write_text(
+        "\n".join(f"line {i}" for i in range(1, 50)), encoding="utf-8"
+    )
+    cfg = RepoWikiConfig()
+    cfg.project.root = str(tmp_path)
+    service = RepoWikiService(cfg)
     page = WikiPagePlan(
         page_id="python-service-apis",
         title="Python服务API",

@@ -571,20 +571,20 @@ class RepositoryScanner:
                     line_number=item.lineno,
                 )
             )
-        for item in fastapi_endpoints:
-            method = _HTTP_METHOD_LITERALS.get(item.method.upper())
-            if method is None:
+        for fastapi_item in fastapi_endpoints:
+            fastapi_method = _HTTP_METHOD_LITERALS.get(fastapi_item.method.upper())
+            if fastapi_method is None:
                 continue
-            module_path = self._choose_module_path(Path(item.file_path))
+            module_path = self._choose_module_path(Path(fastapi_item.file_path))
             module_name = modules[module_path].name if module_path in modules else module_path
             endpoints.append(
                 Endpoint(
-                    method=method,
-                    path=item.path,
+                    method=fastapi_method,
+                    path=fastapi_item.path,
                     module=module_name,
-                    handler=item.handler,
-                    file_path=item.file_path,
-                    line_number=item.lineno,
+                    handler=fastapi_item.handler,
+                    file_path=fastapi_item.file_path,
+                    line_number=fastapi_item.lineno,
                 )
             )
 
