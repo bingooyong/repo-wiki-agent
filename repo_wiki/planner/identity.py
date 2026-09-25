@@ -136,11 +136,22 @@ def _is_product_sentence(text: str | None) -> bool:
     stripped = text.strip()
     if not stripped:
         return False
+    if stripped.casefold() in _GENERIC_README_TITLES:
+        return False
+    if _README_COMMAND_RE.match(stripped):
+        return False
     if ":target:" in stripped or ":alt:" in stripped:
         return False
     if _is_markdown_badge_line(stripped):
         return False
     if _RST_FIELD_LIST_RE.match(stripped) or _RST_SUBSTITUTION_LINE_RE.fullmatch(stripped):
+        return False
+    if re.search(
+        r"more modern|other repositories|not actively maintained|can be found in"
+        r"|^(?:first,|then |run |set environment|create database|for example using)",
+        stripped,
+        flags=re.I,
+    ):
         return False
     return True
 
@@ -205,11 +216,16 @@ def _readme_visible_lines(content: str) -> list[str]:
     text = _HTML_H1_RE.sub(lambda match: "# " + match.group(1), text)
     text = _HTML_TAG_RE.sub(" ", text)
     lines: list[str] = []
+    in_note_block = False
     for raw in text.splitlines():
         stripped = " ".join(raw.split()).strip()
         if not stripped or re.fullmatch(r"#+", stripped):
+            in_note_block = False
             continue
         if _NOTE_LINE_RE.match(stripped) or _README_NOTE_RE.search(stripped):
+            in_note_block = True
+            continue
+        if in_note_block:
             continue
         if _ARCHIVED_LINE_RE.search(stripped) or _CHANGELOG_BULLET_RE.match(stripped):
             continue
@@ -235,11 +251,15 @@ def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
     for line in lines:
         heading = line.lstrip("#").strip() if line.startswith("#") else ""
         if heading:
+            if heading.casefold() in _GENERIC_README_TITLES:
+                break
             if _is_rst_noise_line(heading) or not _looks_like_heading(heading):
                 continue
             if title is None:
                 title = heading
             continue
+        if line.casefold() in _GENERIC_README_TITLES:
+            break
         if _looks_like_heading(line) and title is None:
             title = line
             continue

@@ -194,6 +194,37 @@ Widget Server stores lab samples for one team.
     assert "lab samples" in (identity.description or "")
 
 
+def test_identity_skips_rst_note_and_quickstart_for_pyproject(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "README.rst",
+        """
+.. image:: https://example/badge.svg
+
+**NOTE**: This repository is not actively maintained because this example
+is quite complete and does its primary goal - passing Conduit testsuite.
+
+More modern and relevant examples can be found in other repositories.
+
+Quickstart
+----------
+
+poetry install
+""",
+    )
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+[tool.poetry]
+name = "fastapi-realworld-example-app"
+description = "Backend logic implementation for https://github.com/gothinkster/realworld with awesome FastAPI"
+""",
+    )
+    identity = resolve_repository_identity(tmp_path)
+    assert "NOTE" not in (identity.description or "")
+    assert "Quickstart" not in (identity.description or "")
+    assert "gothinkster/realworld" in (identity.description or "")
+
+
 def test_identity_master_version_beats_old_tag_and_ignores_toolchain(tmp_path: Path) -> None:
     _write(
         tmp_path / "README.md",
