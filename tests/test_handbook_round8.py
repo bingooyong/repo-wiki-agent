@@ -127,13 +127,22 @@ def _go_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_25h_hygiene_catches_repeated_deterministic_blocks() -> None:
-    if not _PROBE_25H.is_dir():
-        content = _FIXTURES / "probe-25h"
-    else:
-        content = _PROBE_25H
+def test_25h_hygiene_catches_repeated_deterministic_blocks(tmp_path: Path) -> None:
+    """Same 进程角色 dump on ≥4 pages trips the hygiene gate (25h CI-repro)."""
+    block = (
+        "## 进程角色\n\n"
+        "ccagent 是主 REST/Web 服务；probe-agent 是隧道客户端；"
+        "ccprobe-control 是 gRPC 控制面服务。这是 25h 插到全部架构页上的"
+        "同一段确定性正文，长度必须超过卫生检查的 80 字门槛。\n"
+    )
+    content = tmp_path / "content"
+    content.mkdir()
+    for name in ("overview.md", "components.md", "modules.md", "events.md"):
+        (content / name).write_text(f"# {name}\n\n{block}\n", encoding="utf-8")
     offenders = handbook_reader_hygiene_offenders(content, None)
     assert offenders.get("repeated_paragraphs")
+    fixture_hits = handbook_reader_hygiene_offenders(_FIXTURES / "probe-25h", None)
+    assert fixture_hits.get("meta_instructions")
 
 
 def test_25h_dry_verify_catches_invented_compose_and_placeholder() -> None:
