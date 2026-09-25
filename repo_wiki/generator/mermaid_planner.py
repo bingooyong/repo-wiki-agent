@@ -1101,7 +1101,7 @@ class MermaidPlanner:
                 diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
                 if diagram:
                     diagrams.append(diagram)
-            if is_join_er_owner_page(page_id=pid, title=""):
+            if (not schema_page) and is_join_er_owner_page(page_id=pid, title=""):
                 keys = self._plan_join_key_diagram(page_id, evidence_binding, context)
                 if keys:
                     diagrams.append(keys)
@@ -2006,20 +2006,22 @@ class MermaidPlanner:
             description="POST/DELETE favorite and follow hit distinct handlers",
             sequence_participants=[
                 "Client",
-                "articles_common",
-                "profiles",
+                "mark_article_as_favorite",
+                "remove_article_from_favorites",
+                "follow_for_user",
+                "unsubscribe_from_user",
                 "ArticlesRepository",
                 "ProfilesRepository",
             ],
             sequence_messages=[
-                ("Client", "articles_common", "POST /api/articles/{slug}/favorite"),
-                ("articles_common", "ArticlesRepository", "add_article_into_favorites"),
-                ("Client", "articles_common", "DELETE /api/articles/{slug}/favorite"),
-                ("articles_common", "ArticlesRepository", "remove_article_from_favorites"),
-                ("Client", "profiles", "POST /api/profiles/{username}/follow"),
-                ("profiles", "ProfilesRepository", "add_user_into_followers"),
-                ("Client", "profiles", "DELETE /api/profiles/{username}/follow"),
-                ("profiles", "ProfilesRepository", "remove_user_from_followers"),
+                ("Client", "mark_article_as_favorite", "POST /api/articles/{slug}/favorite"),
+                ("mark_article_as_favorite", "ArticlesRepository", "add_article_into_favorites"),
+                ("Client", "remove_article_from_favorites", "DELETE /api/articles/{slug}/favorite"),
+                ("remove_article_from_favorites", "ArticlesRepository", "remove_article_from_favorites"),
+                ("Client", "follow_for_user", "POST /api/profiles/{username}/follow"),
+                ("follow_for_user", "ProfilesRepository", "add_user_into_followers"),
+                ("Client", "unsubscribe_from_user", "DELETE /api/profiles/{username}/follow"),
+                ("unsubscribe_from_user", "ProfilesRepository", "remove_user_from_followers"),
             ],
             evidence_spans=[c.span for c in evidence_binding.candidates]
             if evidence_binding

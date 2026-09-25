@@ -170,6 +170,10 @@ def test_python_api_page_gets_favorite_follow_sequence(tmp_path: Path) -> None:
     rendered, ok, _ = MermaidRenderer().render_diagram_with_validation(plan)
     assert ok
     assert "remove_article_from_favorites" in rendered
+    assert "mark_article_as_favorite" in rendered
+    assert "follow_for_user" in rendered
+    assert "unsubscribe_from_user" in rendered
+    assert "articles_common" not in rendered
     assert "DELETE /api/articles/{slug}/favorite" in rendered
     page = _page(
         "python-service-api",
@@ -377,7 +381,21 @@ def test_database_schema_er_includes_author_id_and_differs(tmp_path: Path) -> No
     assert ok1 and ok2
     assert "author_id" in schema_txt
     assert "users" in schema_txt and "articles" in schema_txt
+    assert "favorites" not in schema_txt
+    assert "followers_to_followings" not in schema_txt
     assert normalize_mermaid_block(data_txt) != normalize_mermaid_block(schema_txt)
+    planned = planner.plan_diagram_for_page(
+        "database-architecture",
+        "data",
+        None,
+        {"data_models": models},
+    )
+    planned_txt = "\n".join(
+        MermaidRenderer().render_diagram_with_validation(item)[0] or "" for item in planned
+    )
+    assert "author_id" in planned_txt
+    assert "favorites" not in planned_txt
+    assert "followers_to_followings" not in planned_txt
 
 
 @pytest.mark.asyncio
