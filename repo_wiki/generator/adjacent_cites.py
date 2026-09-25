@@ -50,13 +50,9 @@ _GENERIC_IDENTIFIERS = frozenset(
         "none",
     }
 )
-_FILE_LINE_RE = re.compile(
-    r"^((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+):(\d+)(?:-(\d+))?$"
-)
+_FILE_LINE_RE = re.compile(r"^((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+):(\d+)(?:-(\d+))?$")
 _MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\n]+)\)")
-_PRODUCT_IDENTITY_RE = re.compile(
-    r"产品身份|不再积极维护|Conduit|RealWorld|fastapi-realworld"
-)
+_PRODUCT_IDENTITY_RE = re.compile(r"产品身份|不再积极维护|Conduit|RealWorld|fastapi-realworld")
 _SEVEN_TABLES_RE = re.compile(r"7\s*张业务表")
 
 
