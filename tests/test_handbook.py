@@ -21,6 +21,7 @@ HANDBOOK_HARD_CODES = (
     "QODER_HANDBOOK_INSTALL_RUN",
     "QODER_HANDBOOK_INSTALL_FENCE",
     "QODER_HANDBOOK_API_ROUTE_FILE",
+    "QODER_SOURCE_EVIDENCE_LOW",
 )
 
 
@@ -61,6 +62,7 @@ def test_handbook_hard_codes_are_registered_strict(tmp_path: Path) -> None:
     assert "qoder-handbook-install-run" in names
     assert "qoder-handbook-install-fence" in names
     assert "qoder-handbook-api-route-file" in names
+    assert "qoder-source-evidence" in names
 
 
 def test_coverage_and_degraded_remain_hard() -> None:

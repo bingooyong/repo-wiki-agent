@@ -338,7 +338,7 @@ def _score_onboarding_evidence(
     API pages must not receive a global README boost.
     """
     path = _normalized_span_path(span)
-    name = Path(path).name
+    name = Path(path).name.lower()
     symbol = str(getattr(span, "symbol", "") or "").lower()
     text = str(getattr(span, "span_text", "") or "").lower()
     score = 0.0
@@ -348,16 +348,30 @@ def _score_onboarding_evidence(
         if "api/routes" in path:
             score += WEIGHT_API_ROUTES_FILE
             signals.append("api_routes_file")
+        if path.endswith(".go") and not name.endswith("_test.go"):
+            score += WEIGHT_API_ROUTES_FILE
+            signals.append("go_api_source")
         return score, signals
 
     if _is_overview_or_install_page(page):
-        if name.startswith("readme"):
+        if name == "readme.md":
+            score += WEIGHT_ONBOARDING_README + 1.5
+            signals.append("onboarding_primary_readme")
+        elif name.startswith("readme") and not any(
+            marker in name for marker in ("scaffold", "template", "boilerplate")
+        ):
             score += WEIGHT_ONBOARDING_README
             signals.append("onboarding_readme")
+        elif name.startswith("readme"):
+            score -= 1.5
+            signals.append("onboarding_secondary_readme")
+        if name in {"makefile", "quickstart.md", "go.mod"}:
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("onboarding_build_clue")
         if "settings" in path or "database_url" in symbol or "database_url" in text:
             score += WEIGHT_ONBOARDING_SETTINGS
             signals.append("onboarding_settings")
-        if name == "main.py":
+        if name in {"main.py", "main.go"}:
             score += WEIGHT_ONBOARDING_ENTRY
             signals.append("onboarding_entry")
     elif _is_ops_config_page(page) or _is_database_troubleshooting_page(page):
@@ -375,6 +389,11 @@ def _score_onboarding_evidence(
         if "/models/" in path or name in {"models.py", "model.py"}:
             score += WEIGHT_ONBOARDING_SETTINGS
             signals.append("data_model_file")
+        if path.endswith(".go") and (
+            "gorm:" in text or "tablename" in symbol or "/models/" in path
+        ):
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("go_gorm_model")
     elif _is_security_onboarding_page(page):
         if "authentication.py" in path or path.endswith("/authentication.py"):
             score += WEIGHT_SECURITY_AUTH_FILE

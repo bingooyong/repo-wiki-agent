@@ -1,0 +1,306 @@
+"""Extract Go HTTP routes (gin + RegisterService reflection) and GORM models."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+from repo_wiki.scanner.fastapi_routes import join_http_paths
+
+_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ANY"})
+_GIN_METHOD_NAMES = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "Any"})
+_REGISTER_SERVICE_RE = re.compile(
+    r'(?:^|[^\w.])(?:\w+\.)?RegisterService\(\s*"([^"]+)"\s*,\s*(?:&)?(\w+)\s*[\({]',
+    re.MULTILINE,
+)
+_REGISTER_RAW_ROUTE_RE = re.compile(
+    r'(?:^|[^\w.])(?:\w+\.)?RegisterRawRoute\(\s*([^,]+?)\s*,\s*"([^"]+)"',
+    re.MULTILINE,
+)
+_HTTP_METHOD_CONST_RE = re.compile(r"http\.Method(Get|Post|Put|Patch|Delete|Options|Head)")
+_SERVE_METHOD_RE = re.compile(
+    r"func\s+\(\s*\w+\s+\*?(\w+)\s*\)\s+(Serve[A-Z]\w*)\s*\(\s*\w+\s+\*?(\w+)\s*\)",
+    re.MULTILINE,
+)
+_TYPE_STRUCT_RE = re.compile(
+    r"type\s+(\w+)\s+struct\s*\{",
+    re.MULTILINE,
+)
+_PATH_TAG_RE = re.compile(r'`[^`]*\bpath:"([^"]+)"[^`]*`')
+_GIN_ROUTE_RE = re.compile(
+    r"""\b([A-Za-z_]\w*)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|Any|Handle)\(\s*"""
+    r"""(?:((?:http\.Method\w+)|(?:"[A-Z]+"))\s*,\s*)?["']([^"']+)["']""",
+)
+_HANDLE_FUNC_RE = re.compile(r"""http\.HandleFunc\(\s*["']([^"']+)["']\s*,\s*([A-Za-z_]\w*)""")
+_GORM_TAG_RE = re.compile(r"`[^`]*\bgorm:")
+_DB_TAG_RE = re.compile(r"`[^`]*\bdb:")
+_GORM_MODEL_EMBED_RE = re.compile(r"\bgorm\.Model\b")
+_TABLE_NAME_RE = re.compile(
+    r"func\s+\(\s*(?:\w+\s+)?\*?(\w+)\s*\)\s+TableName\s*\(\s*\)\s+string",
+    re.MULTILINE,
+)
+_NEW_CTOR_RE = re.compile(r"^New(.+)$")
+_SKIP_DIR_PARTS = frozenset({"testdata", "tests", "vendor", "node_modules"})
+
+
+@dataclass(frozen=True)
+class GoEndpoint:
+    method: str
+    path: str
+    handler: str
+    file_path: str
+    lineno: int
+    kind: str = "go_http"
+
+
+@dataclass(frozen=True)
+class GoDataModel:
+    name: str
+    file_path: str
+    lineno: int
+    kind: str = "go_gorm"
+    table_name: str | None = None
+
+
+def is_go_test_path(path: str) -> bool:
+    """True for ``*_test.go``, testdata/, or a tests/ tree — not product routes."""
+    if not path:
+        return False
+    rel = path.replace("\\", "/")
+    name = Path(rel).name.lower()
+    if name.endswith("_test.go"):
+        return True
+    parts = [part.lower() for part in Path(rel).parts]
+    return any(part in _SKIP_DIR_PARTS for part in parts)
+
+
+def http_method_from_request_type(type_name: str) -> str:
+    """Mirror ccagent ``parseMethod``: suffix GET/POST/PUT/DELETE else ANY."""
+    name = type_name.strip()
+    if not name:
+        return "ANY"
+    upper = name.upper()
+    if upper.endswith("REQUEST"):
+        upper = upper[: -len("REQUEST")]
+    elif upper.endswith("REQ"):
+        upper = upper[: -len("REQ")]
+    for suffix, method in (
+        ("DELETE", "DELETE"),
+        ("PATCH", "PATCH"),
+        ("POST", "POST"),
+        ("PUT", "PUT"),
+        ("GET", "GET"),
+    ):
+        if upper.endswith(suffix):
+            return method
+    return "ANY"
+
+
+def _ctor_type_name(expr: str) -> str:
+    match = _NEW_CTOR_RE.match(expr)
+    if match:
+        return match.group(1)
+    return expr
+
+
+def _struct_body_at(text: str, brace_index: int) -> str:
+    if brace_index < 0 or brace_index >= len(text) or text[brace_index] != "{":
+        return ""
+    depth = 0
+    for i in range(brace_index, len(text)):
+        char = text[i]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[brace_index + 1 : i]
+    return ""
+
+
+def _iter_struct_defs(text: str) -> list[tuple[str, str, int]]:
+    found: list[tuple[str, str, int]] = []
+    for match in _TYPE_STRUCT_RE.finditer(text):
+        brace = text.find("{", match.end() - 1)
+        body = _struct_body_at(text, brace)
+        lineno = text[: match.start()].count("\n") + 1
+        found.append((match.group(1), body, lineno))
+    return found
+
+
+def _path_params_from_struct(body: str) -> tuple[list[str], str | None]:
+    params: list[str] = []
+    star: str | None = None
+    for raw in _PATH_TAG_RE.findall(body):
+        tag = raw.strip()
+        if not tag:
+            continue
+        if tag.startswith("*"):
+            star = tag[1:] or star
+            continue
+        params.append(tag.lstrip(":"))
+    return params, star
+
+
+def _base_path_param_names(path: str) -> set[str]:
+    names: set[str] = set()
+    for segment in path.split("/"):
+        if len(segment) < 2 or segment[0] not in {":", "*"}:
+            continue
+        names.add(segment.lstrip(":*"))
+    return names
+
+
+def _join_reflected_path(base: str, method_name: str, req_body: str) -> str:
+    leaf = method_name[5:].lower() if method_name.startswith("Serve") else method_name.lower()
+    path = join_http_paths(base, leaf)
+    present = _base_path_param_names(base)
+    params, star = _path_params_from_struct(req_body)
+    extras = [name for name in params if name and name not in present]
+    if extras:
+        path = join_http_paths(path, *(":" + name for name in extras))
+    if star and star not in present:
+        path = f"{path.rstrip('/')}/*{star}"
+    return path
+
+
+def _resolve_http_method_expr(expr: str | None) -> str:
+    if not expr:
+        return "GET"
+    const = _HTTP_METHOD_CONST_RE.fullmatch(expr.strip())
+    if const:
+        return const.group(1).upper()
+    stripped = expr.strip().strip('"').strip("'")
+    upper = stripped.upper()
+    if upper in _HTTP_METHODS:
+        return upper
+    return "GET"
+
+
+def extract_go_endpoints(files: Sequence[tuple[str, str]]) -> list[GoEndpoint]:
+    """Return product Go HTTP routes, excluding ``*_test.go`` registrations.
+
+    Covers gin ``GET``/``Handle``, ``http.HandleFunc``, ``RegisterRawRoute``,
+    and the ccagent ``RegisterService(base, svc)`` + ``Serve*`` reflection
+    convention (``base/<method lower>`` plus ``path`` struct tags).
+    """
+    product_files = [(path, text) for path, text in files if not is_go_test_path(path)]
+    structs: dict[str, tuple[str, str, int]] = {}
+    methods_by_recv: dict[str, list[tuple[str, str, str, int]]] = {}
+    endpoints: list[GoEndpoint] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def _add(method: str, path: str, handler: str, file_path: str, lineno: int, kind: str) -> None:
+        method_u = method.upper()
+        if method_u not in _HTTP_METHODS:
+            method_u = "ANY"
+        path_n = path if path.startswith("/") else "/" + path
+        key = (method_u, path_n, file_path)
+        if key in seen:
+            return
+        seen.add(key)
+        endpoints.append(
+            GoEndpoint(
+                method=method_u,
+                path=path_n,
+                handler=handler,
+                file_path=file_path,
+                lineno=lineno,
+                kind=kind,
+            )
+        )
+
+    for path, text in product_files:
+        for name, body, lineno in _iter_struct_defs(text):
+            structs[name] = (body, path, lineno)
+        for match in _SERVE_METHOD_RE.finditer(text):
+            recv, method_name, req_type = match.group(1), match.group(2), match.group(3)
+            lineno = text[: match.start()].count("\n") + 1
+            methods_by_recv.setdefault(recv, []).append((method_name, req_type, path, lineno))
+
+        for match in _HANDLE_FUNC_RE.finditer(text):
+            lineno = text[: match.start()].count("\n") + 1
+            _add("GET", match.group(1), match.group(2), path, lineno, "go_nethttp")
+
+        for match in _GIN_ROUTE_RE.finditer(text):
+            call = match.group(2)
+            method_expr = match.group(3)
+            route_path = match.group(4)
+            lineno = text[: match.start()].count("\n") + 1
+            if call == "Handle":
+                method = _resolve_http_method_expr(method_expr)
+            elif call == "Any":
+                method = "ANY"
+            else:
+                method = call.upper()
+            handler = f"{match.group(1)}.{call}"
+            _add(method, route_path, handler, path, lineno, "go_gin")
+
+        for match in _REGISTER_RAW_ROUTE_RE.finditer(text):
+            method = _resolve_http_method_expr(match.group(1).strip())
+            route_path = match.group(2)
+            lineno = text[: match.start()].count("\n") + 1
+            _add(method, route_path, "RegisterRawRoute", path, lineno, "go_raw_route")
+
+    for path, text in product_files:
+        for match in _REGISTER_SERVICE_RE.finditer(text):
+            base = match.group(1)
+            ctor = match.group(2)
+            recv = _ctor_type_name(ctor)
+            lineno = text[: match.start()].count("\n") + 1
+            for method_name, req_type, method_file, method_lineno in methods_by_recv.get(recv, []):
+                req_body = structs.get(req_type, ("", "", 0))[0]
+                route = _join_reflected_path(base, method_name, req_body)
+                method = http_method_from_request_type(req_type)
+                _add(
+                    method,
+                    route,
+                    f"{recv}.{method_name}",
+                    method_file,
+                    method_lineno or lineno,
+                    "go_register_service",
+                )
+
+    return endpoints
+
+
+def extract_go_data_models(files: Sequence[tuple[str, str]]) -> list[GoDataModel]:
+    """Return GORM / ``db:`` tagged structs. Skip test files and untagged DTOs."""
+    table_names: dict[str, str] = {}
+    models: list[GoDataModel] = []
+    seen: set[tuple[str, str]] = set()
+    for path, text in files:
+        if is_go_test_path(path):
+            continue
+        for match in _TABLE_NAME_RE.finditer(text):
+            recv = match.group(1)
+            after = text[match.end() :]
+            table_match = re.search(r'return\s+"([^"]+)"', after[:400])
+            if table_match:
+                table_names[recv] = table_match.group(1)
+        for name, body, lineno in _iter_struct_defs(text):
+            if not (
+                _GORM_TAG_RE.search(body)
+                or _DB_TAG_RE.search(body)
+                or _GORM_MODEL_EMBED_RE.search(body)
+                or name in table_names
+            ):
+                continue
+            key = (name, path)
+            if key in seen:
+                continue
+            seen.add(key)
+            models.append(
+                GoDataModel(
+                    name=name,
+                    file_path=path,
+                    lineno=lineno,
+                    kind="go_gorm"
+                    if (_GORM_TAG_RE.search(body) or name in table_names)
+                    else "go_struct_db",
+                    table_name=table_names.get(name),
+                )
+            )
+    return models

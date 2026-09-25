@@ -29,6 +29,11 @@ from repo_wiki.core.security import (
 )
 from repo_wiki.scanner.artifacts import is_product_source_path, path_role_for
 from repo_wiki.scanner.fastapi_routes import extract_fastapi_endpoints
+from repo_wiki.scanner.go_routes import (
+    extract_go_data_models,
+    extract_go_endpoints,
+    is_go_test_path,
+)
 
 _CODE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".kt"}
 _MODEL_FILE_HINTS = ("model", "schema", "entity", "dto", "migration", "alembic")
@@ -53,9 +58,11 @@ _DOMAIN_SIGNALS: dict[str, tuple[frozenset[str], float]] = {
         frozenset({"repo_wiki", "core", "shared", "common", "base", "foundation"}),
         0.8,
     ),
-    # AI/ML services
+    # AI/ML services. "model"/"graph" are too broad (GORM packages, any graph) so omitted.
     "ai-services": (
-        frozenset({"ai", "ml", "model", "embedding", "vector", "indexer", "retrieval", "graph"}),
+        frozenset(
+            {"ai", "ml", "embedding", "vector", "indexer", "retrieval", "langchain", "llm", "rag"}
+        ),
         0.9,
     ),
     # API and HTTP handling
@@ -113,6 +120,17 @@ _RUNTIME_ROLE_SIGNALS: dict[str, tuple[frozenset[str], float]] = {
     "tooling": (frozenset({"script", "cli", "cmd", "bin", "main"}), 0.8),
     "test-harness": (frozenset({"test", "spec", "fixture", "mock", "assert"}), 0.8),
 }
+
+
+def _keyword_in_signals(keyword: str, signals: str) -> bool:
+    """Match long tokens as substrings; short tokens like ``ai`` as whole words."""
+    key = keyword.lower()
+    blob = signals.lower()
+    if not key:
+        return False
+    if len(key) <= 3:
+        return re.search(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", blob) is not None
+    return key in blob
 
 
 @dataclass
@@ -249,6 +267,9 @@ class RepositoryScanner:
             ".qoder",
             ".repo-agent-eval",
             ".repo-wiki",
+            ".trellis",
+            ".trae",
+            ".cursor",
             ".git",
             "node_modules",
             "target",
@@ -526,6 +547,30 @@ class RepositoryScanner:
         ]
         fastapi_endpoints = extract_fastapi_endpoints(python_files)
         fastapi_files = {item.file_path for item in fastapi_endpoints}
+        go_files = [
+            (file.path.as_posix(), file.text) for file in files if file.path.suffix.lower() == ".go"
+        ]
+        go_endpoints = extract_go_endpoints(go_files)
+        go_files_with_routes = {item.file_path for item in go_endpoints}
+        for item in go_endpoints:
+            method = item.method.upper()
+            if method == "ANY":
+                method = "GET"
+            method_lit = _HTTP_METHOD_LITERALS.get(method)
+            if method_lit is None:
+                continue
+            module_path = self._choose_module_path(Path(item.file_path))
+            module_name = modules[module_path].name if module_path in modules else module_path
+            endpoints.append(
+                Endpoint(
+                    method=method_lit,
+                    path=item.path,
+                    module=module_name,
+                    handler=item.handler,
+                    file_path=item.file_path,
+                    line_number=item.lineno,
+                )
+            )
         for item in fastapi_endpoints:
             method = _HTTP_METHOD_LITERALS.get(item.method.upper())
             if method is None:
@@ -548,6 +593,11 @@ class RepositoryScanner:
             if suffix not in _CODE_SUFFIXES:
                 continue
             if not is_product_source_path(file.path.as_posix()):
+                continue
+            if suffix == ".go" and (
+                is_go_test_path(file.path.as_posix())
+                or file.path.as_posix() in go_files_with_routes
+            ):
                 continue
             module_path = self._choose_module_path(file.path)
             module_name = modules[module_path].name
@@ -723,15 +773,30 @@ class RepositoryScanner:
                             )
                         )
             elif suffix == ".go":
-                for name in re.findall(
-                    r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b", file.text, re.MULTILINE
-                ):
-                    if any(h in lower_path for h in _MODEL_FILE_HINTS):
-                        models.append(
-                            DataModel(
-                                name=name, type="go_struct", module=module_name, file_path=path_str
-                            )
+                for item in extract_go_data_models([(path_str, file.text)]):
+                    models.append(
+                        DataModel(
+                            name=item.name,
+                            type=item.kind,
+                            module=module_name,
+                            file_path=path_str,
                         )
+                    )
+                if not any(model.file_path == path_str for model in models):
+                    for name in re.findall(
+                        r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b",
+                        file.text,
+                        re.MULTILINE,
+                    ):
+                        if any(h in lower_path for h in _MODEL_FILE_HINTS):
+                            models.append(
+                                DataModel(
+                                    name=name,
+                                    type="go_struct",
+                                    module=module_name,
+                                    file_path=path_str,
+                                )
+                            )
             elif suffix in {".java", ".kt"}:
                 for name in re.findall(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)", file.text):
                     if any(h in lower_path for h in _MODEL_FILE_HINTS) or name.lower().endswith(
@@ -969,13 +1034,13 @@ class RepositoryScanner:
         best_reason = "No signals found, using fallback."
 
         for classification, (keywords, base_confidence) in classification_map.items():
-            score = sum(1 for keyword in keywords if keyword.lower() in signals.lower())
+            matched_keywords = [k for k in keywords if _keyword_in_signals(k, signals)]
+            score = len(matched_keywords)
             if score > 0:
                 adjusted_score = min(score * base_confidence, 1.0)
                 if adjusted_score > best_score:
                     best_score = adjusted_score
                     best_match = classification
-                    matched_keywords = [k for k in keywords if k.lower() in signals.lower()]
                     best_reason = f"Matched {len(matched_keywords)} keywords ({', '.join(matched_keywords[:3])}) with confidence {adjusted_score:.2f}"
 
         if best_score == 0.0:

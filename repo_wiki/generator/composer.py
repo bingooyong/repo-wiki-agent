@@ -107,6 +107,28 @@ _HANDBOOK_INSTALL_TAGS = frozenset(
     }
 )
 _HANDBOOK_OVERVIEW_TITLES = frozenset({"项目概述", "项目概览", "project overview"})
+_SHIELD_LINE_RE = re.compile(
+    r"^\[!\[.*?\]\(https?://img\.shields\.io/[^)]+\)\]\([^)]*\)\s*$",
+    re.IGNORECASE,
+)
+_TEST_COUNT_FILLER_RE = re.compile(r"tests?\s+\d+\s*/\s*\d+\s+passing", re.IGNORECASE)
+
+
+def _strip_handbook_filler(markdown: str) -> str:
+    """Drop raw shields.io badges and repeated test-count filler from LLM pages."""
+    kept: list[str] = []
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if _SHIELD_LINE_RE.fullmatch(stripped):
+            continue
+        if "img.shields.io" in stripped.lower() and stripped.startswith("!"):
+            continue
+        if _TEST_COUNT_FILLER_RE.fullmatch(stripped):
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
 _HANDBOOK_INSTALL_HEADINGS = (
     "## 这是什么",
     "## 环境要求",
@@ -1147,6 +1169,7 @@ class LLMPageComposer:
             return ""
         if not stripped.startswith("#"):
             stripped = f"# {title}\n\n{stripped}"
+        stripped = _strip_handbook_filler(stripped)
         return normalize_citation_markup(stripped, self.workspace_root)
 
     @property

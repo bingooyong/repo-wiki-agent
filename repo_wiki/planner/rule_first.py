@@ -56,10 +56,14 @@ _FILENAME_MODULE_LEAVES = frozenset(
         "__init__.py",
         "init",
         "init.py",
+        "init.go",
         "main",
         "main.py",
+        "main.go",
+        "doc.go",
     }
 )
+_SOURCE_FILENAME_SUFFIXES = (".py", ".pyc", ".go")
 _GENERIC_PACKAGE_LEAVES = frozenset(
     {
         "app",
@@ -122,7 +126,9 @@ def _module_leaf_name(name: str) -> str:
 def _is_filename_like_module_name(name: str) -> bool:
     leaf = _module_leaf_name(name).lower()
     collapsed = re.sub(r"\s+", "", leaf)
-    if collapsed.endswith(".py") or collapsed.endswith(".pyc") or ".py" in collapsed:
+    if any(
+        collapsed.endswith(suffix) or suffix in collapsed for suffix in _SOURCE_FILENAME_SUFFIXES
+    ):
         return True
     stem = Path(leaf).stem.lower().strip("._")
     return leaf in _FILENAME_MODULE_LEAVES or stem in {"init", "main"}
@@ -523,6 +529,32 @@ class RuleFirstPlanner:
     def _product_modules(self) -> list[Module]:
         return [module for module in self.snapshot.modules if self._is_product_module(module)]
 
+    def _repo_has_kubernetes(self) -> bool:
+        """True only when the repo actually contains Kubernetes/Helm assets."""
+        needles = ("k8s", "kubernetes", "helm", "kustomization")
+        for module in self._product_modules():
+            blob = f"{module.name} {module.path}".lower()
+            if any(token in blob for token in needles):
+                return True
+        for directory in getattr(self.snapshot.repository, "key_directories", None) or []:
+            if any(token in str(directory).lower() for token in needles):
+                return True
+        root = Path(self.identity.root_path)
+        if not root.is_dir():
+            return False
+        for name in ("Chart.yaml", "kustomization.yaml", "kustomization.yml"):
+            if (root / name).is_file():
+                return True
+        for folder in ("k8s", "kubernetes", "helm", "charts"):
+            if (root / folder).is_dir():
+                return True
+        return False
+
+    def _repo_is_python_primary(self) -> bool:
+        language = (self.snapshot.repository.language or self.identity.language or "").lower()
+        framework = (self.snapshot.repository.framework or self.identity.framework or "").lower()
+        return language == "python" or framework in {"fastapi", "flask"}
+
     def _has_surface_token(self, *tokens: str) -> bool:
         needles = tuple(token.lower() for token in tokens if token)
         if not needles:
@@ -650,10 +682,13 @@ class RuleFirstPlanner:
             (
                 "python-service-apis",
                 "Python服务API",
-                lambda module_name, endpoints: any(
-                    "python" in getattr(e, "service_family", "")
-                    or self._module_runtime(module_name) in {"python", "fastapi"}
-                    for e in endpoints
+                lambda module_name, endpoints: (
+                    self._repo_is_python_primary()
+                    and any(
+                        "python" in getattr(e, "service_family", "")
+                        or self._module_runtime(module_name) in {"python", "fastapi"}
+                        for e in endpoints
+                    )
                 ),
             ),
             (
@@ -988,17 +1023,17 @@ class RuleFirstPlanner:
             tags=["docker", "containers"],
         )
 
-        # Kubernetes deployment
-        self._add_page(
-            page_id=self._make_page_id(
-                "kubernetes-deployment", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS
-            ),
-            title="Kubernetes部署",
-            category=WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
-            parent="deployment-overview",
-            sort_order=6,
-            tags=["kubernetes", "k8s"],
-        )
+        if self._repo_has_kubernetes():
+            self._add_page(
+                page_id=self._make_page_id(
+                    "kubernetes-deployment", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS
+                ),
+                title="Kubernetes部署",
+                category=WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
+                parent="deployment-overview",
+                sort_order=6,
+                tags=["kubernetes", "k8s"],
+            )
 
         # CI/CD pipeline
         self._add_page(

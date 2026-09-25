@@ -122,9 +122,32 @@ def sanitize_citation_payloads(raw: str, workspace_root: str | Path | None = Non
     valid: list[str] = []
     for part in parts:
         coerced = _coerce_path_line_cite(part, workspace_root)
-        if coerced:
+        if coerced and _citation_file_exists(coerced, workspace_root):
             valid.append(coerced)
     return valid
+
+
+def _citation_file_exists(value: str, workspace_root: str | Path | None) -> bool:
+    """Drop cites whose repository file is missing. Keep them when root is unknown."""
+    if workspace_root is None:
+        return True
+    root = Path(workspace_root)
+    if not root.exists():
+        return True
+    body = value
+    if body.lower().startswith("source:"):
+        body = body[len("source:") :].lstrip()
+    match = _VALID_CITE_BODY_RE.fullmatch(body)
+    if not match:
+        return False
+    path_text = match.group("path").strip().replace("\\", "/")
+    if not path_text:
+        return False
+    target = root / path_text
+    try:
+        return target.is_file()
+    except OSError:
+        return False
 
 
 def is_placeholder_citation_ref(raw: str) -> bool:

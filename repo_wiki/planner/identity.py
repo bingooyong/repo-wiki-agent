@@ -28,6 +28,14 @@ _README_CANDIDATE_NAMES = (
     "README_en.md",
 )
 _GENERIC_README_TITLES = frozenset({"readme", "overview", "index", "documentation", "docs"})
+_SECONDARY_README_MARKERS = (
+    "scaffold",
+    "template",
+    "boilerplate",
+    "podman",
+    "docker",
+    "contrib",
+)
 _RST_DECORATION_RE = re.compile(r"^[=\-`:.'\"~^_*+#]{3,}$")
 _RST_FIELD_LIST_RE = re.compile(r"^:[a-zA-Z][-a-zA-Z0-9_]*:")
 _RST_SUBSTITUTION_LINE_RE = re.compile(r"^(\|[^|]+\|\s*)+$")
@@ -43,8 +51,12 @@ def _iter_readme_files(root: Path) -> list[Path]:
         if path.is_file():
             found[path.name] = path
     for path in sorted(root.glob("README*")):
-        if path.is_file() and path.name not in found:
-            found[path.name] = path
+        if not path.is_file() or path.name in found:
+            continue
+        lowered = path.name.lower()
+        if any(marker in lowered for marker in _SECONDARY_README_MARKERS):
+            continue
+        found[path.name] = path
     ordered: list[Path] = []
     for name in _README_CANDIDATE_NAMES:
         candidate = found.get(name)
@@ -63,8 +75,16 @@ def _pyproject_string_fields(content: str) -> dict[str, str]:
     return fields
 
 
+def _is_markdown_badge_line(stripped: str) -> bool:
+    if stripped.startswith("[![") or stripped.startswith("![]("):
+        return True
+    return "img.shields.io" in stripped.lower()
+
+
 def _is_rst_noise_line(stripped: str) -> bool:
     if not stripped or stripped.startswith("<!--") or stripped.startswith(".. "):
+        return True
+    if _is_markdown_badge_line(stripped):
         return True
     if stripped in {"|", ".."}:
         return True
@@ -84,6 +104,8 @@ def _is_product_sentence(text: str | None) -> bool:
     if not stripped:
         return False
     if ":target:" in stripped or ":alt:" in stripped:
+        return False
+    if _is_markdown_badge_line(stripped):
         return False
     if _RST_FIELD_LIST_RE.match(stripped) or _RST_SUBSTITUTION_LINE_RE.fullmatch(stripped):
         return False

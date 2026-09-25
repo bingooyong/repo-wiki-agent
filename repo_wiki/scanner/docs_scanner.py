@@ -256,7 +256,30 @@ def _flatten_source_tokens(source_inventory: dict[str, Any]) -> tuple[set[str], 
 
 
 _PLANNING_FILENAMES = frozenset({"handoff.md", "verification-report.md"})
-_PLANNING_DIR_PARTS = frozenset({".omc", ".superpowers", "superpowers", "sdd"})
+_PLANNING_DIR_PARTS = frozenset(
+    {
+        ".omc",
+        ".superpowers",
+        "superpowers",
+        "sdd",
+        ".trellis",
+        ".trae",
+        ".cursor",
+        ".claude",
+        ".codex",
+        ".windsurf",
+        ".qoder",
+    }
+)
+_TUTORIAL_PLACEHOLDER_TOKENS = frozenset(
+    {
+        "user-service",
+        "order-service",
+        "weather-service",
+        "example-service",
+        "sample-service",
+    }
+)
 _CAMEL_INVENTORY_NAME = re.compile(r"[A-Z][A-Za-z0-9]*(?:Service|Model|API|Api|Router)$")
 _SNAKE_KEBAB_INVENTORY_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*[-_](?:service|api|router)$")
 # Whole-token libraries whose names happen to end with API/Model (not *Service).
@@ -377,6 +400,8 @@ def _is_inventory_shaped_name(token: str) -> bool:
         return False
     if t.casefold() in _LIBRARY_INVENTORY_TOKENS:
         return False
+    if t.casefold() in _TUTORIAL_PLACEHOLDER_TOKENS:
+        return False
     if _CAMEL_INVENTORY_NAME.search(t):
         return True
     return _SNAKE_KEBAB_INVENTORY_NAME.search(t) is not None
@@ -488,9 +513,31 @@ def _repo_path_exists(repo_root: Path, rel: str) -> bool:
     except OSError:
         return False
     try:
-        return _repo_path_exists_casefold(repo_root, rel)
+        if _repo_path_exists_casefold(repo_root, rel):
+            return True
     except OSError:
         return False
+    return _repo_basename_exists(repo_root, rel)
+
+
+def _repo_basename_exists(repo_root: Path, rel: str) -> bool:
+    """Resolve a bare filename against the whole tree (not only repo root)."""
+    if "/" in rel or "\\" in rel:
+        return False
+    name = Path(rel).name
+    if not name or name in {".", ".."}:
+        return False
+    skip = DocumentationScanner._SKIP_DIRS
+    for path in repo_root.rglob(name):
+        try:
+            parts = path.relative_to(repo_root).parts
+        except ValueError:
+            continue
+        if any(part in skip for part in parts):
+            continue
+        if path.is_file():
+            return True
+    return False
 
 
 def _extract_claims(text: str) -> tuple[set[str], set[str]]:
@@ -541,6 +588,9 @@ def is_init_generated_doc(rel: str, text: str) -> bool:
 
 _AGENT_INSTRUCTION_NAMES = frozenset({"AGENTS.md", "CLAUDE.md", "GEMINI.md"})
 _EVAL_REPORT_NAME_RE = re.compile(r"^round\d+-report\.md$", re.IGNORECASE)
+_AGENT_TOOL_DIR_PARTS = frozenset(
+    {".trellis", ".trae", ".cursor", ".claude", ".codex", ".windsurf", ".qoder"}
+)
 
 
 def is_eval_or_agent_instruction_doc(rel: str) -> bool:
@@ -550,6 +600,8 @@ def is_eval_or_agent_instruction_doc(rel: str) -> bool:
         return False
     parts = Path(rel_n).parts
     if any(part == ".repo-agent-eval" for part in parts):
+        return True
+    if any(part in _AGENT_TOOL_DIR_PARTS for part in parts):
         return True
     name = Path(rel_n).name
     if name in _AGENT_INSTRUCTION_NAMES:
@@ -620,7 +672,22 @@ class DocumentationScanner:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self.cache_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    _SKIP_DIRS = frozenset({".git", ".repo-agent-eval", ".repo-wiki", "node_modules", ".venv"})
+    _SKIP_DIRS = frozenset(
+        {
+            ".git",
+            ".repo-agent-eval",
+            ".repo-wiki",
+            "node_modules",
+            ".venv",
+            ".trellis",
+            ".trae",
+            ".cursor",
+            ".claude",
+            ".codex",
+            ".windsurf",
+            ".qoder",
+        }
+    )
 
     def _is_skipped_path(self, path: Path) -> bool:
         try:
@@ -759,7 +826,9 @@ class DocumentationScanner:
                 [
                     n
                     for n in claim_names
-                    if n not in names and n.endswith(("service", "api", "model"))
+                    if n not in names
+                    and n.endswith(("service", "api", "model"))
+                    and n.casefold() not in _TUTORIAL_PLACEHOLDER_TOKENS
                 ]
             )
             freshness = max(0.0, 1.0 - (0.2 * len(stale_refs) + 0.15 * len(conflicting_claims)))

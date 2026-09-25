@@ -108,6 +108,8 @@ class SecurityConfig(BaseModel):
             ".opencode",
             ".tmp",
             ".cursor",
+            ".trellis",
+            ".trae",
             ".vscode",
             "node_modules",
             "dist",

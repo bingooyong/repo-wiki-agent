@@ -10,6 +10,7 @@ from pathlib import Path
 LANGUAGE_EXTENSIONS: dict[str, tuple[str, ...]] = {
     "java": (".java",),
     "python": (".py",),
+    "go": (".go",),
     "typescript": (".ts", ".tsx", ".js", ".jsx"),
     "sql": (".sql",),
     "yaml": (".yaml", ".yml"),
@@ -131,6 +132,48 @@ def _extract_python(file_path: Path, content: str) -> list[SourceSpan]:
                 line_end=end_line,
                 language="python",
                 summary=f"Python function '{name}()'",
+            )
+        )
+
+    return spans
+
+
+def _extract_go(file_path: Path, content: str) -> list[SourceSpan]:
+    """Extract spans from Go source (types and functions)."""
+    spans: list[SourceSpan] = []
+    lines = content.splitlines()
+
+    for match in _regex_finditer(r"^type\s+([A-Za-z_][A-Za-z0-9_]*)\s+", content, re.MULTILINE):
+        name = match.group(1)
+        start_line = content[: match.start()].count("\n") + 1
+        end_line = _find_block_end(lines, start_line - 1, "{", None)
+        spans.append(
+            SourceSpan(
+                file=file_path.as_posix(),
+                symbol=name,
+                line_start=start_line,
+                line_end=end_line,
+                language="go",
+                summary=f"Go type '{name}'",
+            )
+        )
+
+    for match in _regex_finditer(
+        r"^func\s+(?:\([^)]+\)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+        content,
+        re.MULTILINE,
+    ):
+        name = match.group(1)
+        start_line = content[: match.start()].count("\n") + 1
+        end_line = _find_block_end(lines, start_line - 1, "{", None)
+        spans.append(
+            SourceSpan(
+                file=file_path.as_posix(),
+                symbol=name,
+                line_start=start_line,
+                line_end=end_line,
+                language="go",
+                summary=f"Go function '{name}()'",
             )
         )
 
@@ -519,6 +562,7 @@ def _extract_rst(file_path: Path, content: str) -> list[SourceSpan]:
 
 _EXTRACTORS: dict[str, Callable[[Path, str], list[SourceSpan]]] = {
     "python": _extract_python,
+    "go": _extract_go,
     "java": _extract_java,
     "typescript": _extract_typescript,
     "sql": _extract_sql,

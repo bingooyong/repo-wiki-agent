@@ -35,6 +35,8 @@ _API_PAGE_TOKENS = ("core-service-apis", "核心服务api")
 _INSTALL_CLUE_PATTERNS = (
     ("docker-compose", re.compile(r"docker-compose|docker compose", re.I)),
     ("docker", re.compile(r"\bdocker\b", re.I)),
+    ("podman-compose", re.compile(r"\bpodman-compose\b", re.I)),
+    ("podman", re.compile(r"\bpodman\b", re.I)),
     ("DATABASE_URL", re.compile(r"database_url", re.I)),
     ("POSTGRES", re.compile(r"postgres", re.I)),
     ("sqlite", re.compile(r"\bsqlite3?\b", re.I)),
@@ -47,6 +49,25 @@ _INSTALL_CLUE_PATTERNS = (
     ("pnpm", re.compile(r"\bpnpm\b", re.I)),
     ("pip install", re.compile(r"\bpip(?:3)?\s+install\b", re.I)),
     ("poetry", re.compile(r"\bpoetry\s+(?:install|run)\b", re.I)),
+    ("go build", re.compile(r"\bgo\s+build\b", re.I)),
+    ("go run", re.compile(r"\bgo\s+run\b", re.I)),
+    ("go test", re.compile(r"\bgo\s+test\b", re.I)),
+    ("make", re.compile(r"\bmake\s+[A-Za-z0-9_./-]+", re.I)),
+)
+_INSTALL_SIGNAL_FILES = (
+    "pyproject.toml",
+    "package.json",
+    "go.mod",
+    "Makefile",
+    "makefile",
+    "QUICKSTART.md",
+    "QUICKSTART.rst",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "compose.yml",
+    "compose.yaml",
+    "podman-compose.yml",
+    "podman-compose.yaml",
 )
 
 
@@ -185,10 +206,13 @@ def overview_identity_satisfied(markdown: str, repo_root: Path) -> bool:
 
 def _repo_run_source_text(repo_root: Path) -> str:
     chunks = [read_readme_text(repo_root)]
-    for rel in ("pyproject.toml", "package.json"):
+    for rel in _INSTALL_SIGNAL_FILES:
         path = repo_root / rel
         if path.is_file():
             chunks.append(path.read_text(encoding="utf-8", errors="ignore"))
+    for extra in sorted(repo_root.glob("README*")):
+        if extra.is_file() and extra.name not in _README_NAMES:
+            chunks.append(extra.read_text(encoding="utf-8", errors="ignore"))
     return "\n".join(chunks)
 
 

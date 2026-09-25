@@ -100,7 +100,11 @@ def _filename_like_titles(pages: list[WikiPagePlan]) -> list[str]:
     for page in pages:
         compact = " ".join(str(page.title).split()).strip().lower()
         compact = compact.removesuffix(".md")
-        if ".py" in compact.replace(" ", "") or compact in banned_exact:
+        if (
+            ".py" in compact.replace(" ", "")
+            or ".go" in compact.replace(" ", "")
+            or compact in banned_exact
+        ):
             offenders.append(page.title)
     return offenders
 

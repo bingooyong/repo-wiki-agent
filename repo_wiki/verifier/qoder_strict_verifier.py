@@ -155,6 +155,7 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_INSTALL_RUN",
         "QODER_HANDBOOK_INSTALL_FENCE",
         "QODER_HANDBOOK_API_ROUTE_FILE",
+        "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
         "UNSUPPORTED_DOC_CLAIM",
@@ -306,6 +307,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_install_run(),
             self._check_handbook_install_fence(),
             self._check_handbook_api_route_file(),
+            self._check_qoder_source_evidence(),
         ]
 
         hard_failures = [c for c in checks if c.is_hard_gate_failure()]
@@ -2567,6 +2569,60 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-api-route-file",
             "API page cites api/routes implementation files",
+        )
+
+    def _check_qoder_source_evidence(self) -> CheckResult:
+        """Fail when a code repo handbook cites almost no product source files."""
+        from repo_wiki.verifier.source_evidence import (
+            handbook_source_citation_stats,
+            source_evidence_is_sufficient,
+            source_evidence_should_apply,
+        )
+
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("qoder-source-evidence", "No content directory")
+        if not self._is_release_candidate_root():
+            return self._skip_check("qoder-source-evidence", "content-only fixture mode")
+        repo_root = self._source_root_for_citations()
+        if not source_evidence_should_apply(repo_root):
+            return self._skip_check(
+                "qoder-source-evidence", "Repository has few product source files"
+            )
+        stats = handbook_source_citation_stats(content_dir, repo_root)
+        if source_evidence_is_sufficient(stats):
+            return CheckResult(
+                name="qoder-source-evidence",
+                status="PASS",
+                message=(
+                    "Source-file citation evidence OK: "
+                    f"{stats.source_citations}/{stats.total_citations} "
+                    f"({stats.source_ratio:.2%})"
+                ),
+                details={
+                    "source_citations": stats.source_citations,
+                    "total_citations": stats.total_citations,
+                    "source_ratio": stats.source_ratio,
+                    "product_source_files": stats.product_source_files,
+                },
+                gate_type=GateType.HARD,
+            )
+        return CheckResult(
+            name="qoder-source-evidence",
+            status="FAIL",
+            message=(
+                "Handbook citations are overwhelmingly docs/README with almost no "
+                f"product source: {stats.source_citations}/{stats.total_citations} "
+                f"({stats.source_ratio:.2%})"
+            ),
+            details={
+                "source_citations": stats.source_citations,
+                "total_citations": stats.total_citations,
+                "source_ratio": stats.source_ratio,
+                "product_source_files": stats.product_source_files,
+            },
+            reason_code="QODER_SOURCE_EVIDENCE_LOW",
+            gate_type=GateType.HARD,
         )
 
     def _ignored_dirty_roots(self, git_root: Path) -> list[Path]:

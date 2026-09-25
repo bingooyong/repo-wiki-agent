@@ -32,7 +32,11 @@ from repo_wiki.orchestration.runtime_store import (
     create_runtime_store,
 )
 from repo_wiki.retrieval.service import RetrievalService
-from repo_wiki.scanner.artifacts import has_frontend_wiki_surface, write_source_of_truth
+from repo_wiki.scanner.artifacts import (
+    has_frontend_wiki_surface,
+    has_python_wiki_surface,
+    write_source_of_truth,
+)
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 from repo_wiki.verifier.api_claim_inventory import (
     drop_uninventoried_api_claims,
@@ -146,6 +150,8 @@ def _is_filename_like_handbook_title(title: str) -> bool:
     compact = re.sub(r"\s+", " ", str(title)).strip()
     collapsed = compact.replace(" ", "").lower().removesuffix(".md")
     if collapsed.endswith(".py") or ".py" in collapsed:
+        return True
+    if collapsed.endswith(".go") or ".go" in collapsed:
         return True
     return collapsed in _FILENAME_HANDBOOK_TITLES
 
@@ -865,6 +871,13 @@ class RepoWikiService:
             required_roots = [
                 row for row in required_roots if row[1] != "frontend-applications-index"
             ]
+        repository = getattr(snapshot, "repository", None)
+        if not has_python_wiki_surface(
+            getattr(snapshot, "modules", None),
+            language=str(getattr(repository, "language", "") or ""),
+            framework=str(getattr(repository, "framework", "") or ""),
+        ):
+            required_roots = [row for row in required_roots if row[1] != "python-services-index"]
 
         for sort_order, (category, page_id, title) in enumerate(required_roots):
             if page_id in page_ids:
@@ -1126,6 +1139,8 @@ class RepoWikiService:
             ".repo-agent-eval",
             ".qoder",
             ".repo-wiki",
+            ".trellis",
+            ".trae",
             ".git",
             ".gradle",
             ".idea",
@@ -2545,6 +2560,10 @@ class RepoWikiService:
 
         planner = create_planner(str(self.root))
         renderer = create_renderer()
+        from repo_wiki.generator.composer import is_handbook_install_page
+
+        if is_handbook_install_page(page):
+            return []
         page_type = _category_to_doc_type(page.category)
 
         context: dict[str, Any] = {

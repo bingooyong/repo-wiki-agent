@@ -325,20 +325,21 @@ def _module_name_and_path(module: Any, index: int) -> tuple[str, str]:
 
 
 def _product_module_labels(modules: list[Any]) -> list[str]:
-    """Return scanned product packages, not __init__.py / main.py filename dumps."""
+    """Return scanned product packages, not __init__.py / main.go filename dumps."""
     labels: list[str] = []
     seen: set[str] = set()
     for index, module in enumerate(modules):
         name, path = _module_name_and_path(module, index)
+        parts = [part for part in path.replace("\\", "/").strip("/").split("/") if part]
         candidates: list[str] = []
-        if name and not _is_filename_like_module_name(name):
+        if len(parts) >= 2 and parts[0] in {"internal", "pkg", "cmd"}:
+            candidates.append("/".join(parts[:2]))
+        elif name and not _is_filename_like_module_name(name):
             candidates.append(name)
-        else:
-            parts = [part for part in path.replace("\\", "/").strip("/").split("/") if part]
-            if len(parts) >= 2:
-                parent = parts[-2]
-                if parent and not _is_filename_like_module_name(parent):
-                    candidates.append(parent)
+        elif len(parts) >= 2:
+            parent = parts[-2]
+            if parent and not _is_filename_like_module_name(parent):
+                candidates.append(parent)
         for label in candidates:
             if label not in seen:
                 seen.add(label)

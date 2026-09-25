@@ -150,9 +150,17 @@ def test_normalize_file_prefix_readme_rst_cite_is_accepted_by_verifier(tmp_path:
     assert not any("file does not exist" in str(item.get("problem", "")) for item in invalid)
 
 
+def _ensure_src_app(root: Path) -> None:
+    (root / "src").mkdir(exist_ok=True)
+    (root / "src" / "app.py").write_text(
+        "\n".join(f"line {i}" for i in range(1, 41)), encoding="utf-8"
+    )
+
+
 def test_existing_valid_citation_schemes_remain_accepted(tmp_path: Path) -> None:
     """Bare paths and source: cites that already pass must stay valid."""
     (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
+    _ensure_src_app(tmp_path)
     composer = create_composer(workspace_root=tmp_path)
     page = composer._normalize_markdown_response(
         """# Project Overview
@@ -188,11 +196,12 @@ def test_missing_citation_target_still_qoder_citation_invalid(tmp_path: Path) ->
     """Do not weaken QODER_CITATION_INVALID for paths that truly do not exist."""
     (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
     composer = create_composer(workspace_root=tmp_path)
-    page = composer._normalize_markdown_response(
+    normalized = composer._normalize_markdown_response(
         _overview_page("file:missing/nope.py:1"),
         "Project Overview",
     )
-    _write_release_candidate(tmp_path, page)
+    assert "missing/nope.py" not in normalized
+    _write_release_candidate(tmp_path, _overview_page("file:missing/nope.py:1"))
     result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
     assert "QODER_CITATION_INVALID" in result.get("hard_gate_codes", [])
     citation_check = _citation_targets_check(result)
@@ -356,16 +365,16 @@ def test_readme_md_cite_stays_when_both_md_and_rst_exist(tmp_path: Path) -> None
 
 
 def test_missing_app_nope_py_cite_still_hard_invalid(tmp_path: Path) -> None:
-    """A truly missing file stays HARD QODER_CITATION_INVALID; do not relax gates."""
+    """Composer drops invented files; leftover missing cites stay HARD invalid."""
     (tmp_path / "README.rst").write_text("RealWorld Conduit example app\n" * 8, encoding="utf-8")
     composer = create_composer(workspace_root=tmp_path)
     page = composer._normalize_markdown_response(
         _overview_page("app/nope.py:1"),
         "Project Overview",
     )
-    assert "<cite>app/nope.py:1</cite>" in page
+    assert "<cite>app/nope.py:1</cite>" not in page
 
-    _write_release_candidate(tmp_path, page)
+    _write_release_candidate(tmp_path, _overview_page("app/nope.py:1"))
     result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
     assert "QODER_CITATION_INVALID" in result.get("hard_gate_codes", [])
     citation_check = _citation_targets_check(result)
@@ -409,6 +418,7 @@ def _long_readme_rst(root: Path) -> None:
 def test_parenthetical_readme_rst_cite_without_lines_is_dropped(tmp_path: Path) -> None:
     """``README.rst（产品身份声明）`` has no line range; drop it, keep a valid sibling."""
     _long_readme_rst(tmp_path)
+    _ensure_src_app(tmp_path)
     composer = create_composer(workspace_root=tmp_path)
     raw = (
         _overview_page("README.rst（产品身份声明）")
@@ -449,6 +459,7 @@ def test_comma_joined_readme_cites_split_into_two_valid_cites(tmp_path: Path) ->
 def test_readme_parenthetical_without_lines_is_dropped_not_invented(tmp_path: Path) -> None:
     """``README（项目身份说明）`` must not grow invented ``README.rst:N-M`` lines."""
     _long_readme_rst(tmp_path)
+    _ensure_src_app(tmp_path)
     composer = create_composer(workspace_root=tmp_path)
     raw = _overview_page("README（项目身份说明）") + "\n<cite>src/app.py:1-10</cite>\n"
     normalized = composer._normalize_markdown_response(raw, "Project Overview")
@@ -494,6 +505,7 @@ def test_ranged_parenthetical_cite_keeps_path_and_lines(tmp_path: Path) -> None:
 
 def test_readme_note_cite_is_dropped(tmp_path: Path) -> None:
     _long_readme_rst(tmp_path)
+    _ensure_src_app(tmp_path)
     composer = create_composer(workspace_root=tmp_path)
     raw = _overview_page("README:NOTE") + "\n<cite>src/app.py:1-10</cite>\n"
     normalized = composer._normalize_markdown_response(raw, "Project Overview")
