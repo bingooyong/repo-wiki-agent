@@ -216,10 +216,10 @@ def test_route_cite_must_point_at_handler_file(tmp_path: Path) -> None:
 
 def test_prompt_block_lists_parsed_facts(tmp_path: Path) -> None:
     _go_repo(tmp_path)
-    block = source_fact_prompt_block(tmp_path)
-    assert "`mysql`" in block
-    assert "`blackbox-exporter`" in block
-    assert "`--agent-url`：probe-agent control URL" in block
+    assert source_fact_prompt_block(tmp_path) == ""
+    block = source_fact_prompt_block(tmp_path, page_id="health-check", title="健康检查")
+    assert "`--agent-url`" not in block
+    assert "只能使用下列" not in block
     assert "`/health`" in block
     assert load_health_routes(tmp_path)
 
@@ -245,9 +245,9 @@ def test_compose_prompt_includes_parsed_facts(tmp_path: Path) -> None:
     )
     composer_input = build_composer_input(page, None, ctx)
     prompt = composer._build_compose_prompt(composer_input, composer._build_context(composer_input))
-    assert "编排服务名" in prompt
-    assert "`mysql`" in prompt
-    assert "probe-agent control URL" in prompt
+    assert "只能使用下列" not in prompt
+    assert "仅出现在说明文档" not in prompt
+    assert "probe-agent control URL" not in prompt
     assert "`/health`" in prompt
 
 

@@ -356,6 +356,10 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
                     version = match.group(1)
                     break
 
+    live = _latest_product_version(root)
+    if live:
+        version = live
+
     return RepositoryIdentity(
         name=best_name,
         display_name=best_name if best_source == "readme" else _human_readable_name(best_name),
@@ -368,6 +372,57 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         entry_points=[],
         source_digest=None,
     )
+
+
+def _latest_product_version(root: Path) -> str | None:
+    """README badge / latest changelog heading / latest git tag. Skip archived."""
+    readme_hits: list[str] = []
+    for name in _README_CANDIDATE_NAMES:
+        path = root / name
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if re.search(r"archiv|unmaintained|no longer maintained", text[:800], flags=re.I):
+            continue
+        for match in re.finditer(
+            r"(?:badge|shields|version)[^)\n]{0,80}(?:/v|v)?(\d+\.\d+(?:\.\d+)?)",
+            text[:1200],
+            flags=re.I,
+        ):
+            readme_hits.append(match.group(1))
+        title = re.search(r"^#\s+.+\bv(\d+\.\d+(?:\.\d+)?)\b", text, flags=re.M)
+        if title:
+            readme_hits.append(title.group(1))
+    if readme_hits:
+        return readme_hits[0]
+    for name in ("CHANGELOG.md", "CHANGES.md", "HISTORY.md"):
+        path = root / name
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for match in re.finditer(
+            r"^#{1,3}\s+.*?(?:v)?(\d+\.\d+(?:\.\d+)?)\s*$",
+            text,
+            flags=re.M,
+        ):
+            window = text[max(0, match.start() - 80) : match.start()]
+            if re.search(r"archiv", window, flags=re.I):
+                continue
+            return match.group(1)
+    try:
+        tagged = subprocess.run(
+            ["git", "-C", str(root), "describe", "--tags", "--abbrev=0"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if tagged.returncode == 0:
+            hit = re.search(r"v?(\d+\.\d+(?:\.\d+)?)", tagged.stdout.strip())
+            if hit:
+                return hit.group(1)
+    except OSError:
+        return None
+    return None
 
 
 def _human_readable_name(name: str) -> str:

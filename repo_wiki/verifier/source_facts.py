@@ -17,7 +17,6 @@ _COMPOSE_FILES = (
     "podman-compose.yaml",
 )
 _KEBAB_RE = re.compile(r"\b([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b")
-_BACKTICK_TOKEN_RE = re.compile(r"`([A-Za-z][A-Za-z0-9_.-]{1,64})`")
 _TABLE_RE = re.compile(
     r"""(?:CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?|op\.create_table\(\s*|Table\(\s*)['\"`]?([A-Za-z_][A-Za-z0-9_]*)""",
     re.I,
@@ -86,20 +85,53 @@ _GENERIC_TYPES = frozenset(
         "SQLAlchemy",
         "Alembic",
         "HTTPException",
+        "Depends",
+        "Handle",
     }
 )
 _SAMPLE_QUALIFIER_RE = re.compile(r"示例|README|文档样例|仅出现在")
 _API_PRESENTATION_RE = re.compile(r"接口|类型|依赖|触发|handler|工厂|合同")
 
 
-def load_compose_service_names(root: Path) -> set[str]:
-    names: set[str] = set()
+def load_compose_services_by_file(root: Path) -> dict[str, set[str]]:
+    """Service names keyed by the compose filename that declares them."""
+    found: dict[str, set[str]] = {}
     for rel in _COMPOSE_FILES:
         path = root / rel
         if not path.is_file():
             continue
         parsed, _edges = parse_compose_topology(path.read_text(encoding="utf-8", errors="ignore"))
+        found[rel] = set(parsed)
+    return found
+
+
+def load_compose_service_names(root: Path) -> set[str]:
+    names: set[str] = set()
+    for parsed in load_compose_services_by_file(root).values():
         names.update(parsed)
+    return names
+
+
+def load_compose_healthcheck_services(root: Path) -> set[str]:
+    names: set[str] = set()
+    for rel in _COMPOSE_FILES:
+        path = root / rel
+        if not path.is_file():
+            continue
+        current = ""
+        in_health = False
+        for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            service = re.match(r"^  ([A-Za-z][A-Za-z0-9_-]*):\s*$", raw)
+            if service:
+                current = service.group(1)
+                in_health = False
+                continue
+            if current and re.match(r"^    healthcheck:\s*$", raw):
+                in_health = True
+                names.add(current)
+                continue
+            if in_health and raw.startswith("  ") and not raw.startswith("      "):
+                in_health = False
     return names
 
 
@@ -118,8 +150,12 @@ def load_database_tables(root: Path) -> set[str]:
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             tables.update(match.group(1) for match in _TABLE_RE.finditer(text))
-    schema = root / "db" / "schema.sql"
-    if schema.is_file():
+    for schema in (
+        root / "db" / "schema.sql",
+        *sorted(root.glob("*.sql")),
+    ):
+        if not schema.is_file():
+            continue
         tables.update(
             match.group(1)
             for match in _TABLE_RE.finditer(schema.read_text(encoding="utf-8", errors="ignore"))
@@ -178,20 +214,17 @@ def load_cmd_names(root: Path) -> set[str]:
 
 def load_health_routes(root: Path) -> list[str]:
     blob = ""
-    controller = root / "controller.go"
-    if controller.is_file():
-        blob += controller.read_text(encoding="utf-8", errors="ignore")
-    cmd = root / "cmd"
-    if cmd.is_dir():
-        for child in cmd.rglob("*.go"):
-            if child.name.endswith("_test.go"):
-                continue
-            if "health" in child.name.lower() or child.name == "main.go":
-                blob += child.read_text(encoding="utf-8", errors="ignore")
-    for rel in ("app/main.py", "app/api/routes/health.py"):
-        path = root / rel
-        if path.is_file():
-            blob += path.read_text(encoding="utf-8", errors="ignore")
+    skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
+            continue
+        if any(part in skip for part in path.parts) or path.name.endswith("_test.go"):
+            continue
+        if path.name.startswith("test_"):
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "/health" in text or "healthz" in text or "readyz" in text or "livez" in text:
+            blob += text + "\n"
     return list(dict.fromkeys(_HEALTH_ROUTE_RE.findall(blob)))
 
 
@@ -211,29 +244,78 @@ def alembic_uses_model_metadata(root: Path) -> bool:
     return False
 
 
+_COMPOSE_FILE_RE = re.compile(
+    r"`?((?:docker-|podman-)?compose\.ya?ml)`?",
+    re.IGNORECASE,
+)
+_SERVICE_CONTEXT_RE = re.compile(
+    r"(?:服务|容器|编排|compose\s+service|container)[^`\n]{0,40}`([A-Za-z][A-Za-z0-9_-]{1,32})`"
+    r"|`([A-Za-z][A-Za-z0-9_-]{1,32})`\s*(?:服务|容器|service)\b"
+    r"|(?:services?[:：]\s*|编排服务[^。\n]{0,40})`([A-Za-z][A-Za-z0-9_-]{1,32})`",
+    re.IGNORECASE,
+)
+_NOT_SERVICE_TOKENS = frozenset(
+    {
+        "depends",
+        "handle",
+        "true",
+        "false",
+        "none",
+        "self",
+        "return",
+        "import",
+        "class",
+        "async",
+        "await",
+        "const",
+        "func",
+    }
+)
+
+
+def _mentioned_compose_filenames(text: str) -> list[str]:
+    found: list[str] = []
+    for match in _COMPOSE_FILE_RE.finditer(text or ""):
+        name = match.group(1)
+        if name.lower() in {
+            "compose.yaml",
+            "compose.yml",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+            "podman-compose.yml",
+            "podman-compose.yaml",
+        }:
+            found.append(name)
+    return found
+
+
 def _mentioned_compose_services(text: str) -> set[str]:
-    if not re.search(r"compose|docker|podman", text, flags=re.I):
-        return set()
+    """Names used as compose/container services, not every lowercase token."""
     names: set[str] = set()
-    blob = text or ""
-    for match in _KEBAB_RE.finditer(blob):
-        token = match.group(1)
-        if token in _GENERIC_COMPOSE:
+    for sentence in re.split(r"[。\n]", text or ""):
+        if not re.search(r"compose|docker|podman|编排服务|容器服务|服务定义", sentence, flags=re.I):
             continue
-        lo, hi = match.start(), match.end()
-        if lo > 0 and blob[lo - 1] in "/\\-":
-            continue
-        if hi < len(blob) and blob[hi] in "/\\":
-            continue
-        names.add(token)
-    for token in _BACKTICK_TOKEN_RE.findall(blob):
-        lowered = token.lower()
-        if lowered in _GENERIC_COMPOSE:
-            continue
-        if any(lowered.endswith(ext) for ext in (".yml", ".yaml", ".md", ".sql", ".go", ".py")):
-            continue
-        if re.fullmatch(r"[a-z][a-z0-9_-]{1,32}", lowered):
-            names.add(lowered)
+        for match in _SERVICE_CONTEXT_RE.finditer(sentence):
+            token = next((group for group in match.groups() if group), "")
+            lowered = token.lower()
+            if lowered and lowered not in _GENERIC_COMPOSE and lowered not in _NOT_SERVICE_TOKENS:
+                names.add(lowered)
+        for match in re.finditer(
+            r"(?:服务|容器|编排)[^`\n]{0,80}((?:`[A-Za-z][A-Za-z0-9_-]{1,32}`[、,，与和\s]*)+)",
+            sentence,
+            flags=re.I,
+        ):
+            for token in re.findall(r"`([A-Za-z][A-Za-z0-9_-]{1,32})`", match.group(1)):
+                lowered = token.lower()
+                if lowered in _GENERIC_COMPOSE or lowered in _NOT_SERVICE_TOKENS:
+                    continue
+                names.add(lowered)
+        if re.search(r"服务|容器|service", sentence, flags=re.I):
+            for match in _KEBAB_RE.finditer(sentence):
+                token = match.group(1)
+                if token in _GENERIC_COMPOSE:
+                    continue
+                names.add(token)
     return names
 
 
@@ -269,9 +351,7 @@ def _flag_target_mismatches(text: str, flags: dict[str, str], cmd_names: set[str
         help_l = help_text.lower().replace("_", "-")
         if any(leaf.lower().replace("_", "-") in help_l for leaf in mentioned):
             continue
-        help_cmds = [leaf for leaf in leaves if leaf.lower().replace("_", "-") in help_l]
-        if help_cmds or "control url" in help_l:
-            hits.append(f"flag:{flag}")
+        hits.append(f"flag:{flag}")
     return hits
 
 
@@ -307,7 +387,7 @@ def _orm_offenders(text: str, root: Path) -> list[str]:
     if re.search(r"--autogenerate|Autogenerate", text):
         hits.append("orm:autogenerate")
     models_dir = root / "app" / "db" / "models"
-    if re.search(r"app\.db\.models", text) and not models_dir.exists():
+    if re.search(r"app\.db\.models|app/db/models", text) and not models_dir.exists():
         hits.append("orm:app.db.models")
     return hits
 
@@ -324,17 +404,33 @@ def _route_cite_offenders(text: str, endpoints: list[dict] | None) -> list[str]:
     for match in _CITE_RE.finditer(text or ""):
         cite_path = match.group(1).split(":", 1)[0].replace("\\", "/")
         window = text[max(0, match.start() - 80) : match.start()]
-        route = re.search(r"\b(GET|POST|PUT|PATCH|DELETE)\s+(/\S+)", window)
+        route = re.search(r"\b(GET|POST|PUT|PATCH|DELETE|ANY)?\s*(/\S+)", window)
         if not route:
             continue
-        item = by_route.get((route.group(1), route.group(2).rstrip("。，、")))
+        method = (route.group(1) or "").upper()
+        path = route.group(2).rstrip("。，、`")
+        item = by_route.get((method, path)) if method else None
+        if item is None and path:
+            item = next(
+                (
+                    value
+                    for (mth, pth), value in by_route.items()
+                    if pth.rstrip("/") == path.rstrip("/")
+                ),
+                None,
+            )
+        if re.search(r"^/(?:healthz?|readyz|livez)", path) and re.match(
+            r"readme", Path(cite_path).name, flags=re.I
+        ):
+            hits.append(f"route-cite:{method or 'GET'} {path}->{cite_path}")
+            continue
         if not item:
             continue
         handler_file = str(
             item.get("file_path") or item.get("handler_file") or item.get("evidence_path") or ""
         ).replace("\\", "/")
         if handler_file and cite_path != handler_file:
-            hits.append(f"route-cite:{route.group(1)} {route.group(2)}->{cite_path}")
+            hits.append(f"route-cite:{method or item.get('method')} {path}->{cite_path}")
     return hits
 
 
@@ -345,7 +441,8 @@ def handbook_source_fact_offenders(
 ) -> dict[str, list[str]]:
     if content_dir is None or not content_dir.exists() or repo_root is None:
         return {}
-    services = load_compose_service_names(repo_root)
+    services_by_file = load_compose_services_by_file(repo_root)
+    services = set().union(*services_by_file.values()) if services_by_file else set()
     tables = load_database_tables(repo_root)
     flags = load_cli_flag_help(repo_root)
     idents = load_source_identifiers(repo_root)
@@ -356,9 +453,17 @@ def handbook_source_fact_offenders(
     for path in iter_markdown_pages(content_dir):
         text = path.read_text(encoding="utf-8", errors="ignore")
         hits: list[str] = []
-        if services:
-            invented = _mentioned_compose_services(text) - services
-            hits.extend(f"compose:{name}" for name in sorted(invented)[:8])
+        invented = _mentioned_compose_services(text)
+        if invented and services_by_file:
+            mentioned_files = _mentioned_compose_filenames(text)
+            allowed: set[str] = set()
+            for name in mentioned_files:
+                for rel, names in services_by_file.items():
+                    if rel.lower() == name.lower():
+                        allowed.update(names)
+            if not allowed:
+                allowed = set(services)
+            hits.extend(f"compose:{name}" for name in sorted(invented - allowed)[:8])
         migration_page = any(
             token in f"{path.name} {text[:240]}" for token in ("迁移", "表", "migration")
         )
@@ -377,33 +482,21 @@ def handbook_source_fact_offenders(
     return found
 
 
-def source_fact_prompt_block(root: Path) -> str:
-    """Positive facts for the page prompt so the model does not invent them."""
+def source_fact_prompt_block(root: Path, *, page_id: str = "", title: str = "") -> str:
+    """Page-owned facts only. Parsed inventories stay in the verifier."""
+    blob = f"{page_id} {title}"
     lines: list[str] = []
-    services = sorted(load_compose_service_names(root))
-    if services:
-        lines.append(
-            "编排服务名（只能写这些）：" + "、".join(f"`{name}`" for name in services[:12])
-        )
-    tables = sorted(load_database_tables(root))
-    if tables:
-        lines.append("数据表（只能写这些）：" + "、".join(f"`{name}`" for name in tables[:20]))
-    flags = load_cli_flag_help(root)
-    if flags:
-        bits = [f"`--{name}`：{help_text}" for name, help_text in list(flags.items())[:8]]
-        lines.append("CLI 旗标含义：" + "；".join(bits))
-    health = load_health_routes(root)
-    if health:
-        lines.append("健康检查路由：" + "、".join(f"`{item}`" for item in health[:6]))
-    if not alembic_uses_model_metadata(root):
-        for rel in (
-            Path("app") / "db" / "migrations" / "env.py",
-            Path("alembic") / "env.py",
-        ):
-            if (root / rel).is_file():
-                lines.append(
-                    "迁移运行时：`env.py` 里 `target_metadata = None`，"
-                    "不要写 `Base.metadata`、`app.db.models` 或 `--autogenerate`。"
-                )
-                break
+    if any(token in blob for token in ("健康", "health")):
+        health = load_health_routes(root)
+        if health:
+            lines.append("本页健康检查路由：" + "、".join(f"`{item}`" for item in health[:6]))
+        checks = sorted(load_compose_healthcheck_services(root))
+        if checks:
+            lines.append(
+                "本页编排 healthcheck 服务：" + "、".join(f"`{name}`" for name in checks[:8])
+            )
+    if any(token in blob for token in ("数据模型", "data-model", "data_model", "data model")):
+        tables = sorted(load_database_tables(root))
+        if tables:
+            lines.append("本页数据表：" + "、".join(f"`{name}`" for name in tables[:20]))
     return "\n".join(f"- {line}" for line in lines)

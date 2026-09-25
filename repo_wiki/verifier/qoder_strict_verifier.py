@@ -2026,7 +2026,7 @@ class QoderLikeVerifierService(VerifierService):
                 uncovered.extend(page_uncovered)
 
         ratio = 1.0 if total == 0 else covered / total
-        if ratio < 0.95:
+        if ratio < self.CLAIM_CITATION_FLOOR:
             return CheckResult(
                 name="qoder-claim-citation-coverage",
                 status="FAIL",

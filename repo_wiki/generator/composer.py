@@ -67,6 +67,7 @@ from repo_wiki.prompts.skeleton import (
 )
 from repo_wiki.verifier.handbook import (
     EMPTY_CONTENT_REJECTION,
+    EMPTY_SPAN_REJECTION,
     EVIDENCE_META_REJECTION,
     GENERATOR_META_REJECTION,
     MIN_HANDBOOK_BODY_CHARS,
@@ -79,6 +80,7 @@ from repo_wiki.verifier.handbook import (
     handbook_page_is_truncated,
     has_unclosed_fence,
     is_page_timeout_rejection,
+    is_rate_limit_error,
     is_transient_server_error,
     page_server_error_rejection,
     page_timeout_rejection,
@@ -88,6 +90,7 @@ _PROSE_RECOVERY_REASONS = frozenset(
     {
         "Insufficient prose content",
         EMPTY_CONTENT_REJECTION,
+        EMPTY_SPAN_REJECTION,
         UNCLOSED_FENCE_REJECTION,
         ROLE_CONTRADICTION_REJECTION,
         EVIDENCE_META_REJECTION,
@@ -633,6 +636,27 @@ class LLMPageComposer:
                             rewrite_extra_body = self._empty_content_rewrite_extra_body()
                             continue
                         return last_rejected
+                    if is_rate_limit_error(exc):
+                        if attempt < 2:
+                            await asyncio.sleep(0.4 * (2**attempt))
+                            continue
+                        last_rejected = ComposerOutput(
+                            page_id=page_id,
+                            markdown="",
+                            citations_preserved=False,
+                            headings_preserved=False,
+                            evidence_count=0,
+                            rejected=True,
+                            rejection_reason=page_server_error_rejection(exc),
+                            tokens_used=total_tokens,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            provider=self.provider_name,
+                            model=self.model_name,
+                            low_confidence=False,
+                            uncertainty_reasons=[],
+                        )
+                        return last_rejected
                     if is_transient_server_error(exc):
                         last_rejected = ComposerOutput(
                             page_id=page_id,
@@ -807,10 +831,14 @@ class LLMPageComposer:
 
         return derive_process_role_facts(self.workspace_root)
 
-    def _source_fact_block(self) -> str:
+    def _source_fact_block(self, page: WikiPagePlan | None = None) -> str:
         from repo_wiki.verifier.source_facts import source_fact_prompt_block
 
-        return source_fact_prompt_block(Path(self.workspace_root or "."))
+        return source_fact_prompt_block(
+            Path(self.workspace_root or "."),
+            page_id=str(getattr(page, "page_id", "") or ""),
+            title=str(getattr(page, "title", "") or ""),
+        )
 
     def _build_compose_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         if self._use_compact_prompt():
@@ -827,8 +855,8 @@ class LLMPageComposer:
                 + self._build_evidence_context(input.evidence_binding)
             )
         skeleton_md = input.skeleton.render_skeleton_markdown()
-        source_facts = self._source_fact_block()
-        fact_tail = f"\n\n## 源码事实\n{source_facts}" if source_facts else ""
+        source_facts = self._source_fact_block(input.page_plan)
+        fact_tail = f"\n\n## 本页源码事实\n{source_facts}" if source_facts else ""
         return prompt + "\n\n## Article Structure\n" + skeleton_md + fact_tail
 
     def _strip_fenced_blocks(self, markdown: str) -> str:
@@ -904,8 +932,8 @@ class LLMPageComposer:
         role_facts = ""
         if self._page_needs_process_roles(input.page_plan):
             role_facts = f"{self._process_role_facts()}\n"
-        source_facts = self._source_fact_block()
-        fact_block = f"源码事实：\n{source_facts}\n" if source_facts else ""
+        source_facts = self._source_fact_block(input.page_plan)
+        fact_block = f"本页源码事实：\n{source_facts}\n" if source_facts else ""
         thin_rule = ""
         if self._page_wants_wide_evidence(input.page_plan):
             thin_rule = (
@@ -1119,15 +1147,9 @@ class LLMPageComposer:
                     "（`alembic.ini`、`app/db/migrations/`、命令 `alembic upgrade head`），"
                     "不要猜测未出现的迁移工具或路径。每个 revision 的 upgrade 写清建了哪些表。"
                 )
-        mismatches = self._doc_only_identifier_note()
-        if mismatches:
-            rules.append(mismatches)
-        source_facts = self._source_fact_block()
+        source_facts = self._source_fact_block(page)
         if source_facts:
-            rules.append(
-                "- 只能使用下列从仓库解析出的事实，不要发明服务名、表名、旗标或类型：\n"
-                + source_facts
-            )
+            rules.append("- 本页可核对的源码事实：\n" + source_facts)
         return "\n".join(rules)
 
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
@@ -1178,12 +1200,8 @@ class LLMPageComposer:
         role_facts = ""
         if self._page_needs_process_roles(page):
             role_facts = f"进程角色：{self._process_role_facts()}\n"
-        source_facts = self._source_fact_block()
-        fact_block = (
-            f"源码事实（只能写这些，不要发明服务/表/旗标/类型）：\n{source_facts}\n"
-            if source_facts
-            else ""
-        )
+        source_facts = self._source_fact_block(page)
+        fact_block = f"本页源码事实：\n{source_facts}\n" if source_facts else ""
         install_command_block = ""
         if is_handbook_install_page(page):
             from repo_wiki.verifier.handbook import collect_repo_install_commands
@@ -1242,44 +1260,6 @@ class LLMPageComposer:
         if len(cleaned) > max_chars:
             return cleaned[: max_chars - 3].rstrip() + "..."
         return cleaned
-
-    def _doc_only_identifier_note(self) -> str:
-        """Tell the model which README identifiers are samples, not in code."""
-        root = Path(self.workspace_root or ".")
-        from repo_wiki.verifier.handbook import read_readme_text
-
-        readme = read_readme_text(root)
-        if not readme:
-            return ""
-        skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
-        source = []
-        for path in root.rglob("*"):
-            if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
-                continue
-            if any(part in skip for part in path.parts):
-                continue
-            try:
-                source.append(path.read_text(encoding="utf-8", errors="ignore"))
-            except OSError:
-                continue
-        blob = "\n".join(source)
-        names = []
-        for name in re.findall(r"\b([A-Z][A-Za-z0-9]{5,})\b", readme):
-            if name in blob:
-                continue
-            if re.search(
-                rf"\bdef\s+{re.escape(name)}\b|\bfunc\s+\([^)]+\)\s+{re.escape(name)}\b|\bfunc\s+{re.escape(name)}\b",
-                blob,
-            ):
-                continue
-            names.append(name)
-        if not names:
-            return ""
-        listed = "、".join(sorted(set(names))[:8])
-        return (
-            f"- 以下标识只出现在仓库说明文档，源码中没有对应定义（勿把文档示例写成接口）：{listed}。"
-            "正文里要标明这是文档示例，不要写成源码接口合同。"
-        )
 
     def _build_low_confidence_guidance(self, input: ComposerInput) -> str:
         """Build guidance text for low-confidence pages based on evidence quality.
@@ -1566,7 +1546,16 @@ class LLMPageComposer:
         # the opening paragraph already meets the 100-character prose floor.
         if has_unclosed_fence(content):
             result.rejection_reason = UNCLOSED_FENCE_REJECTION
-        elif len(content) > 150 and self._count_prose_chars(content) < 100:
+        else:
+            from repo_wiki.generator.code_safe import empty_inline_spans
+
+            if empty_inline_spans(content):
+                result.rejection_reason = EMPTY_SPAN_REJECTION
+        if (
+            not result.rejection_reason
+            and len(content) > 150
+            and self._count_prose_chars(content) < 100
+        ):
             result.rejection_reason = "Insufficient prose content"
 
         if not result.rejection_reason and contains_generator_meta(content):

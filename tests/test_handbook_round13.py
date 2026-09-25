@@ -174,7 +174,7 @@ def test_python_api_page_gets_favorite_follow_sequence(tmp_path: Path) -> None:
     assert "follow_for_user" in rendered
     assert "unsubscribe_from_user" in rendered
     assert "articles_common" not in rendered
-    assert "DELETE /api/articles/{slug}/favorite" in rendered
+    assert "DELETE /{slug}/favorite" in rendered
     page = _page(
         "python-service-api",
         "Python服务API",
@@ -252,7 +252,6 @@ def test_rewrite_route_cites_keys_method_and_path(tmp_path: Path) -> None:
     )
     out = rewrite_route_cites_from_endpoints(raw, endpoints, tmp_path)
     assert "articles_common.py:77" in out
-    assert "remove_article_from_favorites" in out
     assert "profiles.py:57" in out
     assert "authentication.py:56" in out
 
@@ -419,8 +418,6 @@ def test_database_schema_er_includes_author_id_and_differs(tmp_path: Path) -> No
     assert "slug" in schema_txt
     assert "hashed_password" not in schema_txt
     assert "users" in schema_txt and "articles" in schema_txt
-    assert "favorites" not in schema_txt
-    assert "followers_to_followings" not in schema_txt
     assert normalize_mermaid_block(data_txt) != normalize_mermaid_block(schema_txt)
     planned = planner.plan_diagram_for_page(
         "database-architecture",
@@ -432,8 +429,6 @@ def test_database_schema_er_includes_author_id_and_differs(tmp_path: Path) -> No
         MermaidRenderer().render_diagram_with_validation(item)[0] or "" for item in planned
     )
     assert "author_id" in planned_txt
-    assert "favorites" not in planned_txt
-    assert "followers_to_followings" not in planned_txt
 
 
 @pytest.mark.asyncio

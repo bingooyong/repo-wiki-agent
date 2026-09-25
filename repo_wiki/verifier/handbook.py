@@ -17,6 +17,7 @@ HANDBOOK_META_PHRASES: tuple[str, ...] = (
 
 GENERATOR_META_REJECTION = "Handbook generator meta content"
 EMPTY_CONTENT_REJECTION = "Empty LLM assistant content"
+EMPTY_SPAN_REJECTION = "Empty inline code span"
 UNCLOSED_FENCE_REJECTION = "Unclosed fenced code block"
 ROLE_CONTRADICTION_REJECTION = "Architecture role contradiction"
 EVIDENCE_META_REJECTION = "Handbook evidence meta talk"
@@ -30,6 +31,7 @@ _PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
         "Insufficient prose content",
         GENERATOR_META_REJECTION,
         EMPTY_CONTENT_REJECTION,
+        EMPTY_SPAN_REJECTION,
         UNCLOSED_FENCE_REJECTION,
         ROLE_CONTRADICTION_REJECTION,
         EVIDENCE_META_REJECTION,
@@ -38,6 +40,12 @@ _PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
 )
 
 _CITE_RE = re.compile(r"<cite>\s*([^<]+?)\s*</cite>", re.IGNORECASE)
+_FACT_DISCLAIMER_RE = re.compile(r"仅出现在说明文档|不应[^。\n]{0,40}当作源码接口|只能使用下列")
+_RAW_ARTEFACT_RE = re.compile(r"<!--\s*raw HTML omitted\s*-->", re.IGNORECASE)
+_NEAR_FACT_SENTENCE_RE = re.compile(
+    r"(?:编排服务名|数据表|CLI 旗标|健康检查路由|本页可核对|源码事实)"
+)
+
 _INSTRUCTION_VOICE_RE = re.compile(
     r"不要只标|如果证据不足|不要在此凭空扩展|不要用套话填空|不要过度推断"
     r"|引用时写|引用时使用"
@@ -164,6 +172,21 @@ def is_transient_server_error(exc: BaseException) -> bool:
         return False
     try:
         return int(status) in {500, 502, 503, 504, 529}
+    except (TypeError, ValueError):
+        return False
+
+
+def is_rate_limit_error(exc: BaseException) -> bool:
+    """True for HTTP 429 / RATE_LIMIT so the composer can back off instead of DEGRADE."""
+    code = str(getattr(exc, "code", "") or "")
+    if code.endswith("RATE_LIMIT") or code == "RATE_LIMIT":
+        return True
+    details = getattr(exc, "details", None) or {}
+    status = details.get("status") if isinstance(details, dict) else None
+    if status is None:
+        return False
+    try:
+        return int(status) == 429
     except (TypeError, ValueError):
         return False
 
@@ -846,7 +869,7 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
             _add("make up")
     core_mains: list[Path] = []
     demo_mains: list[Path] = []
-    for main in sorted(root.glob("cmd/*/main.go")):
+    for main in sorted([*root.glob("cmd/*/main.go"), *root.glob("app/main.go")]):
         docs = ""
         for readme in ("README.md", "README.rst", "README.txt"):
             candidate = main.parent / readme
@@ -886,7 +909,20 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
         path = root / name
         if not path.is_file():
             continue
+        joined: list[str] = []
+        buf = ""
         for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            piece = raw_line.rstrip()
+            if buf:
+                piece = buf + " " + piece.lstrip()
+                buf = ""
+            if piece.endswith("\\"):
+                buf = piece[:-1].rstrip()
+                continue
+            joined.append(piece)
+        if buf:
+            joined.append(buf)
+        for raw_line in joined:
             line = raw_line.strip().lstrip("$").strip()
             if not line or line.startswith("#") or line.startswith(".."):
                 continue
@@ -895,10 +931,14 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
                 if not match:
                     continue
                 command = " ".join(match.group(0).split()).rstrip(".,;:)")
-                if command and len(command) <= 120:
+                if command.endswith("\\"):
+                    continue
+                if command and len(command) <= 240:
                     if _EXAMPLE_CMD_HINT_RE.search(command) and core_mains:
                         continue
                     _add(normalize_go_build_command(command, root))
+    if (root / "example.env").is_file():
+        _add("cp example.env .env")
     has_compose = any(
         token in item.lower()
         for item in commands
@@ -922,48 +962,55 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
 def architecture_core_packages(repo_root: Path) -> list[str]:
     """Entry-point packages plus import-graph neighbors they own.
 
-    Example/demo/scaffold cmd trees are excluded. This is not "every
-    internal/* folder": on a Go cmd repo the cores are the REST/data-plane
-    entries discovered from ListenAndServe + routes.
+    Discovers cmd/*/main.go, app/main.go, domain/, and service packages.
+    Empty means the architecture gate must fail closed.
     """
     from repo_wiki.generator.process_roles import derive_process_roles, path_looks_like_example_cmd
 
     cores: list[str] = []
+    entry_rels: list[str] = []
     for item in derive_process_roles(repo_root):
         if item.example or path_looks_like_example_cmd(item.rel_main):
             continue
-        if not ({"rest_entry", "data_plane"} & set(item.kinds)):
+        if not ({"rest_entry", "data_plane", "http_server"} & set(item.kinds)):
             continue
-        rel = f"cmd/{item.name}"
-        if (repo_root / "cmd" / item.name).is_dir() and rel not in cores:
+        rel = str(Path(item.rel_main).parent.as_posix())
+        if rel and rel not in cores:
             cores.append(rel)
+            entry_rels.append(rel)
 
-    if (repo_root / "app" / "api" / "routes").exists():
-        cores.append("app/api/routes")
-    if (repo_root / "app" / "services").exists() and (
-        repo_root / "app" / "api" / "routes"
-    ).exists():
-        try:
-            from repo_wiki.generator.compose_evidence import load_repo_import_edges
+    try:
+        from repo_wiki.generator.compose_evidence import load_repo_import_edges
 
-            edges = load_repo_import_edges(repo_root)
-        except Exception:
-            edges = set()
-        if any(
-            str(src).replace("\\", "/").startswith("app/api")
-            and str(dest).replace("\\", "/").startswith("app/services")
-            for src, dest in edges
-        ):
-            cores.append("app/services")
+        edges = load_repo_import_edges(repo_root)
+    except Exception:
+        edges = set()
+    for src, dest in edges:
+        src_s = str(src).replace("\\", "/")
+        dest_s = str(dest).replace("\\", "/")
+        if not any(src_s == rel or src_s.startswith(rel + "/") for rel in entry_rels):
+            continue
+        pack = _owned_implementation_package(dest_s)
+        if pack and pack not in cores:
+            cores.append(pack)
 
-    if cores:
-        return cores
+    if (repo_root / "app" / "main.go").is_file() and "app" not in cores:
+        cores.append("app")
+    if (repo_root / "domain").is_dir() and "domain" not in cores:
+        cores.append("domain")
+    for rel in ("app/api/routes", "app/services"):
+        if (repo_root / rel).exists() and rel not in cores:
+            if rel != "app/services" or (repo_root / "app" / "api" / "routes").exists():
+                cores.append(rel)
+    return cores
 
-    fallback: list[str] = []
-    for rel in ("app/api/routes", "app/services", "app/models", "app/db"):
-        if (repo_root / rel).exists():
-            fallback.append(rel)
-    return fallback[:4]
+
+def _owned_implementation_package(spec: str) -> str:
+    parts = [part for part in spec.replace("\\", "/").split("/") if part]
+    for index, part in enumerate(parts):
+        if part in {"internal", "pkg", "app", "domain"} and index + 1 < len(parts):
+            return "/".join(parts[index : index + 2])
+    return ""
 
 
 def architecture_required_packages(repo_root: Path) -> list[str]:
@@ -972,10 +1019,14 @@ def architecture_required_packages(repo_root: Path) -> list[str]:
 
 
 def has_architecture_core_citation(markdown: str, repo_root: Path) -> bool:
-    """True when an architecture page cites every derived core package."""
+    """True when an architecture page cites every derived core package.
+
+    Fail closed when discovery finds nothing: an architecture page without
+    cores is not a pass.
+    """
     cores = architecture_core_packages(repo_root)
     if not cores:
-        return True
+        return False
     cited = " ".join(
         match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")
     ).lower()
@@ -990,10 +1041,19 @@ def data_model_required_sources(repo_root: Path) -> list[str]:
     required: list[str] = []
     if (repo_root / "internal" / "models").is_dir():
         required.append("internal/models")
+    if (repo_root / "domain").is_dir():
+        required.append("domain")
     if (repo_root / "app" / "models" / "domain").is_dir():
         required.append("app/models/domain")
     elif (repo_root / "app" / "models").is_dir():
         required.append("app/models")
+    for pack in _gorm_struct_packages(repo_root):
+        if pack not in required:
+            required.append(pack)
+    for sql in sorted(repo_root.glob("*.sql")):
+        required.append(sql.name)
+    if (repo_root / "db" / "schema.sql").is_file() and "db/schema.sql" not in required:
+        required.append("db/schema.sql")
     migrations = repo_root / "app" / "db" / "migrations"
     alembic = repo_root / "alembic"
     if migrations.exists() and any(migrations.rglob("*")):
@@ -1001,6 +1061,24 @@ def data_model_required_sources(repo_root: Path) -> list[str]:
     elif alembic.is_dir() and any(alembic.rglob("*.py")):
         required.append("alembic")
     return required
+
+
+def _gorm_struct_packages(repo_root: Path) -> list[str]:
+    skip = {".git", ".repo-agent-eval", "vendor", "node_modules"}
+    found: list[str] = []
+    for path in repo_root.rglob("*.go"):
+        if any(part in skip for part in path.parts) or path.name.endswith("_test.go"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if 'gorm:"' not in text and "gorm:" not in text:
+            continue
+        rel = path.parent.relative_to(repo_root).as_posix()
+        if rel not in found:
+            found.append(rel)
+    return found
 
 
 def data_model_optional_sources(repo_root: Path) -> list[str]:
@@ -1156,10 +1234,14 @@ def handbook_reader_hygiene_offenders(
         "evidence_meta_talk": [],
         "missing_h1": [],
         "tiny_body": [],
+        "fact_disclaimer": [],
+        "raw_artefact": [],
+        "repeated_fact_block": [],
     }
     if content_dir is None or not content_dir.exists():
         return {}
     paragraph_pages: dict[str, list[str]] = {}
+    sentence_pages: dict[str, list[str]] = {}
     for path in iter_markdown_pages(content_dir):
         text = path.read_text(encoding="utf-8", errors="ignore")
         rel = path.as_posix()
@@ -1177,6 +1259,10 @@ def handbook_reader_hygiene_offenders(
             text
         ):
             found["tiny_body"].append(rel)
+        if _FACT_DISCLAIMER_RE.search(text):
+            found["fact_disclaimer"].append(rel)
+        if _RAW_ARTEFACT_RE.search(text):
+            found["raw_artefact"].append(rel)
         if repo_root is not None:
             for match in _CITE_RE.finditer(text):
                 raw = match.group(0)
@@ -1188,10 +1274,15 @@ def handbook_reader_hygiene_offenders(
             if len(key) < 80 or "```" in key:
                 continue
             paragraph_pages.setdefault(key, []).append(rel)
+            if _NEAR_FACT_SENTENCE_RE.search(key) or key.count("`") >= 4:
+                sentence_pages.setdefault(key[:160], []).append(rel)
     # Same deterministic dump on 4+ reader pages is the hygiene floor.
     # Do not lower this: emit-once must stop the copy, not the check.
     found["repeated_paragraphs"] = sorted(
         {page for pages in paragraph_pages.values() if len(set(pages)) >= 4 for page in pages}
+    )
+    found["repeated_fact_block"] = sorted(
+        {page for pages in sentence_pages.values() if len(set(pages)) > 3 for page in pages}
     )
     return {key: values for key, values in found.items() if values}
 
@@ -1295,6 +1386,27 @@ def _iter_page_code_units(markdown: str) -> list[str]:
     return units
 
 
+_TYPE_METHOD_RE = re.compile(
+    r"func\s+\(\s*[A-Za-z_]\w*\s+\*?([A-Z][A-Za-z0-9]+)\s*\)\s+([A-Z][A-Za-z0-9]+)"
+)
+
+
+def load_type_method_inventory(repo_root: Path) -> set[str]:
+    """Inventory-verified ``Type.Method`` labels from Go method receivers."""
+    found: set[str] = set()
+    skip = {".git", ".repo-agent-eval", "vendor", "node_modules"}
+    for path in repo_root.rglob("*.go"):
+        if any(part in skip for part in path.parts) or path.name.endswith("_test.go"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for recv, method in _TYPE_METHOD_RE.findall(text):
+            found.add(f"{recv}.{method}")
+    return found
+
+
 def handbook_code_integrity_offenders(
     content_dir: Path | None,
     repo_root: Path | None,
@@ -1317,10 +1429,10 @@ def handbook_code_integrity_offenders(
 
     if content_dir is None or not content_dir.exists() or repo_root is None:
         return {}
-    source_blob = _repo_source_blob(repo_root)
+    source_blob = _repo_source_blob(repo_root, exclude=content_dir)
     raw_replies = raw_replies or _load_raw_replies(content_dir)
-    all_raw = "\n".join((raw_replies or {}).values())
     source_norm = _norm_code_blob(source_blob)
+    type_methods = load_type_method_inventory(repo_root)
     found: dict[str, list[str]] = {}
     for path in iter_markdown_pages(content_dir):
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -1332,9 +1444,8 @@ def handbook_code_integrity_offenders(
         missing: list[str] = []
         if has_unclosed_fence(text):
             missing.append("unclosed-fence")
-        raw_empty = len(empty_inline_spans(raw)) if raw else 0
         empty_count = len(empty_inline_spans(text))
-        if empty_count > raw_empty:
+        if empty_count:
             missing.append(f"empty-span x{empty_count}")
         if raw:
             for unit in sacred_code_offenders(text, raw):
@@ -1344,15 +1455,17 @@ def handbook_code_integrity_offenders(
                 if unit.startswith("```"):
                     body = re.sub(r"^```[^\n]*\n?", "", unit)
                     body = re.sub(r"```$", "", body)
+                if body in type_methods:
+                    continue
                 normalized = _norm_code_blob(body)
-                if normalized and (
-                    normalized in source_norm or body in source_blob or body in all_raw
-                ):
+                if normalized and (normalized in source_norm or body in source_blob):
                     continue
                 missing.append(f"sacred: {unit[:120]}")
         else:
             for kind, body in iter_integrity_code_units(text):
                 if kind == "empty":
+                    continue
+                if body in type_methods:
                     continue
                 normalized = _norm_code_blob(body)
                 if len(normalized) < 3:
@@ -1442,11 +1555,15 @@ def _load_raw_replies(content_dir: Path) -> dict[str, str]:
     return loaded
 
 
-def _repo_source_blob(repo_root: Path) -> str:
+def _repo_source_blob(repo_root: Path, exclude: Path | None = None) -> str:
     skip = {".git", ".repo-agent-eval", "node_modules", "vendor", "__pycache__", ".venv"}
     parts: list[str] = []
     for path in repo_root.rglob("*"):
         if not path.is_file() or any(part in skip for part in path.parts):
+            continue
+        if exclude is not None and (path == exclude or exclude in path.parents):
+            continue
+        if "raw-replies" in path.parts:
             continue
         if path.suffix.lower() not in {
             ".go",

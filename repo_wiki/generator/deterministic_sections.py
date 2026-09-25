@@ -265,7 +265,7 @@ def is_join_er_owner_page(*, page_id: str = "", title: str = "") -> bool:
 
 
 _INVENTED_JOIN_ID_PK_RE = re.compile(
-    r"(?P<head>(?:followers_to_followings|articles_to_tags|favorites)\s*\{)"
+    r"(?P<head>(?:[a-z][a-z0-9_]{2,})\s*\{)"
     r"(?P<body>[^}]*)"
     r"(?P<tail>\})",
     re.S,
@@ -298,9 +298,13 @@ def leftover_request_flow_is_untrustworthy(block: str) -> bool:
         return True
     if re.search(r"GET\s+/force-resync", text):
         return True
-    if "AuthenticationDep" in text and re.search(r"POST\s+/api/users(?!/login)", text):
+    if (
+        re.search(r"Auth\w*Dep", text)
+        and re.search(r"POST\s+/", text)
+        and not re.search(r"/login", text)
+    ):
         return True
-    if "register" in text.lower() and "AuthenticationDep" in text:
+    if "register" in text.lower() and re.search(r"Auth\w*Dep", text):
         return True
     return False
 
@@ -637,23 +641,6 @@ def rewrite_route_cites_from_endpoints(
                 cursor = pos
             pieces.append(line[cursor:])
             line = "".join(pieces)
-        if (
-            "DELETE" in line
-            and "/favorite" in line
-            and "mark_article_as_favorite" in line
-            and "remove_article_from_favorites" not in line
-        ):
-            line = line.replace(
-                "`mark_article_as_favorite`",
-                "`mark_article_as_favorite` 与 `remove_article_from_favorites`",
-                1,
-            )
-            if "remove_article_from_favorites" not in line:
-                line = line.replace(
-                    "mark_article_as_favorite",
-                    "mark_article_as_favorite 与 remove_article_from_favorites",
-                    1,
-                )
         out.append(line)
     return "\n".join(out)
 
@@ -669,9 +656,9 @@ def leftover_mermaid_is_unusable(content: str) -> bool:
             return True
         if "ErrorWrapper" in block:
             return True
-        if re.search(r"\n    (users|articles|tags) \{\s*\n    \}", block):
+        if re.search(r"\n    ([a-z][a-z0-9_]{2,}) \{\s*\n    \}", block):
             return True
-        if "create_updated_at_trigger" in block and "commentaries" not in block.lower():
+        if "version_fn[" in block and "trigger_fn[" in block:
             return True
     return False
 
@@ -912,22 +899,12 @@ def dedupe_identical_fences(content: str) -> str:
 
 
 def strip_header_only_cites(content: str, root: Path) -> str:
+    """Drop header-only cites. Never convert them into new code spans."""
+
     def _keep(match: re.Match[str]) -> str:
         if not is_header_only_cite(match.group(0), root):
             return match.group(0)
-        path = match.group(1).strip()
-        start, end = match.span()
-        line_start = content.rfind("\n", 0, start) + 1
-        line_end = content.find("\n", end)
-        if line_end < 0:
-            line_end = len(content)
-        prefix = content[line_start:start]
-        remainder = (prefix + content[end:line_end]).strip()
-        if prefix.rstrip().endswith(f"`{path}`"):
-            return ""
-        if not remainder:
-            return ""
-        return f"`{path}`"
+        return ""
 
     return _HEADER_CITE_RE.sub(_keep, content)
 
@@ -1057,14 +1034,17 @@ def _go_local_db_start_lines(root: Path) -> list[str]:
 def _health_check_url(root: Path) -> str:
     """Prefer a source listen port; otherwise use a README localhost health URL."""
     from repo_wiki.verifier.handbook import collect_doc_listen_ports
+    from repo_wiki.verifier.source_facts import load_health_routes
 
+    routes = load_health_routes(root)
+    path = routes[0] if routes else "/health"
     port = preferred_source_listen_port(root)
     if port is None:
         docs = collect_doc_listen_ports(read_readme_text(root))
         port = min(docs) if docs else None
     if port is None:
-        return "/health"
-    return f"http://localhost:{port}/health"
+        return path
+    return f"http://localhost:{port}{path}"
 
 
 def _primary_go_binary(root: Path) -> str:
@@ -1081,6 +1061,8 @@ def _primary_go_binary(root: Path) -> str:
         for child in sorted(cmd.iterdir()):
             if child.is_dir() and (child / "main.go").is_file():
                 return child.name
+    if (root / "app" / "main.go").is_file():
+        return "app"
     return "app"
 
 
@@ -1095,6 +1077,18 @@ def build_go_install_section(root: Path) -> str:
     run = cite_readme_line(root, f"./bin/{binary}") or cite_readme_line(root, "./bin/")
     health = cite_readme_line(root, "/health")
     schema_cmd = _schema_import_command(root) or "# 按仓库 README 导入 schema"
+    from repo_wiki.generator.process_roles import derive_process_roles
+
+    roles = derive_process_roles(root)
+    rest = next((item for item in roles if "rest_entry" in item.kinds), None)
+    pkg = Path(rest.rel_main).parent.as_posix() if rest and rest.rel_main else ""
+    if not pkg:
+        if (root / "cmd" / binary / "main.go").is_file():
+            pkg = f"cmd/{binary}"
+        elif (root / "app" / "main.go").is_file():
+            pkg = "app"
+        else:
+            pkg = f"cmd/{binary}"
     return "\n".join(
         [
             "## 安装步骤",
@@ -1124,7 +1118,7 @@ def build_go_install_section(root: Path) -> str:
             "",
             "### 路径 B：本地编译",
             "",
-            f"1. 先按 README 启动本地 MySQL（以及 blackbox-exporter）。 {cite_readme_line(root, 'podman run')}",
+            f"1. 先按 README 启动本地依赖服务。 {cite_readme_line(root, 'podman run')}",
             "",
             "```bash",
             *_go_local_db_start_lines(root),
@@ -1140,7 +1134,7 @@ def build_go_install_section(root: Path) -> str:
             f"3. 编译主 REST/Web 服务。 {build}",
             "",
             "```bash",
-            f"go build -o bin/{binary} ./cmd/{binary}",
+            f"go build -o bin/{binary} ./{pkg}",
             "```",
             "",
             f"4. 启动本地进程并检查健康状态。 {run} {health}",
@@ -1468,7 +1462,7 @@ def build_data_model_cite_block(root: Path) -> str:
             "配置类结构则集中在下表，避免把类型堆成无说明清单。\n\n"
             f"{body}\n\n"
             f"{table}\n"
-            f"表结构见 db/schema.sql。{migrations}\n"
+            f"表结构见 db/schema.sql。 {cite_existing_meaningful(root, 'db/schema.sql')}{migrations}\n"
         )
     models = load_alembic_migration_models(root)
     if not models:
@@ -1479,14 +1473,14 @@ def build_data_model_cite_block(root: Path) -> str:
     domain_dir = root / "app" / "models" / "domain"
     if domain_dir.is_dir():
         domain = cite_existing_meaningful(root, "app/models/domain")
-    migration_cite = cite_first_match(root, rel, r'op\.create_table\(\s*"users"') or (
+    migration_cite = cite_first_match(root, rel, r"op\.create_table\(") or (
         f"<cite>{rel}:1-1</cite>" if (root / rel).is_file() else ""
     )
     return (
         "## 持久化表\n\n"
         f"持久化表以 `{rel}` 为准，当前迁移定义 {names}，外键按迁移列声明。"
-        f" 不存在 profiles 表。 {migration_cite} "
-        f"app/models/domain 是 Pydantic 领域模型，不是 ORM 实体。 {domain}\n"
+        f" {migration_cite} "
+        f"领域模型目录不是 ORM 实体。 {domain}\n"
     )
 
 
@@ -1513,33 +1507,6 @@ def build_security_cite_block(root: Path) -> str:
         f"口令哈希与令牌校验在认证依赖中完成。"
         f" {' '.join(cites[1:])}\n"
     )
-
-
-def build_feature_prose(root: Path) -> str:
-    if (root / "app" / "api" / "routes").is_dir():
-        routes = sorted(
-            path.stem
-            for path in (root / "app" / "api" / "routes").glob("*.py")
-            if path.name != "__init__.py"
-        )
-        if routes:
-            return (
-                "核心功能由路由模块实现，包括 "
-                + "、".join(routes)
-                + " 等请求入口，再进入服务与仓储完成读写。"
-            )
-    if (root / "internal" / "services").is_dir():
-        from repo_wiki.generator.process_roles import derive_process_roles
-
-        rest = next(
-            (item for item in derive_process_roles(root) if "rest_entry" in item.kinds),
-            None,
-        )
-        owner = rest.name if rest is not None else "主 HTTP 入口"
-        return (
-            f"核心功能由 {owner} 对外提供 REST/Web 接口，并由 services 与 repository 完成请求处理。"
-        )
-    return ""
 
 
 def is_header_only_cite(raw: str, repo_root: Path | None) -> bool:
@@ -1788,10 +1755,14 @@ def build_verify_section(root: Path) -> str:
             f"2. 用源码健康检查确认进程存活：`curl {url}` {health}\n"
         )
     if (root / "app" / "main.py").is_file():
+        from repo_wiki.verifier.source_facts import load_health_routes
+
+        routes = load_health_routes(root)
+        path = routes[0] if routes else "/"
         return (
             "## 启动与验证\n\n"
             "1. 按安装步骤准备 `.env` 并完成迁移。\n\n"
-            "2. 用真实路由确认进程存活：`curl http://127.0.0.1:8000/api/tags`\n"
+            f"2. 用真实路由确认进程存活：`curl http://127.0.0.1:8000{path}`\n"
         )
     return ""
 
@@ -1852,21 +1823,12 @@ def apply_deterministic_rewrites(
         pass
     text = re.sub(r"^.*安全实现见.*$", "", text, flags=re.M)
     text = re.sub(r"<cite>\s*[^<]*_test\.go:[^<]*</cite>", "", text, flags=re.I)
-    install_like = any(token in (title or "") for token in ("安装", "快速开始", "环境配置"))
     if is_install_owner_page(page_id=page_id, title=title) or (
-        not page_id
-        and (title in {"安装与配置", "安装指南"} or "## 安装步骤" in text)
-        and not any(token in title for token in ("快速开始", "环境配置"))
+        not page_id and title in {"安装与配置", "安装指南"}
     ):
         section = build_install_section(root)
         if section:
             text = replace_h2_section(text, ("安装步骤",), section)
-    elif install_like or "## 安装步骤" in text:
-        text = replace_h2_section(
-            text,
-            ("安装步骤",),
-            "## 安装步骤\n\n完整步骤见安装与配置，本页不重复命令。\n",
-        )
     arch_like = "架构" in (category or "") or "架构" in (title or "")
     if arch_like and is_architecture_owner_page(page_id=page_id, title=title):
         role = build_go_role_section(root)
@@ -1926,11 +1888,6 @@ def apply_deterministic_rewrites(
     ):
         if "按资源分组的接口" in text:
             text = replace_h2_section(text, ("API 分组",), "## API 分组\n\n本组接口见 API参考。\n")
-    if (
-        not is_data_model_owner_page(page_id=page_id, title=title)
-        and "followers_to_followings" in text
-    ):
-        text = re.sub(r"```mermaid\s*erDiagram.*?```", "", text, flags=re.I | re.S)
     text = strip_invented_join_id_pk(text)
     text = strip_empty_numbered_steps(text)
     text = strip_dangling_colon_leads(text)

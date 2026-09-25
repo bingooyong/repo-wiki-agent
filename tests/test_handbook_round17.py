@@ -58,6 +58,23 @@ _FORBIDDEN_LITERALS = (
     "BizTreeNode",
     "APIAuth",
     "README sample, not in code",
+    "commentaries",
+    "followers_to_followings",
+    "articles_to_tags",
+    "mark_article_as_favorite",
+    "remove_article_from_favorites",
+    "follow_for_user",
+    "unsubscribe_from_user",
+    "/api/articles/{slug}/favorite",
+    "/api/profiles/{username}/follow",
+    "create_updated_at_trigger",
+    "control url",
+    "blackbox-exporter",
+    "authenticationdep",
+    "get_username_from_token",
+    "/api/tags",
+    "profiles.py",
+    "7 张业务表",
 )
 _FORBIDDEN_PATH_JOINS = (
     r"""["']cmd["']\s*,\s*["']ccagent["']""",
@@ -343,17 +360,76 @@ def test_readme_header_range_cite_is_rewritten(tmp_path: Path) -> None:
     assert "authentication.py:21-34" in out
 
 
+def _sample_repo_literals() -> tuple[str, ...]:
+    import os
+    import re
+
+    extra: list[str] = []
+    raw = os.environ.get("REPO_WIKI_SAMPLE_REPOS", "")
+    roots = [Path(item) for item in raw.split(":") if item]
+    roots.extend(
+        path
+        for path in (
+            Path("/tmp/sample-repos"),
+            Path("/tmp/eval-probe"),
+            Path("/tmp/eval-fastapi"),
+        )
+        if path.is_dir()
+    )
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in {
+                ".go",
+                ".py",
+                ".sql",
+                ".yml",
+                ".yaml",
+            }:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            extra.extend(
+                re.findall(r"\b(?:ccagent|ccprobe-control|probe-agent)\b", text, flags=re.I)
+            )
+            extra.extend(re.findall(r"create_table\(\s*[\"']([a-z][a-z0-9_]+)[\"']", text))
+            extra.extend(
+                re.findall(
+                    r"^\s{2}([A-Za-z][A-Za-z0-9_-]*(?:-[A-Za-z0-9_]+)+):\s*$",
+                    text,
+                    flags=re.M,
+                )
+            )
+            extra.extend(
+                re.findall(
+                    r"\b(mark_article\w+|remove_article\w+|follow_for_user|"
+                    r"unsubscribe_from_user|articles_to_tags|followers_to_followings)\b",
+                    text,
+                )
+            )
+    return tuple(
+        sorted({item.lower() for item in extra if len(item) >= 8 and ("_" in item or "-" in item)})
+    )
+
+
 def test_no_repo_specific_literals_in_audited_source() -> None:
     import re
 
     repo = Path(__file__).resolve().parents[1]
+    tokens = {item.lower() for item in _FORBIDDEN_LITERALS}
+    tokens.update(_sample_repo_literals())
     hits: list[str] = []
     for path in sorted((repo / "repo_wiki").rglob("*.py")):
         text = path.read_text(encoding="utf-8")
         rel = path.relative_to(repo).as_posix()
         lowered = text.lower()
-        for token in _FORBIDDEN_LITERALS:
-            if token.lower() in lowered:
+        for token in tokens:
+            if not token:
+                continue
+            if re.search(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", lowered):
                 hits.append(f"{rel}:{token}")
         for pattern in _FORBIDDEN_PATH_JOINS:
             if re.search(pattern, text, flags=re.I):
@@ -362,7 +438,7 @@ def test_no_repo_specific_literals_in_audited_source() -> None:
 
 
 def test_generator_version_is_r17() -> None:
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r18-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r20-")
 
 
 def test_hedged_current_evidence_is_meta_talk() -> None:

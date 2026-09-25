@@ -2726,7 +2726,6 @@ class RepoWikiService:
         return cite_existing_meaningful(self.root, rel)
 
     def _rewrite_install_page_contract(self, page: Any, content: str) -> str:
-        from repo_wiki.generator.composer import is_handbook_install_page
         from repo_wiki.generator.deterministic_sections import (
             build_install_section,
             replace_h2_section,
@@ -2740,19 +2739,8 @@ class RepoWikiService:
             return content
         if is_install_owner_page(page_id=page_id, title=title):
             section = build_install_section(self.root)
-            if not section:
-                return content
-            content = re.sub(
-                r"```(?:bash|sh)\n.*?```", "", content, flags=re.IGNORECASE | re.DOTALL
-            )
-            content = replace_h2_section(content, ("安装步骤",), section)
-        elif is_handbook_install_page(page) or "## 安装步骤" in content:
-            content = replace_h2_section(
-                content,
-                ("安装步骤",),
-                "## 安装步骤\n\n完整步骤见安装与配置，本页不重复命令。\n",
-            )
-        else:
+            if section:
+                content = replace_h2_section(content, ("安装步骤",), section)
             return content
         return content
 
@@ -3507,25 +3495,29 @@ class RepoWikiService:
         return cleaned
 
     def _strip_readme_english_note(self, content: str) -> str:
-        """Drop README maintenance NOTE pasted verbatim into Chinese handbook pages."""
-        cleaned = re.sub(
-            r"\*\*NOTE\*\*\s*:.*?(?=\n|$)",
-            "",
-            content,
-            flags=re.IGNORECASE,
-        )
-        cleaned = re.sub(
-            r"^NOTE\s*:.*?(?=\n|$)",
-            "",
-            cleaned,
-            flags=re.IGNORECASE | re.M,
-        )
-        return re.sub(
-            r"^[A-Za-z][^\n]*\brepository\b[^\n]*\bmaintain\w*[^\n]*$",
-            "",
-            cleaned,
-            flags=re.IGNORECASE | re.M,
-        )
+        """Drop whole-line English maintenance notes; never empty a code span."""
+        from repo_wiki.generator.code_safe import map_outside_code
+
+        def _drop_lines(text: str) -> str:
+            kept: list[str] = []
+            for line in (text or "").splitlines():
+                stripped = line.strip()
+                if re.match(
+                    r"^(?:\*\*NOTE\*\*|NOTE)\s*:",
+                    stripped,
+                    flags=re.IGNORECASE,
+                ):
+                    continue
+                if re.match(
+                    r"^[A-Za-z][^\n]*\brepository\b[^\n]*\bmaintain\w*[^\n]*$",
+                    stripped,
+                    flags=re.IGNORECASE,
+                ):
+                    continue
+                kept.append(line)
+            return "\n".join(kept)
+
+        return map_outside_code(content or "", _drop_lines)
 
     def _strip_empty_blockquotes(self, content: str) -> str:
         lines = [line for line in content.splitlines() if line.strip() not in {">", "> ", ">$"}]
@@ -3611,7 +3603,12 @@ class RepoWikiService:
                     idx -= 1
                 if idx >= 0:
                     prev = out[idx].rstrip()
-                    if prev and not prev.startswith("#") and not prev.startswith("```"):
+                    if (
+                        prev
+                        and not prev.startswith("#")
+                        and "```" not in prev
+                        and not prev.strip().startswith("```")
+                    ):
                         out[idx] = prev + " " + line.strip()
                         pending_blanks.clear()
                         continue
@@ -3695,13 +3692,6 @@ class RepoWikiService:
 
         if fails_floor(content):
             content = self._unwrap_list_items_to_prose(content)
-        if not fails_floor(content):
-            return content
-        from repo_wiki.generator.deterministic_sections import build_feature_prose
-
-        extra = build_feature_prose(self.root)
-        if extra and extra not in content:
-            content = content.rstrip() + "\n\n" + extra + "\n"
         return content
 
     def _unwrap_list_items_to_prose(self, content: str) -> str:

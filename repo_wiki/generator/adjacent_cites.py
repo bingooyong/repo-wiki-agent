@@ -55,7 +55,6 @@ _MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\n]+)\)")
 _PRODUCT_IDENTITY_RE = re.compile(r"产品身份|不再.{0,8}维护|停止主动维护")
 _DANGLING_README_RE = re.compile(r"(?:(?<=[。；])|^)\s*`README\.(?:rst|md)`\s*[。；]?")
 _README_HEADER_CITE_RE = re.compile(r"<cite>\s*(README\.(?:rst|md|txt)):1-1?\d\s*</cite>", re.I)
-_SEVEN_TABLES_RE = re.compile(r"7\s*张业务表")
 _RST_SKIP_RE = re.compile(r"^(?:\.\.|:|\||---+)")
 _NOTE_LINE_RE = re.compile(r"^(?:\.\.\s+note::|\*\*NOTE\*\*\s*:|NOTE\s*:)", re.I)
 _ROUTE_PATH_RE = re.compile(r"`(/[A-Za-z0-9_.:{}/-]*)`")
@@ -181,9 +180,25 @@ def attach_adjacent_cites(
 
     root = Path(workspace_root) if workspace_root is not None else None
     lines = markdown.splitlines()
+    in_fence = [False] * len(lines)
+    fence = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence[index] = True
+            fence = not fence
+            continue
+        in_fence[index] = fence
     tag_index = 0
     for claim in sorted(uncovered, key=lambda item: item.line, reverse=True):
         insert_at = min(max(claim.line, 0), len(lines))
+        claim_idx = max(claim.line - 1, 0)
+        if claim_idx < len(in_fence) and in_fence[claim_idx]:
+            continue
+        if insert_at < len(lines) and "```" in lines[insert_at]:
+            continue
+        if insert_at > 0 and "```" in lines[insert_at - 1]:
+            continue
         claim_text = claim.text or (lines[claim.line - 1] if 0 < claim.line <= len(lines) else "")
         idents = sentence_identifiers(claim_text) if root is not None else set()
         if _is_multifile_summary(claim_text):
@@ -393,8 +408,8 @@ def rewrite_fastapi_intro_cites(
         )
         if mig_cite:
             for index, line in enumerate(lines):
-                if _SEVEN_TABLES_RE.search(line) or re.search(
-                    rf"{re.escape(alembic_rel)}:1-1?\d\b", line
+                if re.search(rf"{re.escape(alembic_rel)}:1-1?\d\b", line) or (
+                    re.search(r"\d+\s*张.{0,12}表", line) and re.search(r"models/", line)
                 ):
                     _replace_adjacent_cite(lines, index, mig_cite)
                     changed = True

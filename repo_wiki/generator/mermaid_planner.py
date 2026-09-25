@@ -196,12 +196,9 @@ def _endpoint_is_anonymous(endpoint: dict[str, Any]) -> bool:
         return True
     if path in {"/healthz", "/health", "/readyz", "/ready", "/live"}:
         return True
-    if method == "POST" and path in {
-        "/api/users",
-        "/users",
-        "/api/users/login",
-        "/users/login",
-    }:
+    if method == "POST" and any(
+        token in path.lower() for token in ("/login", "/register", "/signup", "/signin")
+    ):
         return True
     return False
 
@@ -373,7 +370,7 @@ def _request_flow_score(endpoint: dict[str, Any], page_id: str, tokens: set[str]
     if any(token in leaf for token in ("auth", "认证", "login")):
         if "login" in path or "auth" in file_path:
             score += 5
-        if path.rstrip("/") == "/api/users":
+        if any(token in path.lower() for token in ("login", "register", "signup")):
             score += 4
     return score
 
@@ -384,7 +381,7 @@ _PY_APP_IMPORT_RE = re.compile(
 
 
 def python_app_package_label(path_or_module: str) -> str:
-    """Map ``app/api/routes/articles.py`` / ``app.services.jwt`` to a package label."""
+    """Map a Python route/module path to a package label."""
     text = (path_or_module or "").replace("\\", "/").strip()
     if text.endswith(".py"):
         text = text[:-3]
@@ -1192,7 +1189,6 @@ class MermaidPlanner:
                     page_id,
                     evidence_binding,
                     context,
-                    allow_names={"users", "articles", "commentaries"},
                 )
                 if core:
                     diagrams.append(core)
@@ -1731,7 +1727,7 @@ class MermaidPlanner:
         hit = ""
         for path in sorted(versions.glob("*.py")):
             text = path.read_text(encoding="utf-8", errors="ignore")
-            if "create_updated_at_trigger" in text:
+            if re.search(r"updated_at.*trigger|trigger.*updated_at", text, flags=re.I):
                 hit = path.name[:32]
                 break
         if not hit:
@@ -1743,10 +1739,10 @@ class MermaidPlanner:
             description="Alembic installs update_updated_at_column on tables",
             nodes=[
                 DiagramNode(id="version_fn", label=hit, shape="rectangle"),
-                DiagramNode(id="trigger_fn", label="create_updated_at_trigger", shape="rectangle"),
+                DiagramNode(id="trigger_fn", label="updated_at trigger", shape="rectangle"),
                 DiagramNode(
                     id="tables",
-                    label="users/articles/commentaries timestamps",
+                    label="timestamped tables",
                     shape="rectangle",
                 ),
             ],
@@ -1768,6 +1764,12 @@ class MermaidPlanner:
     ) -> DiagramPlan | None:
         """Plan data model ER diagram."""
         models = [item for item in (context.get("data_models") or []) if isinstance(item, dict)]
+        if not models:
+            root = Path(self.workspace_root) if self.workspace_root else None
+            if root is not None:
+                from repo_wiki.generator.deterministic_sections import load_alembic_migration_models
+
+                models = load_alembic_migration_models(root)
         if allow_names:
             allowed = {name.lower() for name in allow_names}
             models = [
@@ -2091,50 +2093,51 @@ class MermaidPlanner:
                 if "favorite" in text.lower():
                     common = path
                     break
-        profiles = routes / "profiles.py" if routes.is_dir() else None
-        if profiles is not None and not profiles.is_file():
-            profiles = (
-                next(
-                    (
-                        path
-                        for path in routes.rglob("*.py")
-                        if "follow" in path.read_text(encoding="utf-8", errors="ignore").lower()
-                    ),
-                    None,
-                )
-                if routes.is_dir()
-                else None
-            )
-        if not (common and Path(common).is_file() and profiles and Path(profiles).is_file()):
+        follow = None
+        if routes.is_dir():
+            for path in routes.rglob("*.py"):
+                if path == common:
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    continue
+                if "follow" in text.lower():
+                    follow = path
+                    break
+        if not (common and Path(common).is_file() and follow and Path(follow).is_file()):
+            return None
+        participants = ["Client"]
+        messages: list[tuple[str, str, str]] = []
+        for path in (Path(common), Path(follow)):
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for match in re.finditer(
+                r"@(?:\w+\.)?(post|delete|put|get)\(\s*[\"']([^\"']+)[\"']",
+                text,
+                flags=re.I,
+            ):
+                method = match.group(1).upper()
+                route = match.group(2)
+                after = text[match.end() : match.end() + 400]
+                func = re.search(r"def\s+([A-Za-z_][A-Za-z0-9_]*)", after)
+                if not func:
+                    continue
+                name = func.group(1)
+                if name not in participants:
+                    participants.append(name)
+                messages.append(("Client", name, f"{method} {route}"))
+        if len(messages) < 2:
             return None
         return DiagramPlan(
-            diagram_id=f"{page_id}-favorite-follow",
+            diagram_id=f"{page_id}-route-dispatch",
             diagram_type=MermaidDiagramType.SEQUENCE_DIAGRAM,
-            title="Favorite and follow dispatch",
-            description="POST/DELETE favorite and follow hit distinct handlers",
-            sequence_participants=[
-                "Client",
-                "mark_article_as_favorite",
-                "remove_article_from_favorites",
-                "follow_for_user",
-                "unsubscribe_from_user",
-                "ArticlesRepository",
-                "ProfilesRepository",
-            ],
-            sequence_messages=[
-                ("Client", "mark_article_as_favorite", "POST /api/articles/{slug}/favorite"),
-                ("mark_article_as_favorite", "ArticlesRepository", "add_article_into_favorites"),
-                ("Client", "remove_article_from_favorites", "DELETE /api/articles/{slug}/favorite"),
-                (
-                    "remove_article_from_favorites",
-                    "ArticlesRepository",
-                    "remove_article_from_favorites",
-                ),
-                ("Client", "follow_for_user", "POST /api/profiles/{username}/follow"),
-                ("follow_for_user", "ProfilesRepository", "add_user_into_followers"),
-                ("Client", "unsubscribe_from_user", "DELETE /api/profiles/{username}/follow"),
-                ("unsubscribe_from_user", "ProfilesRepository", "remove_user_from_followers"),
-            ],
+            title="Route dispatch",
+            description="Discovered handlers for mutating routes",
+            sequence_participants=participants[:8],
+            sequence_messages=messages[:8],
             evidence_spans=[c.span for c in evidence_binding.candidates]
             if evidence_binding
             else [],
@@ -2154,13 +2157,8 @@ class MermaidPlanner:
                 from repo_wiki.generator.deterministic_sections import load_alembic_migration_models
 
                 models = load_alembic_migration_models(root)
-        tables = [
-            item
-            for item in models
-            if str(item.get("type") or "") in {"", "migration_table"}
-            and mermaid_er_field(str(item.get("name") or item.get("table") or "")).lower()
-            in {"users", "articles", "commentaries"}
-        ]
+        tables = [item for item in models if str(item.get("type") or "") in {"", "migration_table"}]
+        tables = tables[:8]
         if not tables:
             return None
         er_entities = []
@@ -2179,21 +2177,7 @@ class MermaidPlanner:
                     continue
                 raw_type = attr_types[index] if index < len(attr_types) else "string"
                 attributes.append({"name": name, "type": _mermaid_scalar_type(raw_type)})
-            if entity_name.lower() == "articles" and not any(
-                attr["name"] == "author_id" for attr in attributes
-            ):
-                attributes.append({"name": "author_id", "type": "int"})
-            if entity_name.lower() == "articles" and not any(
-                attr["name"] == "slug" for attr in attributes
-            ):
-                attributes.append({"name": "slug", "type": "string"})
-            key_cols = {
-                "users": {"id", "username", "email"},
-                "articles": {"id", "slug", "author_id"},
-                "commentaries": {"id", "author_id", "article_id"},
-            }.get(entity_name.lower(), set())
-            if key_cols:
-                attributes = [attr for attr in attributes if attr["name"] in key_cols]
+            attributes = attributes[:8]
             extra_pks = [
                 mermaid_er_field(str(item))
                 for item in (model.get("primary_keys") or [])
@@ -2212,13 +2196,23 @@ class MermaidPlanner:
                 parts = raw.split(":")
                 dest = mermaid_er_field(parts[1] if len(parts) >= 2 else raw)
                 label = mermaid_er_field(parts[2] if len(parts) >= 3 else "fk")
-                if dest.lower() in {"users", "articles", "commentaries"} and dest != entity_name:
+                if dest and dest != entity_name:
                     relationships.append((dest, entity_name, label or "fk"))
-        if "users" in have and "articles" in have:
-            if not any(label == "author_id" for _src, _dst, label in relationships):
-                relationships.append(("users", "articles", "author_id"))
         if not er_entities:
             return None
+        root = Path(self.workspace_root) if self.workspace_root else None
+        if root is not None and (
+            (root / "app" / "db" / "migrations" / "versions").is_dir()
+            or (root / "alembic").is_dir()
+        ):
+            er_entities.append(
+                {
+                    "entity": "alembic_version",
+                    "attributes": [{"name": "version_num", "type": "string"}],
+                    "primary_key": "version_num",
+                    "primary_keys": ["version_num"],
+                }
+            )
         return DiagramPlan(
             diagram_id=f"{page_id}-schema-tables",
             diagram_type=MermaidDiagramType.ER_DIAGRAM,
@@ -2244,18 +2238,34 @@ class MermaidPlanner:
         auth = root / "app" / "api" / "dependencies" / "authentication.py"
         if not (jwt.is_file() and auth.is_file()):
             return None
+        try:
+            jwt_text = jwt.read_text(encoding="utf-8", errors="ignore")
+            auth_text = auth.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return None
+        auth_class = re.search(r"class\s+([A-Z][A-Za-z0-9]+)", auth_text)
+        auth_fn = re.search(r"def\s+([A-Za-z_][A-Za-z0-9_]*)", auth_text)
+        jwt_class = re.search(r"class\s+([A-Z][A-Za-z0-9]+)", jwt_text)
+        jwt_fn = re.search(
+            r"def\s+(get_\w+|decode_\w+|verify_\w+|[A-Za-z_][A-Za-z0-9_]*)", jwt_text
+        )
+        dep_name = auth_class or auth_fn or jwt_class
+        if not dep_name:
+            return None
         from repo_wiki.generator.compose_evidence import jwt_token_prefix
 
         prefix = jwt_token_prefix(root)
+        dep_name = dep_name.group(1)
+        fn_name = jwt_fn.group(1) if jwt_fn else dep_name
         return DiagramPlan(
             diagram_id=f"{page_id}-jwt-sequence",
             diagram_type=MermaidDiagramType.SEQUENCE_DIAGRAM,
             title="JWT authentication",
             description="Route dependency verifies JWT",
-            sequence_participants=["Client", "AuthenticationDep", "jwt"],
+            sequence_participants=["Client", dep_name, "jwt"],
             sequence_messages=[
-                ("Client", "AuthenticationDep", f"{prefix} token"),
-                ("AuthenticationDep", "jwt", "get_username_from_token"),
+                ("Client", dep_name, f"{prefix} token"),
+                (dep_name, "jwt", fn_name),
             ],
             evidence_spans=[c.span for c in evidence_binding.candidates]
             if evidence_binding

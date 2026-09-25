@@ -198,46 +198,89 @@ def _imported_route_text(root: Path, main_text: str) -> str:
     return "\n".join(extra)
 
 
+def _process_from_main(
+    base: Path,
+    main: Path,
+    name: str,
+    compose_names: set[str],
+    readme_run: str,
+) -> RepoProcess | None:
+    text = _read_text(main)
+    if not text:
+        return None
+    docs = ""
+    for readme in ("README.md", "README.rst", "README.txt"):
+        candidate = main.parent / readme
+        if candidate.is_file():
+            docs = _read_text(candidate)
+            break
+    combined = "\n".join([text, docs, _imported_route_text(base, text)])
+    kinds: set[str] = set()
+    if _DATA_PLANE_RE.search(combined):
+        kinds.add("data_plane")
+    if _CONTROL_PLANE_RE.search(combined):
+        kinds.add("control_plane")
+    if _TUNNEL_CLIENT_RE.search(combined):
+        kinds.add("tunnel_client")
+    if _HTTP_SERVER_RE.search(combined):
+        kinds.add("http_server")
+    return RepoProcess(
+        name=name,
+        rel_main=main.relative_to(base).as_posix(),
+        text=combined,
+        docs=docs,
+        route_count=_route_count(combined),
+        example=_is_example_text(docs, text[:800]),
+        in_compose=name.lower() in {item.lower() for item in compose_names},
+        in_readme_run=name.lower() in readme_run,
+        kinds=frozenset(kinds),
+    )
+
+
 def discover_cmd_processes(root: Path | str | None) -> list[RepoProcess]:
-    """Return cmd/* binaries that have Go sources."""
+    """Return Go entry binaries from cmd/*/main.go or app/main.go."""
     if root is None:
         return []
     base = Path(root)
-    cmd = base / "cmd"
-    if not cmd.is_dir():
-        return []
     compose_names = _compose_service_names(base)
     readme_run = _readme_run_blob(base).lower()
     found: list[RepoProcess] = []
-    for child in sorted(cmd.iterdir()):
-        if not child.is_dir():
-            continue
-        rel_main, text, docs = _cmd_package_text(base, child)
-        if not text:
-            continue
-        combined = "\n".join([text, docs, _imported_route_text(base, text)])
-        kinds: set[str] = set()
-        if _DATA_PLANE_RE.search(combined):
-            kinds.add("data_plane")
-        if _CONTROL_PLANE_RE.search(combined):
-            kinds.add("control_plane")
-        if _TUNNEL_CLIENT_RE.search(combined):
-            kinds.add("tunnel_client")
-        if _HTTP_SERVER_RE.search(combined):
-            kinds.add("http_server")
-        found.append(
-            RepoProcess(
-                name=child.name,
-                rel_main=rel_main,
-                text=combined,
-                docs=docs,
-                route_count=_route_count(combined),
-                example=_is_example_text(docs, text[:800]),
-                in_compose=child.name.lower() in {item.lower() for item in compose_names},
-                in_readme_run=child.name.lower() in readme_run,
-                kinds=frozenset(kinds),
+    cmd = base / "cmd"
+    if cmd.is_dir():
+        for child in sorted(cmd.iterdir()):
+            if not child.is_dir():
+                continue
+            rel_main, text, docs = _cmd_package_text(base, child)
+            if not text:
+                continue
+            combined = "\n".join([text, docs, _imported_route_text(base, text)])
+            kinds: set[str] = set()
+            if _DATA_PLANE_RE.search(combined):
+                kinds.add("data_plane")
+            if _CONTROL_PLANE_RE.search(combined):
+                kinds.add("control_plane")
+            if _TUNNEL_CLIENT_RE.search(combined):
+                kinds.add("tunnel_client")
+            if _HTTP_SERVER_RE.search(combined):
+                kinds.add("http_server")
+            found.append(
+                RepoProcess(
+                    name=child.name,
+                    rel_main=rel_main,
+                    text=combined,
+                    docs=docs,
+                    route_count=_route_count(combined),
+                    example=_is_example_text(docs, text[:800]),
+                    in_compose=child.name.lower() in {item.lower() for item in compose_names},
+                    in_readme_run=child.name.lower() in readme_run,
+                    kinds=frozenset(kinds),
+                )
             )
-        )
+    app_main = base / "app" / "main.go"
+    if app_main.is_file() and not any(item.rel_main == "app/main.go" for item in found):
+        item = _process_from_main(base, app_main, "app", compose_names, readme_run)
+        if item is not None:
+            found.append(item)
     return found
 
 
@@ -428,8 +471,8 @@ def repo_has_python_app(root: Path | str | None) -> bool:
 def unknown_process_mentions(markdown: str, allowed: set[str]) -> list[str]:
     """Process/binary names claimed in prose that are not in the documented repo.
 
-    Standalone kebab tokens such as volume names (``ha-agent-a1-data``) or
-    generic slugs (``api-server``) are ignored. Only ``cmd/X``,
+    Standalone kebab tokens such as volume names or generic slugs are
+    ignored. Only ``cmd/X``,
     ``X 进程/二进制/服务``, and explicit REST/data-plane/control-plane role
     claims are considered.
     """

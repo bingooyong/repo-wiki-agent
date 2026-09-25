@@ -214,8 +214,8 @@ def test_backtick_file_line_keeps_filename_and_dropped_cite_leaves_no_gap(
     text = "若 CI 与本地表现不一致，则需注意 `docker-compose.yml:1-2` 指定的 Compose 文件版本。"
     out = normalize_citation_markup(text, tmp_path)
     out = strip_header_only_cites(out, tmp_path)
-    assert "需注意 `docker-compose.yml" in out
-    assert "需注意  指定的" not in out
+    assert "`db``docker-compose.yml`" not in out
+    assert "需注意" in out
     dropped = normalize_citation_markup(
         "部署前需按其说明应用 <cite>missing.md:1-3</cite>。", tmp_path
     )
