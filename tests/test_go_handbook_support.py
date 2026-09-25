@@ -21,7 +21,6 @@ from repo_wiki.generator.mermaid_planner import (
     validate_mermaid_syntax,
 )
 from repo_wiki.orchestration.service import RepoWikiService, _is_filename_like_handbook_title
-from repo_wiki.verifier.api_claim_inventory import api_claim_in_inventory
 from repo_wiki.planner.identity import resolve_repository_identity
 from repo_wiki.planner.rule_first import RuleFirstPlanner, _is_filename_like_module_name
 from repo_wiki.planner.schema import (
@@ -46,6 +45,7 @@ from repo_wiki.scanner.multi_runtime_scanner_v3 import (
 )
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 from repo_wiki.scanner.source_spans import SourceSpanExtractor
+from repo_wiki.verifier.api_claim_inventory import api_claim_in_inventory
 from repo_wiki.verifier.handbook import (
     has_fenced_install_run_command,
     install_run_clue_count,
