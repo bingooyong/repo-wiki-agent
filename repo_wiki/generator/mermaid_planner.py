@@ -189,7 +189,12 @@ def _endpoint_is_anonymous(endpoint: dict[str, Any]) -> bool:
         return True
     if path in {"/healthz", "/health", "/readyz", "/ready", "/live"}:
         return True
-    if method == "POST" and path in {"/api/users", "/users"}:
+    if method == "POST" and path in {
+        "/api/users",
+        "/users",
+        "/api/users/login",
+        "/users/login",
+    }:
         return True
     return False
 
@@ -883,16 +888,21 @@ class MermaidPlanner:
             auth = self._plan_auth_flow_diagram(page_id, evidence_binding, context)
             if auth:
                 diagrams.append(auth)
-        elif page_type in {"architecture", "overview"}:
-            diagram = self._plan_overview_architecture_diagram(page_id, evidence_binding, context)
-            if diagram:
-                diagrams.append(diagram)
-            tunnel = self._plan_grpc_tunnel(page_id, evidence_binding, context)
-            if tunnel:
-                diagrams.append(tunnel)
+        elif page_type == "overview":
+            modules = self._plan_overview_module_flow(page_id, evidence_binding, context)
+            if modules:
+                diagrams.append(modules)
             settings = self._plan_settings_flow(page_id, evidence_binding, context)
             if settings:
                 diagrams.append(settings)
+        elif page_type == "architecture":
+            diagram = self._plan_overview_architecture_diagram(page_id, evidence_binding, context)
+            if diagram:
+                diagrams.append(diagram)
+            if _is_full_architecture_page(page_id):
+                tunnel = self._plan_grpc_tunnel(page_id, evidence_binding, context)
+                if tunnel:
+                    diagrams.append(tunnel)
 
         elif page_type in ("service", "section", "development"):
             diagram = self._plan_service_diagram(page_id, evidence_binding, context)
@@ -930,19 +940,33 @@ class MermaidPlanner:
             )
 
             pid = page_id or ""
-            diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
-            if diagram:
-                diagrams.append(diagram)
-            if is_join_er_owner_page(page_id=pid, title="") or (
-                not is_data_model_owner_page(page_id=pid, title="")
-                and any(
-                    token in pid.lower() for token in ("schema", "database", "migration", "迁移")
+            satellite = any(
+                token in pid.lower()
+                for token in (
+                    "schema",
+                    "database-architecture",
+                    "database-migration",
+                    "migration",
+                    "迁移",
                 )
-            ):
+            )
+            if is_data_model_owner_page(page_id=pid, title="") or not satellite:
+                diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
+                if diagram:
+                    diagrams.append(diagram)
+            if is_join_er_owner_page(page_id=pid, title=""):
                 keys = self._plan_join_key_diagram(page_id, evidence_binding, context)
                 if keys:
                     diagrams.append(keys)
             if any(token in pid.lower() for token in ("migration", "迁移")):
+                core = self._plan_data_model_diagram(
+                    page_id,
+                    evidence_binding,
+                    context,
+                    allow_names={"users", "articles", "commentaries"},
+                )
+                if core:
+                    diagrams.append(core)
                 migration = self._plan_migration_flow(page_id, evidence_binding, context)
                 if migration:
                     diagrams.append(migration)
@@ -1511,9 +1535,18 @@ class MermaidPlanner:
         page_id: str,
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
+        allow_names: set[str] | None = None,
     ) -> DiagramPlan | None:
         """Plan data model ER diagram."""
         models = [item for item in (context.get("data_models") or []) if isinstance(item, dict)]
+        if allow_names:
+            allowed = {name.lower() for name in allow_names}
+            models = [
+                item
+                for item in models
+                if mermaid_er_field(str(item.get("name") or item.get("table") or "")).lower()
+                in allowed
+            ]
         product_models = [
             item
             for item in models
@@ -1773,6 +1806,57 @@ class MermaidPlanner:
             else [],
         )
 
+    def _plan_overview_module_flow(
+        self,
+        page_id: str,
+        evidence_binding: PageEvidenceBinding | None,
+        context: dict[str, Any],
+    ) -> DiagramPlan | None:
+        """Product package map for 项目概述 — not the architecture import graph."""
+        skip = {"__init__.py", "tests", "test", "docs", "scripts"}
+        nodes: list[DiagramNode] = []
+        edges: list[DiagramEdge] = []
+        seen_nodes: set[str] = set()
+        seen_edges: set[tuple[str, str]] = set()
+        for index, module in enumerate(context.get("modules") or []):
+            name, path = _module_name_and_path(module, index)
+            label = name if not name.endswith(".py") else (path.strip("/").split("/")[0] or name)
+            if not label or label in skip or label.endswith(".py"):
+                continue
+            ident = mermaid_ident(label)
+            if ident not in seen_nodes:
+                seen_nodes.add(ident)
+                nodes.append(DiagramNode(id=ident, label=label, shape="rectangle"))
+            depends = []
+            if isinstance(module, dict):
+                depends = list(module.get("depends_on") or module.get("dependencies") or [])
+            for dest in depends:
+                dest_label = str(dest).strip()
+                if not dest_label or dest_label in skip or dest_label.endswith(".py"):
+                    continue
+                dest_id = mermaid_ident(dest_label)
+                if dest_id not in seen_nodes:
+                    seen_nodes.add(dest_id)
+                    nodes.append(DiagramNode(id=dest_id, label=dest_label, shape="rectangle"))
+                pair = (ident, dest_id)
+                if pair not in seen_edges and ident != dest_id:
+                    seen_edges.add(pair)
+                    edges.append(DiagramEdge(from_node=ident, to_node=dest_id))
+        if len(edges) < 2:
+            return None
+        used = {edge.from_node for edge in edges} | {edge.to_node for edge in edges}
+        return DiagramPlan(
+            diagram_id=f"{page_id}-overview-modules",
+            diagram_type=MermaidDiagramType.FLOWCHART,
+            title="Product modules",
+            description="Application packages named on the overview page",
+            nodes=[node for node in nodes if node.id in used],
+            edges=edges,
+            evidence_spans=[c.span for c in evidence_binding.candidates]
+            if evidence_binding
+            else [],
+        )
+
     def _plan_jwt_sequence(
         self,
         page_id: str,
@@ -1794,10 +1878,10 @@ class MermaidPlanner:
             diagram_type=MermaidDiagramType.SEQUENCE_DIAGRAM,
             title="JWT authentication",
             description="Route dependency verifies JWT",
-            sequence_participants=["Client", "AuthenticationDep", "JWTService"],
+            sequence_participants=["Client", "AuthenticationDep", "jwt"],
             sequence_messages=[
                 ("Client", "AuthenticationDep", f"{prefix} token"),
-                ("AuthenticationDep", "JWTService", "decode/verify"),
+                ("AuthenticationDep", "jwt", "get_username_from_token"),
             ],
             evidence_spans=[c.span for c in evidence_binding.candidates]
             if evidence_binding
@@ -1925,7 +2009,15 @@ class MermaidPlanner:
             ):
                 sample = endpoints[-1]
         elif "python" in leaf:
-            sample = selected[0]
+            sample = next(
+                (
+                    item
+                    for item in selected
+                    if "article" in str(item.get("path") or "").lower()
+                    or "tag" in str(item.get("path") or "").lower()
+                ),
+                selected[0],
+            )
         else:
             sample = selected[0]
         method, path = _honest_method_path(sample, root)
@@ -2217,9 +2309,10 @@ class MermaidRenderer:
         for from_p, to_p, message in plan.sequence_messages:
             if to_p == "Client":
                 continue
-            if not str(message or "").strip():
+            label = re.sub(r"<cite>[^<]*</cite>", "", str(message or "")).strip()
+            if not label:
                 continue
-            lines.append(f"    {from_p}->>{to_p}: {message}")
+            lines.append(f"    {from_p}->>{to_p}: {label}")
 
         return "\n".join(lines)
 

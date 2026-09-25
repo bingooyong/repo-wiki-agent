@@ -2413,6 +2413,12 @@ class RepoWikiService:
         content = sanitize_leftover_handbook_mermaid(content)
         content = self._strip_reading_notes_boilerplate(content)
         content = self._strip_readme_english_note(content)
+        if self._fallback_is_onboarding_page(page):
+            from repo_wiki.generator.deterministic_sections import (
+                ensure_overview_names_framework,
+            )
+
+            content = ensure_overview_names_framework(content, self.root)
 
         is_api_like_page = self._is_qoder_api_contract_page(page)
         if is_api_like_page:
@@ -3148,11 +3154,7 @@ class RepoWikiService:
             mermaid_key = normalize_mermaid_block(rendered)
             is_er = "erDiagram" in rendered
             is_seq = "sequenceDiagram" in rendered and "->>" in rendered
-            from repo_wiki.planner.schema import WikiTaxonomyCategory as _Cat
-
-            force_er = is_er and getattr(page, "category", None) == _Cat.DATA_MODELS
-            force_arch = getattr(page, "category", None) == _Cat.ARCHITECTURE_DESIGN
-            if mermaid_key in self._seen_mermaid_hashes and not force_er and not force_arch:
+            if mermaid_key in self._seen_mermaid_hashes:
                 continue
             if not is_er and not is_seq and mermaid_edge_count(rendered) < 2:
                 continue
@@ -3178,16 +3180,6 @@ class RepoWikiService:
                     if mermaid_key not in self._seen_mermaid_hashes:
                         self._seen_mermaid_hashes.add(mermaid_key)
                         rendered_blocks.append(f"```mermaid\n{rendered}\n```")
-                    elif "->>" in rendered:
-                        unique = rendered.replace(
-                            "sequenceDiagram",
-                            f"sequenceDiagram\n    Note over Client: {str(getattr(page, 'title', '') or page.page_id)[:24]}",
-                            1,
-                        )
-                        unique_key = normalize_mermaid_block(unique)
-                        if unique_key not in self._seen_mermaid_hashes:
-                            self._seen_mermaid_hashes.add(unique_key)
-                            rendered_blocks.append(f"```mermaid\n{unique}\n```")
         return rendered_blocks
 
     def _rebuild_qoder_toc_from_real_h2s(self, page: Any, content: str) -> str:

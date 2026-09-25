@@ -98,6 +98,51 @@ def is_data_model_owner_page(*, page_id: str = "", title: str = "") -> bool:
     return pid in _DATA_MODEL_OWNER_IDS or (title or "") in {"数据模型"}
 
 
+def derive_framework_stack(root: Path) -> str:
+    """Name the web framework from pyproject or application imports."""
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            text = pyproject.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            text = ""
+        if re.search(r"\bfastapi\b", text, flags=re.I):
+            return "FastAPI"
+    search_roots = [root / "app", root / "src", root]
+    seen: set[Path] = set()
+    for base in search_roots:
+        if not base.exists():
+            continue
+        paths = [base] if base.is_file() else list(base.rglob("*.py"))
+        for path in paths[:80]:
+            if path in seen or not path.is_file():
+                continue
+            seen.add(path)
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if re.search(r"\bfrom fastapi\b|\bimport fastapi\b|\bFastAPI\s*\(", text):
+                return "FastAPI"
+    return ""
+
+
+def ensure_overview_names_framework(content: str, root: Path) -> str:
+    """State the detected framework on the overview page when the model omitted it."""
+    framework = derive_framework_stack(root)
+    if not framework:
+        return content or ""
+    if framework.lower() in (content or "").lower():
+        return content or ""
+    sentence = f"本仓库的 Web 框架是 {framework}，技术栈由 pyproject 与应用入口导入确定。"
+    text = content or ""
+    lines = text.splitlines()
+    if lines and lines[0].startswith("#"):
+        rest = "\n".join(lines[1:]).lstrip("\n")
+        return f"{lines[0]}\n\n{sentence}\n\n{rest}".rstrip() + "\n"
+    return f"{sentence}\n\n{text}".lstrip()
+
+
 def is_join_er_owner_page(*, page_id: str = "", title: str = "") -> bool:
     pid = (page_id or "").lower().rsplit("/", 1)[-1]
     title_s = title or ""
@@ -358,28 +403,34 @@ def rewrite_route_methods_from_table(content: str, root: Path) -> str:
 def attach_missing_route_cites(content: str, endpoints: list[dict] | None) -> str:
     if not endpoints:
         return content or ""
-    by_path: dict[str, dict] = {}
+    by_route: dict[tuple[str, str], dict] = {}
     for item in endpoints:
         path = str(item.get("path") or "")
-        if path:
-            by_path[path] = item
+        method = str(item.get("method") or "").upper()
+        if path and method:
+            by_route[(method, path)] = item
     out: list[str] = []
     claim = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\s+(/[A-Za-z0-9_/{}.:-]*)")
+    in_fence = False
     for line in (content or "").splitlines():
-        if "<cite>" in line or not claim.search(line):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            out.append(line)
+            continue
+        if in_fence or "<cite>" in line or not claim.search(line):
             out.append(line)
             continue
         match = claim.search(line)
         if match is None:
             out.append(line)
             continue
-        found = by_path.get(match.group(2))
+        found = by_route.get((match.group(1).upper(), match.group(2)))
         if found is None:
             out.append(line)
             continue
-        item = found
-        file_path = str(item.get("file_path") or "")
-        line_no = int(item.get("line_number") or item.get("line_start") or 0)
+        file_path = str(found.get("file_path") or "")
+        line_no = int(found.get("line_number") or found.get("line_start") or 0)
         if file_path and line_no > 0:
             out.append(f"{line.rstrip()} <cite>{file_path}:{line_no}-{line_no}</cite>")
         else:
