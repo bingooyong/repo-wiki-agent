@@ -3177,7 +3177,8 @@ class RepoWikiService:
             mermaid_key = normalize_mermaid_block(rendered)
             is_er = "erDiagram" in rendered
             is_seq = "sequenceDiagram" in rendered and "->>" in rendered
-            if mermaid_key in self._seen_mermaid_hashes:
+            page_needs_er = getattr(page, "category", None) == WikiTaxonomyCategory.DATA_MODELS
+            if mermaid_key in self._seen_mermaid_hashes and not (is_er and page_needs_er):
                 continue
             if not is_er and not is_seq and mermaid_edge_count(rendered) < 2:
                 continue
@@ -3259,6 +3260,14 @@ class RepoWikiService:
                     markdown = (
                         markdown.rstrip() + "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
                     )
+            page_results[idx] = (path, markdown)
+        for idx in sorted(page_results):
+            if idx < 0 or idx >= len(pages_to_compose):
+                continue
+            page = pages_to_compose[idx]
+            path, markdown = page_results[idx]
+            markdown = self._ensure_minimum_prose_density(markdown, page)
+            markdown = self._rebuild_qoder_toc_from_real_h2s(page, markdown)
             page_results[idx] = (path, markdown)
 
     def _rebuild_qoder_toc_from_real_h2s(self, page: Any, content: str) -> str:

@@ -333,6 +333,35 @@ def test_emit_once_ownership_follows_page_order_not_completion(tmp_path: Path) -
     assert len(hashes) == len(set(hashes))
 
 
+def test_data_model_pages_keep_required_er_after_emit_once(tmp_path: Path) -> None:
+    root = _fastapi_repo(tmp_path)
+    versions = root / "app" / "db" / "migrations" / "versions"
+    versions.mkdir(parents=True, exist_ok=True)
+    (versions / "fdf8821871d7_main_tables.py").write_text(
+        'op.create_table("users", sa.Column("id", sa.Integer, primary_key=True))\n'
+        'op.create_table("articles", sa.Column("id", sa.Integer, primary_key=True), '
+        'sa.Column("author_id", sa.Integer, sa.ForeignKey("users.id")))\n',
+        encoding="utf-8",
+    )
+    service = _service(root)
+    context = _py_context(root)
+    owner = _page(
+        "data-models-overview", "数据模型", WikiTaxonomyCategory.DATA_MODELS, "数据模型.md"
+    )
+    satellite = _page(
+        "database-migration-strategy",
+        "数据迁移策略",
+        WikiTaxonomyCategory.DATA_MODELS,
+        "数据迁移策略.md",
+    )
+    raw_owner = "# 数据模型\n\nusers 与 articles 有 author_id 外键关系。\n"
+    raw_sat = "# 数据迁移策略\n\nAlembic 迁移建立 users 与 articles 的关联。\n"
+    page_results = {0: (owner.output_path, raw_owner), 1: (satellite.output_path, raw_sat)}
+    service._inject_planner_mermaid_in_page_order([owner, satellite], page_results, {}, context)
+    assert any("erDiagram" in block for block in _mermaid_bodies(page_results[0][1]))
+    assert any("erDiagram" in block for block in _mermaid_bodies(page_results[1][1]))
+
+
 def test_database_schema_er_includes_author_id_and_differs(tmp_path: Path) -> None:
     root = _fastapi_repo(tmp_path)
     versions = root / "app" / "db" / "migrations" / "versions"
