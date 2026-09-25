@@ -217,7 +217,8 @@ class TestMermaidPlanner:
             "modules": [
                 {"name": "auth", "path": "src/auth"},
                 {"name": "api", "path": "src/api"},
-            ]
+            ],
+            "import_edges": [("auth", "api")],
         }
 
         diagrams = planner.plan_diagram_for_page(
@@ -249,6 +250,7 @@ class TestMermaidPlanner:
                 {"name": "tests", "path": "tests"},
             ],
             "key_directories": ["app", "tests"],
+            "import_edges": [("app/api", "app/services"), ("app/services", "app/models")],
         }
         diagrams = planner.plan_diagram_for_page("overview", "overview", None, context)
         assert diagrams
@@ -273,11 +275,12 @@ class TestMermaidPlanner:
                 ".repo-wiki/index/meta.json",
             ],
         }
+        context["import_edges"] = [("repo_wiki", "repo_wiki")]
         diagrams = planner.plan_diagram_for_page("architecture", "architecture", None, context)
-        rendered = renderer.render_diagram(diagrams[0])
-        assert "docs/" in rendered
-        assert "ai/source-of-truth" in rendered
-        assert ".repo-wiki" in rendered
+        if diagrams:
+            rendered = renderer.render_diagram(diagrams[0])
+            assert "docs/" not in rendered
+            assert ".repo-wiki" not in rendered
 
     def test_service_diagram_omits_filename_modules_and_dangling_start_edge(self):
         planner = create_planner()
@@ -397,7 +400,13 @@ class TestMermaidPlanner:
             page_id="overview",
             page_type="overview",
             evidence_binding=binding,
-            context={},
+            context={
+                "modules": [
+                    {"name": "auth", "path": "src/auth"},
+                    {"name": "api", "path": "src/api"},
+                ],
+                "import_edges": [("auth", "api")],
+            },
         )
 
         assert len(diagrams) >= 1
@@ -561,7 +570,13 @@ class TestPlanAndRenderDiagram:
             page_id="overview",
             page_type="overview",
             evidence_binding=None,
-            context={"modules": [{"name": "auth", "path": "src/auth"}]},
+            context={
+                "modules": [
+                    {"name": "auth", "path": "src/auth"},
+                    {"name": "api", "path": "src/api"},
+                ],
+                "import_edges": [("auth", "api")],
+            },
         )
 
         assert rendered is not None

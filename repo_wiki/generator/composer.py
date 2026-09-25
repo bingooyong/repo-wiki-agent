@@ -880,7 +880,8 @@ class LLMPageComposer:
                 "- 正文必须用段落解释；不要把项目概述写成安装步骤清单。列表行不计入 prose 下限。",
                 "- 不要把源码证据原文整段放进 Markdown 代码围栏；本页不要求 ```bash / ```sh 安装命令围栏。",
                 "- 概述页：README 的 `<cite>` 必须覆盖快速开始/运行章节，不要只引用徽章行。"
-                "若仓库有 `cmd/ccagent`，核心流程必须写到该控制面进程。",
+                "若仓库有多个 `cmd/` 二进制，不要写成单一 backend process。"
+                "ccagent 是主 REST/Web 服务，不是边缘 Agent 或隧道客户端。",
             ]
         else:
             rules = [
@@ -907,8 +908,11 @@ class LLMPageComposer:
                 "- 架构页：必须引用核心包（Python 必引 `app/api/routes` 与 `app/models`；"
                 "Go 必引 `cmd/ccagent`、`internal/control`、`internal/services`、"
                 "`internal/repository`、`internal/exporter`）。"
-                "ccagent 是主 REST/Web 服务，不是领取任务的 Agent；probe-agent 是隧道客户端。"
+                "ccagent 是主 REST/Web 服务，不是领取任务的 Agent，也不是边缘 Agent；"
+                "probe-agent 才是隧道客户端。"
                 "Go 控制面是 `ccprobe-control -serve -transport grpc`，不要写成普通 CLI。"
+                "只写 import 图里存在的依赖：internal/control 不依赖 services/repository；"
+                "ccprobe-control 不依赖 services/repository/exporter。"
                 "不要引用 `*_test.go`，不要声称从 `package main`（如 custom-probe）导入类型。"
                 "不要把示例/demo/scaffold 二进制当成系统架构。"
             )
@@ -925,10 +929,12 @@ class LLMPageComposer:
                 )
             elif python_domain:
                 rules.append(
-                    "- 数据模型页：ER 以 `app/db/migrations` 的表为准（users/profiles/"
-                    "articles/tags/favorites/comments），并引用 `app/models/domain`。"
+                    "- 数据模型页：ER 以 `app/db/migrations/versions` 的表为准"
+                    "（users、followers_to_followings、articles、tags、articles_to_tags、"
+                    "favorites、commentaries），并引用该 versions 文件与 `app/models/domain`。"
                     "这些是 Pydantic 领域模型 + asyncpg/raw SQL，不是 ORM 实体；"
-                    "不要把 request/response schema 列成实体，也不要引用 alembic/env.py。"
+                    "不要发明 profiles 表，不要把 request/response schema 列成实体，"
+                    "也不要只引用 alembic/env.py。"
                 )
             else:
                 rules.append(

@@ -69,6 +69,9 @@ _PROMPT_LEAK_PHRASES = (
     "the repo gives no route table",
     "(no reference document available)",
     "no reference document available",
+    "从提供的证据可见",
+    "证据中可确认的 schema 相关元数据",
+    "证据中可确认的",
 )
 _QUALITY_METRIC_LEAK = re.compile(
     r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b|\b21\s*/\s*25\b",
@@ -337,6 +340,9 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_DATA_MODEL_SOURCE",
         "QODER_HANDBOOK_PLACEHOLDER_MERMAID",
         "QODER_HANDBOOK_READER_HYGIENE",
+        "QODER_HANDBOOK_DIAGRAM_EVIDENCE",
+        "QODER_HANDBOOK_INSTALL_PATH",
+        "QODER_HANDBOOK_IMPORT_CONSISTENCY",
         "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -493,6 +499,9 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_data_model_source(),
             self._check_handbook_placeholder_mermaid(),
             self._check_handbook_reader_hygiene(),
+            self._check_handbook_diagram_evidence(),
+            self._check_handbook_install_path(),
+            self._check_handbook_import_consistency(),
             self._check_qoder_source_evidence(),
         ]
 
@@ -2909,6 +2918,93 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-reader-hygiene",
             "No appended boilerplate, header-only cites, or duplicated fences",
+        )
+
+    def _check_handbook_diagram_evidence(self) -> CheckResult:
+        from repo_wiki.generator.compose_evidence import (
+            invented_compose_edges,
+            is_placeholder_ops_diagram,
+            load_compose_from_root,
+        )
+
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("qoder-handbook-diagram-evidence", "No markdown pages")
+        _names, allowed = load_compose_from_root(self._handbook_repo_root())
+        invented: list[str] = []
+        placeholders: list[str] = []
+        for page in content_dir.rglob("*.md"):
+            text = page.read_text(encoding="utf-8", errors="ignore")
+            if invented_compose_edges(text, allowed):
+                invented.append(page.as_posix())
+            if is_placeholder_ops_diagram(text):
+                placeholders.append(page.as_posix())
+        if invented or placeholders:
+            return self._handbook_fail(
+                "qoder-handbook-diagram-evidence",
+                "QODER_HANDBOOK_DIAGRAM_EVIDENCE",
+                "Invented compose edges or empty start/build/test/lint placeholder diagrams",
+                {"invented_compose": invented[:20], "placeholder_ops": placeholders[:20]},
+            )
+        return self._handbook_pass(
+            "qoder-handbook-diagram-evidence",
+            "Compose and ops diagrams are evidence-backed",
+        )
+
+    def _check_handbook_install_path(self) -> CheckResult:
+        from repo_wiki.generator.compose_evidence import install_path_gaps
+
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("qoder-handbook-install-path", "No markdown pages")
+        gaps: dict[str, list[str]] = {}
+        for page in content_dir.rglob("*.md"):
+            text = page.read_text(encoding="utf-8", errors="ignore")
+            found = install_path_gaps(text)
+            if found:
+                gaps[page.as_posix()] = found
+        if gaps:
+            return self._handbook_fail(
+                "qoder-handbook-install-path",
+                "QODER_HANDBOOK_INSTALL_PATH",
+                "An install alternative path references a container it never starts",
+                gaps,
+            )
+        return self._handbook_pass(
+            "qoder-handbook-install-path",
+            "Each install alternative path is self-sufficient",
+        )
+
+    def _check_handbook_import_consistency(self) -> CheckResult:
+        from repo_wiki.generator.compose_evidence import (
+            load_repo_import_edges,
+            prose_import_contradictions,
+        )
+
+        content_dir = self._find_content_dir()
+        repo_root = self._handbook_repo_root()
+        if not content_dir or repo_root is None:
+            return self._skip_check("qoder-handbook-import-consistency", "No handbook root")
+        edges = load_repo_import_edges(repo_root)
+        if not edges:
+            return self._skip_check("qoder-handbook-import-consistency", "No import graph")
+        found: dict[str, list[str]] = {}
+        for page in content_dir.rglob("*.md"):
+            hits = prose_import_contradictions(
+                page.read_text(encoding="utf-8", errors="ignore"), edges
+            )
+            if hits:
+                found[page.as_posix()] = hits
+        if found:
+            return self._handbook_fail(
+                "qoder-handbook-import-consistency",
+                "QODER_HANDBOOK_IMPORT_CONSISTENCY",
+                "Architecture prose claims dependencies that the import graph does not have",
+                found,
+            )
+        return self._handbook_pass(
+            "qoder-handbook-import-consistency",
+            "Dependency claims match the import graph",
         )
 
     def _handbook_backtick_cite_pages(self) -> list[str]:

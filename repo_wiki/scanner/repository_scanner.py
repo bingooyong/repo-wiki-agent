@@ -848,6 +848,8 @@ class RepositoryScanner:
                     for table_spec in extract_alembic_tables(file.text):
                         raw_attrs = table_spec.get("attributes")
                         raw_rels = table_spec.get("relationships")
+                        raw_types = table_spec.get("attribute_types")
+                        raw_pks = table_spec.get("primary_keys")
                         models.append(
                             DataModel(
                                 name=str(table_spec["name"]),
@@ -860,9 +862,17 @@ class RepositoryScanner:
                                 relationships=[str(rel) for rel in raw_rels]
                                 if isinstance(raw_rels, list)
                                 else [],
+                                attribute_types=[str(item) for item in raw_types]
+                                if isinstance(raw_types, list)
+                                else [],
+                                primary_key=str(table_spec.get("primary_key") or ""),
                                 table_name=str(table_spec.get("table_name") or table_spec["name"]),
                             )
                         )
+                        if isinstance(raw_pks, list):
+                            models[-1].primary_key = (
+                                str(raw_pks[0]) if len(raw_pks) == 1 else models[-1].primary_key
+                            )
 
         if go_files:
             module_by_path = {path: module for path, _text, module in go_files}
@@ -1260,11 +1270,19 @@ class RepositoryScanner:
                 "PATCH",
             ) and not self._is_webhook_path(endpoint.path)
 
-            # Set common error codes
-            endpoint.error_codes = [400, 401, 403, 404, 500]
-
             # Preserve extractor line numbers when the handler search misses.
             content = file_contents.get(endpoint.file_path, "")
+            lines = content.splitlines() if content else []
+            start = max(0, int(endpoint.line_number or 1) - 1)
+            window = "\n".join(lines[start : start + 40])
+            found_codes = re.findall(r"\b(400|401|403|404|409|422|429|500)\b", window)
+            endpoint.error_codes = sorted({int(code) for code in found_codes}) or [
+                400,
+                401,
+                403,
+                404,
+                500,
+            ]
             if endpoint.line_number > 1 and self._line_matches_handler(
                 content, endpoint.line_number, endpoint.handler
             ):

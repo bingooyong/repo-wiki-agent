@@ -25,6 +25,9 @@ HANDBOOK_HARD_CODES = (
     "QODER_HANDBOOK_DATA_MODEL_SOURCE",
     "QODER_HANDBOOK_PLACEHOLDER_MERMAID",
     "QODER_HANDBOOK_READER_HYGIENE",
+    "QODER_HANDBOOK_DIAGRAM_EVIDENCE",
+    "QODER_HANDBOOK_INSTALL_PATH",
+    "QODER_HANDBOOK_IMPORT_CONSISTENCY",
     "QODER_SOURCE_EVIDENCE_LOW",
 )
 
@@ -70,6 +73,9 @@ def test_handbook_hard_codes_are_registered_strict(tmp_path: Path) -> None:
     assert "qoder-handbook-data-model-source" in names
     assert "qoder-handbook-placeholder-mermaid" in names
     assert "qoder-handbook-reader-hygiene" in names
+    assert "qoder-handbook-diagram-evidence" in names
+    assert "qoder-handbook-install-path" in names
+    assert "qoder-handbook-import-consistency" in names
     assert "qoder-source-evidence" in names
 
 

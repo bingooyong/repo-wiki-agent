@@ -71,13 +71,24 @@ def mermaid_er_field(value: str) -> str:
 
 def _mermaid_scalar_type(value: str) -> str:
     lowered = (value or "").split(".")[-1].lower().lstrip("*[]")
-    if lowered in {"int", "int8", "int16", "int32", "int64", "uint", "uint64"}:
+    if lowered in {
+        "int",
+        "int8",
+        "int16",
+        "int32",
+        "int64",
+        "uint",
+        "uint64",
+        "integer",
+        "bigint",
+        "smallint",
+    }:
         return "int"
     if lowered in {"float", "float32", "float64"}:
         return "float"
-    if lowered in {"bool"}:
+    if lowered in {"bool", "boolean"}:
         return "bool"
-    if lowered in {"time", "datetime"}:
+    if lowered in {"time", "datetime", "timestamp"}:
         return "datetime"
     return "string"
 
@@ -87,12 +98,29 @@ _PAGE_SCOPE_ALIASES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
         ("auth", "jwt", "认证", "授权", "安全", "security"),
         ("auth", "jwt", "security", "apiauth", "secrets", "netguard", "audit"),
     ),
-    (("前端", "frontend", "web"), ("web", "frontend", "static", "html")),
+    (
+        ("前端", "frontend", "web", "frontend-application"),
+        ("web", "frontend", "static", "html", "ccagent"),
+    ),
     (("核心服务", "core", "service"), ("services", "repository", "exporter")),
     (("agent", "探针", "tunnel"), ("agent", "probe", "tunnel")),
     (("控制", "control", "grpc"), ("control", "grpc", "tunnel")),
     (("部署", "compose", "运维", "ops"), ("deploy", "compose")),
     (("错误", "error", "status"), ("error", "exception", "handler")),
+    (("system-components", "system", "组件"), ("cmd", "internal/control", "internal/services")),
+    (
+        ("module-relationships", "module", "模块"),
+        ("internal/control", "internal/services", "internal/repository"),
+    ),
+    (
+        ("data-flow", "数据流", "调用链"),
+        ("internal/services", "internal/repository", "internal/exporter"),
+    ),
+    (
+        ("event-architecture", "event", "事件"),
+        ("internal/control", "internal/agent", "cmd/probe-agent"),
+    ),
+    (("database-schema", "数据库架构", "数据迁移"), ("migration", "models")),
 )
 
 
@@ -528,7 +556,13 @@ def _module_name_and_path(module: Any, index: int) -> tuple[str, str]:
 
 def _is_full_architecture_page(page_id: str) -> bool:
     pid = (page_id or "").lower().rsplit("/", 1)[-1]
-    return pid in {"architecture-overview", "project-overview", "overview", "architecture"}
+    return pid in {
+        "architecture-overview",
+        "project-overview",
+        "overview",
+        "architecture",
+        "整体架构概览",
+    }
 
 
 def _module_label(module: Any, index: int = 0) -> str:
@@ -723,11 +757,27 @@ class MermaidPlanner:
 
         elif page_type == "api":
             diagrams.extend(self.plan_api_diagrams(page_id, evidence_binding, context))
+            pid = (page_id or "").lower()
+            if any(token in pid for token in ("auth", "认证", "jwt", "frontend", "前端")):
+                auth = self._plan_auth_flow_diagram(page_id, evidence_binding, context)
+                if auth:
+                    diagrams.append(auth)
+            if any(token in pid for token in ("auth", "认证", "jwt")):
+                jwt = self._plan_jwt_sequence(page_id, evidence_binding, context)
+                if jwt:
+                    diagrams.append(jwt)
 
         elif page_type in ("data", "entity"):
             diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
+            if any(
+                token in (page_id or "").lower()
+                for token in ("migration", "迁移", "database-schema")
+            ):
+                migration = self._plan_migration_flow(page_id, evidence_binding, context)
+                if migration:
+                    diagrams.append(migration)
 
         elif page_type == "ops":
             diagram = self._plan_ops_diagram(page_id, evidence_binding, context)
@@ -809,8 +859,10 @@ class MermaidPlanner:
                 seen_edges.add((src, dst))
                 edges.append(DiagramEdge(from_node=mermaid_ident(src), to_node=mermaid_ident(dst)))
 
-        for layer_id, layer_label in _wiki_tool_layers_present(context):
-            nodes.append(DiagramNode(id=layer_id, label=layer_label, shape="rectangle"))
+        used = {edge.from_node for edge in edges} | {edge.to_node for edge in edges}
+        nodes = [node for node in nodes if node.id in used]
+        if len(edges) < 1:
+            return None
 
         evidence_spans = []
         if evidence_binding:
@@ -1006,8 +1058,18 @@ class MermaidPlanner:
             else:
                 flow_tag = "list flow"
 
-            messages.append(("Client", target, f"{flow_name} ({flow_tag})"))
-            messages.append((target, "Client", "response"))
+            route = _add_participant("Route")
+            messages.append(("Client", route, f"{flow_name} ({flow_tag})"))
+            messages.append((route, target, "dispatch"))
+            service = _package_from_file(str(endpoint.get("file_path") or ""))
+            if service and service not in {handler, "Client", "Route"}:
+                svc = _add_participant(service)
+                messages.append((target, svc, "handle"))
+        if len(participants) > 6:
+            keep = participants[:6]
+            participants[:] = keep
+            allowed = set(keep)
+            messages[:] = [item for item in messages if item[0] in allowed and item[1] in allowed]
 
         evidence_spans = []
         if evidence_binding:
@@ -1146,6 +1208,42 @@ class MermaidPlanner:
             evidence_spans=[c.span for c in candidates],
         )
 
+    def _plan_migration_flow(
+        self,
+        page_id: str,
+        evidence_binding: PageEvidenceBinding | None,
+        context: dict[str, Any],
+    ) -> DiagramPlan | None:
+        root = Path(self.workspace_root) if self.workspace_root else None
+        if root is None:
+            return None
+        versions = root / "app" / "db" / "migrations" / "versions"
+        if not versions.is_dir():
+            return None
+        files = sorted(path.name for path in versions.glob("*.py"))
+        if not files:
+            return None
+        nodes = [
+            DiagramNode(id="alembic_env", label="alembic env.py", shape="rectangle"),
+            DiagramNode(id="versions_file", label=files[0][:32], shape="rectangle"),
+            DiagramNode(id="tables", label="migration tables", shape="rectangle"),
+        ]
+        edges = [
+            DiagramEdge(from_node="alembic_env", to_node="versions_file"),
+            DiagramEdge(from_node="versions_file", to_node="tables"),
+        ]
+        return DiagramPlan(
+            diagram_id=f"{page_id}-migration-flow",
+            diagram_type=MermaidDiagramType.FLOWCHART,
+            title="Migration flow",
+            description="Alembic versions apply table DDL",
+            nodes=nodes,
+            edges=edges,
+            evidence_spans=[c.span for c in evidence_binding.candidates]
+            if evidence_binding
+            else [],
+        )
+
     def _plan_data_model_diagram(
         self,
         page_id: str,
@@ -1179,13 +1277,7 @@ class MermaidPlanner:
             ]
         elif any(str(item.get("type") or "") == "migration_table" for item in product_models):
             product_models = [
-                item
-                for item in product_models
-                if str(item.get("type") or "") == "migration_table"
-                or (
-                    str(item.get("type") or "") == "python_class"
-                    and "models/domain" in str(item.get("file_path") or "").replace("\\", "/")
-                )
+                item for item in product_models if str(item.get("type") or "") == "migration_table"
             ]
 
         er_entities = []
@@ -1207,26 +1299,36 @@ class MermaidPlanner:
                 raw_type = attr_types[index] if index < len(attr_types) else "string"
                 attributes.append({"name": name, "type": _mermaid_scalar_type(raw_type)})
             primary_key = mermaid_er_field(str(model.get("primary_key") or "")) or ""
+            extra_pks = [
+                mermaid_er_field(str(item))
+                for item in (model.get("primary_keys") or [])
+                if mermaid_er_field(str(item))
+            ]
             er_entities.append(
                 {
                     "entity": entity_name,
                     "attributes": attributes,
                     "primary_key": primary_key,
+                    "primary_keys": extra_pks,
                     "file_path": str(model.get("file_path") or ""),
                 }
             )
             for target in model.get("relationships") or []:
                 raw = str(target)
-                kind, sep, dest = raw.partition(":")
-                if not sep:
-                    dest, kind = kind, "belongs_to"
+                parts = raw.split(":")
+                if len(parts) >= 3:
+                    kind, dest, label = parts[0], parts[1], parts[2]
+                elif len(parts) == 2:
+                    kind, dest, label = parts[0], parts[1], parts[1]
+                else:
+                    dest, kind, label = raw, "belongs_to", "fk"
                 dest_name = mermaid_er_field(dest)
                 if not dest_name:
                     continue
                 if kind == "has_many":
-                    edge = (entity_name, dest_name, "fk")
+                    edge = (entity_name, dest_name, mermaid_er_field(label) or "fk")
                 else:
-                    edge = (dest_name, entity_name, "fk")
+                    edge = (dest_name, entity_name, mermaid_er_field(label) or "fk")
                 if edge[0] == edge[1] and kind != "belongs_to":
                     continue
                 if edge in relationships:
@@ -1263,8 +1365,8 @@ class MermaidPlanner:
         nodes = []
         edges = []
 
-        # Add command nodes
-        cmd_list = list(commands.items())[:8]
+        # Add command nodes — skip empty scanner placeholders (start/build/test/lint).
+        cmd_list = [(key, value) for key, value in commands.items() if str(value or "").strip()][:8]
         if cmd_list:
             # Start node
             start_id = mermaid_ident("start", prefix="ops")
@@ -1279,6 +1381,9 @@ class MermaidPlanner:
             end_id = mermaid_ident("finish", prefix="ops")
             nodes.append(DiagramNode(id=end_id, label="End", shape="circle"))
             edges.append(DiagramEdge(from_node=prev_node, to_node=end_id))
+
+        if len(edges) < 2:
+            return None
 
         evidence_spans = []
         if evidence_binding:
@@ -1317,46 +1422,29 @@ class MermaidPlanner:
                 break
         if not text:
             return None
-        services = re.findall(r"(?m)^  ([A-Za-z][A-Za-z0-9_-]*):\s*$", text)
-        skip = {"version", "services", "volumes", "networks", "configs", "secrets"}
-        services = [name for name in services if name not in skip]
-        if len(services) < 2:
+        from repo_wiki.generator.compose_evidence import parse_compose_topology
+
+        services, depends = parse_compose_topology(text)
+        if len(services) < 2 or len(depends) < 1:
             return None
-        depends = re.findall(
-            r"(?ms)^  ([A-Za-z][A-Za-z0-9_-]*):.*?depends_on:\s*(?:\[([^\]]+)\]|((?:\n    - [A-Za-z0-9_-]+)+))",
-            text,
-        )
+        chosen = {name for name in services[:10]}
         nodes = [
             DiagramNode(id=mermaid_ident(name, prefix="svc"), label=name, shape="rectangle")
             for name in services[:10]
         ]
-        chosen = {name for name in services[:10]}
         edges: list[DiagramEdge] = []
-        for src, inline, listed in depends:
-            targets: list[str] = []
-            if inline:
-                targets.extend(part.strip(" '\"") for part in inline.split(",") if part.strip())
-            if listed:
-                targets.extend(re.findall(r"[A-Za-z][A-Za-z0-9_-]*", listed))
-            for dest in targets:
-                if src in chosen and dest in chosen and src != dest:
-                    edges.append(
-                        DiagramEdge(
-                            from_node=mermaid_ident(src, prefix="svc"),
-                            to_node=mermaid_ident(dest, prefix="svc"),
-                        )
-                    )
-        if len(edges) < 2:
-            ordered = [name for name in services if name in chosen]
-            for left, right in zip(ordered, ordered[1:], strict=False):
+        for src, dest in depends:
+            if src in chosen and dest in chosen and src != dest:
                 edges.append(
                     DiagramEdge(
-                        from_node=mermaid_ident(left, prefix="svc"),
-                        to_node=mermaid_ident(right, prefix="svc"),
+                        from_node=mermaid_ident(src, prefix="svc"),
+                        to_node=mermaid_ident(dest, prefix="svc"),
                     )
                 )
-        if len(edges) < 2:
+        if len(edges) < 1:
             return None
+        used = {edge.from_node for edge in edges} | {edge.to_node for edge in edges}
+        nodes = [node for node in nodes if node.id in used]
         return DiagramPlan(
             diagram_id=f"{page_id}-compose-topology",
             diagram_type=MermaidDiagramType.FLOWCHART,
@@ -1426,6 +1514,9 @@ class MermaidPlanner:
         auth = root / "app" / "api" / "dependencies" / "authentication.py"
         if not (jwt.is_file() and auth.is_file()):
             return None
+        from repo_wiki.generator.compose_evidence import jwt_token_prefix
+
+        prefix = jwt_token_prefix(root)
         return DiagramPlan(
             diagram_id=f"{page_id}-jwt-sequence",
             diagram_type=MermaidDiagramType.SEQUENCE_DIAGRAM,
@@ -1433,7 +1524,7 @@ class MermaidPlanner:
             description="Route dependency verifies JWT",
             sequence_participants=["Client", "AuthenticationDep", "JWTService"],
             sequence_messages=[
-                ("Client", "AuthenticationDep", "Bearer token"),
+                ("Client", "AuthenticationDep", f"{prefix} token"),
                 ("AuthenticationDep", "JWTService", "decode/verify"),
             ],
             evidence_spans=[c.span for c in evidence_binding.candidates]
@@ -1550,8 +1641,9 @@ class MermaidRenderer:
 
         # Render messages
         for from_p, to_p, message in plan.sequence_messages:
-            lines.append(f"    {from_p}->>+{to_p}: {message}")
-            lines.append(f"    {to_p}-->>-{from_p}: response")
+            if to_p == "Client":
+                continue
+            lines.append(f"    {from_p}->>{to_p}: {message}")
 
         return "\n".join(lines)
 
@@ -1563,30 +1655,29 @@ class MermaidRenderer:
             entity_name = mermaid_er_field(str(entity.get("entity") or "Unknown"))
             attributes = entity.get("attributes") or []
             primary_key = mermaid_er_field(str(entity.get("primary_key") or ""))
+            pk_set = {
+                mermaid_er_field(str(item))
+                for item in (entity.get("primary_keys") or [])
+                if mermaid_er_field(str(item))
+            }
+            if primary_key:
+                pk_set.add(primary_key)
             lines.append(f"    {entity_name} {{")
             seen: set[str] = set()
-            if primary_key:
-                pk_type = "string"
-                for attr in attributes:
-                    if (
-                        isinstance(attr, dict)
-                        and mermaid_er_field(str(attr.get("name") or "")) == primary_key
-                    ):
-                        pk_type = _mermaid_scalar_type(str(attr.get("type") or "string"))
-                        break
-                lines.append(f"        {pk_type} {primary_key} PK")
-                seen.add(primary_key)
-            for attr in attributes[:8]:
+            for attr in attributes[:10]:
                 if isinstance(attr, dict):
                     field = mermaid_er_field(str(attr.get("name") or ""))
                     field_type = _mermaid_scalar_type(str(attr.get("type") or "string"))
                 else:
                     field = mermaid_er_field(str(attr))
                     field_type = "string"
-                if field in seen:
+                if not field or field in seen:
                     continue
                 seen.add(field)
-                lines.append(f"        {field_type} {field}")
+                suffix = " PK" if field in pk_set else ""
+                lines.append(f"        {field_type} {field}{suffix}")
+            for extra in pk_set - seen:
+                lines.append(f"        string {extra} PK")
             lines.append("    }")
         known = {mermaid_er_field(str(entity.get("entity") or "")) for entity in plan.er_entities}
         for rel in plan.er_relationships:

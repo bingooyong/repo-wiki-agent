@@ -568,6 +568,7 @@ def rewrite_install_command_ports(command: str, repo_root: Path) -> str:
 _MERMAID_FENCE_RE = re.compile(r"```mermaid\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 _MERMAID_EDGE_TOKENS = (
     _MERMAID_ARROW,
+    "-" + ">>",
     "=" + "=>",
     "-.-",
     "<" + "--",
@@ -973,7 +974,9 @@ def _go_struct_definition_ranges(repo_root: Path) -> list[tuple[str, int, int]]:
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         for index, line in enumerate(lines, start=1):
             if struct_re.match(line):
-                found.append((rel, index, min(len(lines), index + 20)))
+                from repo_wiki.generator.deterministic_sections import go_struct_end_line
+
+                found.append((rel, index, go_struct_end_line(lines, index)))
     return found
 
 

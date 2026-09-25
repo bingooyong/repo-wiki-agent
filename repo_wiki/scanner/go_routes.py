@@ -155,6 +155,23 @@ def _iter_struct_defs(text: str) -> list[tuple[str, str, int]]:
     return found
 
 
+def _enclosing_func_name(text: str, pos: int) -> str:
+    window = text[:pos]
+    matches = list(re.finditer(r"func\s+(?:\([^)]+\)\s*)?([A-Z][A-Za-z0-9_]*)\s*\(", window))
+    if not matches:
+        matches = list(re.finditer(r"func\s+(?:\([^)]+\)\s*)?([A-Za-z_]\w*)\s*\(", window))
+    if not matches:
+        return ""
+    name = matches[-1].group(1)
+    recv = re.search(
+        r"func\s+\(\s*\w+\s+\*?(\w+)\s*\)\s+" + re.escape(name),
+        window,
+    )
+    if recv:
+        return f"{recv.group(1)}.{name}"
+    return name
+
+
 def go_package_label(path: str) -> str | None:
     """Return ``internal/foo`` / ``cmd/bar`` for a product Go path."""
     parts = [part for part in path.replace("\\", "/").split("/") if part]
@@ -469,7 +486,10 @@ def extract_go_endpoints(files: Sequence[tuple[str, str]]) -> list[GoEndpoint]:
         for match in _HANDLE_FUNC_RE.finditer(text):
             lineno = text[: match.start()].count("\n") + 1
             method, route_path = _split_method_path(match.group(1))
-            _add(method, route_path, match.group(2), path, lineno, "go_nethttp")
+            handler = match.group(2)
+            if handler == "func":
+                handler = _enclosing_func_name(text, match.start()) or path.rsplit("/", 1)[-1]
+            _add(method, route_path, handler, path, lineno, "go_nethttp")
 
         for match in _MUX_HANDLE_RE.finditer(text):
             raw = match.group(1)
