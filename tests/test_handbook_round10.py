@@ -194,6 +194,14 @@ op.create_primary_key(
     ["follower_id", "following_id"],
 )
 op.create_table(
+    "articles",
+    sa.Column("id", sa.Integer, primary_key=True),
+    sa.Column("slug", sa.Text, unique=True, index=True),
+    sa.Column("title", sa.Text),
+    sa.Column("author_id", sa.Integer, sa.ForeignKey("users.id")),
+    *timestamps(),
+)
+op.create_table(
     "articles_to_tags",
     sa.Column("article_id", sa.Integer, sa.ForeignKey("articles.id")),
     sa.Column("tag", sa.Text),

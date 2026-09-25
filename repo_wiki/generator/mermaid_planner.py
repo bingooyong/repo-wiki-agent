@@ -1099,6 +1099,10 @@ class MermaidPlanner:
                 schema = self._plan_database_schema_diagram(page_id, evidence_binding, context)
                 if schema:
                     diagrams.append(schema)
+                else:
+                    diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
+                    if diagram:
+                        diagrams.append(diagram)
             elif is_data_model_owner_page(page_id=pid, title="") or not satellite:
                 diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
                 if diagram:
@@ -2055,9 +2059,7 @@ class MermaidPlanner:
             and mermaid_er_field(str(item.get("name") or item.get("table") or "")).lower()
             in {"users", "articles", "commentaries"}
         ]
-        if not any(
-            mermaid_er_field(str(item.get("name") or "")).lower() == "articles" for item in tables
-        ):
+        if not tables:
             return None
         er_entities = []
         relationships: list[tuple[str, str, str]] = []
