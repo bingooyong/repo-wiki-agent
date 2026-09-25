@@ -137,7 +137,9 @@ def _fastapi_repo(root: Path) -> Path:
     (root / "app" / "core" / "settings").mkdir(parents=True)
     (root / "app" / "services").mkdir(parents=True)
     (root / "app" / "main.py").write_text("from app.api.routes import articles\n", encoding="utf-8")
-    (root / "app" / "db" / "queries.py").write_text("def fetch():\n    return []\n", encoding="utf-8")
+    (root / "app" / "db" / "queries.py").write_text(
+        "def fetch():\n    return []\n", encoding="utf-8"
+    )
     (root / "app" / "api" / "dependencies" / "authentication.py").write_text(
         "from app.core.settings import Settings\n"
         "def get_current_user_authorizer():\n    return None\n",

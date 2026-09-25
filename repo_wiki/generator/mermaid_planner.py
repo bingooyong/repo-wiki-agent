@@ -697,7 +697,8 @@ def _is_full_architecture_page(page_id: str) -> bool:
     pid = (page_id or "").lower()
     leaf = pid.rsplit("/", 1)[-1]
     return (
-        leaf in {
+        leaf
+        in {
             "architecture-overview",
             "architecture",
             "整体架构概览",
@@ -1878,11 +1879,7 @@ class MermaidPlanner:
         if any(token in leaf for token in ("core", "核心")):
             sample = selected[-1]
             first_app = next(
-                (
-                    item
-                    for item in endpoints
-                    if "app/" in str(item.get("file_path") or "")
-                ),
+                (item for item in endpoints if "app/" in str(item.get("file_path") or "")),
                 None,
             )
             if (
