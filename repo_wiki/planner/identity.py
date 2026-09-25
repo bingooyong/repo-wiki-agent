@@ -15,6 +15,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 from repo_wiki.planner.schema import RepositoryIdentity
 
@@ -38,6 +39,19 @@ _SECONDARY_README_MARKERS = (
 )
 _RST_DECORATION_RE = re.compile(r"^[=\-`:.'\"~^_*+#]{3,}$")
 _RST_FIELD_LIST_RE = re.compile(r"^:[a-zA-Z][-a-zA-Z0-9_]*:")
+_HTTP_URL_RE = re.compile(r"https?://[^\s)<>\"'\]]+", re.IGNORECASE)
+_IMG_SHIELDS_HOST = "img.shields.io"
+
+
+def has_img_shields_io_url(text: str) -> bool:
+    """True only when a URL hostname is exactly img.shields.io."""
+    for raw in _HTTP_URL_RE.findall(text):
+        hostname = (urlparse(raw).hostname or "").lower()
+        if hostname == _IMG_SHIELDS_HOST:
+            return True
+    return False
+
+
 _RST_SUBSTITUTION_LINE_RE = re.compile(r"^(\|[^|]+\|\s*)+$")
 _PYPROJECT_STRING_FIELD_RE = re.compile(
     r'^\s*(name|version|description)\s*=\s*"([^"]+)"', re.MULTILINE
@@ -78,7 +92,7 @@ def _pyproject_string_fields(content: str) -> dict[str, str]:
 def _is_markdown_badge_line(stripped: str) -> bool:
     if stripped.startswith("[![") or stripped.startswith("![]("):
         return True
-    return "img.shields.io" in stripped.lower()
+    return has_img_shields_io_url(stripped)
 
 
 def _is_rst_noise_line(stripped: str) -> bool:

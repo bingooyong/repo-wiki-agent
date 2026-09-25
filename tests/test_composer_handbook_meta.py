@@ -175,3 +175,14 @@ async def test_generator_meta_rejection_is_page_local_like_insufficient_prose(
     assert is_page_local_quality_rejection("LLM page timeout after 180.0s") is True
     assert is_page_local_quality_rejection("LLM page server error 529: Server error: 529") is True
     assert is_page_local_quality_rejection("Composition error: 529") is False
+
+
+def test_strip_handbook_filler_drops_real_shields_host_only() -> None:
+    from repo_wiki.generator.composer import _strip_handbook_filler
+
+    real = "![Go](https://img.shields.io/badge/Go-1.25+-00ADD8)"
+    spoof = "![status](https://evil.example/img.shields.io/badge/spoof)"
+    rendered = _strip_handbook_filler(f"{real}\n\n企业级探针拨测。\n\n{spoof}\n")
+    assert "img.shields.io/badge/Go" not in rendered
+    assert "evil.example/img.shields.io" in rendered
+    assert "企业级探针拨测" in rendered

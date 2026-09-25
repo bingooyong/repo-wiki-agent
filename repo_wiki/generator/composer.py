@@ -41,6 +41,7 @@ from repo_wiki.llm.models import (
 )
 from repo_wiki.llm.providers import create_mock_provider
 from repo_wiki.llm.retry import chat_with_retry
+from repo_wiki.planner.identity import has_img_shields_io_url
 from repo_wiki.planner.schema import (
     INVENTORY_SERVICE_API_PAGE_ID,
     WikiPagePlan,
@@ -121,7 +122,7 @@ def _strip_handbook_filler(markdown: str) -> str:
         stripped = line.strip()
         if _SHIELD_LINE_RE.fullmatch(stripped):
             continue
-        if "img.shields.io" in stripped.lower() and stripped.startswith("!"):
+        if stripped.startswith("!") and has_img_shields_io_url(stripped):
             continue
         if _TEST_COUNT_FILLER_RE.fullmatch(stripped):
             continue
