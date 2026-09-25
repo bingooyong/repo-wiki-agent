@@ -1305,11 +1305,18 @@ def handbook_code_integrity_offenders(
 ) -> dict[str, list[str]]:
     """Code spans/fences mutated away from the raw reply and repository source.
 
-    Also flags empty inline spans and unclosed fences. Thresholds match
-    acc-25r/code_integrity.py: mermaid excluded, bash fences and A.B / spaced
-    spans included, whitespace-normalised membership.
+    Also flags empty inline spans and unclosed fences. Final units must be
+    byte-identical to the raw model reply. Generator-owned extras (not in the
+    raw reply) must appear in repository source. Thresholds match
+    acc-25s/code_integrity.py: mermaid excluded, bash fences and A.B / spaced
+    spans included, single-space normalisation.
     """
-    from repo_wiki.generator.code_safe import empty_inline_spans, iter_integrity_code_units
+    from repo_wiki.generator.code_safe import (
+        empty_inline_spans,
+        is_mermaid_fence,
+        iter_integrity_code_units,
+        sacred_code_offenders,
+    )
 
     if content_dir is None or not content_dir.exists() or repo_root is None:
         return {}
@@ -1317,7 +1324,6 @@ def handbook_code_integrity_offenders(
     raw_replies = raw_replies or _load_raw_replies(content_dir)
     all_raw = "\n".join((raw_replies or {}).values())
     source_norm = _norm_code_blob(source_blob)
-    raw_norm = _norm_code_blob(all_raw)
     found: dict[str, list[str]] = {}
     for path in iter_markdown_pages(content_dir):
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -1329,27 +1335,34 @@ def handbook_code_integrity_offenders(
         missing: list[str] = []
         if has_unclosed_fence(text):
             missing.append("unclosed-fence")
+        raw_empty = len(empty_inline_spans(raw)) if raw else 0
         empty_count = len(empty_inline_spans(text))
-        if empty_count:
+        if empty_count > raw_empty:
             missing.append(f"empty-span x{empty_count}")
-        for kind, body in iter_integrity_code_units(text):
-            if kind == "empty":
-                continue
-            normalized = re.sub(r"\s+", " ", body).strip()
-            if len(normalized) < 3:
-                continue
-            if (
-                body in raw
-                or body in all_raw
-                or body in source_blob
-                or normalized in re.sub(r"\s+", " ", raw)
-                or normalized in re.sub(r"\s+", " ", all_raw)
-                or normalized in re.sub(r"\s+", " ", source_blob)
-                or _norm_code_blob(body) in raw_norm
-                or _norm_code_blob(body) in source_norm
-            ):
-                continue
-            missing.append(f"{kind}: {normalized[:120]}")
+        if raw:
+            for unit in sacred_code_offenders(text, raw):
+                if is_mermaid_fence(unit):
+                    continue
+                body = unit.strip("`")
+                if unit.startswith("```"):
+                    body = re.sub(r"^```[^\n]*\n?", "", unit)
+                    body = re.sub(r"```$", "", body)
+                normalized = _norm_code_blob(body)
+                if normalized and (
+                    normalized in source_norm or body in source_blob or body in all_raw
+                ):
+                    continue
+                missing.append(f"sacred: {unit[:120]}")
+        else:
+            for kind, body in iter_integrity_code_units(text):
+                if kind == "empty":
+                    continue
+                normalized = _norm_code_blob(body)
+                if len(normalized) < 3:
+                    continue
+                if body in source_blob or normalized in source_norm:
+                    continue
+                missing.append(f"{kind}: {normalized[:120]}")
         if missing:
             found[path.as_posix()] = missing[:16]
     return found
@@ -1393,7 +1406,7 @@ def _raw_reply_dir(content_dir: Path) -> Path:
 
 
 def _norm_code_blob(text: str) -> str:
-    return re.sub(r"\s+", "", text or "")
+    return re.sub(r"\s+", " ", text or "").strip()
 
 
 def _load_raw_replies(content_dir: Path) -> dict[str, str]:

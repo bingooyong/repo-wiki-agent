@@ -748,6 +748,7 @@ async def test_insufficient_prose_rejects_do_not_trip_circuit_breaker(
     assert len(prose_rejects) == 3
     assert not disabled_reasons
     assert modes.count("fallback") == 3
+    assert modes.count("llm") == PAGE_COUNT - 3
 
 
 @pytest.mark.asyncio

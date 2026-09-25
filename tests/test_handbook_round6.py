@@ -177,7 +177,7 @@ def test_normalize_unwraps_backtick_wrapped_cite() -> None:
     out = normalize_citation_markup(text)
     assert not re.search(r"`<cite>[^<]+</cite>`", out)
     assert "<cite>app/api/routes/users.py:10-12</cite>" in out
-    assert "`internal/models/tag.go`" in out
+    assert "`internal/models/tag.go:4-12`" in out
     verifier = QoderLikeVerifierService(Path("."), strict=True)
     assert verifier._handbook_backtick_cite_pages  # attribute exists after impl
 

@@ -2510,7 +2510,11 @@ class RepoWikiService:
             for candidate in binding.candidates[:8]:
                 cites.append(citation_renderer.render_cite_block_from_candidate(candidate))
 
-        from repo_wiki.generator.code_safe import map_outside_code
+        from repo_wiki.generator.code_safe import (
+            map_outside_code,
+            protect_code_units,
+            restore_code_units,
+        )
         from repo_wiki.generator.deterministic_sections import (
             attach_missing_route_cites,
             rewrite_architecture_role_claims,
@@ -2523,6 +2527,7 @@ class RepoWikiService:
             strip_unknown_go_packages,
         )
 
+        content, _sacred_code = protect_code_units(content)
         content = map_outside_code(content, rewrite_architecture_role_claims)
         content = map_outside_code(
             content,
@@ -2665,6 +2670,7 @@ class RepoWikiService:
         content = normalize_citation_markup(content, self.root)
         content = strip_header_only_cites(content, self.root)
         content = self._append_short_migration_evidence(page, content)
+        content = restore_code_units(content, _sacred_code)
         return content.strip() + "\n"
 
     def _write_raw_reply(self, page: Any, raw_markdown: str) -> None:

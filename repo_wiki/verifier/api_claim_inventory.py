@@ -187,16 +187,21 @@ def drop_uninventoried_api_claims(
             return match.group(0)
         return ""
 
-    cleaned_lines: list[str] = []
-    for line in content.splitlines():
-        rewritten = API_CLAIM_PATTERN.sub(replace_claim, line)
-        rewritten = _TEST_ONLY_PATH_PATTERN.sub("", rewritten)
-        if rewritten != line:
-            leading_ws_len = len(rewritten) - len(rewritten.lstrip(" \t"))
-            prefix, body = rewritten[:leading_ws_len], rewritten[leading_ws_len:]
-            body = re.sub(r"[ \t]{2,}", " ", body)
-            rewritten = (prefix + body).rstrip()
-        if re.fullmatch(r"\s*[-*]\s*", rewritten):
-            continue
-        cleaned_lines.append(rewritten)
-    return "\n".join(cleaned_lines).strip()
+    from repo_wiki.generator.code_safe import map_outside_code
+
+    def _rewrite_prose(prose: str) -> str:
+        cleaned_lines: list[str] = []
+        for line in (prose or "").splitlines():
+            rewritten = API_CLAIM_PATTERN.sub(replace_claim, line)
+            rewritten = _TEST_ONLY_PATH_PATTERN.sub("", rewritten)
+            if rewritten != line:
+                leading_ws_len = len(rewritten) - len(rewritten.lstrip(" \t"))
+                prefix, body = rewritten[:leading_ws_len], rewritten[leading_ws_len:]
+                body = re.sub(r"[ \t]{2,}", " ", body)
+                rewritten = (prefix + body).rstrip()
+            if re.fullmatch(r"\s*[-*]\s*", rewritten):
+                continue
+            cleaned_lines.append(rewritten)
+        return "\n".join(cleaned_lines).strip()
+
+    return map_outside_code(content or "", _rewrite_prose)

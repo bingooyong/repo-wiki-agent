@@ -727,8 +727,7 @@ curl http://localhost:1900/health
         _go_context(root),
         add_mermaid=False,
     )
-    assert "go build -o bin/..." not in ide_out
-    assert "bin/ccagent" in ide_out
+    assert "`go build -o bin/...`" in ide_out
     auth = _page(
         "identity-authentication",
         "身份认证",

@@ -16,6 +16,7 @@ from repo_wiki.evidence.citation_renderer import (
     sanitize_citation_payloads,
 )
 from repo_wiki.evidence.ranking import rank_evidence_for_page
+from repo_wiki.generator.code_safe import sacred_code_offenders
 from repo_wiki.generator.mermaid_planner import (
     MermaidDiagramType,
     create_planner,
@@ -1441,10 +1442,11 @@ def test_schema_sql_foreign_keys_merge_into_snapshot(tmp_path: Path) -> None:
     assert any(item.startswith("belongs_to:ProbeEndpoint") for item in tag.relationships)
 
 
-def test_backtick_path_then_line_normalizes() -> None:
-    rewritten = normalize_citation_markup("见 `internal/models/endpoint.go`:12-20。")
-    assert "<cite>internal/models/endpoint.go:12-20</cite>" in rewritten
-    assert "`internal/models/endpoint.go`:12-20" not in rewritten
+def test_backtick_path_then_line_leaves_span_bytes() -> None:
+    raw = "见 `internal/models/endpoint.go`:12-20。"
+    rewritten = normalize_citation_markup(raw)
+    assert "`internal/models/endpoint.go`" in rewritten
+    assert sacred_code_offenders(rewritten, raw) == []
 
 
 def test_page_dump_detects_21_25_and_endpoint_leak() -> None:

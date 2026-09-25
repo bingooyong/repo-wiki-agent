@@ -23,8 +23,7 @@ from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 _DROP_CITATION_SCHEMES = ("file:", "path:", "relpath:")
 _PLACEHOLDER_CITE_BODY = "start-end"
 _CITE_BLOCK_RE = re.compile(r"(<cite>\s*)([^<]+?)(\s*</cite>)")
-_BACKTICK_CITE_RE = re.compile(r"`((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?)`")
-_SOURCE_FILE_SUFFIXES = frozenset(
+_SOURCE_FILE_SUFFIXES = frozenset({
     {
         ".go",
         ".py",
@@ -52,7 +51,6 @@ _BACKTICK_WRAPPED_CITE_RE = re.compile(
     r"`\s*(<cite>\s*[^<]+?\s*</cite>)\s*`",
     re.IGNORECASE,
 )
-_BACKTICK_PATH_THEN_LINE_RE = re.compile(r"`((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+)`:(\d+(?:-\d+)?)")
 _BRACKET_CITE_RE = re.compile(r"(\[cite:\s*)([^\]]+?)(\])")
 _CITE_PATH_SUFFIX_RE = re.compile(r"^(.+?)(:\d+(?:-\d+)?(?:\s*\([^)]+\))?)$")
 _CITE_PAREN_RE = re.compile(r"（[^）]*）|\([^)]*\)")
@@ -272,32 +270,17 @@ def normalize_citation_markup(text: str, workspace_root: str | Path | None = Non
         payloads = sanitize_citation_payloads(match.group(2), workspace_root)
         if payloads:
             return "".join(f"<cite>{item}</cite>" for item in payloads)
-        path_text = _cite_path_only(match.group(2))
-        return f"`{path_text}`" if path_text else ""
+        return ""
 
     def _rewrite_brackets(match: re.Match[str]) -> str:
         payloads = sanitize_citation_payloads(match.group(2), workspace_root)
         if payloads:
             return "".join(f"[cite: {item}]" for item in payloads)
-        path_text = _cite_path_only(match.group(2))
-        return f"`{path_text}`" if path_text else ""
+        return ""
 
-    def _backtick_path_then_line(match: re.Match[str]) -> str:
-        path_text = match.group(1)
-        if not _looks_like_source_cite(f"{path_text}:{match.group(2)}", workspace_root):
-            return match.group(0)
-        return f"`{path_text}`<cite>{path_text}:{match.group(2)}</cite>"
-
-    def _backtick_cite(match: re.Match[str]) -> str:
-        body = match.group(1)
-        if not _looks_like_source_cite(body, workspace_root):
-            return match.group(0)
-        path_text = _cite_path_only(body) or body.split(":")[0]
-        return f"`{path_text}`<cite>{body}</cite>"
-
+    # Unwrap `<cite>...</cite>` only. Never convert a cite into a code span
+    # and never rewrite bytes inside an existing span or fence.
     unwrapped = _BACKTICK_WRAPPED_CITE_RE.sub(lambda match: match.group(1), text)
-    unwrapped = _BACKTICK_PATH_THEN_LINE_RE.sub(_backtick_path_then_line, unwrapped)
-    unwrapped = _BACKTICK_CITE_RE.sub(_backtick_cite, unwrapped)
     rewritten = _CITE_BLOCK_RE.sub(_rewrite_blocks, unwrapped)
     rewritten = _BRACKET_CITE_RE.sub(_rewrite_brackets, rewritten)
     return strip_empty_cite_parens(collapse_citation_text_gaps(rewritten))

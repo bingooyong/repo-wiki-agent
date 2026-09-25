@@ -58,7 +58,7 @@ def fence_language(header: str) -> str:
 def iter_integrity_code_units(markdown: str) -> list[tuple[str, str]]:
     """Yield (kind, body) for integrity: all fences except mermaid, all inline spans.
 
-    Matches acc-25r/code_integrity.py: bash fences, A.B forms, and spans with
+    Matches acc-25s/code_integrity.py: bash fences, A.B forms, and spans with
     spaces are included. Empty bodies are yielded as kind=empty.
     """
     units: list[tuple[str, str]] = []
@@ -77,3 +77,34 @@ def iter_integrity_code_units(markdown: str) -> list[tuple[str, str]]:
         else:
             units.append(("inline", body))
     return units
+
+
+def iter_delimited_code_units(markdown: str) -> list[str]:
+    """Return exact `` ```...``` `` and `` `...` `` strings, mermaid included."""
+    units: list[str] = []
+    for match in _FENCE_RE.finditer(markdown or ""):
+        units.append(match.group(0))
+    stripped = _FENCE_RE.sub("", markdown or "")
+    for match in _INLINE_RE.finditer(stripped):
+        units.append(match.group(0))
+    return units
+
+
+def is_mermaid_fence(unit: str) -> bool:
+    return bool(re.match(r"```(?:mermaid|plantuml|graphviz)\b", unit or "", flags=re.I))
+
+
+def sacred_code_offenders(final: str, raw: str) -> list[str]:
+    """Final code units that are not byte-identical to a raw-reply unit.
+
+    Mermaid/plantuml fences are generator-owned diagrams and are ignored here;
+    the integrity gate still requires their bodies to exist in source when they
+    are not in the raw reply.
+    """
+    raw_units = set(iter_delimited_code_units(raw))
+    offenders: list[str] = []
+    for unit in iter_delimited_code_units(final):
+        if unit in raw_units or is_mermaid_fence(unit):
+            continue
+        offenders.append(unit[:160])
+    return offenders

@@ -1643,24 +1643,9 @@ def strip_placeholder_ops_fences(content: str) -> str:
 
 
 def expand_truncated_build_commands(content: str, root: Path) -> str:
-    text = content or ""
-    names: list[str] = []
-    ci = root / ".github" / "workflows" / "ci.yml"
-    if ci.is_file():
-        names = re.findall(
-            r"go build -o (bin/[A-Za-z0-9_-]+)", ci.read_text(encoding="utf-8", errors="ignore")
-        )
-    if not names:
-        from repo_wiki.generator.process_roles import discover_cmd_processes
-
-        names = [f"bin/{item.name}" for item in discover_cmd_processes(root)]
-    listing = "、".join(f"`{name}`" for name in names[:6])
-    commands = " && ".join(
-        f"go build -o {name} ./cmd/{name.rsplit('/', 1)[-1]}" for name in names[:6]
-    )
-    if "bin/probe-..." in text:
-        text = text.replace("bin/probe-...", listing)
-    return re.sub(r"go build -o bin/\.\.\.", commands, text)
+    """No-op: never rewrite go-build text inside spans or fences."""
+    del root
+    return content or ""
 
 
 def rewrite_checkout_directory_name(content: str, root: Path) -> str:
@@ -1722,7 +1707,9 @@ def apply_deterministic_rewrites(
     page_id: str = "",
 ) -> str:
     """Replay structural compose rewrites without LLM or fence-wide substitution."""
-    text = content or ""
+    from repo_wiki.generator.code_safe import protect_code_units, restore_code_units
+
+    text, held = protect_code_units(content or "")
     text = sanitize_leftover_handbook_mermaid(text)
     text = rewrite_token_const_cite(text, root)
     text = rewrite_checkout_directory_name(text, root)
@@ -1829,4 +1816,5 @@ def apply_deterministic_rewrites(
     text = strip_empty_sections_and_footnotes(text)
     text = strip_reader_unresolved_markers(text)
     text = dedupe_identical_fences(text)
+    text = restore_code_units(text, held)
     return rebuild_toc_from_h2s(text)
