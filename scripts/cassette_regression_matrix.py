@@ -185,20 +185,18 @@ def _acc25r_code_integrity(content: Path | None, cassette: Path, source: Path, a
     empty = 0
     unclosed = 0
     tiny: list[str] = []
+    empty_re = re.compile(r"(?<!`)``(?!`)")
+    fence_re = re.compile(r"```.*?```", re.S)
     if content is not None:
-        from repo_wiki.generator.code_safe import empty_inline_spans
-        from repo_wiki.verifier.handbook import (
-            MIN_HANDBOOK_BODY_CHARS,
-            handbook_page_body_len,
-            has_unclosed_fence,
-        )
-
         for path in sorted(content.rglob("*.md")):
             text = path.read_text(encoding="utf-8", errors="ignore")
-            empty += len(empty_inline_spans(text))
-            if has_unclosed_fence(text):
+            stripped = fence_re.sub("", text)
+            empty += len(empty_re.findall(stripped))
+            if text.count("```") % 2 == 1:
                 unclosed += 1
-            if handbook_page_body_len(text) < MIN_HANDBOOK_BODY_CHARS:
+            body = re.sub(r"`[^`]*`", "", stripped)
+            body = re.sub(r"<cite>.*?</cite>", "", body, flags=re.I)
+            if len(re.sub(r"\s+", "", body)) < 800:
                 tiny.append(path.relative_to(content).as_posix())
     return {
         "violations": payload.get("violations"),
