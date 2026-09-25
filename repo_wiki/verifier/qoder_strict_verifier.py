@@ -3217,7 +3217,19 @@ class QoderLikeVerifierService(VerifierService):
                 continue
             raw_summary = payload.get("summary")
             summary = raw_summary if isinstance(raw_summary, dict) else {}
-            count = int(summary.get("dropped_core_count") or 0)
+            from repo_wiki.orchestration.quality_artifacts import _is_core_handbook_page
+
+            dropped_ids = [
+                str(item)
+                for item in (
+                    summary.get("dropped_core_page_ids") or summary.get("dropped_page_ids") or []
+                )
+                if _is_core_handbook_page(str(item))
+            ]
+            if not dropped_ids:
+                extra = summary.get("dropped_page_ids") or []
+                dropped_ids = [str(item) for item in extra if _is_core_handbook_page(str(item))]
+            count = len(dropped_ids)
             if count:
                 return self._handbook_fail(
                     "qoder-handbook-dropped-cores",
@@ -3225,7 +3237,7 @@ class QoderLikeVerifierService(VerifierService):
                     "Dropped core handbook pages are a hard fail",
                     {
                         "dropped_core_count": count,
-                        "dropped_core_page_ids": summary.get("dropped_core_page_ids") or [],
+                        "dropped_core_page_ids": dropped_ids,
                     },
                 )
             return self._handbook_pass(

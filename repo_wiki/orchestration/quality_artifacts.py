@@ -26,14 +26,27 @@ _CITE_TARGET_PATTERN = re.compile(
 )
 _URI_SCHEME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _READY_STATES = {"READY", "PASS"}
-_CORE_PAGE_RE = re.compile(
-    r"overview|install|quick|api|data.?model|概述|安装|快速|数据模型",
-    re.I,
+_CORE_PAGE_IDS = frozenset(
+    {
+        "project-overview",
+        "installation",
+        "quick-start",
+        "quickstart",
+        "api-overview",
+        "api-reference",
+        "data-models-overview",
+        "data-model",
+        "data-models",
+    }
 )
+_CORE_TITLE_RE = re.compile(r"^(项目概述|安装与配置|安装指南|快速开始|API参考|数据模型)$")
 
 
 def _is_core_handbook_page(page_id: str, title: str = "") -> bool:
-    return bool(_CORE_PAGE_RE.search(f"{page_id} {title}"))
+    pid = (page_id or "").lower().rsplit("/", 1)[-1]
+    if pid in _CORE_PAGE_IDS:
+        return True
+    return bool(_CORE_TITLE_RE.search((title or "").strip()))
 
 
 def _now_iso() -> str:

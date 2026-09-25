@@ -232,6 +232,56 @@ app.include_router(inner, prefix="/api")
     assert not hasattr(independent, "_resolve_router_ref")
 
 
+def test_c_independent_extractor_joins_attr_prefix_and_module_router() -> None:
+    files = [
+        (
+            "main.py",
+            """
+from fastapi import FastAPI
+from pkg.httpx import api as api_router
+class Settings:
+    api_prefix: str = "/api"
+application = FastAPI()
+application.include_router(api_router.router, prefix=settings.api_prefix)
+""",
+        ),
+        (
+            "pkg/httpx/api.py",
+            """
+from fastapi import APIRouter
+router = APIRouter()
+router.include_router(users.router, prefix="/users")
+""",
+        ),
+        (
+            "pkg/httpx/users.py",
+            """
+from fastapi import APIRouter
+router = APIRouter()
+@router.post("/login")
+def login():
+    return {}
+""",
+        ),
+        (
+            "svc.go",
+            """
+package svc
+type EchoReq struct {
+    Path string `path:"/hello/echo"`
+}
+""",
+        ),
+    ]
+    source = extract_source_http_paths(files)
+    assert ("POST", "/api/users/login") in source
+    assert ("ANY", "/hello/echo") in source
+    handbook = "GET `/api/users/login` 与 ANY `/hello/echo` 与 GET `/invented`。"
+    mismatches = handbook_route_crosscheck_mismatches(handbook, files)
+    assert not any("api/users/login" in item or "hello/echo" in item for item in mismatches)
+    assert any("invented" in item for item in mismatches)
+
+
 def test_d_models_are_tables_dtos_are_labeled(tmp_path: Path) -> None:
     _write(
         tmp_path / "models.py",
@@ -270,6 +320,18 @@ type Widget struct {
 func Boot(db *DB) { db.AutoMigrate(&Widget{}) }
 """,
     )
+    _write(
+        tmp_path / "query.go",
+        """
+package store
+
+type ResultFilter struct {
+    Name string
+}
+
+func List(db *DB) { db.Find(&ResultFilter{}) }
+""",
+    )
     _write(tmp_path / "sql" / "001_up.sql", "CREATE TABLE beacons (id INT);\n")
     _write(tmp_path / "sql" / "001_down.sql", "DROP TABLE beacons;\n")
     tables = {name for name, _rel in discover_model_classes(tmp_path)}
@@ -278,6 +340,7 @@ func Boot(db *DB) { db.AutoMigrate(&Widget{}) }
     assert "Note" in tables
     assert "Widget" in tables
     assert "beacons" in tables
+    assert "ResultFilter" not in tables
     assert "AccountIn" in dtos
     assert "AccountIn" not in tables
     required = data_model_required_sources(tmp_path)
@@ -329,8 +392,16 @@ services:
 
 
 def test_f_dropped_core_and_short_skeleton_cannot_hide(tmp_path: Path) -> None:
-    from repo_wiki.orchestration.quality_artifacts import build_generation_quality_documents
+    from repo_wiki.orchestration.quality_artifacts import (
+        _is_core_handbook_page,
+        build_generation_quality_documents,
+    )
     from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
+
+    assert _is_core_handbook_page("project-overview", "项目概述")
+    assert _is_core_handbook_page("installation", "安装与配置")
+    assert not _is_core_handbook_page("deployment-overview", "部署概览")
+    assert not _is_core_handbook_page("api-development", "API开发指南")
 
     page = WikiPagePlan(
         page_id="project-overview",

@@ -1038,9 +1038,7 @@ _SQL_CREATE_RE = re.compile(
     r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`\"']?([A-Za-z_][A-Za-z0-9_]*)",
     re.I,
 )
-_DB_USE_RE = re.compile(
-    r"(?:AutoMigrate|Create|Find|Save|First|Updates)\(\s*&([A-Z][A-Za-z0-9_]+)",
-)
+_DB_USE_RE = re.compile(r"AutoMigrate\(\s*&([A-Z][A-Za-z0-9_]+)")
 _DTO_NAME_RE = re.compile(r"(DTO|Schema|Request|Response|In|Out)$")
 _DOWN_NAME_RE = re.compile(r"(?:^|[_-])down(?:[_-]|\.|$)", re.I)
 _ABSENCE_RE = re.compile(
@@ -1070,11 +1068,23 @@ def discover_model_classes(repo_root: Path) -> list[tuple[str, str]]:
         elif path.suffix == ".go" and not path.name.endswith("_test.go"):
             text = path.read_text(encoding="utf-8", errors="ignore")
             go_used.update(_DB_USE_RE.findall(text))
-            tagged = 'gorm:"' in text or "gorm.Model" in text or "gorm:" in text
             for match in _GORM_STRUCT_RE.finditer(text):
-                name = match.group(1)
-                if tagged or name in go_used:
-                    found.append((name, rel))
+                if match.group(1).endswith(("Repository", "Filter", "Query", "View")):
+                    continue
+                brace = text.find("{", match.end() - 1)
+                window = text[match.start() : brace + 1] if brace >= 0 else match.group(0)
+                depth = 0
+                if brace >= 0:
+                    for index, char in enumerate(text[brace:], brace):
+                        if char == "{":
+                            depth += 1
+                        elif char == "}":
+                            depth -= 1
+                            if depth <= 0:
+                                window = text[match.start() : index + 1]
+                                break
+                if 'gorm:"' in window or "gorm.Model" in window or match.group(1) in go_used:
+                    found.append((match.group(1), rel))
         elif path.suffix == ".sql":
             text = path.read_text(encoding="utf-8", errors="ignore")
             for match in _SQL_CREATE_RE.finditer(text):
@@ -1164,7 +1174,10 @@ def data_model_required_sources(repo_root: Path) -> list[str]:
         if rel.endswith(".sql"):
             continue
         del name
-        pack = str(Path(rel).parent.as_posix())
+        parent = Path(rel).parent
+        if parent.name != "models" and Path(rel).name not in {"models.py", "model.py"}:
+            continue
+        pack = str(parent.as_posix())
         if pack not in required:
             required.append(pack if pack != "." else rel)
     ups = _up_migration_files(repo_root)
