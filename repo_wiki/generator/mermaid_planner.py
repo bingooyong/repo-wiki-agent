@@ -694,12 +694,30 @@ def _module_name_and_path(module: Any, index: int) -> tuple[str, str]:
 
 
 def _is_full_architecture_page(page_id: str) -> bool:
-    pid = (page_id or "").lower().rsplit("/", 1)[-1]
-    return pid in {
-        "architecture-overview",
-        "architecture",
-        "整体架构概览",
-    }
+    pid = (page_id or "").lower()
+    leaf = pid.rsplit("/", 1)[-1]
+    return (
+        leaf in {
+            "architecture-overview",
+            "architecture",
+            "整体架构概览",
+        }
+        or "architecture-overview" in pid
+        or "整体架构概览" in pid
+    )
+
+
+def _architecture_prefer_tokens(page_id: str) -> tuple[str, ...] | None:
+    pid = (page_id or "").lower()
+    if any(token in pid for token in ("event", "事件")):
+        return ("control", "agent", "probe-agent", "cmd/probe-agent", "cmd/ccprobe-control")
+    if any(token in pid for token in ("data-flow", "数据流", "调用链")):
+        return ("services", "repository", "exporter", "app/services", "app/db")
+    if any(token in pid for token in ("module", "模块")):
+        return ("control", "services", "repository", "app/api", "app/models")
+    if any(token in pid for token in ("system", "组件")):
+        return ("cmd/", "app/api", "app/core", "internal/control", "internal/services")
+    return None
 
 
 def _module_label(module: Any, index: int = 0) -> str:
@@ -939,6 +957,11 @@ class MermaidPlanner:
             if compose:
                 diagrams.append(compose)
 
+        if not diagrams:
+            fallback = self._plan_request_flow_sequence(page_id, evidence_binding, context)
+            if fallback:
+                diagrams.append(fallback)
+
         return diagrams
 
     def _plan_overview_architecture_diagram(
@@ -960,7 +983,16 @@ class MermaidPlanner:
                 for token in tokens
             )
         ]
+        prefer_tokens = _architecture_prefer_tokens(page_id)
         if not _is_full_architecture_page(page_id):
+            if prefer_tokens:
+                token_scoped = [
+                    label
+                    for label in labels
+                    if any(token in label.lower() for token in prefer_tokens)
+                ]
+                if token_scoped:
+                    scoped = token_scoped
             if not scoped:
                 scoped = [label for label in labels if label.startswith(("internal/", "app/"))]
             if not scoped:
@@ -1154,7 +1186,16 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        """Map endpoint list/detail/count/parameter retrieval flows into a sequence."""
+        """Catalog-only list/detail/count/parameter flows. Other API pages use request-flow."""
+        from repo_wiki.generator.deterministic_sections import is_api_catalog_owner_page
+
+        pid = (page_id or "").lower()
+        if not (
+            is_api_catalog_owner_page(page_id=page_id or "")
+            or pid.endswith("api-reference")
+            or pid.rsplit("/", 1)[-1] in {"api-ref", "api-reference", "api"}
+        ):
+            return None
         endpoints = context.get("endpoints", [])
 
         participants: list[str] = ["Client"]
@@ -1499,6 +1540,8 @@ class MermaidPlanner:
                 for item in (model.get("primary_keys") or [])
                 if mermaid_er_field(str(item))
             ]
+            if not attributes:
+                attributes = [{"name": "id", "type": "int"}]
             er_entities.append(
                 {
                     "entity": entity_name,
@@ -1529,6 +1572,41 @@ class MermaidPlanner:
                 if edge in relationships:
                     continue
                 relationships.append(edge)
+
+        have = {item["entity"] for item in er_entities}
+        models_by_name = {
+            mermaid_er_field(str(item.get("name") or item.get("table") or "")): item
+            for item in models
+            if isinstance(item, dict)
+        }
+        for left, right, _label in relationships:
+            dest = left if left not in have else (right if right not in have else "")
+            if not dest:
+                continue
+            source = models_by_name.get(dest) or {}
+            dest_attrs: list[dict[str, str]] = []
+            raw_types = [str(item) for item in (source.get("attribute_types") or [])]
+            for index, item in enumerate(source.get("attributes") or []):
+                name = mermaid_er_field(str(item))
+                if not name:
+                    continue
+                raw = raw_types[index] if index < len(raw_types) else "string"
+                dest_attrs.append({"name": name, "type": _join_key_scalar(name, raw)})
+            if not dest_attrs:
+                dest_attrs = [{"name": "id", "type": "int"}]
+            er_entities.append(
+                {
+                    "entity": dest,
+                    "attributes": dest_attrs,
+                    "primary_key": mermaid_er_field(str(source.get("primary_key") or "id")),
+                    "primary_keys": [
+                        mermaid_er_field(str(item))
+                        for item in (source.get("primary_keys") or ["id"])
+                        if mermaid_er_field(str(item))
+                    ],
+                }
+            )
+            have.add(dest)
 
         if not er_entities:
             return None
@@ -1710,9 +1788,13 @@ class MermaidPlanner:
             return None
         pid = (page_id or "").lower()
         if not any(
-            token in pid for token in ("overview", "architecture", "setting", "项目", "架构")
+            token in pid
+            for token in ("overview", "setting", "项目概述", "project-overview", "installation")
         ):
             return None
+        if any(token in pid for token in ("architecture", "架构设计", "事件", "模块", "数据流")):
+            if "overview" not in pid and "整体" not in pid and "项目概述" not in pid:
+                return None
         return DiagramPlan(
             diagram_id=f"{page_id}-settings-flow",
             diagram_type=MermaidDiagramType.FLOWCHART,
@@ -1778,21 +1860,39 @@ class MermaidPlanner:
             elif "python" in leaf:
                 selected = [
                     item for item in endpoints if "app/" in str(item.get("file_path") or "")
-                ][:1]
+                ]
             elif "core" in leaf or "核心" in leaf:
                 selected = [
                     item
                     for item in endpoints
                     if "app/api" in str(item.get("file_path") or "")
                     or "controller" in str(item.get("file_path") or "")
-                ][:1]
+                ]
             elif leaf in {"api-overview", "api-reference", "api", "api-ref"}:
                 selected = list(endpoints[:1])
+        if not selected and endpoints:
+            selected = [endpoints[sum(ord(c) for c in (page_id or "x")) % len(endpoints)]]
         if not selected:
             return None
         selected.sort(key=lambda item: _request_flow_score(item, page_id, tokens), reverse=True)
-        if any(token in leaf for token in ("core", "核心")) and len(selected) > 1:
+        if any(token in leaf for token in ("core", "核心")):
             sample = selected[-1]
+            first_app = next(
+                (
+                    item
+                    for item in endpoints
+                    if "app/" in str(item.get("file_path") or "")
+                ),
+                None,
+            )
+            if (
+                first_app
+                and str(sample.get("path") or "") == str(first_app.get("path") or "")
+                and len(endpoints) > 1
+            ):
+                sample = endpoints[-1]
+        elif "python" in leaf:
+            sample = selected[0]
         else:
             sample = selected[0]
         method, path = _honest_method_path(sample, root)

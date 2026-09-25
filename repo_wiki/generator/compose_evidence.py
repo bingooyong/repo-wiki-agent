@@ -176,6 +176,7 @@ def mermaid_compose_edges(block: str) -> list[tuple[str, str]]:
 def invented_compose_edges(markdown: str, allowed: list[tuple[str, str]]) -> list[tuple[str, str]]:
     allowed_set = {(src, dest) for src, dest in allowed}
     allowed_names = {src for src, dest in allowed} | {dest for src, dest in allowed}
+    compose_names = {name for name in allowed_names if name != ".env"}
     found: list[tuple[str, str]] = []
     for block in re.findall(r"```mermaid\s*(.*?)```", markdown or "", flags=re.I | re.S):
         if "erDiagram" in block or "sequenceDiagram" in block:
@@ -185,6 +186,8 @@ def invented_compose_edges(markdown: str, allowed: list[tuple[str, str]]) -> lis
                 continue
         for src, dest in mermaid_compose_edges(block):
             if src in {"start", "finish"} or dest in {"start", "finish"}:
+                continue
+            if src == ".env" and dest not in compose_names:
                 continue
             if (
                 (src, dest) not in allowed_set

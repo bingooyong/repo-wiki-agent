@@ -2332,8 +2332,17 @@ class RepoWikiService:
             return True
         if category == WikiTaxonomyCategory.CORE_SERVICES:
             return True
+        if category == WikiTaxonomyCategory.PYTHON_SERVICES:
+            return True
+        if category == WikiTaxonomyCategory.FRONTEND_APPLICATIONS:
+            return True
         if category == WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS and any(
             token in title or token in page_id for token in ("部署", "compose", "拓扑", "deploy")
+        ):
+            return True
+        if any(
+            token in title or token in page_id
+            for token in ("错误处理", "前端应用API", "认证授权", "Python服务API", "核心服务API")
         ):
             return True
         return False
@@ -2421,18 +2430,30 @@ class RepoWikiService:
 
         is_api_page = page.category == WikiTaxonomyCategory.API_REFERENCE
         is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
-        if leftover_mermaid_is_unusable(content) or self._existing_mermaid_is_thin(content):
+        from repo_wiki.generator.deterministic_sections import leftover_compose_has_undeclared_env
+
+        if (
+            leftover_mermaid_is_unusable(content)
+            or leftover_compose_has_undeclared_env(content, self.root)
+            or self._existing_mermaid_is_thin(content)
+        ):
             content = self._strip_mermaid_fences(content)
         needs_er_mermaid = is_data_model_page and not self._content_has_er_mermaid(content)
+        if needs_er_mermaid:
+            content = self._strip_mermaid_fences(content)
         needs_any_mermaid = (
             add_mermaid
             or is_api_page
             or is_data_model_page
+            or self._page_requires_hard_mermaid(page)
             or page.category
             in {
                 WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
                 WikiTaxonomyCategory.SECURITY_COMPLIANCE,
                 WikiTaxonomyCategory.CORE_SERVICES,
+                WikiTaxonomyCategory.PYTHON_SERVICES,
+                WikiTaxonomyCategory.FRONTEND_APPLICATIONS,
+                WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
             }
         ) and not self._content_has_mermaid_fence(content)
         if needs_er_mermaid or needs_any_mermaid:
@@ -2458,6 +2479,7 @@ class RepoWikiService:
         from repo_wiki.generator.deterministic_sections import (
             attach_missing_route_cites,
             rewrite_architecture_role_claims,
+            rewrite_frontend_consumer_claims,
             rewrite_readme_route_cites,
             rewrite_route_methods_from_table,
             rewrite_token_const_cite,
@@ -2467,6 +2489,12 @@ class RepoWikiService:
         )
 
         content = rewrite_architecture_role_claims(content)
+        content = rewrite_frontend_consumer_claims(
+            content,
+            self.root,
+            page_id=str(getattr(page, "page_id", "") or ""),
+            title=str(getattr(page, "title", "") or ""),
+        )
         content = rewrite_route_methods_from_table(content, self.root)
         content = strip_unknown_go_packages(content, self.root)
         content = rewrite_token_const_cite(content, self.root)
@@ -2649,7 +2677,7 @@ class RepoWikiService:
                 count=1,
             )
         content = re.sub(
-            r"\n## 核心包\n\n(?:- `[^`]+`\s*<cite>[^<]+</cite>\s*\n)+",
+            r"\n## 核心包\n\n(?:(?:- )?`[^`]+`\s*<cite>[^<]+</cite>[。.\s]*)+",
             "\n",
             content,
         )
@@ -2809,6 +2837,18 @@ class RepoWikiService:
         page_id = str(getattr(page, "page_id", "") or "")
         title = str(getattr(page, "title", "") or "")
         leaf = page_id.lower().rsplit("/", 1)[-1]
+        if any(token in f"{page_id} {title}" for token in ("前端", "frontend", "web")):
+            from repo_wiki.generator.mermaid_planner import frontend_fetch_paths
+
+            fetches = set(frontend_fetch_paths(self.root))
+            prefixes = ("/probe", "/tag", "/api/v1")
+            filtered = [
+                item
+                for item in normalized
+                if any(str(item.get("path") or "").startswith(prefix) for prefix in prefixes)
+                or str(item.get("path") or "") in fetches
+            ]
+            return self._order_api_endpoints_for_pages(filtered)
         if is_api_catalog_owner_page(page_id=page_id, title=title):
             return self._order_api_endpoints_for_pages(normalized)
         if leaf in {"error-handling-status-codes", "error-codes"}:
@@ -3107,6 +3147,32 @@ class RepoWikiService:
                 continue
             self._seen_mermaid_hashes.add(mermaid_key)
             rendered_blocks.append(f"```mermaid\n{rendered}\n```")
+        if not rendered_blocks and self._page_requires_hard_mermaid(page):
+            from repo_wiki.generator.mermaid_planner import MermaidPlanner
+
+            fallback_planner = MermaidPlanner(str(self.root))
+            fallback = fallback_planner._plan_request_flow_sequence(
+                str(getattr(page, "page_id", "") or ""),
+                binding,
+                context,
+            )
+            if fallback:
+                rendered, is_valid, _ = renderer.render_diagram_with_validation(fallback)
+                if is_valid and rendered:
+                    mermaid_key = normalize_mermaid_block(rendered)
+                    if mermaid_key not in self._seen_mermaid_hashes:
+                        self._seen_mermaid_hashes.add(mermaid_key)
+                        rendered_blocks.append(f"```mermaid\n{rendered}\n```")
+                    elif "->>" in rendered:
+                        unique = rendered.replace(
+                            "sequenceDiagram",
+                            f"sequenceDiagram\n    Note over Client: {str(getattr(page, 'title', '') or page.page_id)[:24]}",
+                            1,
+                        )
+                        unique_key = normalize_mermaid_block(unique)
+                        if unique_key not in self._seen_mermaid_hashes:
+                            self._seen_mermaid_hashes.add(unique_key)
+                            rendered_blocks.append(f"```mermaid\n{unique}\n```")
         return rendered_blocks
 
     def _rebuild_qoder_toc_from_real_h2s(self, page: Any, content: str) -> str:

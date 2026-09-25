@@ -398,6 +398,27 @@ def leftover_mermaid_is_unusable(content: str) -> bool:
             return True
         if "ErrorWrapper" in block:
             return True
+        if re.search(r"\n    (users|articles|tags) \{\s*\n    \}", block):
+            return True
+        if "create_updated_at_trigger" in block and "commentaries" not in block.lower():
+            return True
+    return False
+
+
+def leftover_compose_has_undeclared_env(content: str, root: Path) -> bool:
+    from repo_wiki.generator.compose_evidence import (
+        load_compose_from_root,
+        mermaid_compose_edges,
+    )
+
+    _names, allowed = load_compose_from_root(root)
+    allowed_set = set(allowed)
+    for block in re.findall(r"```mermaid\s*(.*?)```", content or "", flags=re.I | re.S):
+        if "erDiagram" in block or "sequenceDiagram" in block:
+            continue
+        for src, dest in mermaid_compose_edges(block):
+            if src == ".env" and (src, dest) not in allowed_set:
+                return True
     return False
 
 
@@ -1223,6 +1244,55 @@ def rewrite_architecture_role_claims(content: str) -> str:
     return text
 
 
+FRONTEND_CONSUMER_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    (
+        r"ccprobe-control 模块面向前端应用的 HTTP API 入口",
+        "ccagent 面向前端应用的 HTTP API 入口",
+    ),
+    (
+        r"围绕 `ccprobe-control` 的 Go handler 与请求/响应结构展开 API 参考说明",
+        "围绕 `web/` 与 `static/` 对 ccagent `/probe`、`/tag`、`/api/v1` 的调用展开 API 参考说明",
+    ),
+    (
+        r"前端应用通过 HTTP 调用 ccprobe-control 暴露的查询与控制端点（`/force-resync`、`/healthz`、`/publish`、`/status`）",
+        "前端应用通过 `web/`、`static/` 调用 ccagent 的 `/probe`、`/tag`、`/api/v1` 路由",
+    ),
+    (
+        r"整体链路是“前端 → 控制面 handler → TunnelHub/服务 → 响应”",
+        "整体链路是“前端 fetch → ccagent `/probe` `/tag` `/api/v1` → 响应”",
+    ),
+    (
+        r"前端应用通过一组轻量的查询与控制端点完成状态查看、强制再同步与探测任务发布",
+        "前端应用通过 `/probe`、`/tag`、`/api/v1` 完成状态查看与标签查询",
+    ),
+)
+
+
+def rewrite_frontend_consumer_claims(
+    content: str,
+    root: Path,
+    *,
+    page_id: str = "",
+    title: str = "",
+) -> str:
+    blob = f"{page_id} {title} {content[:80]}"
+    if not any(token in blob for token in ("前端", "frontend", "web")):
+        return content or ""
+    text = content or ""
+    for pattern, repl in FRONTEND_CONSUMER_REPLACEMENTS:
+        text = re.sub(pattern, repl, text)
+    from repo_wiki.generator.mermaid_planner import frontend_fetch_paths
+
+    fetches = frontend_fetch_paths(root)
+    if fetches and "ccprobe-control 暴露的查询与控制端点" in text:
+        listed = "、".join(f"`{path}`" for path in fetches[:6])
+        text = text.replace(
+            "ccprobe-control 暴露的查询与控制端点",
+            f"ccagent 的 {listed} 路由",
+        )
+    return text
+
+
 def strip_reader_unresolved_markers(content: str) -> str:
     text = _UNRESOLVED_API_RE.sub("", content or "")
     text = re.sub(r"^## API 证据状态\n\n<!-- repo-wiki:unresolved[^>]+-->\n?", "", text, flags=re.M)
@@ -1398,6 +1468,7 @@ def apply_deterministic_rewrites(
     text = strip_placeholder_ops_fences(text)
     text = expand_truncated_build_commands(text, root)
     text = rewrite_architecture_role_claims(text)
+    text = rewrite_frontend_consumer_claims(text, root, page_id=page_id, title=title)
     try:
         from repo_wiki.generator.compose_evidence import (
             load_repo_import_edges,

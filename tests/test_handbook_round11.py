@@ -15,12 +15,16 @@ from repo_wiki.generator.compose_evidence import (
 )
 from repo_wiki.generator.deterministic_sections import (
     ARCHITECTURE_ROLE_REPLACEMENTS,
+    FRONTEND_CONSUMER_REPLACEMENTS,
     audit_text_rewrite,
     build_verify_section,
     dangling_rewrite_artifacts,
+    leftover_compose_has_undeclared_env,
+    leftover_mermaid_is_unusable,
     load_route_method_table,
     package_strip_targets,
     rewrite_architecture_role_claims,
+    rewrite_frontend_consumer_claims,
     rewrite_route_methods_from_table,
     strip_unknown_go_packages,
 )
@@ -113,6 +117,11 @@ def test_rewrites_are_text_safe_on_25j_and_25k(tmp_path: Path) -> None:
                 for pattern, _repl in ARCHITECTURE_ROLE_REPLACEMENTS
                 for match in re.finditer(pattern, before)
             ]
+            frontend_targets = [
+                match.group(0)
+                for pattern, _repl in FRONTEND_CONSUMER_REPLACEMENTS
+                for match in re.finditer(pattern, before)
+            ]
             route_targets = [
                 token
                 for path, method in load_route_method_table(root).items()
@@ -125,6 +134,12 @@ def test_rewrites_are_text_safe_on_25j_and_25k(tmp_path: Path) -> None:
                     package_strip_targets(before, root),
                 ),
                 (rewrite_architecture_role_claims, role_targets),
+                (
+                    lambda text: rewrite_frontend_consumer_claims(
+                        text, root, page_id=page.stem, title=page.stem
+                    ),
+                    frontend_targets,
+                ),
                 (lambda text: rewrite_route_methods_from_table(text, root), route_targets),
             )
             for rewriter, targets in rewrites:
@@ -473,6 +488,140 @@ def test_generate_attaches_diagrams_even_when_leftover_exists(tmp_path: Path) ->
     distinct, total = handbook_distinct_evidence_mermaid_count(content)
     assert total >= 1
     assert distinct >= 1
+
+
+def test_leftover_undeclared_env_and_empty_er_are_replaced(tmp_path: Path) -> None:
+    go = _go_repo(tmp_path)
+    (go / "podman-compose.yml").write_text(
+        "services:\n  mysql:\n    image: mysql\n  ccagent:\n    image: ccagent\n"
+        "    depends_on: [mysql]\n  custom-probe:\n    image: probe\n",
+        encoding="utf-8",
+    )
+    leftover = (
+        "# 部署运维\n\n```mermaid\nflowchart TD\n"
+        "    env_file[.env]\n    ccagent[ccagent]\n    custom[custom-probe]\n"
+        "    env_file --> ccagent\n    env_file --> custom\n```\n"
+    )
+    assert leftover_compose_has_undeclared_env(leftover, go)
+    out = _render(
+        _service(go),
+        _page(
+            "deployment-operations",
+            "部署运维",
+            WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
+            "部署运维.md",
+        ),
+        leftover,
+        _go_context(go),
+    )
+    assert "env_file --> ccagent" not in out
+    _names, allowed = load_compose_from_root(go)
+    assert invented_compose_edges(out, allowed) == []
+
+    py = _fastapi_repo(tmp_path / "fa")
+    empty_er = (
+        "# 数据库架构\n\n```mermaid\nerDiagram\n    users {\n    }\n"
+        "    articles {\n    }\n    tags {\n    }\n```\n"
+    )
+    assert leftover_mermaid_is_unusable(empty_er)
+    schema = _render(
+        _service(py),
+        _page(
+            "database-schema",
+            "数据库架构",
+            WikiTaxonomyCategory.DATA_MODELS,
+            "数据模型/数据库架构/数据库架构.md",
+        ),
+        empty_er,
+        _py_context(py),
+    )
+    assert re_empty_entity(schema, "users") is False
+    trigger = (
+        "# 数据迁移策略\n\n```mermaid\nflowchart TD\n"
+        "    version_fn[fdf8821871d7_main_tables.py]\n"
+        "    trigger_fn[create_updated_at_trigger]\n"
+        "    tables[users/articles timestamps]\n"
+        "    version_fn --> trigger_fn\n    trigger_fn --> tables\n```\n"
+    )
+    assert leftover_mermaid_is_unusable(trigger)
+    migration = _render(
+        _service(py),
+        _page(
+            "database-migration-strategy",
+            "数据迁移策略",
+            WikiTaxonomyCategory.DATA_MODELS,
+            "数据模型/数据迁移策略.md",
+        ),
+        trigger,
+        _py_context(py),
+    )
+    assert "erDiagram" in migration
+    assert "commentaries" in migration.lower()
+
+
+def test_architecture_pages_keep_mermaid_after_overview(tmp_path: Path) -> None:
+    root = _fastapi_repo(tmp_path)
+    service = _service(root)
+    ctx = _py_context(root)
+    _render(
+        service,
+        _page(
+            "project-overview",
+            "项目概述",
+            WikiTaxonomyCategory.PROJECT_OVERVIEW,
+            "项目概述/项目概述.md",
+        ),
+        "# 项目概述\n\n正文。\n",
+        ctx,
+    )
+    for page_id, title, output in (
+        ("architecture-overview", "整体架构概览", "架构设计/整体架构概览.md"),
+        ("event-driven-architecture", "事件驱动架构", "架构设计/事件驱动架构.md"),
+        ("module-relationships", "模块关系", "架构设计/模块关系.md"),
+    ):
+        out = _render(
+            service,
+            _page(page_id, title, WikiTaxonomyCategory.ARCHITECTURE_DESIGN, output),
+            f"# {title}\n\n正文。\n",
+            ctx,
+        )
+        assert "```mermaid" in out, title
+
+
+def test_frontend_page_uses_ccagent_fetch_routes(tmp_path: Path) -> None:
+    root = _go_repo(tmp_path)
+    (root / "web").mkdir()
+    (root / "web" / "app.js").write_text('fetch("/probe/list"); fetch("/tag");\n', encoding="utf-8")
+    raw = (
+        "# 前端应用API\n\n"
+        "本 Wiki 页面聚焦仓库  中 ccprobe-control 模块面向前端应用的 HTTP API 入口。"
+        "前端应用通过 HTTP 调用 ccprobe-control 暴露的查询与控制端点"
+        "（`/force-resync`、`/healthz`、`/publish`、`/status`）。\n"
+    )
+    targets = [
+        match.group(0)
+        for pattern, _repl in FRONTEND_CONSUMER_REPLACEMENTS
+        for match in re.finditer(pattern, raw)
+    ]
+    rewritten = rewrite_frontend_consumer_claims(
+        raw, root, page_id="frontend-application-api", title="前端应用API"
+    )
+    audit = audit_text_rewrite(raw, rewritten, target_spans=targets)
+    assert audit["collateral"] == 0
+    out = _render(
+        _service(root),
+        _page(
+            "frontend-application-api",
+            "前端应用API",
+            WikiTaxonomyCategory.API_REFERENCE,
+            "API参考/前端应用API.md",
+        ),
+        raw,
+        _go_context(root),
+    )
+    assert "ccprobe-control 模块面向前端应用" not in out
+    assert "/probe" in out
+    assert "```mermaid" in out
 
 
 def test_missing_route_cites_are_attached(tmp_path: Path) -> None:

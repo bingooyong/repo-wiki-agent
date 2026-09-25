@@ -136,9 +136,18 @@ def _fastapi_repo(root: Path) -> Path:
     (root / "app" / "models" / "domain").mkdir(parents=True)
     (root / "app" / "core" / "settings").mkdir(parents=True)
     (root / "app" / "services").mkdir(parents=True)
-    (root / "app" / "main.py").write_text("def app():\n    return 1\n", encoding="utf-8")
+    (root / "app" / "main.py").write_text("from app.api.routes import articles\n", encoding="utf-8")
+    (root / "app" / "db" / "queries.py").write_text("def fetch():\n    return []\n", encoding="utf-8")
     (root / "app" / "api" / "dependencies" / "authentication.py").write_text(
-        "def get_current_user_authorizer():\n    return None\n", encoding="utf-8"
+        "from app.core.settings import Settings\n"
+        "def get_current_user_authorizer():\n    return None\n",
+        encoding="utf-8",
+    )
+    (root / "app" / "core" / "settings" / "__init__.py").write_text(
+        "class Settings:\n    pass\n", encoding="utf-8"
+    )
+    (root / "app" / "services" / "articles.py").write_text(
+        "from app.db import queries\n", encoding="utf-8"
     )
     (root / "app" / "api" / "errors" / "http_error.py").write_text(
         "from fastapi import HTTPException\n"
@@ -153,7 +162,12 @@ def _fastapi_repo(root: Path) -> Path:
         encoding="utf-8",
     )
     (root / "app" / "api" / "routes" / "articles.py").write_text(
+        "from app.services import articles\nfrom app.db import queries\n"
         "@router.get('')\nasync def list_articles():\n    return []\n",
+        encoding="utf-8",
+    )
+    (root / "app" / "api" / "routes" / "tags.py").write_text(
+        "@router.get('')\nasync def get_tags():\n    return []\n",
         encoding="utf-8",
     )
     (root / "app" / "models" / "domain" / "users.py").write_text(
@@ -247,6 +261,14 @@ def _go_context(root: Path) -> ComposerContext:
                 "line_number": 12,
                 "service": "frontend",
             },
+            {
+                "method": "GET",
+                "path": "/probe/list",
+                "handler": "ListProbes",
+                "file_path": "cmd/ccagent/probe.go",
+                "line_number": 8,
+                "service": "ccagent",
+            },
         ],
         modules=[
             {"name": "internal/exporter", "path": "internal/exporter"},
@@ -285,6 +307,13 @@ def _py_context(root: Path) -> ComposerContext:
                 "path": "/api/articles",
                 "handler": "list_articles",
                 "file_path": "app/api/routes/articles.py",
+                "line_number": 2,
+            },
+            {
+                "method": "GET",
+                "path": "/api/tags",
+                "handler": "get_tags",
+                "file_path": "app/api/routes/tags.py",
                 "line_number": 2,
             },
         ],
