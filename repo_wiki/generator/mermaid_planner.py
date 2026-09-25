@@ -1725,7 +1725,7 @@ class MermaidPlanner:
         else:
             handler = mermaid_ident(str(sample.get("handler") or "Handler"), prefix="h")
             auth_name, auth_label = _auth_hop(sample, go_auth=go_auth, py_auth=py_auth)
-            if auth_name:
+            if auth_name and auth_label:
                 service = mermaid_ident(
                     _package_from_file(str(sample.get("file_path") or "")) or "Service",
                     prefix="svc",
