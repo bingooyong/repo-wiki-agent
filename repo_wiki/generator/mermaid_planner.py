@@ -2017,7 +2017,11 @@ class MermaidPlanner:
                 ("Client", "mark_article_as_favorite", "POST /api/articles/{slug}/favorite"),
                 ("mark_article_as_favorite", "ArticlesRepository", "add_article_into_favorites"),
                 ("Client", "remove_article_from_favorites", "DELETE /api/articles/{slug}/favorite"),
-                ("remove_article_from_favorites", "ArticlesRepository", "remove_article_from_favorites"),
+                (
+                    "remove_article_from_favorites",
+                    "ArticlesRepository",
+                    "remove_article_from_favorites",
+                ),
                 ("Client", "follow_for_user", "POST /api/profiles/{username}/follow"),
                 ("follow_for_user", "ProfilesRepository", "add_user_into_followers"),
                 ("Client", "unsubscribe_from_user", "DELETE /api/profiles/{username}/follow"),
