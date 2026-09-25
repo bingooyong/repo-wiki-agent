@@ -959,7 +959,9 @@ def _readme_shell_lines(root: Path) -> list[str]:
     prefixes = (
         "export ",
         "docker ",
+        "docker-compose ",
         "podman ",
+        "podman-compose ",
         "poetry ",
         "alembic ",
         "uvicorn ",
@@ -978,13 +980,48 @@ def _readme_shell_lines(root: Path) -> list[str]:
     return found
 
 
-def _first_readme_command(root: Path, *needles: str) -> str:
+def _readme_commands(root: Path, *needles: str) -> list[str]:
     lowered = [needle.lower() for needle in needles]
-    for line in _readme_shell_lines(root):
-        hay = line.lower()
-        if all(needle in hay for needle in lowered):
-            return line
-    return ""
+    return [
+        line
+        for line in _readme_shell_lines(root)
+        if all(needle in line.lower() for needle in lowered)
+    ]
+
+
+def _first_readme_command(root: Path, *needles: str) -> str:
+    found = _readme_commands(root, *needles)
+    return found[0] if found else ""
+
+
+def _poetry_run(root: Path, command: str) -> str:
+    """Keep README command text; prefix alembic/uvicorn when Poetry is the installer."""
+    if not command or command.startswith("poetry "):
+        return command
+    uses_poetry = bool(
+        _first_readme_command(root, "poetry install") or _first_readme_command(root, "poetry run")
+    )
+    if uses_poetry and command.startswith(("alembic ", "uvicorn ")):
+        return f"poetry run {command}"
+    return command
+
+
+def _readme_env_block(root: Path) -> str:
+    found = [
+        line
+        for line in _readme_shell_lines(root)
+        if line.startswith(("touch .env", "echo APP_ENV", "echo DATABASE_URL", "echo SECRET_KEY"))
+    ]
+    if found:
+        return "\n".join(found)
+    assignments: list[str] = []
+    for raw in read_readme_text(root).splitlines():
+        stripped = raw.strip().lstrip("$").strip()
+        if stripped.startswith(("APP_ENV=", "DATABASE_URL=", "SECRET_KEY=")):
+            assignments.append(f"echo {stripped} >> .env")
+    if assignments:
+        return "\n".join(["touch .env", *assignments])
+    return "touch .env"
 
 
 def _schema_import_command(root: Path) -> str:
@@ -1126,23 +1163,22 @@ def build_fastapi_install_section(root: Path) -> str:
     compose_db = cite_readme_line(root, "docker-compose up") or cite_readme_line(
         root, "docker compose up"
     )
-    env_lines = [
-        line
-        for line in _readme_shell_lines(root)
-        if line.startswith(("touch .env", "echo APP_ENV", "echo DATABASE_URL", "echo SECRET_KEY"))
-    ]
     docker_line = _first_readme_command(root, "docker run") or _first_readme_command(
         root, "podman run"
     )
     poetry_line = _first_readme_command(root, "poetry install") or "poetry install"
-    alembic_line = _first_readme_command(root, "alembic upgrade") or "alembic upgrade head"
-    uvicorn_line = _first_readme_command(root, "uvicorn") or "uvicorn app.main:app --reload"
-    compose_line = _first_readme_command(root, "docker-compose up") or _first_readme_command(
+    alembic_line = _poetry_run(
+        root, _first_readme_command(root, "alembic upgrade") or "alembic upgrade head"
+    )
+    uvicorn_line = _poetry_run(
+        root, _first_readme_command(root, "uvicorn") or "uvicorn app.main:app --reload"
+    )
+    compose_lines = _readme_commands(root, "docker-compose up") or _readme_commands(
         root, "docker compose up"
     )
-    env_block = "\n".join(env_lines) if env_lines else "touch .env"
+    env_block = _readme_env_block(root)
     docker_block = docker_line or "# 按仓库 README 启动数据库"
-    compose_block = compose_line or "# 按仓库 README 启动编排"
+    compose_block = "\n".join(compose_lines) if compose_lines else "# 按仓库 README 启动编排"
     return "\n".join(
         [
             "## 安装步骤",
