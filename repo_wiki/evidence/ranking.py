@@ -269,9 +269,10 @@ def _score_by_category_relevance(page: WikiPagePlan, span: EvidenceSpanRecord) -
 
     # Categories that prefer certain languages
     language_preference = {
-        WikiTaxonomyCategory.DATA_MODELS: ["sql", "python", "java"],
-        WikiTaxonomyCategory.API_REFERENCE: ["typescript", "python", "java"],
-        WikiTaxonomyCategory.CORE_SERVICES: ["python", "java", "typescript"],
+        WikiTaxonomyCategory.DATA_MODELS: ["go", "sql", "python", "java"],
+        WikiTaxonomyCategory.API_REFERENCE: ["go", "typescript", "python", "java"],
+        WikiTaxonomyCategory.CORE_SERVICES: ["go", "python", "java", "typescript"],
+        WikiTaxonomyCategory.ARCHITECTURE_DESIGN: ["go", "python", "typescript"],
         WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS: ["yaml", "python", "shell"],
         WikiTaxonomyCategory.DEVELOPMENT_GUIDE: ["markdown", "python"],
     }
@@ -387,6 +388,13 @@ def _score_onboarding_evidence(
         if path.startswith("cmd/") and name == "main.go":
             score += WEIGHT_ONBOARDING_ENTRY + 1.0
             signals.append("onboarding_cmd_main")
+    elif page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
+        if path.endswith(".go") and (path.startswith("internal/") or "/internal/" in path):
+            score += WEIGHT_ONBOARDING_SETTINGS + 2.0
+            signals.append("arch_go_internal")
+        if path.startswith("cmd/") and name == "main.go":
+            score += WEIGHT_ONBOARDING_ENTRY
+            signals.append("arch_cmd_main")
     elif _is_ops_config_page(page) or _is_database_troubleshooting_page(page):
         if "settings" in path or "database_url" in symbol or "database_url" in text:
             score += WEIGHT_ONBOARDING_SETTINGS
@@ -524,7 +532,57 @@ def rank_evidence_for_page(
             )
         )
 
-    return results[:MIN_CANDIDATES_PER_PAGE]
+    return _pin_required_file_candidates(page, available_spans, results[:MIN_CANDIDATES_PER_PAGE])
+
+
+def _pin_required_file_candidates(
+    page: WikiPagePlan,
+    available_spans: list[EvidenceSpanRecord],
+    results: list[EvidenceCandidate],
+) -> list[EvidenceCandidate]:
+    """Keep required files (especially README) on overview/install pages."""
+    required = list((page.source_requirements.files if page.source_requirements else []) or [])
+    if _is_overview_or_install_page(page) and not any(
+        Path(item).name.lower() == "readme.md" for item in required
+    ):
+        required.append("README.md")
+    if not required:
+        return results
+    present = {_normalized_span_path(candidate.span) for candidate in results}
+    extras: list[EvidenceCandidate] = []
+    for span in available_spans:
+        path = _normalized_span_path(span)
+        name = Path(path).name.lower()
+        for req in required:
+            req_n = req.replace("\\", "/").lower()
+            if path.endswith(req_n) or name == Path(req_n).name:
+                if path not in present:
+                    extras.append(
+                        EvidenceCandidate(
+                            evidence_id=int(getattr(span, "id", 0) or 0),
+                            span=span,
+                            score=WEIGHT_ONBOARDING_README + 2.0,
+                            match_signals=["required_file"],
+                            citation_order=0,
+                        )
+                    )
+                    present.add(path)
+                break
+    if not extras:
+        return results
+    merged = extras + results
+    pinned: list[EvidenceCandidate] = []
+    for index, candidate in enumerate(merged[:MIN_CANDIDATES_PER_PAGE]):
+        pinned.append(
+            EvidenceCandidate(
+                evidence_id=candidate.evidence_id,
+                span=candidate.span,
+                score=candidate.score,
+                match_signals=candidate.match_signals,
+                citation_order=index,
+            )
+        )
+    return pinned
 
 
 def _infer_service_name_from_page(page: WikiPagePlan) -> str | None:

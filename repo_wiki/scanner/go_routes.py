@@ -55,6 +55,15 @@ _TABLE_NAME_RE = re.compile(
 )
 _NEW_CTOR_RE = re.compile(r"^New(.+)$")
 _SKIP_DIR_PARTS = frozenset({"testdata", "tests", "vendor", "node_modules"})
+_GO_IMPORT_BLOCK_RE = re.compile(r"import\s*\(\s*([\s\S]*?)\)")
+_GO_IMPORT_SINGLE_RE = re.compile(r'^\s*import\s+(?:\w+\s+)?"([^"]+)"', re.MULTILINE)
+_GO_IMPORT_PATH_RE = re.compile(r'"([^"]+)"')
+_GO_FIELD_RE = re.compile(
+    r"^\s*([A-Za-z_]\w*)\s+(\*?\[\]\*?|\*|\[]\*)?([A-Za-z_]\w*(?:\.\w+)?)\s*(`[^`]*`)?",
+    re.MULTILINE,
+)
+_NON_MODEL_NAME_RE = re.compile(r"(Config|Options|Settings|Writer|Reader|Logger|Client|Conn)$")
+_PRODUCT_PKG_ROOTS = frozenset({"internal", "pkg", "cmd"})
 
 
 @dataclass(frozen=True)
@@ -74,6 +83,9 @@ class GoDataModel:
     lineno: int
     kind: str = "go_gorm"
     table_name: str | None = None
+    attributes: tuple[str, ...] = ()
+    primary_key: str | None = None
+    relations: tuple[str, ...] = ()
 
 
 def is_go_test_path(path: str) -> bool:
@@ -140,6 +152,87 @@ def _iter_struct_defs(text: str) -> list[tuple[str, str, int]]:
         lineno = text[: match.start()].count("\n") + 1
         found.append((match.group(1), body, lineno))
     return found
+
+
+def go_package_label(path: str) -> str | None:
+    """Return ``internal/foo`` / ``cmd/bar`` for a product Go path."""
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    for root in _PRODUCT_PKG_ROOTS:
+        if root in parts:
+            index = parts.index(root)
+            if index + 1 < len(parts):
+                return "/".join(parts[index : index + 2])
+    return None
+
+
+def go_quoted_imports(text: str) -> list[str]:
+    """Return quoted import paths from single-line and block imports."""
+    found: list[str] = []
+    for match in _GO_IMPORT_BLOCK_RE.finditer(text):
+        found.extend(_GO_IMPORT_PATH_RE.findall(match.group(1)))
+    found.extend(_GO_IMPORT_SINGLE_RE.findall(text))
+    return found
+
+
+def extract_go_internal_import_edges(
+    files: Sequence[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Return ``(from_pkg, to_pkg)`` edges among ``internal/*`` / ``cmd/*``."""
+    edges: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for path, text in files:
+        if is_go_test_path(path):
+            continue
+        src = go_package_label(path)
+        if not src:
+            continue
+        for imported in go_quoted_imports(text):
+            dst = go_package_label(imported)
+            if not dst or dst == src:
+                continue
+            key = (src, dst)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append(key)
+    return edges
+
+
+def _parse_gorm_fields(
+    body: str, known_models: set[str]
+) -> tuple[tuple[str, ...], str | None, tuple[str, ...]]:
+    attrs: list[str] = []
+    pk: str | None = None
+    rels: list[str] = []
+    seen_rel: set[str] = set()
+    for name, _indirection, typ, tag in _GO_FIELD_RE.findall(body):
+        if not name or name[0].islower():
+            continue
+        tag = tag or ""
+        if name not in attrs:
+            attrs.append(name)
+        if "primaryKey" in tag or "primary_key" in tag:
+            pk = name
+        type_name = typ.split(".")[-1]
+        if type_name in known_models and type_name not in seen_rel:
+            seen_rel.add(type_name)
+            rels.append(type_name)
+        if name.endswith("ID") and name[:-2] in known_models and name[:-2] not in seen_rel:
+            seen_rel.add(name[:-2])
+            rels.append(name[:-2])
+    if pk is None and "ID" in attrs:
+        pk = "ID"
+    return tuple(attrs), pk, tuple(rels)
+
+
+def _is_non_model_struct(name: str, body: str, table_names: dict[str, str]) -> bool:
+    if not name or name[0].islower():
+        return True
+    if name in table_names:
+        return False
+    if _GORM_MODEL_EMBED_RE.search(body):
+        return False
+    return bool(_NON_MODEL_NAME_RE.search(name)) and not _GORM_TAG_RE.search(body)
 
 
 def _path_params_from_struct(body: str) -> tuple[list[str], str | None]:
@@ -306,7 +399,7 @@ def extract_go_endpoints(files: Sequence[tuple[str, str]]) -> list[GoEndpoint]:
 def extract_go_data_models(files: Sequence[tuple[str, str]]) -> list[GoDataModel]:
     """Return GORM / ``db:`` tagged structs. Skip test files and untagged DTOs."""
     table_names: dict[str, str] = {}
-    models: list[GoDataModel] = []
+    raw: list[tuple[str, str, str, int, str]] = []
     seen: set[tuple[str, str]] = set()
     for path, text in files:
         if is_go_test_path(path):
@@ -318,6 +411,8 @@ def extract_go_data_models(files: Sequence[tuple[str, str]]) -> list[GoDataModel
             if table_match:
                 table_names[recv] = table_match.group(1)
         for name, body, lineno in _iter_struct_defs(text):
+            if _is_non_model_struct(name, body, table_names):
+                continue
             if not (
                 _GORM_TAG_RE.search(body)
                 or _DB_TAG_RE.search(body)
@@ -329,15 +424,24 @@ def extract_go_data_models(files: Sequence[tuple[str, str]]) -> list[GoDataModel
             if key in seen:
                 continue
             seen.add(key)
-            models.append(
-                GoDataModel(
-                    name=name,
-                    file_path=path,
-                    lineno=lineno,
-                    kind="go_gorm"
-                    if (_GORM_TAG_RE.search(body) or name in table_names)
-                    else "go_struct_db",
-                    table_name=table_names.get(name),
-                )
+            kind = (
+                "go_gorm" if (_GORM_TAG_RE.search(body) or name in table_names) else "go_struct_db"
             )
+            raw.append((name, path, body, lineno, kind))
+    known = {name for name, _path, _body, _lineno, _kind in raw}
+    models: list[GoDataModel] = []
+    for name, path, body, lineno, kind in raw:
+        attributes, primary_key, relations = _parse_gorm_fields(body, known - {name})
+        models.append(
+            GoDataModel(
+                name=name,
+                file_path=path,
+                lineno=lineno,
+                kind=kind,
+                table_name=table_names.get(name),
+                attributes=attributes,
+                primary_key=primary_key,
+                relations=relations,
+            )
+        )
     return models

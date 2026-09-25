@@ -67,6 +67,9 @@ class DataModel(BaseModel):
     type: str
     module: str
     file_path: str
+    attributes: list[str] = Field(default_factory=list)
+    primary_key: str = ""
+    relationships: list[str] = Field(default_factory=list)
 
 
 class RepositoryStats(BaseModel):

@@ -54,6 +54,12 @@ _PROMPT_LEAK_PHRASES = (
     "you are a technical writer",
     "根据以下证据撰写",
     "根据下列证据",
+    "以下端点来自仓库扫描证据上下文",
+    "仓库扫描证据上下文",
+    "evidence 中被截断",
+    "evidence 之外",
+    "没有发现顶层 readme",
+    "the repo gives no route table",
 )
 _QUALITY_METRIC_LEAK = re.compile(
     r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b",
@@ -2217,6 +2223,7 @@ class QoderLikeVerifierService(VerifierService):
         sources: set[str] = set()
         apis: set[tuple[str, str]] = set()
         endpoint_auth: dict[tuple[str, str], str] = {}
+        handler_files: set[str] = set()
         services: set[str] = set()
         models: set[str] = set()
         runtimes: set[str] = set()
@@ -2241,6 +2248,13 @@ class QoderLikeVerifierService(VerifierService):
                         auth = self._endpoint_auth_value(item)
                         if auth is not None:
                             endpoint_auth[api_key] = auth
+                        file_path = (
+                            item.get("file_path")
+                            or item.get("handler_file")
+                            or item.get("evidence_path")
+                        )
+                        if isinstance(file_path, str) and file_path.strip():
+                            handler_files.add(file_path.strip().replace("\\", "/"))
                 services_payload = self._inventory_lists(data, "services")
                 for item in services_payload:
                     if not isinstance(item, dict):
@@ -2291,6 +2305,7 @@ class QoderLikeVerifierService(VerifierService):
             "sources": sources,
             "apis": apis,
             "endpoint_auth": endpoint_auth,
+            "handler_files": handler_files,
             "services": services,
             "models": models,
             "runtimes": runtimes,
@@ -2689,10 +2704,15 @@ class QoderLikeVerifierService(VerifierService):
         pages = find_matching_pages(self._find_content_dir(), ("core-service-apis", "核心服务api"))
         if not pages:
             return self._skip_check("qoder-handbook-api-route-file", "Core API page absent")
+        inventories = self._load_structured_inventory_sets()
+        handler_files = sorted(inventories.get("handler_files") or [])
         missing = [
             page.as_posix()
             for page in pages
-            if not has_api_routes_citation(page.read_text(encoding="utf-8", errors="ignore"))
+            if not has_api_routes_citation(
+                page.read_text(encoding="utf-8", errors="ignore"),
+                handler_files=handler_files,
+            )
         ]
         if missing:
             return self._handbook_fail(

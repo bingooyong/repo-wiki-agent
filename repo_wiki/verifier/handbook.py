@@ -286,9 +286,34 @@ def has_readme_citation(markdown: str, readme_names: tuple[str, ...]) -> bool:
     return False
 
 
-def has_api_routes_citation(markdown: str) -> bool:
+def has_api_routes_citation(
+    markdown: str, handler_files: list[str] | tuple[str, ...] | None = None
+) -> bool:
+    """True when an API page cites FastAPI ``api/routes`` or inventory handlers.
+
+    FastAPI layout (inventory contains ``api/routes``, or no inventory) still
+    requires an ``api/routes`` citation. Go/other layouts accept a cite to one
+    of the inventory handler files.
+    """
+    cited: list[str] = []
     for match in _CITE_RE.finditer(markdown):
         path = match.group(1).split(":")[0].replace("\\", "/").lower()
-        if "api/routes" in path:
+        cited.append(path)
+    handlers = [item.replace("\\", "/").lower() for item in (handler_files or []) if item]
+    fastapi_handlers = [item for item in handlers if "api/routes" in item]
+    if fastapi_handlers or not handlers:
+        return any("api/routes" in path for path in cited)
+    return any(_cite_matches_handler(path, handlers) for path in cited)
+
+
+def _cite_matches_handler(path: str, handlers: list[str]) -> bool:
+    for handler in handlers:
+        if (
+            path == handler
+            or path.endswith("/" + handler)
+            or handler.endswith("/" + path)
+            or path.endswith(handler)
+            or handler.endswith(path)
+        ):
             return True
     return False

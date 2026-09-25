@@ -355,6 +355,7 @@ class RuleFirstPlanner:
             source_requirements=SourceRequirement(
                 modules=[m.name for m in self.snapshot.modules],
                 commands=["start", "build", "test"],
+                files=["README.md"],
             ),
             sort_order=0,
             tags=["overview", "index"],
@@ -387,7 +388,10 @@ class RuleFirstPlanner:
             title="快速开始",
             category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
             parent="project-overview",
-            source_requirements=SourceRequirement(commands=["start"]),
+            source_requirements=SourceRequirement(
+                files=["README.md", "QUICKSTART.md"],
+                commands=["start"],
+            ),
             sort_order=2,
             tags=["quickstart", "getting-started"],
         )
@@ -398,6 +402,10 @@ class RuleFirstPlanner:
             title="安装指南",
             category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
             parent="project-overview",
+            source_requirements=SourceRequirement(
+                files=["README.md", "QUICKSTART.md"],
+                commands=["start", "build"],
+            ),
             sort_order=3,
             tags=["installation", "setup"],
         )
@@ -425,6 +433,7 @@ class RuleFirstPlanner:
                     m.name
                     for m in self.snapshot.modules
                     if m.domain in ("core-platform", "ai-services")
+                    or str(m.path or "").startswith("internal/")
                 ]
             ),
             sort_order=0,
@@ -554,6 +563,12 @@ class RuleFirstPlanner:
         language = (self.snapshot.repository.language or self.identity.language or "").lower()
         framework = (self.snapshot.repository.framework or self.identity.framework or "").lower()
         return language == "python" or framework in {"fastapi", "flask"}
+
+    def _has_api_routes_layout(self) -> bool:
+        return any(
+            "api/routes" in (endpoint.file_path or "").replace("\\", "/").lower()
+            for endpoint in self.snapshot.endpoints
+        )
 
     def _has_surface_token(self, *tokens: str) -> bool:
         needles = tuple(token.lower() for token in tokens if token)
@@ -719,6 +734,10 @@ class RuleFirstPlanner:
                     grouped_modules.append(module_name)
                     grouped_endpoints.extend(f"{e.method} {e.path}" for e in endpoints)
             if not grouped_modules:
+                continue
+            if page_id_base == "core-service-apis" and not (
+                self._has_api_routes_layout() or self._repo_is_python_primary()
+            ):
                 continue
             self._add_page(
                 page_id=self._make_page_id(page_id_base, WikiTaxonomyCategory.API_REFERENCE),

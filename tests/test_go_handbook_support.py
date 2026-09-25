@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from repo_wiki.core.config import RepoWikiConfig
@@ -14,21 +15,27 @@ from repo_wiki.evidence.citation_renderer import (
     normalize_citation_markup,
     sanitize_citation_payloads,
 )
+from repo_wiki.evidence.ranking import rank_evidence_for_page
 from repo_wiki.generator.mermaid_planner import (
     MermaidDiagramType,
     create_planner,
     create_renderer,
     validate_mermaid_syntax,
 )
+from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.orchestration.service import RepoWikiService, _is_filename_like_handbook_title
 from repo_wiki.planner.identity import resolve_repository_identity
 from repo_wiki.planner.rule_first import RuleFirstPlanner, _is_filename_like_module_name
 from repo_wiki.planner.schema import (
     RepositoryIdentity,
+    SourceRequirement,
     WikiPagePlan,
     WikiTaxonomyCategory,
 )
 from repo_wiki.scanner.docs_scanner import (
+    _is_inventory_shaped_name,
+    _is_source_file_claim,
+    _repo_path_exists,
     is_eval_or_agent_instruction_doc,
     is_product_citation_source,
     scan_repository_docs_inventory,
@@ -36,6 +43,7 @@ from repo_wiki.scanner.docs_scanner import (
 from repo_wiki.scanner.go_routes import (
     extract_go_data_models,
     extract_go_endpoints,
+    extract_go_internal_import_edges,
     http_method_from_request_type,
     is_go_test_path,
 )
@@ -47,6 +55,7 @@ from repo_wiki.scanner.repository_scanner import RepositoryScanner
 from repo_wiki.scanner.source_spans import SourceSpanExtractor
 from repo_wiki.verifier.api_claim_inventory import api_claim_in_inventory
 from repo_wiki.verifier.handbook import (
+    has_api_routes_citation,
     has_fenced_install_run_command,
     install_run_clue_count,
     repo_run_clue_names,
@@ -180,16 +189,31 @@ _ENDPOINT_MODEL_GO = """
 package models
 
 type ProbeEndpoint struct {
-    ID   int64  `gorm:"primaryKey;column:id" json:"id"`
-    Name string `gorm:"column:name" json:"name"`
+    ID   int64     `gorm:"primaryKey;column:id" json:"id"`
+    Name string    `gorm:"column:name" json:"name"`
+    Tags []ProbeTag `gorm:"many2many:endpoint_tags"`
 }
 
 func (ProbeEndpoint) TableName() string {
     return "probe_endpoints"
 }
 
+type ProbeTag struct {
+    ID         int64          `gorm:"primaryKey;column:id"`
+    EndpointID int64          `gorm:"index;column:endpoint_id"`
+    Endpoint   *ProbeEndpoint `gorm:"foreignKey:EndpointID"`
+}
+
 type AuthConfig struct {
     Type string `json:"type"`
+}
+
+type DatabaseConfig struct {
+    DSN string
+}
+
+type bufWriter struct {
+    buf []byte
 }
 
 type UserRow struct {
@@ -206,6 +230,8 @@ def _write_synthetic_go_repo(root: Path) -> None:
     (root / "internal" / "models").mkdir(parents=True)
     (root / "internal" / "control").mkdir(parents=True)
     (root / "internal" / "probe").mkdir(parents=True)
+    (root / "internal" / "repository").mkdir(parents=True)
+    (root / "internal" / "exporter").mkdir(parents=True)
     (root / "deploy" / "compose" / "vault").mkdir(parents=True)
     (root / ".trellis").mkdir()
     (root / ".trae").mkdir()
@@ -221,7 +247,11 @@ def _write_synthetic_go_repo(root: Path) -> None:
     (root / "controller.go").write_text(_CONTROLLER_GO, encoding="utf-8")
     (root / "apiauth_test.go").write_text(_APIAUTH_TEST_GO, encoding="utf-8")
     (root / "internal" / "services" / "serv_probe_endpoint.go").write_text(
-        _SERV_PROBE_GO, encoding="utf-8"
+        _SERV_PROBE_GO.replace(
+            'import "ccagent"',
+            'import (\n    "ccagent"\n    "ccagent/internal/repository"\n)',
+        ),
+        encoding="utf-8",
     )
     (root / "internal" / "services" / "serv_tag.go").write_text(_SERV_TAG_GO, encoding="utf-8")
     (root / "internal" / "services" / "agent_ops.go").write_text(_RAW_ROUTE_GO, encoding="utf-8")
@@ -230,7 +260,16 @@ def _write_synthetic_go_repo(root: Path) -> None:
         "package control\nfunc Dial() {}\n", encoding="utf-8"
     )
     (root / "internal" / "probe" / "result_repo.go").write_text(
-        "package probe\nfunc Load() {}\n", encoding="utf-8"
+        'package probe\n\nimport "ccagent/internal/models"\n\nfunc Load() { _ = models.ProbeEndpoint{} }\n',
+        encoding="utf-8",
+    )
+    (root / "internal" / "repository" / "store.go").write_text(
+        'package repository\n\nimport "ccagent/internal/models"\n\nfunc Save() { _ = models.ProbeEndpoint{} }\n',
+        encoding="utf-8",
+    )
+    (root / "internal" / "exporter" / "prom.go").write_text(
+        'package exporter\n\nimport "ccagent/internal/repository"\n\nfunc Export() { repository.Save() }\n',
+        encoding="utf-8",
     )
     (root / "cmd" / "ccagent" / "main.go").write_text(
         "package main\nfunc main() {}\n", encoding="utf-8"
@@ -244,8 +283,21 @@ def _write_synthetic_go_repo(root: Path) -> None:
         "# probe_exporter\n\n"
         "[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8)](https://go.dev/)\n\n"
         "企业级服务探针拨测与结果导出平台。\n\n"
-        "```bash\ngo build -o bin/ccagent ./cmd/ccagent/main.go\n```\n",
+        "## Run\n\n"
+        "需要 MySQL，并先执行 `db/schema.sql`。\n\n"
+        "```bash\n"
+        "make install\n"
+        "go build -o bin/ccagent ./cmd/ccagent/main.go\n"
+        "podman-compose up -d\n"
+        "```\n",
         encoding="utf-8",
+    )
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "docs" / "PLAN.md").write_text("# Plan\nControl-plane rollout.\n", encoding="utf-8")
+    (root / "db").mkdir(exist_ok=True)
+    (root / "db" / "migrations").mkdir(exist_ok=True)
+    (root / "db" / "migrations" / "001_init.sql").write_text(
+        "CREATE TABLE probe_endpoints (id BIGINT);\n", encoding="utf-8"
     )
     (root / "README-scaffold.md").write_text(
         "# ccagent\n\n基于 Go 的高性能 HTTP 服务框架，集成了自动服务注册。\n",
@@ -317,9 +369,12 @@ def test_extract_gorm_models_not_plain_structs(tmp_path: Path) -> None:
     models = extract_go_data_models(_go_files(tmp_path))
     names = {item.name for item in models}
     assert "ProbeEndpoint" in names
+    assert "ProbeTag" in names
     assert any(item.table_name == "probe_endpoints" for item in models)
     assert "UserRow" in names
     assert "AuthConfig" not in names
+    assert "DatabaseConfig" not in names
+    assert "bufWriter" not in names
     assert "SyntheticWorkflow" not in names
 
 
@@ -341,6 +396,10 @@ def test_inventory_v3_and_snapshot_count_go_routes(tmp_path: Path) -> None:
     assert "/probe/endpoint/list" in snap_paths
     assert "/api/v1/secrets" not in snap_paths
     assert "ProbeEndpoint" in snap_models
+    assert "ProbeTag" in snap_models
+    assert "DatabaseConfig" not in snap_models
+    assert "bufWriter" not in snap_models
+    assert "probe_endpoints" not in snap_models
 
 
 def test_scan_single_file_gorm_and_gin() -> None:
@@ -475,7 +534,7 @@ def test_ai_tool_folders_excluded_from_product_docs(tmp_path: Path) -> None:
 
 def test_stale_resolver_finds_internal_go_files(tmp_path: Path) -> None:
     _write_synthetic_go_repo(tmp_path)
-    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs").mkdir(exist_ok=True)
     (tmp_path / "docs" / "notes.md").write_text(
         "See `tunnel.go` and `result_repo.go` and missing `docs/xxx.md`.\n",
         encoding="utf-8",
@@ -671,7 +730,9 @@ def test_api_pages_group_by_resource_and_cite_handler(tmp_path: Path) -> None:
     section = service._build_truthful_api_group_section(endpoints)
     assert section.index("### probe/endpoint") < section.index("### hello")
     assert "<cite>internal/services/serv_probe_endpoint.go:12</cite>" in section
+    assert "`internal/services/serv_probe_endpoint.go`:12" not in section
     assert section.count("/hello/ping") == 1
+    assert "以下端点来自仓库扫描证据上下文" not in section
 
 
 def test_generated_pb_and_tests_are_not_source_evidence(tmp_path: Path) -> None:
@@ -752,24 +813,42 @@ def test_architecture_mermaid_prefers_internal_packages() -> None:
     planner = create_planner()
     renderer = create_renderer()
     diagrams = planner.plan_diagram_for_page(
-        "architecture",
+        "architecture-overview",
         "architecture",
         None,
         {
             "modules": [
-                {"name": "control", "path": "internal/control"},
-                {"name": "probe", "path": "internal/probe"},
-                {"name": "services", "path": "internal/services"},
-                {"name": "models", "path": "internal/models"},
-                {"name": "agent", "path": "internal/agent"},
+                {"name": "control", "path": "internal/control", "depends_on": ["internal/models"]},
+                {"name": "probe", "path": "internal/probe", "depends_on": ["internal/models"]},
+                {
+                    "name": "services",
+                    "path": "internal/services",
+                    "depends_on": ["internal/repository"],
+                },
+                {"name": "models", "path": "internal/models", "depends_on": []},
+                {"name": "agent", "path": "internal/agent", "depends_on": ["internal/control"]},
+                {
+                    "name": "repository",
+                    "path": "internal/repository",
+                    "depends_on": ["internal/models"],
+                },
+                {
+                    "name": "exporter",
+                    "path": "internal/exporter",
+                    "depends_on": ["internal/repository"],
+                },
             ]
         },
     )
     rendered = renderer.render_diagram(diagrams[0])
     assert "internal/control" in rendered
     assert "internal/services" in rendered
+    assert "internal/repository" in rendered
+    assert "internal/exporter" in rendered
+    assert "internal/probe" in rendered
     assert "仓库扫描" not in rendered
     assert "LLM生成" not in rendered
+    assert "repo --> internal" not in rendered
 
 
 def test_repeated_filler_and_prompt_leak_are_page_dumps() -> None:
@@ -777,5 +856,236 @@ def test_repeated_filler_and_prompt_leak_are_page_dumps() -> None:
     page = "\n\n".join([pad] * 4)
     assert page_has_repeated_filler(page) is True
     assert page_has_prompt_leakage("端点由用户在请求中提供") is True
+    assert page_has_prompt_leakage("以下端点来自仓库扫描证据上下文") is True
+    assert page_has_prompt_leakage("evidence 中被截断") is True
+    assert page_has_prompt_leakage("the repo gives no route table") is True
+    assert page_has_prompt_leakage("没有发现顶层 README") is True
+    assert page_has_prompt_leakage("当前证据未列出端口") is False
     assert is_qoder_page_dump("Tests 21/25 / Coverage 84%\n\n" + "一句说明。\n") is True
     assert is_qoder_page_dump("# 正常页\n\n这是一段足够说明的散文。\n") is False
+
+
+def test_snapshot_preserves_go_handler_line_numbers(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    snapshot = RepositoryScanner(
+        RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+    ).scan()
+    create = next(ep for ep in snapshot.endpoints if ep.path.endswith("/create"))
+    assert create.line_number > 1
+    assert create.file_path.endswith("serv_probe_endpoint.go")
+
+
+def test_install_and_overview_require_readme_files(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    cfg = RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+    snapshot = RepositoryScanner(cfg).scan()
+    identity = resolve_repository_identity(tmp_path)
+    pages = RuleFirstPlanner(identity, snapshot).generate().pages
+    install = next(page for page in pages if page.page_id == "installation")
+    overview = next(page for page in pages if page.page_id == "project-overview")
+    assert "README.md" in install.source_requirements.files
+    assert "README.md" in overview.source_requirements.files
+    commands = RepoWikiService(cfg)._install_commands_from_repo_files()
+    assert any("make install" in item or "go build" in item for item in commands)
+    assert any("podman-compose" in item for item in commands)
+    assert not any("-action probe" in item for item in commands)
+    titles = [page.title for page in pages]
+    assert "核心服务API" not in titles
+
+
+def test_overview_ranking_pins_readme(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    page = WikiPagePlan(
+        page_id="project-overview",
+        title="项目概述",
+        category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        output_path="docs/pages/overview.md",
+        source_requirements=SourceRequirement(files=["README.md"]),
+        tags=["overview"],
+    )
+    spans = [
+        EvidenceSpanRecord(
+            digest="go",
+            file_path="internal/control/tunnel.go",
+            line_start=1,
+            line_end=2,
+            language="go",
+            span_text="package control",
+            symbol="Dial",
+        ),
+        EvidenceSpanRecord(
+            digest="readme",
+            file_path="README.md",
+            line_start=1,
+            line_end=8,
+            language="markdown",
+            span_text="## Run\nmake install\npodman-compose up -d",
+            symbol="README",
+        ),
+    ]
+    ranked = rank_evidence_for_page(page, spans)
+    assert any(Path(item.span.file_path).name.lower() == "readme.md" for item in ranked)
+
+
+def test_go_import_edges_include_repository_services_probe_exporter(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    edges = extract_go_internal_import_edges(_go_files(tmp_path))
+    pairs = set(edges)
+    assert ("internal/services", "internal/repository") in pairs
+    assert ("internal/repository", "internal/models") in pairs
+    assert ("internal/exporter", "internal/repository") in pairs
+    assert ("internal/probe", "internal/models") in pairs
+    snapshot = RepositoryScanner(
+        RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+    ).scan()
+    by_path = {module.path: module for module in snapshot.modules}
+    assert "internal/repository" in by_path
+    assert any(
+        "internal/models" in dep or dep.endswith("models")
+        for dep in by_path["internal/repository"].depends_on
+    )
+    assert any(
+        "internal/repository" in dep or dep.endswith("repository")
+        for dep in by_path["internal/exporter"].depends_on
+    )
+    endpoint = next(model for model in snapshot.data_models if model.name == "ProbeEndpoint")
+    assert "ID" in endpoint.attributes
+    assert endpoint.primary_key == "ID"
+    assert "ProbeTag" in endpoint.relationships
+    assert {model.name for model in snapshot.data_models} <= {
+        "ProbeEndpoint",
+        "ProbeTag",
+        "UserRow",
+    }
+    planner = create_planner()
+    diagrams = planner.plan_diagram_for_page(
+        "architecture-overview",
+        "architecture",
+        None,
+        {"modules": [module.model_dump() for module in snapshot.modules]},
+    )
+    rendered = create_renderer().render_diagram(diagrams[0])
+    assert "internal/repository" in rendered
+    assert "internal/services" in rendered
+    assert "internal/probe" in rendered
+    assert "internal/exporter" in rendered
+    assert "-->" in rendered
+    assert "relates" not in rendered
+
+
+def test_er_omits_invented_relates_and_uses_real_pk() -> None:
+    planner = create_planner()
+    renderer = create_renderer()
+    diagrams = planner.plan_diagram_for_page(
+        "data-model",
+        "data",
+        None,
+        {
+            "data_models": [
+                {
+                    "name": "ProbeEndpoint",
+                    "type": "go_gorm",
+                    "file_path": "internal/models/endpoint.go",
+                    "primary_key": "ID",
+                    "attributes": ["ID", "Name"],
+                    "relationships": ["ProbeTag"],
+                },
+                {
+                    "name": "ProbeTag",
+                    "type": "go_gorm",
+                    "file_path": "internal/models/endpoint.go",
+                    "primary_key": "ID",
+                    "attributes": ["ID", "EndpointID"],
+                    "relationships": ["ProbeEndpoint"],
+                },
+            ]
+        },
+    )
+    rendered = renderer.render_diagram(diagrams[0])
+    assert "string id PK" not in rendered
+    assert "ID PK" in rendered
+    assert "relates" not in rendered
+    assert "ProbeTag" in rendered
+    assert "||--o{" in rendered
+
+
+def test_api_route_file_accepts_go_handler_inventory(tmp_path: Path) -> None:
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "core-service-apis.md").write_text(
+        "# 核心服务API\n\n路由在 <cite>internal/services/serv_probe_endpoint.go:12-20</cite>。\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "source-inventory.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "repo_agent.source_inventory/1.0",
+                "endpoints": [
+                    {
+                        "method": "POST",
+                        "path": "/probe/endpoint/create",
+                        "file_path": "internal/services/serv_probe_endpoint.go",
+                        "line_number": 12,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_api_route_file()
+    assert result.status == "PASS"
+    assert has_api_routes_citation(
+        "见 <cite>internal/services/serv_probe_endpoint.go:12</cite>",
+        handler_files=["internal/services/serv_probe_endpoint.go"],
+    )
+    assert not has_api_routes_citation(
+        "见 <cite>internal/models/endpoint.go:1</cite>",
+        handler_files=["internal/services/serv_probe_endpoint.go"],
+    )
+
+
+def test_api_route_file_fastapi_inventory_still_requires_routes(tmp_path: Path) -> None:
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "core-service-apis.md").write_text(
+        "# 核心服务API\n\n模型在 <cite>app/models/domain.py:1-8</cite>。\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "source-inventory.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "repo_agent.source_inventory/1.0",
+                "endpoints": [
+                    {
+                        "method": "POST",
+                        "path": "/api/users/login",
+                        "file_path": "app/api/routes/authentication.py",
+                        "line_number": 10,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = QoderLikeVerifierService(tmp_path, strict=True)._check_handbook_api_route_file()
+    assert result.status == "FAIL"
+    assert result.reason_code == "QODER_HANDBOOK_API_ROUTE_FILE"
+
+
+def test_backtick_path_line_is_normalized_to_cite() -> None:
+    text = "路由在 `internal/services/serv_probe_endpoint.go:12`。"
+    rewritten = normalize_citation_markup(text)
+    assert "<cite>internal/services/serv_probe_endpoint.go:12</cite>" in rewritten
+    assert "`internal/services/serv_probe_endpoint.go:12`" not in rewritten
+
+
+def test_fact_conflict_placeholders_and_docs_plan_lookup(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    assert _is_inventory_shaped_name("test-api") is False
+    assert _is_inventory_shaped_name("external_api") is False
+    assert _is_inventory_shaped_name("partner-api") is False
+    assert _is_source_file_claim("app/config.yaml") is False
+    assert _is_source_file_claim("app/logs/ccagent.log") is False
+    assert _is_source_file_claim("app/api/routes/authentication.py") is True
+    assert _repo_path_exists(tmp_path, "plan.md") is True
+    assert _repo_path_exists(tmp_path, "docs/plan.md") is True

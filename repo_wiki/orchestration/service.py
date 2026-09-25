@@ -68,6 +68,12 @@ _PROMPT_LEAK_PHRASES = (
     "you are a technical writer",
     "根据以下证据撰写",
     "根据下列证据",
+    "以下端点来自仓库扫描证据上下文",
+    "仓库扫描证据上下文",
+    "evidence 中被截断",
+    "evidence 之外",
+    "没有发现顶层 readme",
+    "the repo gives no route table",
 )
 _QUALITY_METRIC_LEAK = re.compile(
     r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b",
@@ -80,7 +86,10 @@ _GENERIC_GO_INSTALL = re.compile(
 _INSTALL_ENV_CLUE_PATTERNS = (
     re.compile(r"\bDATABASE_URL\b", re.I),
     re.compile(r"\bPOSTGRES(?:QL)?\b", re.I),
+    re.compile(r"\bMYSQL\b", re.I),
     re.compile(r"\bSQLITE3?\b", re.I),
+    re.compile(r"\bschema\.sql\b", re.I),
+    re.compile(r"\bpodman-compose\b", re.I),
     re.compile(r"\bdocker(?:-|\s+)compose\b", re.I),
     re.compile(r"\buv\s+sync\b", re.I),
     re.compile(r"\bnpm\s+install\b", re.I),
@@ -2565,7 +2574,7 @@ class RepoWikiService:
                 "不得视为已验证 API 清单。"
             )
 
-        lines = ["以下端点来自仓库扫描证据上下文，按资源分组：", ""]
+        lines = ["按资源分组的接口：", ""]
         grouped: dict[str, list[dict[str, Any]]] = {}
         for endpoint in endpoints:
             path = str(endpoint.get("path") or "").strip()
@@ -2596,9 +2605,11 @@ class RepoWikiService:
                     details.append(f"handler `{handler}`")
                 cite = ""
                 if file_path:
-                    line_number = endpoint.get("line_number") or endpoint.get("line_start") or 1
-                    details.append(f"`{file_path}`:{line_number}")
-                    cite = f" <cite>{file_path}:{line_number}</cite>"
+                    start = int(endpoint.get("line_number") or endpoint.get("line_start") or 0)
+                    end = int(endpoint.get("line_end") or 0)
+                    if start > 0:
+                        location = f"{start}-{end}" if end > start else str(start)
+                        cite = f" <cite>{file_path}:{location}</cite>"
                 suffix = f"（{'，'.join(details)}）" if details else ""
                 lines.append(f"- {method} {path}{suffix}{cite}")
             lines.append("")
@@ -2644,7 +2655,11 @@ class RepoWikiService:
         body_endpoints = [
             ep
             for ep in endpoints
-            if ep.get("request_body") or ep.get("response_type") or ep.get("error_codes")
+            if ep.get("request_body")
+            or (
+                ep.get("response_type")
+                and str(ep.get("response_type") or "").strip().lower() not in {"", "json"}
+            )
         ]
         if not body_endpoints:
             return (

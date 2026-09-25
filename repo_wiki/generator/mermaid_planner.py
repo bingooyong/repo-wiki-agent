@@ -177,6 +177,9 @@ class DiagramPlan:
     er_entities: list[dict[str, Any]] = field(
         default_factory=list
     )  # {entity, attributes, primary_key}
+    er_relationships: list[tuple[str, str, str]] = field(
+        default_factory=list
+    )  # (left, right, label)
 
     # For class diagram
     class_definitions: list[dict[str, Any]] = field(default_factory=list)
@@ -373,6 +376,60 @@ def _module_name_and_path(module: Any, index: int) -> tuple[str, str]:
     return str(module), ""
 
 
+def _is_full_architecture_page(page_id: str) -> bool:
+    pid = (page_id or "").lower()
+    return pid in {"architecture-overview", "project-overview", "overview"} or pid.endswith(
+        ("architecture-overview", "project-overview")
+    )
+
+
+def _module_label(module: Any, index: int = 0) -> str:
+    name, path = _module_name_and_path(module, index)
+    parts = [part for part in path.replace("\\", "/").strip("/").split("/") if part]
+    if len(parts) >= 2 and parts[0] in {"internal", "pkg", "cmd"}:
+        return "/".join(parts[:2])
+    return name
+
+
+def _import_edges_from_context(context: dict[str, Any]) -> list[tuple[str, str]]:
+    edges: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    raw = context.get("import_edges") or []
+    for item in raw:
+        src = dst = ""
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            src, dst = str(item[0]), str(item[1])
+        elif isinstance(item, dict):
+            src = str(item.get("from") or item.get("source") or "")
+            dst = str(item.get("to") or item.get("target") or "")
+        if src and dst and src != dst and (src, dst) not in seen:
+            seen.add((src, dst))
+            edges.append((src, dst))
+    if edges:
+        return edges
+    labels = set(_product_module_labels(context.get("modules") or []))
+    for index, module in enumerate(context.get("modules") or []):
+        if not isinstance(module, dict):
+            continue
+        src = _module_label(module, index)
+        if not src:
+            continue
+        for dep in module.get("depends_on") or []:
+            dep_s = str(dep)
+            dst = dep_s
+            if dst not in labels:
+                matches = [
+                    label for label in labels if label.endswith("/" + dep_s) or label == dep_s
+                ]
+                if len(matches) != 1:
+                    continue
+                dst = matches[0]
+            if src != dst and (src, dst) not in seen:
+                seen.add((src, dst))
+                edges.append((src, dst))
+    return edges
+
+
 def _product_module_labels(modules: list[Any]) -> list[str]:
     """Return scanned product packages, not __init__.py / main.go filename dumps."""
     labels: list[str] = []
@@ -480,7 +537,9 @@ class MermaidPlanner:
         )
 
         # Plan based on page type
-        if page_type in ("overview", "architecture"):
+        if page_type == "architecture" or (
+            page_type == "overview" and _is_full_architecture_page(page_id)
+        ):
             diagram = self._plan_overview_architecture_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
@@ -511,27 +570,44 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        """Plan architecture/overview flowchart from product packages, not a folder star."""
+        """Plan architecture/overview flowchart from import-derived package edges."""
         labels = _product_module_labels(context.get("modules") or [])
-        internal = [label for label in labels if label.startswith("internal/")]
-        others = [label for label in labels if not label.startswith("internal/")]
-        chosen = (internal + others)[:10]
-        nodes = [DiagramNode(id="repo", label="Repository", shape="round")]
+        import_edges = _import_edges_from_context(context)
+        preferred = {
+            label
+            for label in labels
+            if any(
+                token in label
+                for token in (
+                    "repository",
+                    "services",
+                    "probe",
+                    "exporter",
+                    "agent",
+                    "models",
+                    "control",
+                )
+            )
+        }
+        connected = {src for src, dst in import_edges if src in labels}
+        connected.update(dst for src, dst in import_edges if dst in labels)
+        if import_edges:
+            chosen = [label for label in labels if label in preferred or label in connected]
+        else:
+            chosen = list(labels)
+        if not chosen:
+            chosen = [label for label in labels if label.startswith("internal/")]
+        nodes = [
+            DiagramNode(id=mermaid_ident(label), label=label, shape="rectangle") for label in chosen
+        ]
+        chosen_set = set(chosen)
         edges: list[DiagramEdge] = []
-        if any(label.startswith("internal/") for label in chosen):
-            nodes.append(DiagramNode(id="internal", label="internal", shape="round"))
-            edges.append(DiagramEdge(from_node="repo", to_node="internal"))
-        for label in chosen:
-            node_id = mermaid_ident(label)
-            nodes.append(DiagramNode(id=node_id, label=label, shape="rectangle"))
-            if label.startswith("internal/"):
-                edges.append(DiagramEdge(from_node="internal", to_node=node_id))
-            else:
-                edges.append(DiagramEdge(from_node="repo", to_node=node_id))
+        for src, dst in import_edges:
+            if src in chosen_set and dst in chosen_set:
+                edges.append(DiagramEdge(from_node=mermaid_ident(src), to_node=mermaid_ident(dst)))
 
         for layer_id, layer_label in _wiki_tool_layers_present(context):
             nodes.append(DiagramNode(id=layer_id, label=layer_label, shape="rectangle"))
-            edges.append(DiagramEdge(from_node="repo", to_node=layer_id))
 
         evidence_spans = []
         if evidence_binding:
@@ -561,14 +637,22 @@ class MermaidPlanner:
         labels = _product_module_labels(context.get("modules") or [])
         tokens = _page_tokens(page_id)
         related = [label for label in labels if any(token in label.lower() for token in tokens)]
-        chosen = (related or labels)[:8]
+        import_edges = _import_edges_from_context(context)
+        neighbors = set(related)
+        for src, dst in import_edges:
+            if src in related:
+                neighbors.add(dst)
+            if dst in related:
+                neighbors.add(src)
+        chosen = [label for label in labels if label in neighbors][:8]
+        if not chosen:
+            chosen = related[:8]
         for label in chosen:
             nodes.append(DiagramNode(id=mermaid_ident(label), label=label, shape="rectangle"))
-        if len(chosen) >= 2:
-            for left, right in zip(chosen, chosen[1:], strict=False):
-                edges.append(
-                    DiagramEdge(from_node=mermaid_ident(left), to_node=mermaid_ident(right))
-                )
+        chosen_set = set(chosen)
+        for src, dst in import_edges:
+            if src in chosen_set and dst in chosen_set:
+                edges.append(DiagramEdge(from_node=mermaid_ident(src), to_node=mermaid_ident(dst)))
 
         evidence_spans = []
         if evidence_binding:
@@ -703,9 +787,8 @@ class MermaidPlanner:
         seen: set[str] = set()
         for endpoint in selected:
             raw = str(
-                endpoint.get("service")
-                or endpoint.get("handler")
-                or _package_from_file(str(endpoint.get("file_path") or ""))
+                _package_from_file(str(endpoint.get("file_path") or ""))
+                or endpoint.get("service")
                 or ""
             ).strip()
             if not raw or raw.lower() in _WIKI_PIPELINE_LABELS:
@@ -720,9 +803,15 @@ class MermaidPlanner:
                 DiagramNode(id=mermaid_ident(label, prefix="svc"), label=label, shape="rectangle")
                 for label in labels[:8]
             ]
+            chosen_set = set(labels[:8])
+            import_edges = _import_edges_from_context(context)
             edges = [
-                DiagramEdge(from_node=nodes[index].id, to_node=nodes[index + 1].id)
-                for index in range(len(nodes) - 1)
+                DiagramEdge(
+                    from_node=mermaid_ident(src, prefix="svc"),
+                    to_node=mermaid_ident(dst, prefix="svc"),
+                )
+                for src, dst in import_edges
+                if src in chosen_set and dst in chosen_set
             ]
         else:
             nodes = [
@@ -813,20 +902,38 @@ class MermaidPlanner:
         context: dict[str, Any],
     ) -> DiagramPlan | None:
         """Plan data model ER diagram."""
-        models = context.get("data_models", [])
-        modules = context.get("modules", [])
+        models = [item for item in (context.get("data_models") or []) if isinstance(item, dict)]
+        product_models = [
+            item
+            for item in models
+            if str(item.get("type") or "")
+            in {"", "go_gorm", "go_struct_db", "python_class", "ts_definition", "jvm_class"}
+        ]
+        if any(
+            str(item.get("type") or "") in {"go_gorm", "go_struct_db"} for item in product_models
+        ):
+            product_models = [
+                item
+                for item in product_models
+                if str(item.get("type") or "") in {"go_gorm", "go_struct_db"}
+            ]
 
         er_entities = []
-        for model in models[:10]:  # Limit to 10 models
+        seen_names: set[str] = set()
+        relationships: list[tuple[str, str, str]] = []
+        for model in product_models[:12]:
             entity_name = mermaid_er_field(
                 str(model.get("name") or model.get("table") or "unknown")
             )
+            if entity_name.lower() in seen_names:
+                continue
+            seen_names.add(entity_name.lower())
             attributes = [
                 mermaid_er_field(str(item))
                 for item in (model.get("attributes") or [])
                 if str(item).strip()
             ]
-            primary_key = mermaid_er_field(str(model.get("primary_key") or "id"))
+            primary_key = mermaid_er_field(str(model.get("primary_key") or "")) or ""
             er_entities.append(
                 {
                     "entity": entity_name,
@@ -835,17 +942,13 @@ class MermaidPlanner:
                     "file_path": str(model.get("file_path") or ""),
                 }
             )
+            for target in model.get("relationships") or []:
+                dest = mermaid_er_field(str(target))
+                if dest:
+                    relationships.append((entity_name, dest, "fk"))
 
-        # If no explicit models, infer from product packages (not __init__.py dumps)
         if not er_entities:
-            for module_name in _product_module_labels(modules)[:5]:
-                er_entities.append(
-                    {
-                        "entity": module_name,
-                        "attributes": [],
-                        "primary_key": "id",
-                    }
-                )
+            return None
 
         evidence_spans = []
         if evidence_binding:
@@ -858,6 +961,7 @@ class MermaidPlanner:
             title="Data Model",
             description="Entity relationships",
             er_entities=er_entities,
+            er_relationships=relationships,
             evidence_spans=evidence_spans,
         )
 
@@ -986,15 +1090,15 @@ class MermaidRenderer:
         """Render ER diagram."""
         lines = ["erDiagram"]
 
-        names: list[str] = []
         for entity in plan.er_entities:
             entity_name = mermaid_er_field(str(entity.get("entity") or "Unknown"))
-            names.append(entity_name)
             attributes = entity.get("attributes") or []
-            primary_key = mermaid_er_field(str(entity.get("primary_key") or "id"))
+            primary_key = mermaid_er_field(str(entity.get("primary_key") or ""))
             lines.append(f"    {entity_name} {{")
-            lines.append(f"        string {primary_key} PK")
-            seen = {primary_key}
+            seen: set[str] = set()
+            if primary_key:
+                lines.append(f"        string {primary_key} PK")
+                seen.add(primary_key)
             for attr in attributes[:8]:
                 field = mermaid_er_field(str(attr))
                 if field in seen:
@@ -1002,8 +1106,15 @@ class MermaidRenderer:
                 seen.add(field)
                 lines.append(f"        string {field}")
             lines.append("    }")
-        for left, right in zip(names, names[1:], strict=False):
-            lines.append(f"    {left} ||--o{{ {right} : relates")
+        known = {mermaid_er_field(str(entity.get("entity") or "")) for entity in plan.er_entities}
+        for rel in plan.er_relationships:
+            if len(rel) < 2:
+                continue
+            left = mermaid_er_field(str(rel[0]))
+            right = mermaid_er_field(str(rel[1]))
+            label = mermaid_er_field(str(rel[2] if len(rel) > 2 else "fk")) or "fk"
+            if left in known and right in known and left != right:
+                lines.append(f"    {left} ||--o{{ {right} : {label}")
 
         return "\n".join(lines)
 

@@ -277,6 +277,12 @@ _GENERIC_FACT_CLAIM_TOKENS = frozenset(
         "registerservice",
         "openapi",
         "newservice",
+        "test-api",
+        "external_api",
+        "partner-api",
+        "user-api",
+        "httpservice",
+        "scheduledservice",
     }
 )
 _ENV_FILE_NAME = re.compile(r"^\.env(?:\.[A-Za-z0-9_.-]+)?$", re.IGNORECASE)
@@ -325,6 +331,12 @@ _TUTORIAL_PLACEHOLDER_TOKENS = frozenset(
         "registerservice",
         "openapi",
         "newservice",
+        "test-api",
+        "external_api",
+        "partner-api",
+        "user-api",
+        "httpservice",
+        "scheduledservice",
     }
 )
 _CAMEL_INVENTORY_NAME = re.compile(r"[A-Z][A-Za-z0-9]*(?:Service|Model|API|Api|Router)$")
@@ -480,6 +492,12 @@ def _is_source_file_claim(value: str) -> bool:
     if suffix in _NON_SOURCE_FILE_EXTS:
         return False
     lowered = raw.lower()
+    if (
+        lowered in {"app/config.yaml", "app/config.yml"}
+        or lowered == "app/logs"
+        or lowered.startswith("app/logs/")
+    ):
+        return False
     if any(lowered.startswith(prefix) for prefix in _SOURCE_DIR_PREFIXES):
         return True
     if "/" not in raw:
@@ -577,21 +595,37 @@ def _repo_path_exists(repo_root: Path, rel: str) -> bool:
 
 def _repo_basename_exists(repo_root: Path, rel: str) -> bool:
     """Resolve a bare filename against the whole tree (not only repo root)."""
-    if "/" in rel or "\\" in rel:
-        return False
     name = Path(rel).name
     if not name or name in {".", ".."}:
         return False
+    # Slash paths still try a docs/ + case-insensitive basename lookup.
+    if "/" in rel or "\\" in rel:
+        docs = repo_root / "docs"
+        if docs.is_dir() and _basename_exists_casefold(docs, name, repo_root):
+            return True
+        return False
     skip = DocumentationScanner._SKIP_DIRS
-    for path in repo_root.rglob(name):
+    docs = repo_root / "docs"
+    if docs.is_dir() and _basename_exists_casefold(docs, name, repo_root):
+        return True
+    return _basename_exists_casefold(repo_root, name, repo_root, skip=skip)
+
+
+def _basename_exists_casefold(
+    start: Path, name: str, repo_root: Path, skip: frozenset[str] | None = None
+) -> bool:
+    folded = name.casefold()
+    skip_parts = skip or frozenset()
+    for path in start.rglob("*"):
+        if not path.is_file() or path.name.casefold() != folded:
+            continue
         try:
             parts = path.relative_to(repo_root).parts
         except ValueError:
             continue
-        if any(part in skip for part in parts):
+        if any(part in skip_parts for part in parts):
             continue
-        if path.is_file():
-            return True
+        return True
     return False
 
 

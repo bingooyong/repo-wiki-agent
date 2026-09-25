@@ -150,7 +150,7 @@ _HANDBOOK_INSTALL_STRUCTURE = """推荐结构：
 用产品身份说明仓库是什么、读者按本页做完后能得到什么。不要用仓库 slug 或通用 api-server 表述代替产品名。
 
 ## 环境要求
-列出仓库文档里出现的运行时、语言版本、包管理器和外部依赖。证据不足时写「当前证据显示」。
+列出仓库文档里出现的运行时、语言版本、包管理器和外部依赖。证据不足时省略该事实，不要用套话填空。
 
 ## 安装步骤
 使用编号步骤。每一步若涉及命令，必须给出可复制的 ```bash 或 ```sh 围栏，不要只把命令写在行内反引号里。
@@ -167,7 +167,7 @@ _HANDBOOK_OVERVIEW_STRUCTURE = """推荐结构：
 用产品身份说明仓库是什么、给谁用。不要用仓库 slug 或通用 api-server 表述代替产品名。不要写成安装手册。
 
 ## 能做什么
-概括仓库文档里已经出现的能力与边界。证据不足时写「当前证据显示」。
+概括仓库文档里已经出现的能力与边界。证据不足时省略该事实，不要用套话填空。
 
 ## 仓库怎么组织
 说明主要目录、模块或文档入口如何对应，不另画未出现在仓库里的架构。
@@ -841,13 +841,23 @@ class LLMPageComposer:
         return is_handbook_overview_page(page) or is_handbook_install_page(page)
 
     def _evidence_has_api_routes(self, binding: PageEvidenceBinding | None) -> bool:
+        has_routes, _has_go = self._evidence_route_layout(binding)
+        return has_routes
+
+    def _evidence_route_layout(self, binding: PageEvidenceBinding | None) -> tuple[bool, bool]:
         if binding is None:
-            return False
+            return False, False
+        has_routes = False
+        has_go = False
         for candidate in binding.candidates:
             path = str(getattr(candidate.span, "file_path", "") or "").replace("\\", "/").lower()
             if "api/routes" in path:
-                return True
-        return False
+                has_routes = True
+            if path.endswith(".go") and (
+                path.startswith("internal/") or path.startswith("cmd/") or "/internal/" in path
+            ):
+                has_go = True
+        return has_routes, has_go
 
     def _handbook_cite_rules(self, input: ComposerInput) -> str:
         page = input.page_plan
@@ -880,13 +890,18 @@ class LLMPageComposer:
                 "列表行不计入 prose 下限，不要用子弹列表充当整页正文。",
                 "- 不要把证据原文整段放进 Markdown 代码围栏；围栏不能替代段落正文。",
             ]
-        if page.category == WikiTaxonomyCategory.API_REFERENCE and self._evidence_has_api_routes(
-            input.evidence_binding
-        ):
-            rules.append(
-                "- API 页：证据中已有 `api/routes` 文件时，正文必须至少有一条 `<cite>` "
-                "指向该路由模块（例如 `app/api/routes/...`），不能只引用 models、db 或 tests。"
-            )
+        if page.category == WikiTaxonomyCategory.API_REFERENCE:
+            has_routes, has_go_handlers = self._evidence_route_layout(input.evidence_binding)
+            if has_routes:
+                rules.append(
+                    "- API 页：证据中已有 `api/routes` 文件时，正文必须至少有一条 `<cite>` "
+                    "指向该路由模块（例如 `app/api/routes/...`），不能只引用 models、db 或 tests。"
+                )
+            elif has_go_handlers:
+                rules.append(
+                    "- API 页：证据中已有 Go handler 文件时，正文必须至少有一条 `<cite>` "
+                    "指向该 handler（例如 `internal/services/...`），不能只引用 SQL、docs 或配置。"
+                )
         return "\n".join(rules)
 
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
@@ -954,7 +969,7 @@ class LLMPageComposer:
 - 至少保留 3 个 `<cite>` 引用，格式为仓库相对路径加行号范围，例如 `<cite>src/app.py:1-10</cite>`。
 {self._root_readme_cite_rule()}
 {handbook_cite_rules}{list_rule}
-- 如果证据不足，明确写”当前证据显示”，不要过度推断。
+- 如果证据不足，省略该事实，不要用套话填空，也不要过度推断。
 - {identity_slot}必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
 {api_quality_rules}
 
@@ -1001,7 +1016,7 @@ class LLMPageComposer:
                 "生成时必须：\n"
                 "- 对每一个依赖推断的结论标注「待确认」\n"
                 "- 不允许编造模块名、API 端点、版本号或配置\n"
-                "- 使用「当前证据显示」而非「系统使用」\n"
+                "- 只写能从证据核对的事实，不要用套话填空\n"
                 "- 保留所有 `<cite>` 引用，即使推断不确定\n"
             )
 

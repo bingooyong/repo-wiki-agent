@@ -32,6 +32,7 @@ from repo_wiki.scanner.fastapi_routes import extract_fastapi_endpoints
 from repo_wiki.scanner.go_routes import (
     extract_go_data_models,
     extract_go_endpoints,
+    go_quoted_imports,
     is_go_test_path,
 )
 
@@ -765,6 +766,7 @@ class RepositoryScanner:
         self, files: list[ScannedFile], modules: dict[str, Module]
     ) -> list[DataModel]:
         models: list[DataModel] = []
+        go_files: list[tuple[str, str, str]] = []
         for file in files:
             suffix = file.path.suffix.lower()
             module_path = self._choose_module_path(file.path)
@@ -806,30 +808,7 @@ class RepositoryScanner:
                             )
                         )
             elif suffix == ".go":
-                for item in extract_go_data_models([(path_str, file.text)]):
-                    models.append(
-                        DataModel(
-                            name=item.name,
-                            type=item.kind,
-                            module=module_name,
-                            file_path=path_str,
-                        )
-                    )
-                if not any(model.file_path == path_str for model in models):
-                    for name in re.findall(
-                        r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b",
-                        file.text,
-                        re.MULTILINE,
-                    ):
-                        if any(h in lower_path for h in _MODEL_FILE_HINTS):
-                            models.append(
-                                DataModel(
-                                    name=name,
-                                    type="go_struct",
-                                    module=module_name,
-                                    file_path=path_str,
-                                )
-                            )
+                go_files.append((path_str, file.text, module_name))
             elif suffix in {".java", ".kt"}:
                 for name in re.findall(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)", file.text):
                     if any(h in lower_path for h in _MODEL_FILE_HINTS) or name.lower().endswith(
@@ -855,10 +834,28 @@ class RepositoryScanner:
                         )
                     )
 
+        if go_files:
+            module_by_path = {path: module for path, _text, module in go_files}
+            for item in extract_go_data_models([(path, text) for path, text, _module in go_files]):
+                models.append(
+                    DataModel(
+                        name=item.name,
+                        type=item.kind,
+                        module=module_by_path.get(item.file_path, item.file_path.split("/")[0]),
+                        file_path=item.file_path,
+                        attributes=list(item.attributes),
+                        primary_key=item.primary_key or "",
+                        relationships=list(item.relations),
+                    )
+                )
+
         dedup: dict[tuple[str, str, str], DataModel] = {}
         for model in models:
             dedup[(model.name, model.module, model.file_path)] = model
-        return list(dedup.values())
+        models = list(dedup.values())
+        if any(model.type in {"go_gorm", "go_struct_db"} for model in models):
+            models = [model for model in models if model.type in {"go_gorm", "go_struct_db"}]
+        return models
 
     def _ensure_modules_cover_entities(
         self,
@@ -895,6 +892,23 @@ class RepositoryScanner:
             if module_path not in deps:
                 continue
             text = file.text
+            if file.path.suffix.lower() == ".go":
+                for candidate in go_quoted_imports(text):
+                    for known in known_paths:
+                        if known == module_path:
+                            continue
+                        if (
+                            candidate == known
+                            or candidate.endswith("/" + known)
+                            or f"/{known}/" in f"/{candidate}/"
+                        ):
+                            label = (
+                                known
+                                if known.startswith(("internal/", "cmd/", "pkg/"))
+                                else modules[known].name
+                            )
+                            deps[module_path].add(label)
+                continue
             candidates = set(
                 re.findall(r"^\s*from\s+([A-Za-z0-9_./]+)\s+import\b", text, re.MULTILINE)
             )
@@ -1196,12 +1210,17 @@ class RepositoryScanner:
             # Set common error codes
             endpoint.error_codes = [400, 401, 403, 404, 500]
 
-            # Extract line number for handler citation
-            line_number = self._find_handler_line(
-                endpoint, file_contents.get(endpoint.file_path, "")
-            )
-            endpoint.line_number = line_number
-            endpoint.line_end = line_number + 10  # Approximate span
+            # Preserve extractor line numbers when the handler search misses.
+            found = self._find_handler_line(endpoint, file_contents.get(endpoint.file_path, ""))
+            if found > 0:
+                endpoint.line_number = found
+                endpoint.line_end = found + 10
+            elif endpoint.line_number > 0:
+                if endpoint.line_end <= 0:
+                    endpoint.line_end = endpoint.line_number
+            else:
+                endpoint.line_number = 0
+                endpoint.line_end = 0
 
     def _is_webhook_path(self, path: str) -> bool:
         """Check if path looks like a webhook."""
@@ -1250,6 +1269,7 @@ class RepositoryScanner:
         if not handler or handler == "unknown":
             return 0
 
+        method = handler.rsplit(".", 1)[-1]
         # Search for function definition
         patterns = [
             rf"^def\s+{re.escape(handler)}\s*\(",
@@ -1259,6 +1279,7 @@ class RepositoryScanner:
             rf"^export\s+const\s+{re.escape(handler)}\s*=",
             rf"^\s*func\s+{re.escape(handler)}\s*\(",
             rf"^\s*fun\s+{re.escape(handler)}\s*\(",
+            rf"^func\s+\([^)]+\)\s+{re.escape(method)}\s*\(",
         ]
 
         lines = file_content.splitlines()
