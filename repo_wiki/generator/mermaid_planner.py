@@ -892,6 +892,12 @@ class MermaidPlanner:
             modules = self._plan_overview_module_flow(page_id, evidence_binding, context)
             if modules:
                 diagrams.append(modules)
+            else:
+                diagram = self._plan_overview_architecture_diagram(
+                    page_id, evidence_binding, context
+                )
+                if diagram:
+                    diagrams.append(diagram)
             settings = self._plan_settings_flow(page_id, evidence_binding, context)
             if settings:
                 diagrams.append(settings)
@@ -1842,6 +1848,30 @@ class MermaidPlanner:
                 if pair not in seen_edges and ident != dest_id:
                     seen_edges.add(pair)
                     edges.append(DiagramEdge(from_node=ident, to_node=dest_id))
+        for src, dst in _import_edges_from_context(context):
+            src_label = str(src).strip()
+            dst_label = str(dst).strip()
+            if (
+                not src_label
+                or not dst_label
+                or src_label in skip
+                or dst_label in skip
+                or src_label.endswith(".py")
+                or dst_label.endswith(".py")
+            ):
+                continue
+            src_id = mermaid_ident(src_label)
+            dst_id = mermaid_ident(dst_label)
+            if src_id not in seen_nodes:
+                seen_nodes.add(src_id)
+                nodes.append(DiagramNode(id=src_id, label=src_label, shape="rectangle"))
+            if dst_id not in seen_nodes:
+                seen_nodes.add(dst_id)
+                nodes.append(DiagramNode(id=dst_id, label=dst_label, shape="rectangle"))
+            pair = (src_id, dst_id)
+            if pair not in seen_edges and src_id != dst_id:
+                seen_edges.add(pair)
+                edges.append(DiagramEdge(from_node=src_id, to_node=dst_id))
         if len(edges) < 2:
             return None
         used = {edge.from_node for edge in edges} | {edge.to_node for edge in edges}
