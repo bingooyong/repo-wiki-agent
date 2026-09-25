@@ -493,7 +493,7 @@ def test_prompt_does_not_echo_reader_facing_line(tmp_path: Path) -> None:
     assert "本页面向仓库读者" not in prompt
     assert "当前证据" not in prompt
     assert "证据范围" not in prompt
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r21-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r22-")
 
 
 def test_contract_keeps_labeled_bullet_lists(tmp_path: Path) -> None:
@@ -516,4 +516,4 @@ def test_contract_keeps_labeled_bullet_lists(tmp_path: Path) -> None:
 
 
 def test_generator_version_is_r16() -> None:
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r21-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r22-")

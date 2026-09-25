@@ -1619,10 +1619,17 @@ class RepoWikiService:
                 inject_planner_mermaid=False,
             )
             self._write_raw_reply(page, getattr(output, "raw_markdown", "") or output.markdown)
-            from repo_wiki.verifier.handbook import handbook_page_is_fallback_stub
+            from repo_wiki.generator.composer import is_handbook_install_page
+            from repo_wiki.verifier.handbook import (
+                handbook_page_is_fallback_stub,
+                install_steps_invalid_reason,
+            )
 
             if handbook_page_is_fallback_stub(enriched):
                 write_fallback(page, binding, page_idx, "tiny_or_stub_page")
+                return
+            if is_handbook_install_page(page) and install_steps_invalid_reason(enriched):
+                write_fallback(page, binding, page_idx, "invalid-install-step")
                 return
             self._store_composer_cache_page(
                 cache,
@@ -2284,9 +2291,19 @@ class RepoWikiService:
         return cite_existing_meaningful(self.root, rel)
 
     def _rewrite_install_page_contract(self, page: Any, content: str) -> str:
-        """Install steps stay as the model wrote them from this repo's docs."""
-        del page
-        return content
+        """Replace install/quick-start steps with README fence commands."""
+        from repo_wiki.generator.composer import is_handbook_install_page
+        from repo_wiki.generator.deterministic_sections import (
+            build_install_section,
+            replace_h2_section,
+        )
+
+        if not is_handbook_install_page(page):
+            return content
+        section = build_install_section(self.root)
+        if not section:
+            return content
+        return replace_h2_section(content, ("安装步骤", "快速开始"), section)
 
     def _install_commands_from_repo_files(self) -> list[str]:
         from repo_wiki.verifier.handbook import collect_repo_install_commands
@@ -2377,17 +2394,6 @@ class RepoWikiService:
         if not block:
             return content
         return replace_h2_section(content, ("安全实现",), block)
-
-    def _data_model_struct_cites(self) -> list[str]:
-        from repo_wiki.generator.deterministic_sections import (
-            discover_go_struct_names,
-            go_struct_cite,
-        )
-
-        cites = [
-            go_struct_cite(self.root, name) for name in discover_go_struct_names(self.root)[:8]
-        ]
-        return [item for item in cites if item]
 
     def _drop_uninventoried_snapshot_api_claims(
         self,
@@ -3073,18 +3079,18 @@ class RepoWikiService:
         return "\n".join(lines)
 
     def _strip_language_mismatched_model_prose(self, content: str) -> str:
-        go_repo = (self.root / "internal" / "models").is_dir()
-        python_repo = (self.root / "app" / "models").is_dir()
+        go_repo = any(
+            path.suffix == ".go" and "models" in path.parts for path in self.root.rglob("*.go")
+        )
+        python_repo = any(
+            path.suffix == ".py" and "models" in path.parts for path in self.root.rglob("*.py")
+        )
         lines = []
         for line in content.splitlines():
             if (
                 go_repo
                 and not python_repo
-                and (
-                    "alembic" in line.lower()
-                    or "app/models" in line
-                    or ("未提供" in line and "internal/models" in line)
-                )
+                and ("alembic" in line.lower() or "pydantic" in line.lower())
             ):
                 continue
             if python_repo and not go_repo and "ORM 实体" in line and "Pydantic" not in line:

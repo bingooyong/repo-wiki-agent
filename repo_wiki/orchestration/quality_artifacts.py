@@ -26,6 +26,14 @@ _CITE_TARGET_PATTERN = re.compile(
 )
 _URI_SCHEME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _READY_STATES = {"READY", "PASS"}
+_CORE_PAGE_RE = re.compile(
+    r"overview|install|quick|api|data.?model|概述|安装|快速|数据模型",
+    re.I,
+)
+
+
+def _is_core_handbook_page(page_id: str, title: str = "") -> bool:
+    return bool(_CORE_PAGE_RE.search(f"{page_id} {title}"))
 
 
 def _now_iso() -> str:
@@ -178,11 +186,20 @@ def build_generation_quality_documents(
     counts = Counter(str(p["quality_state"]) for p in quality_pages)
     fallback_or_degraded = counts.get("FALLBACK", 0) + counts.get("DEGRADED", 0)
     unidentified = counts.get("UNIDENTIFIED", 0)
+    dropped_ids = [
+        str(item.get("page_id") or "")
+        for item in failed_pages
+        if isinstance(item, dict) and (item.get("dropped") or item.get("page_id"))
+    ]
+    dropped_ids.extend(str(item) for item in (llm_summary.get("dropped_page_ids") or []) if item)
+    dropped_core_ids = sorted({item for item in dropped_ids if _is_core_handbook_page(item)})
     all_ready = bool(quality_pages) and all(
         p["quality_state"] in _READY_STATES for p in quality_pages
     )
     grade = (
-        "PASS"
+        "FAIL"
+        if dropped_core_ids
+        else "PASS"
         if all_ready
         else "FALLBACK"
         if fallback_or_degraded
@@ -216,7 +233,10 @@ def build_generation_quality_documents(
             "fallback_count": counts.get("FALLBACK", 0),
             "degraded_count": counts.get("DEGRADED", 0),
             "dropped_count": counts.get("DROPPED", 0)
-            + int(llm_summary.get("dropped_page_count") or 0),
+            + int(llm_summary.get("dropped_page_count") or 0)
+            + len({item for item in dropped_ids if item}),
+            "dropped_core_count": len(dropped_core_ids),
+            "dropped_core_page_ids": dropped_core_ids,
             "unidentified_count": counts.get("UNIDENTIFIED", 0),
             "llm_mode": llm_summary.get("mode"),
             "fallback_page_count": llm_summary.get("fallback_page_count", 0),

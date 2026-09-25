@@ -298,18 +298,13 @@ def _section_bounds(lines: list[str], heading: str) -> tuple[int, int] | None:
 def find_alembic_revision_rel(root: Path) -> str:
     """Return the Alembic revision with the most create_table calls."""
     candidates: list[Path] = []
-    for rel in (
-        "app/db/migrations/versions",
-        "alembic/versions",
-        "migrations/versions",
-    ):
-        folder = root / rel
-        if folder.is_dir():
-            candidates.extend(path for path in folder.glob("*.py") if path.is_file())
-    if not candidates:
-        for path in root.rglob("*.py"):
-            if path.parent.name == "versions" and "migration" in path.as_posix().lower():
-                candidates.append(path)
+    skip = {".git", "vendor", "node_modules", "__pycache__", ".repo-agent-eval"}
+    for path in root.rglob("*.py"):
+        if any(part in skip for part in path.parts):
+            continue
+        blob = path.as_posix().lower()
+        if path.parent.name == "versions" or "migration" in blob:
+            candidates.append(path)
     best = ""
     best_count = -1
     for path in candidates:

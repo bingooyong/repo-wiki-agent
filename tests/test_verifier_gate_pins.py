@@ -102,6 +102,7 @@ def test_pinned_verifier_gate_thresholds() -> None:
         "QODER_HANDBOOK_ROLE_CONSISTENCY",
         "QODER_HANDBOOK_SOURCE_FACTS",
         "QODER_HANDBOOK_ROUTE_CROSSCHECK",
+        "QODER_HANDBOOK_DROPPED_CORE",
         "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -134,8 +135,21 @@ def test_pinned_verifier_gate_thresholds() -> None:
         )
         == _DOC_MISMATCH_SKIP
     )
-    assert "Depends" in _GENERIC_TYPES
-    assert "Handle" in _GENERIC_TYPES
+    assert _GENERIC_TYPES == frozenset(
+        {
+            "FastAPI",
+            "PostgreSQL",
+            "SQLAlchemy",
+            "Alembic",
+            "HTTPException",
+            "Depends",
+            "Docker",
+            "GitHub",
+            "Dockerfile",
+            "Makefile",
+            "Handle",
+        }
+    )
     assert "schema" in _GENERIC_TABLES
     assert "healthcheck" in _GENERIC_COMPOSE
     assert "depends" in _NOT_SERVICE_TOKENS

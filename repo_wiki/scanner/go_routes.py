@@ -30,8 +30,12 @@ _TYPE_STRUCT_RE = re.compile(
 )
 _PATH_TAG_RE = re.compile(r'`[^`]*\bpath:"([^"]+)"[^`]*`')
 _GIN_ROUTE_RE = re.compile(
-    r"""\b([A-Za-z_]\w*)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|Any|Handle)\(\s*"""
+    r"""\b([A-Za-z_]\w*)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|Any|Handle|Get|Post|Put|Patch|Delete|Head)\(\s*"""
     r"""(?:((?:http\.Method\w+)|(?:"[A-Z]+"))\s*,\s*)?["']([^"']+)["']""",
+)
+_GROUP_ASSIGN_RE = re.compile(r"""(\w+)\s*:?=\s*(\w+)\.Group\(\s*["']([^"']+)["']""")
+_TO_ROUTE_RE = re.compile(
+    r"""(\w+)\.To\(\s*["']([A-Z]+(?:\s*,\s*[A-Z]+)*)["']\s*,\s*["']([^"']+)["']"""
 )
 _HANDLE_FUNC_RE = re.compile(r"""(?:http\.)?HandleFunc\(\s*["']([^"']+)["']\s*,\s*([A-Za-z_]\w*)""")
 _MUX_HANDLE_RE = re.compile(
@@ -528,6 +532,10 @@ def extract_go_endpoints(files: Sequence[tuple[str, str]]) -> list[GoEndpoint]:
             lineno = text[: match.start()].count("\n") + 1
             _add(match.group(1).upper(), match.group(2), "pprof", path, lineno, "go_pprof")
 
+        group_prefix: dict[str, str] = {}
+        for match in _GROUP_ASSIGN_RE.finditer(text):
+            child, parent, prefix = match.group(1), match.group(2), match.group(3)
+            group_prefix[child] = join_http_paths(group_prefix.get(parent, ""), prefix)
         for match in _GIN_ROUTE_RE.finditer(text):
             call = match.group(2)
             method_expr = match.group(3)
@@ -542,7 +550,19 @@ def extract_go_endpoints(files: Sequence[tuple[str, str]]) -> list[GoEndpoint]:
             else:
                 method = call.upper()
             handler = f"{match.group(1)}.{call}"
-            _add(method, route_path, handler, path, lineno, "go_gin")
+            _add(
+                method,
+                join_http_paths(group_prefix.get(match.group(1), ""), route_path),
+                handler,
+                path,
+                lineno,
+                "go_gin",
+            )
+        for match in _TO_ROUTE_RE.finditer(text):
+            lineno = text[: match.start()].count("\n") + 1
+            route_path = join_http_paths(group_prefix.get(match.group(1), ""), match.group(3))
+            for method in (item.strip().upper() for item in match.group(2).split(",")):
+                _add(method, route_path, f"{match.group(1)}.To", path, lineno, "go_to")
 
         for match in _REGISTER_RAW_ROUTE_RE.finditer(text):
             method = _resolve_http_method_expr(match.group(1).strip())

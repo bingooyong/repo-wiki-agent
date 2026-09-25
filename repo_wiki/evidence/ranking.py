@@ -533,9 +533,9 @@ def _score_onboarding_evidence(
             else:
                 score += WEIGHT_ONBOARDING_ENTRY + 2.0
                 signals.append("arch_cmd_core")
-        if "app/api/routes" in path or path.startswith("app/models"):
+        if any(part in {"routes", "routers", "models"} for part in Path(path).parts):
             score += WEIGHT_ONBOARDING_SETTINGS + 2.0
-            signals.append("arch_python_core")
+            signals.append("arch_core_models_or_routes")
     elif _is_ops_config_page(page) or _is_database_troubleshooting_page(page):
         if "settings" in path or "database_url" in symbol or "database_url" in text:
             score += WEIGHT_ONBOARDING_SETTINGS
@@ -552,10 +552,7 @@ def _score_onboarding_evidence(
             score += WEIGHT_ONBOARDING_SETTINGS
             signals.append("data_model_file")
         if path.endswith(".go") and (
-            "gorm:" in text
-            or "tablename" in symbol
-            or "/models/" in path
-            or path.startswith("internal/models/")
+            "gorm:" in text or "tablename" in symbol or "/models/" in path
         ):
             score += WEIGHT_ONBOARDING_SETTINGS + 1.0
             signals.append("go_gorm_model")

@@ -53,18 +53,19 @@ def _repo_is_python(root: Path) -> bool:
 
 
 def discover_go_struct_names(root: Path) -> list[str]:
-    models = root / "internal" / "models"
-    if not models.is_dir():
-        return []
+    skip = {".git", "vendor", "node_modules", "__pycache__", ".repo-agent-eval", "testdata"}
     names: list[str] = []
-    for path in sorted(models.glob("*.go")):
-        if path.name.endswith("_test.go"):
+    for folder in root.rglob("models"):
+        if not folder.is_dir() or any(part in skip for part in folder.parts):
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        names.extend(re.findall(r"type\s+([A-Z][A-Za-z0-9]+)\s+struct\b", text))
+        for path in sorted(folder.glob("*.go")):
+            if path.name.endswith("_test.go"):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            names.extend(re.findall(r"type\s+([A-Z][A-Za-z0-9]+)\s+struct\b", text))
     seen: set[str] = set()
     ordered: list[str] = []
     for name in names:
@@ -73,32 +74,6 @@ def discover_go_struct_names(root: Path) -> list[str]:
         seen.add(name)
         ordered.append(name)
     return ordered
-
-
-def discover_core_domain_structs(root: Path) -> list[str]:
-    """Structs from the model layer that the route/service layer actually uses."""
-    names = discover_go_struct_names(root)
-    if not names:
-        return []
-    blob_parts: list[str] = []
-    for folder in (root / "internal" / "services", root / "internal" / "repository"):
-        if not folder.is_dir():
-            continue
-        for path in folder.rglob("*.go"):
-            if path.name.endswith("_test.go"):
-                continue
-            try:
-                blob_parts.append(path.read_text(encoding="utf-8", errors="ignore"))
-            except OSError:
-                continue
-    extra = root / "controller.go"
-    if extra.is_file():
-        blob_parts.append(extra.read_text(encoding="utf-8", errors="ignore"))
-    blob = "\n".join(blob_parts)
-    scored = [(name, blob.count(name)) for name in names]
-    used = [name for name, count in scored if count >= 2]
-    used.sort(key=lambda name: (-blob.count(name), name))
-    return used
 
 
 def discover_auth_implementation(root: Path) -> str:
@@ -161,22 +136,7 @@ _README_ROUTE_CITE_RE = re.compile(
     re.IGNORECASE,
 )
 _UNRESOLVED_API_RE = re.compile(r"UNRESOLVED_API_[A-Z_]+")
-_EMPTY_NUMBERED_RE = re.compile(
-    r"(?m)^(\d+)\.\s+\S[^\n]*\n(?:<cite>[^<]+</cite>\s*\n)?(?:[ \t]*\n){2,}"
-)
-_GO_SECURITY_HINTS = (
-    "internal/auth",
-    "internal/secrets",
-    "internal/audit",
-    "internal/netguard",
-    "internal/security",
-    "deploy/mtls",
-)
-_FASTAPI_SECURITY_HINTS = (
-    "app/services/jwt.py",
-    "app/services/security.py",
-    "app/api/dependencies/authentication.py",
-)
+_SECURITY_PATH_TOKENS = ("auth", "jwt", "security", "hmac", "secret", "mtls")
 
 
 def is_install_owner_page(*, page_id: str = "", title: str = "") -> bool:
@@ -1169,11 +1129,13 @@ def build_alembic_migration_appendix(root: Path) -> str:
 
 
 def load_alembic_migration_models(root: Path) -> list[dict[str, Any]]:
-    versions = root / "app" / "db" / "migrations" / "versions"
-    if not versions.is_dir():
-        return []
     models: list[dict[str, Any]] = []
-    for path in sorted(versions.glob("*.py")):
+    skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
+    for path in sorted(root.rglob("*.py")):
+        if any(part in skip for part in path.parts):
+            continue
+        if path.parent.name != "versions" and "migration" not in path.as_posix().lower():
+            continue
         tables = extract_alembic_tables(path.read_text(encoding="utf-8", errors="ignore"))
         rel = path.relative_to(root).as_posix()
         for table in tables:
@@ -1192,115 +1154,79 @@ def go_struct_end_line(lines: list[str], start: int) -> int:
 
 
 def go_struct_cite(root: Path, name: str) -> str:
-    models = root / "internal" / "models"
-    if not models.is_dir():
-        return ""
     pattern = re.compile(rf"^type\s+{re.escape(name)}\s+struct\s*\{{")
-    for path in sorted(models.rglob("*.go")):
-        if path.name.endswith("_test.go"):
+    skip = {".git", "vendor", "node_modules", "testdata"}
+    for path in sorted(root.rglob("*.go")):
+        if path.name.endswith("_test.go") or any(part in skip for part in path.parts):
             continue
-        rel = path.relative_to(root).as_posix()
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         for index, line in enumerate(lines, 1):
             if pattern.match(line):
+                rel = path.relative_to(root).as_posix()
                 return f"<cite>{rel}:{index}-{go_struct_end_line(lines, index)}</cite>"
     return ""
 
 
 def all_go_model_struct_cites(root: Path) -> list[tuple[str, str]]:
-    models = root / "internal" / "models"
-    if not models.is_dir():
-        return []
-    pattern = re.compile(r"^type\s+([A-Z][A-Za-z0-9_]*)\s+struct\s*\{")
     cites: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for path in sorted(models.rglob("*.go")):
-        if path.name.endswith("_test.go"):
-            continue
-        rel = path.relative_to(root).as_posix()
-        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        for index, line in enumerate(lines, 1):
-            match = pattern.match(line)
-            if not match or match.group(1) in seen:
-                continue
-            seen.add(match.group(1))
-            cites.append(
-                (match.group(1), f"<cite>{rel}:{index}-{go_struct_end_line(lines, index)}</cite>")
-            )
+    for name in discover_go_struct_names(root):
+        cite = go_struct_cite(root, name)
+        if cite:
+            cites.append((name, cite))
     return cites
 
 
 def build_data_model_cite_block(root: Path) -> str:
-    if (root / "internal" / "models").is_dir():
-        named = all_go_model_struct_cites(root)
-        by_name = {name: cite for name, cite in named}
-        discovered = discover_go_struct_names(root)
-        required = [go_struct_cite(root, name) for name in discovered[:8]]
-        required = [item for item in required if item]
-        if not named and not required:
-            return ""
-        migrations = ""
-        mig_dir = root / "db" / "migrations"
-        if mig_dir.is_dir():
-            sqls = sorted(path for path in mig_dir.glob("*.sql"))
-            if sqls:
-                rel = sqls[0].relative_to(root).as_posix()
-                migrations = f" `db/migrations` 含 {len(sqls)} 个 SQL 迁移，例如 {cite_first_match(root, rel, r'CREATE TABLE|create table') or f'<cite>{rel}:1-1</cite>'}。"
-        core_names = set(discovered[:8])
-        paragraphs: list[str] = []
-        for name in discovered[:8]:
-            cite = by_name.get(name) or go_struct_cite(root, name)
-            if not cite:
-                continue
-            paragraphs.append(f"{name} 定义在 internal/models。 {cite}")
-        if not paragraphs and required:
-            paragraphs = [f"核心实体定义见 internal/models。 {item}" for item in required[:4]]
-        config_rows = [f"| {name} | {cite} |" for name, cite in named if name not in core_names]
-        table = ""
-        if config_rows:
-            table = (
-                "其余配置与辅助类型按定义行收录，不逐条展开：\n\n"
-                "| 类型 | 定义 |\n| --- | --- |\n" + "\n".join(config_rows) + "\n"
-            )
-        body = "\n\n".join(paragraphs)
-        return (
-            "## 实体定义\n\n"
-            "GORM 结构体定义在 internal/models。"
-            f"核心实体包括 {'、'.join(discovered[:8]) or '源码 type 声明'}，"
-            "配置类结构则集中在下表，避免把类型堆成无说明清单。\n\n"
-            f"{body}\n\n"
-            f"{table}\n"
-            f"表结构见 db/schema.sql。 {cite_existing_meaningful(root, 'db/schema.sql')}{migrations}\n"
-        )
-    models = load_alembic_migration_models(root)
-    if not models:
+    from repo_wiki.verifier.handbook import discover_model_classes
+
+    named = all_go_model_struct_cites(root)[:8]
+    models = load_alembic_migration_models(root)[:8]
+    classes = [name for name, rel in discover_model_classes(root) if not rel.endswith(".sql")]
+    if not named and not models and not classes:
         return ""
-    rel = str(models[0].get("file_path") or "app/db/migrations")
-    names = "、".join(str(item.get("name")) for item in models)
-    domain = ""
-    domain_dir = root / "app" / "models" / "domain"
-    if domain_dir.is_dir():
-        domain = cite_existing_meaningful(root, "app/models/domain")
-    migration_cite = cite_first_match(root, rel, r"op\.create_table\(") or (
-        f"<cite>{rel}:1-1</cite>" if (root / rel).is_file() else ""
+    cites = " ".join(cite for _name, cite in named)
+    tables = "、".join(
+        dict.fromkeys(
+            [
+                *[name for name, _cite in named],
+                *classes,
+                *[str(item.get("name") or "") for item in models if item.get("name")],
+            ]
+        )
     )
-    return (
-        "## 持久化表\n\n"
-        f"持久化表以 `{rel}` 为准，当前迁移定义 {names}，外键按迁移列声明。"
-        f" {migration_cite} "
-        f"领域模型目录不是 ORM 实体。 {domain}\n"
-    )
+    up = ""
+    for path in sorted(root.rglob("*.sql")):
+        if any(part in {".git", "vendor", "node_modules"} for part in path.parts):
+            continue
+        rel = path.relative_to(root).as_posix()
+        if re.search(r"CREATE\s+TABLE", path.read_text(encoding="utf-8", errors="ignore"), re.I):
+            up = cite_existing_meaningful(root, rel) or f"<cite>{rel}:1-1</cite>"
+            break
+    if models:
+        rel = str(models[0].get("file_path") or "")
+        up = (
+            up
+            or cite_first_match(root, rel, r"op\.create_table\(")
+            or (f"<cite>{rel}:1-1</cite>" if rel and (root / rel).is_file() else "")
+        )
+    return f"## 实体定义\n\n真实表：{tables} {cites} {up}\n"
 
 
 def build_security_cite_block(root: Path) -> str:
     cites: list[str] = []
-    hints = _GO_SECURITY_HINTS if _repo_is_go(root) else _FASTAPI_SECURITY_HINTS
-    for rel in hints:
-        path = root / rel
-        if path.exists():
-            cite = cite_existing_meaningful(root, rel)
-            if cite:
-                cites.append(cite)
+    skip = {".git", "vendor", "node_modules", "__pycache__", ".repo-agent-eval"}
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
+            continue
+        if any(part in skip for part in path.parts) or path.name.endswith("_test.go"):
+            continue
+        if not any(token in path.as_posix().lower() for token in _SECURITY_PATH_TOKENS):
+            continue
+        cite = cite_existing_meaningful(root, path.relative_to(root).as_posix())
+        if cite:
+            cites.append(cite)
+        if len(cites) >= 4:
+            break
     auth = discover_auth_implementation(root)
     if _repo_is_go(root):
         if not auth and not cites:
@@ -1495,32 +1421,8 @@ def strip_reader_unresolved_markers(content: str) -> str:
 
 
 def strip_empty_numbered_steps(content: str) -> str:
-    lines = (content or "").splitlines()
-    kept: list[str] = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        match = re.match(r"^(\d+)\.\s+\S", line)
-        if match:
-            body: list[str] = []
-            look = index + 1
-            while (
-                look < len(lines)
-                and not re.match(r"^(\d+)\.\s+", lines[look])
-                and not lines[look].startswith("## ")
-            ):
-                if lines[look].strip():
-                    body.append(lines[look])
-                look += 1
-            meaningful = [
-                item for item in body if not re.fullmatch(r"<cite>[^<]+</cite>", item.strip())
-            ]
-            if not meaningful and not re.search(r"`[^`]+`|```", line):
-                index = look
-                continue
-        kept.append(line)
-        index += 1
-    return "\n".join(kept)
+    """Never delete or renumber steps. Invalid steps fail the page elsewhere."""
+    return content or ""
 
 
 def strip_placeholder_ops_fences(content: str) -> str:

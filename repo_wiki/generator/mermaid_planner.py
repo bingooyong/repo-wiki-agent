@@ -66,7 +66,7 @@ def mermaid_er_field(value: str) -> str:
     text = re.sub(r"[{}]", "", value or "").strip()
     text = _MERMAID_UNSAFE_ID.sub("_", text)
     text = re.sub(r"_+", "_", text).strip("_")
-    return text or "id"
+    return text
 
 
 def _mermaid_scalar_type(value: str) -> str:
@@ -117,9 +117,9 @@ _PAGE_SCOPE_ALIASES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     ),
     (
         ("核心服务", "core", "service"),
-        ("services", "repository", "exporter", "app/api", "app/services"),
+        ("services", "repository", "exporter", "api", "routes"),
     ),
-    (("python", "python-service"), ("app/services", "app/api", "/api/")),
+    (("python", "python-service"), ("services", "api", "/api/")),
     (("agent", "探针", "tunnel"), ("agent", "probe", "tunnel")),
     (("控制", "control", "grpc"), ("control", "grpc", "tunnel")),
     (("部署", "compose", "运维", "ops"), ("deploy", "compose")),
@@ -829,11 +829,11 @@ def _architecture_prefer_tokens(page_id: str) -> tuple[str, ...] | None:
     if any(token in pid for token in ("event", "事件")):
         return ("control", "agent", "cmd/")
     if any(token in pid for token in ("data-flow", "数据流", "调用链")):
-        return ("services", "repository", "exporter", "app/services", "app/db")
+        return ("services", "repository", "exporter", "db")
     if any(token in pid for token in ("module", "模块")):
-        return ("control", "services", "repository", "app/api", "app/models")
+        return ("control", "services", "repository", "api", "models")
     if any(token in pid for token in ("system", "组件")):
-        return ("cmd/", "app/api", "app/core", "control", "services")
+        return ("cmd/", "api", "core", "control", "services")
     return None
 
 
@@ -1889,10 +1889,10 @@ class MermaidPlanner:
                 {
                     "entity": dest,
                     "attributes": dest_attrs,
-                    "primary_key": mermaid_er_field(str(source.get("primary_key") or "id")),
+                    "primary_key": mermaid_er_field(str(source.get("primary_key") or "")),
                     "primary_keys": [
                         mermaid_er_field(str(item))
-                        for item in (source.get("primary_keys") or ["id"])
+                        for item in (source.get("primary_keys") or [])
                         if mermaid_er_field(str(item))
                     ],
                 }
@@ -2187,8 +2187,8 @@ class MermaidPlanner:
                 {
                     "entity": entity_name,
                     "attributes": attributes or [{"name": "id", "type": "int"}],
-                    "primary_key": mermaid_er_field(str(model.get("primary_key") or "id")),
-                    "primary_keys": extra_pks or ["id"],
+                    "primary_key": mermaid_er_field(str(model.get("primary_key") or "")),
+                    "primary_keys": extra_pks or [],
                 }
             )
             for target in model.get("relationships") or []:
@@ -2362,13 +2362,21 @@ class MermaidPlanner:
                 selected = list(endpoints[:1])
             elif "python" in leaf:
                 selected = [
-                    item for item in endpoints if "app/" in str(item.get("file_path") or "")
+                    item
+                    for item in endpoints
+                    if any(
+                        part in {"api", "routes", "routers", "app"}
+                        for part in Path(str(item.get("file_path") or "")).parts
+                    )
                 ]
             elif "core" in leaf or "核心" in leaf:
                 selected = [
                     item
                     for item in endpoints
-                    if "app/api" in str(item.get("file_path") or "")
+                    if any(
+                        part in {"api", "routes", "routers", "controller"}
+                        for part in Path(str(item.get("file_path") or "")).parts
+                    )
                     or "controller" in str(item.get("file_path") or "")
                 ]
             elif leaf in {"api-overview", "api-reference", "api", "api-ref"}:
@@ -2543,10 +2551,10 @@ class MermaidPlanner:
                     {
                         "entity": dest,
                         "attributes": dest_attrs,
-                        "primary_key": mermaid_er_field(str(source.get("primary_key") or "id")),
+                        "primary_key": mermaid_er_field(str(source.get("primary_key") or "")),
                         "primary_keys": [
                             mermaid_er_field(str(item))
-                            for item in (source.get("primary_keys") or ["id"])
+                            for item in (source.get("primary_keys") or [])
                             if mermaid_er_field(str(item))
                         ],
                     }

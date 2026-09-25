@@ -73,9 +73,11 @@ def contains_evidence_meta_talk(text: str) -> bool:
 
 
 def handbook_page_is_fallback_stub(markdown: str) -> bool:
-    """True only for deterministic fallback stubs, not short structured LLM pages."""
+    """True for fallback stubs and any page under the 800-character body floor."""
     text = markdown or ""
-    return any(marker in text for marker in _FALLBACK_STUB_MARKERS)
+    if any(marker in text for marker in _FALLBACK_STUB_MARKERS):
+        return True
+    return handbook_page_body_len(text) < MIN_HANDBOOK_BODY_CHARS
 
 
 _README_NAMES = ("README.md", "README.rst", "README.txt", "README")
@@ -784,14 +786,6 @@ _GENERIC_GO_INSTALL = re.compile(
     r"\bgo\s+(?:build|run|mod\s+download)\s+(?:-o\s+\S+\s+)?(?:\.|./\.\.\.)\b",
     re.IGNORECASE,
 )
-_EXAMPLE_CMD_HINT_RE = re.compile(
-    r"example|示例|demo|scaffold|sample|hello|custom[-_]",
-    re.I,
-)
-_STUB_MAIN_RE = re.compile(
-    r"^\s*package\s+main\s*(?:import\s+\([^)]*\)\s*)?func\s+main\s*\(\s*\)\s*\{\s*\}\s*$",
-    re.S,
-)
 _SKIP_DISCOVERY_DIRS = frozenset(
     {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__", "testdata"}
 )
@@ -808,36 +802,104 @@ def _iter_entry_mains(root: Path) -> list[Path]:
     return found
 
 
+_FENCE_RE = re.compile(r"```(?:bash|sh|shell|console|zsh)?\n(.*?)```", re.I | re.S)
+_RST_LITERAL_RE = re.compile(r"::[ \t]*\n(?:[ \t]*\n)*((?:[ \t]+\S.*\n?)+)")
+_PROMPT_RE = re.compile(r"^(?:\$|>)\s+")
+_MAKE_JUNK_RE = re.compile(r"""^(?:@|\t)|\$\(|\$\$|\\$""")
+_SHELL_START_RE = re.compile(
+    r"^(?:git|cp|mv|cd|curl|wget|make|uv|pip3?|poetry|npm|pnpm|yarn|go|docker|"
+    r"podman|alembic|uvicorn|mysql|psql|export|python|uvx|\./)",
+    re.I,
+)
 _REPO_INSTALL_LINE_PATTERNS = (
-    re.compile(r"docker(?:-|\s+)compose(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
-    re.compile(r"\bpodman-compose(?:\s+[A-Za-z0-9_-]+){0,6}", re.I),
-    re.compile(r"\bpodman\s+run\b[^\n]{0,200}", re.I),
-    re.compile(r"\bdocker\s+run\b[^\n]{0,200}", re.I),
-    re.compile(r"\bmake(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
-    re.compile(r"\bgo\s+build(?:\s+[A-Za-z0-9_./-]+){0,8}", re.I),
-    re.compile(r"podman exec[^\n]{0,80}schema\.sql", re.I),
-    re.compile(r"mysql[^\n]{0,80}schema\.sql", re.I),
-    re.compile(r"curl\s+https?://localhost:\d+\S*", re.I),
-    re.compile(r"\./bin/[A-Za-z0-9_-]+", re.I),
-    re.compile(r"\bgo\s+run(?:\s+[A-Za-z0-9_./-]+){0,8}", re.I),
-    re.compile(r"\buv\s+sync\b", re.I),
-    re.compile(r"\buv\s+run(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
-    re.compile(r"\bnpm\s+install(?:\s+[A-Za-z0-9_@/-]+){0,4}", re.I),
-    re.compile(r"\bpip(?:3)?\s+install(?:\s+[A-Za-z0-9_\[\]'\"=-]+){0,4}", re.I),
-    re.compile(r"\bpoetry\s+install(?:\s+[A-Za-z0-9_.-]*){0,4}", re.I),
-    re.compile(r"\balembic\s+upgrade\s+head\b", re.I),
-    re.compile(r"\buvicorn\s+[A-Za-z0-9_.:-]+(?:\s+--reload)?", re.I),
+    re.compile(r"docker(?:-|\s+)compose", re.I),
+    re.compile(r"\bpodman-compose\b", re.I),
+    re.compile(r"\b(?:poetry|alembic|uvicorn|uv|pip3?|npm)\b", re.I),
+    re.compile(r"\bgo\s+(?:build|run|test)\b", re.I),
+    re.compile(r"\bmake\s+[A-Za-z0-9_./-]+", re.I),
+    re.compile(r"\bcurl\s+", re.I),
 )
 
 
+def _is_rejected_shell_line(line: str) -> bool:
+    if not line or line.startswith("#"):
+        return True
+    if _MAKE_JUNK_RE.search(line):
+        return True
+    if line.endswith("\\"):
+        return True
+    if " " not in line and not line.startswith("./") and "/" not in line:
+        return True
+    return not _SHELL_START_RE.match(line)
+
+
+def _join_shell_continuations(lines: list[str]) -> list[str]:
+    joined: list[str] = []
+    buf = ""
+    for raw in lines:
+        piece = raw.rstrip()
+        if buf:
+            piece = buf + " " + piece.lstrip()
+            buf = ""
+        if piece.endswith("\\"):
+            buf = piece[:-1].rstrip()
+            continue
+        joined.append(piece)
+    return joined
+
+
+def extract_readme_shell_commands(text: str) -> list[str]:
+    """Copy shell lines from README fences / RST literals / prompt lines. Keep order."""
+    commands: list[str] = []
+    seen: set[str] = set()
+
+    def _take(raw: str) -> None:
+        if raw.startswith("\t"):
+            return
+        line = _PROMPT_RE.sub("", raw.strip())
+        if _is_rejected_shell_line(line):
+            return
+        key = line.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        commands.append(line)
+
+    def _take_block(block: str) -> None:
+        for raw in _join_shell_continuations(block.splitlines()):
+            _take(raw)
+
+    for block in _FENCE_RE.findall(text or ""):
+        _take_block(block)
+    for block in _RST_LITERAL_RE.findall(text or ""):
+        _take_block(block)
+    if not commands:
+        _take_block(text or "")
+    return commands
+
+
+def install_steps_invalid_reason(content: str) -> str | None:
+    """Fail the page when a numbered/fenced step is makefile junk or a ``\\`` stump."""
+    for raw in (content or "").splitlines():
+        line = raw.strip().lstrip("0123456789.").strip().strip("`")
+        if _MAKE_JUNK_RE.search(line) or line.endswith("\\"):
+            return "invalid-install-step"
+    for block in _FENCE_RE.findall(content or ""):
+        for raw in block.splitlines():
+            line = _PROMPT_RE.sub("", raw.rstrip())
+            if _MAKE_JUNK_RE.search(line) or line.endswith("\\"):
+                return "invalid-install-step"
+    return None
+
+
 def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
-    """Collect install/run commands from this repo's Makefile and README, in source order."""
+    """Collect install/run commands from this repo's README fences, in source order."""
     commands: list[str] = []
     seen: set[str] = set()
 
     def _add(command: str) -> None:
         text = " ".join(command.split()).strip()
-        if not text or _GENERIC_GO_INSTALL.search(text):
+        if not text or _GENERIC_GO_INSTALL.search(text) or text.endswith("\\"):
             return
         key = text.casefold()
         if key in seen:
@@ -845,90 +907,25 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
         seen.add(key)
         commands.append(text)
 
-    makefile = next(
-        (path for path in (root / "Makefile", root / "makefile") if path.is_file()),
-        None,
-    )
+    for name in ("README.md", "README.rst", "QUICKSTART.md", "README"):
+        path = root / name
+        if path.is_file():
+            for item in extract_readme_shell_commands(
+                path.read_text(encoding="utf-8", errors="ignore")
+            ):
+                _add(normalize_go_build_command(item, root))
+    makefile = next((path for path in (root / "Makefile", root / "makefile") if path.is_file()), None)
     if makefile is not None:
         text = makefile.read_text(encoding="utf-8", errors="ignore")
-        for raw in text.splitlines():
-            line = raw.split("#", 1)[0].strip()
-            if re.search(r"\b(?:go\s+build|podman-compose|docker-compose|go\s+run)\b", line):
-                _add(normalize_go_build_command(line, root))
         if re.search(r"^install:", text, re.M):
             _add("make install")
         if re.search(r"^up:", text, re.M):
             _add("make up")
-    core_mains: list[Path] = []
-    demo_mains: list[Path] = []
-    for main in sorted(_iter_entry_mains(root)):
-        docs = ""
-        for readme in ("README.md", "README.rst", "README.txt"):
-            candidate = main.parent / readme
-            if candidate.is_file():
-                docs = candidate.read_text(encoding="utf-8", errors="ignore")
-                break
-        hint = f"{main.parent.name}\n{docs[:400]}"
-        from repo_wiki.generator.process_roles import path_looks_like_example_cmd
-
-        stub = False
-        try:
-            stub = bool(_STUB_MAIN_RE.match(main.read_text(encoding="utf-8", errors="ignore")))
-        except OSError:
-            stub = False
-        if (
-            path_looks_like_example_cmd(main.as_posix())
-            or _EXAMPLE_CMD_HINT_RE.search(hint)
-            or stub
-        ):
-            demo_mains.append(main)
-        else:
-            core_mains.append(main)
-    for name in ("README.md", "README.rst", "QUICKSTART.md"):
-        path = root / name
-        if not path.is_file():
-            continue
-        joined: list[str] = []
-        buf = ""
-        for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            piece = raw_line.rstrip()
-            if buf:
-                piece = buf + " " + piece.lstrip()
-                buf = ""
-            if piece.endswith("\\"):
-                buf = piece[:-1].rstrip()
-                continue
-            joined.append(piece)
-        if buf:
-            joined.append(buf)
-        for raw_line in joined:
-            line = raw_line.strip().lstrip("$").strip()
-            if not line or line.startswith("#") or line.startswith(".."):
-                continue
-            for pattern in _REPO_INSTALL_LINE_PATTERNS:
-                match = pattern.search(line)
-                if not match:
-                    continue
-                command = " ".join(match.group(0).split()).rstrip(".,;:)")
-                if command.endswith("\\"):
-                    continue
-                if command and len(command) <= 240:
-                    if _EXAMPLE_CMD_HINT_RE.search(command) and core_mains:
-                        continue
-                    _add(normalize_go_build_command(command, root))
     has_compose = any(
         token in item.lower()
         for item in commands
         for token in ("podman-compose", "docker compose", "docker-compose")
     )
-    schema_cmds = [item for item in commands if "schema.sql" in item]
-    if schema_cmds:
-        preferred_schema = next(
-            (item for item in schema_cmds if "exec" in item.lower()),
-            schema_cmds[0],
-        )
-        commands = [item for item in commands if "schema.sql" not in item]
-        commands.append(preferred_schema)
     if has_compose:
         commands = [item for item in commands if "./bin/" not in item]
     return commands[:limit]
@@ -969,14 +966,14 @@ def architecture_core_packages(repo_root: Path) -> list[str]:
     domain = repo_root / "domain"
     if domain.is_dir() and "domain" not in cores:
         cores.append("domain")
-    for candidate in (
-        repo_root / "app" / "api" / "routes",
-        repo_root / "src" / "app" / "api" / "routes",
-    ):
-        if candidate.is_dir():
-            rel = candidate.relative_to(repo_root).as_posix()
-            if rel not in cores:
-                cores.append(rel)
+    for path in repo_root.rglob("*"):
+        if not path.is_dir() or any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
+            continue
+        if path.name not in {"routes", "routers"}:
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        if rel and rel not in cores:
+            cores.append(rel)
 
     try:
         from repo_wiki.generator.compose_evidence import load_repo_import_edges
@@ -1031,34 +1028,88 @@ def has_architecture_core_citation(markdown: str, repo_root: Path) -> bool:
     return all(rel.lower() in cited for rel in cores)
 
 
+_CLASS_RE = re.compile(r"^class\s+([A-Z][A-Za-z0-9_]+)\s*\(([^)]*)\)", re.M)
+_TABLE_TRUE_RE = re.compile(r"\btable\s*=\s*True\b")
+_TABLENAME_RE = re.compile(r"__tablename__\s*=")
+_GORM_STRUCT_RE = re.compile(r"type\s+([A-Z][A-Za-z0-9_]+)\s+struct\b")
+_SQL_CREATE_RE = re.compile(
+    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`\"']?([A-Za-z_][A-Za-z0-9_]*)",
+    re.I,
+)
+_DB_USE_RE = re.compile(
+    r"(?:AutoMigrate|Create|Find|Save|First|Updates)\(\s*&([A-Z][A-Za-z0-9_]+)",
+)
+_DTO_NAME_RE = re.compile(r"(DTO|Schema|Request|Response|In|Out)$")
+_DOWN_NAME_RE = re.compile(r"(?:^|[_-])down(?:[_-]|\.|$)", re.I)
+_ABSENCE_RE = re.compile(
+    r"(?:没有|无|未提供|不存在)\s*[`'\"]([A-Za-z0-9_./-]+)[`'\"]"
+    r"|no\s+migrations?\s+folder"
+    r"|没有\s*(?:migrations?|sql)\s*(?:目录|folder)",
+    re.I,
+)
+
+
 def discover_model_classes(repo_root: Path) -> list[tuple[str, str]]:
-    """SQLModel / SQLAlchemy / GORM model classes anywhere under the repo."""
+    """Real tables only: SQLModel table=True, SQLAlchemy __tablename__, DB-used Go, CREATE TABLE."""
     found: list[tuple[str, str]] = []
-    class_re = re.compile(r"^class\s+([A-Z][A-Za-z0-9_]+)\s*\(([^)]*)\)", re.M)
-    table_true = re.compile(r"\btable\s*=\s*True\b")
-    tablename = re.compile(r"__tablename__\s*=")
-    gorm = re.compile(r"type\s+([A-Z][A-Za-z0-9_]+)\s+struct\b")
+    go_used: set[str] = set()
     for path in repo_root.rglob("*"):
         if not path.is_file() or any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
             continue
         rel = path.relative_to(repo_root).as_posix()
         if path.suffix == ".py":
             text = path.read_text(encoding="utf-8", errors="ignore")
-            for match in class_re.finditer(text):
-                name, bases = match.group(1), match.group(2)
-                window = text[match.start() : match.start() + 400]
-                if (
-                    table_true.search(window)
-                    or tablename.search(window)
-                    or re.search(r"SQLModel|DeclarativeBase|declarative_base", bases)
-                ):
-                    found.append((name, rel))
+            starts = [match.start() for match in _CLASS_RE.finditer(text)]
+            for match in _CLASS_RE.finditer(text):
+                nxt = next((pos for pos in starts if pos > match.start()), len(text))
+                window = text[match.start() : nxt]
+                if _TABLE_TRUE_RE.search(window) or _TABLENAME_RE.search(window):
+                    found.append((match.group(1), rel))
         elif path.suffix == ".go" and not path.name.endswith("_test.go"):
             text = path.read_text(encoding="utf-8", errors="ignore")
-            if 'gorm:"' not in text and "gorm.Model" not in text:
-                continue
-            for match in gorm.finditer(text):
+            go_used.update(_DB_USE_RE.findall(text))
+            tagged = 'gorm:"' in text or "gorm.Model" in text or "gorm:" in text
+            for match in _GORM_STRUCT_RE.finditer(text):
+                name = match.group(1)
+                if tagged or name in go_used:
+                    found.append((name, rel))
+        elif path.suffix == ".sql":
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for match in _SQL_CREATE_RE.finditer(text):
                 found.append((match.group(1), rel))
+    for path in repo_root.rglob("*.go"):
+        if any(part in _SKIP_DISCOVERY_DIRS for part in path.parts) or path.name.endswith("_test.go"):
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for name in go_used:
+            if name in {item[0] for item in found}:
+                continue
+            if re.search(rf"type\s+{re.escape(name)}\s+struct\b", text):
+                found.append((name, rel))
+    return found
+
+
+def discover_dto_classes(repo_root: Path) -> list[tuple[str, str]]:
+    """Pydantic / *Schema / *DTO classes that are not tables."""
+    tables = {name for name, _rel in discover_model_classes(repo_root)}
+    found: list[tuple[str, str]] = []
+    for path in repo_root.rglob("*.py"):
+        if any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        starts = [item.start() for item in _CLASS_RE.finditer(text)]
+        for match in _CLASS_RE.finditer(text):
+            name, bases = match.group(1), match.group(2)
+            if name in tables:
+                continue
+            nxt = next((pos for pos in starts if pos > match.start()), len(text))
+            window = text[match.start() : nxt]
+            if _TABLE_TRUE_RE.search(window) or _TABLENAME_RE.search(window):
+                continue
+            if "BaseModel" in bases or _DTO_NAME_RE.search(name):
+                found.append((name, rel))
     return found
 
 
@@ -1081,31 +1132,42 @@ def repo_has_routes_or_db(repo_root: Path) -> bool:
     return False
 
 
-def data_model_required_sources(repo_root: Path) -> list[str]:
-    """Model packages that a data-model page must cite when they exist.
+def _up_migration_files(repo_root: Path) -> list[str]:
+    found: list[str] = []
+    for path in repo_root.rglob("*"):
+        if not path.is_file() or any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        if _DOWN_NAME_RE.search(path.name):
+            continue
+        if path.suffix == ".sql":
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if _SQL_CREATE_RE.search(text) or "schema" in path.name.lower():
+                found.append(rel)
+        elif path.suffix == ".py" and (
+            "migration" in rel.lower() or path.parent.name == "versions"
+        ):
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if re.search(r"def\s+upgrade\b|op\.create_table", text):
+                found.append(rel)
+    return found
 
-    ``schema.sql`` alone is not enough when GORM/SQLAlchemy model sources exist.
-    """
+
+def data_model_required_sources(repo_root: Path) -> list[str]:
+    """Cite model packages plus one up-migration or schema file, never every down file."""
     required: list[str] = []
     for name, rel in discover_model_classes(repo_root):
+        if rel.endswith(".sql"):
+            continue
         del name
         pack = str(Path(rel).parent.as_posix())
         if pack not in required:
             required.append(pack if pack != "." else rel)
-    for pack in _gorm_struct_packages(repo_root):
-        if pack not in required:
-            required.append(pack)
-    classes_found = bool(discover_model_classes(repo_root) or _gorm_struct_packages(repo_root))
-    if not classes_found:
-        for sql in repo_root.rglob("*.sql"):
-            if sql.is_file() and not any(part in _SKIP_DISCOVERY_DIRS for part in sql.parts):
-                rel = sql.relative_to(repo_root).as_posix()
-                if rel not in required:
-                    required.append(rel)
+    ups = _up_migration_files(repo_root)
+    if ups:
+        required.append(ups[0])
+    elif not required:
         for pack in _model_package_dirs(repo_root):
-            if pack not in required:
-                required.append(pack)
-        for pack in _migration_source_dirs(repo_root):
             if pack not in required:
                 required.append(pack)
     return required
@@ -1124,50 +1186,27 @@ def _model_package_dirs(repo_root: Path) -> list[str]:
     return found
 
 
-def _migration_source_dirs(repo_root: Path) -> list[str]:
-    found: list[str] = []
-    for path in repo_root.rglob("*"):
-        if not path.is_dir() or any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
-            continue
-        rel = path.relative_to(repo_root).as_posix()
-        if path.name == "versions" and any(
-            part in {"alembic", "migrations"} for part in path.parts
-        ):
-            if rel not in found:
-                found.append(rel)
-    return found
-
-
-def _gorm_struct_packages(repo_root: Path) -> list[str]:
-    skip = {".git", ".repo-agent-eval", "vendor", "node_modules"}
-    found: list[str] = []
-    for path in repo_root.rglob("*.go"):
-        if any(part in skip for part in path.parts) or path.name.endswith("_test.go"):
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        if 'gorm:"' not in text and "gorm:" not in text:
-            continue
-        rel = path.parent.relative_to(repo_root).as_posix()
-        if rel not in found:
-            found.append(rel)
-    return found
-
-
 def data_model_optional_sources(repo_root: Path) -> list[str]:
     optional: list[str] = []
-    if (repo_root / "db" / "schema.sql").is_file():
-        optional.append("db/schema.sql")
+    for path in repo_root.rglob("*.sql"):
+        if any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
+            continue
+        if "schema" in path.name.lower():
+            optional.append(path.relative_to(repo_root).as_posix())
     return optional
 
 
 def has_data_model_source_citation(markdown: str, repo_root: Path) -> bool:
-    """True when a data-model page cites every existing model package."""
+    """True when a data-model page cites model packages and one up-migration/schema."""
+    if data_model_absence_offenders(markdown, repo_root):
+        return False
     required = data_model_required_sources(repo_root)
     optional = data_model_optional_sources(repo_root)
-    classes = discover_model_classes(repo_root)
+    classes = [
+        (name, rel)
+        for name, rel in discover_model_classes(repo_root)
+        if not rel.endswith(".sql")
+    ]
     if not required and not optional and not classes:
         return not repo_has_routes_or_db(repo_root)
     cited = " ".join(
@@ -1176,89 +1215,39 @@ def has_data_model_source_citation(markdown: str, repo_root: Path) -> bool:
     blob = markdown or ""
     if classes and not all(name in blob for name, _rel in classes):
         return False
-    if required and not all(need.lower() in cited for need in required):
+    ups = set(_up_migration_files(repo_root))
+    packages = [need for need in required if need not in ups]
+    if packages and not all(need.lower() in cited for need in packages):
         return False
-    if (repo_root / "internal" / "models").is_dir() and not _has_go_struct_definition_cite(
-        markdown, repo_root
-    ):
+    if ups and not any(item.lower() in cited for item in ups):
         return False
-    if (repo_root / "internal" / "models").is_dir() and not _has_required_go_struct_cites(
-        markdown, repo_root
-    ):
-        return False
-    versions = repo_root / "app" / "db" / "migrations" / "versions"
-    if versions.is_dir() and any(versions.glob("*.py")):
-        if "migrations/versions" not in cited:
-            return False
-    if required:
+    if required or ups:
         return True
     return any(need.lower() in cited for need in optional)
 
 
-def _go_struct_definition_ranges(repo_root: Path) -> list[tuple[str, int, int]]:
-    models_dir = repo_root / "internal" / "models"
-    if not models_dir.is_dir():
-        return []
-    found: list[tuple[str, int, int]] = []
-    struct_re = re.compile(r"^type\s+([A-Z][A-Za-z0-9_]*)\s+struct\s*\{")
-    for path in sorted(models_dir.rglob("*.go")):
-        if path.name.endswith("_test.go"):
+def data_model_absence_offenders(markdown: str, repo_root: Path) -> list[str]:
+    """Pages must not claim a discovered folder is missing."""
+    hits: list[str] = []
+    blob = markdown or ""
+    existing = {
+        path.relative_to(repo_root).as_posix().lower()
+        for path in repo_root.rglob("*")
+        if path.is_dir() and not any(part in _SKIP_DISCOVERY_DIRS for part in path.parts)
+    }
+    existing.update(path.name.lower() for path in repo_root.iterdir() if path.is_dir())
+    for match in _ABSENCE_RE.finditer(blob):
+        token = (match.group(1) or "").strip("`'\" ").lower()
+        raw = match.group(0).lower()
+        if not token:
+            if re.search(r"migrations?", raw) and any("migration" in item for item in existing):
+                hits.append("absence:migrations")
+            if re.search(r"\bsql\b", raw) and any("sql" in item for item in existing):
+                hits.append("absence:sql")
             continue
-        rel = path.relative_to(repo_root).as_posix()
-        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        for index, line in enumerate(lines, start=1):
-            if struct_re.match(line):
-                from repo_wiki.generator.deterministic_sections import go_struct_end_line
-
-                found.append((rel, index, go_struct_end_line(lines, index)))
-    return found
-
-
-def _has_go_struct_definition_cite(markdown: str, repo_root: Path) -> bool:
-    ranges = _go_struct_definition_ranges(repo_root)
-    if not ranges:
-        return True
-    for match in _CITE_RE.finditer(markdown or ""):
-        raw = match.group(1).replace("\\", "/")
-        path, _sep, rest = raw.partition(":")
-        if not rest:
-            continue
-        start_s, _dash, end_s = rest.partition("-")
-        try:
-            start = int(re.sub(r"\D.*", "", start_s) or "0")
-            end = int(re.sub(r"\D.*", "", end_s or start_s) or start)
-        except ValueError:
-            continue
-        for rel, struct_start, struct_end in ranges:
-            if path.lower() != rel.lower():
-                continue
-            # File-header cites like :1-8 that merely graze a later struct do not count.
-            if start <= 1 and struct_start > 3:
-                continue
-            if start <= struct_end and end >= struct_start:
-                return True
-    return False
-
-
-def _has_required_go_struct_cites(markdown: str, repo_root: Path) -> bool:
-    from repo_wiki.generator.deterministic_sections import (
-        discover_core_domain_structs,
-        go_struct_cite,
-    )
-
-    text = markdown or ""
-    needed = [go_struct_cite(repo_root, name) for name in discover_core_domain_structs(repo_root)]
-    needed = [item for item in needed if item]
-    if not needed:
-        return True
-    cited = " ".join(match.group(1) for match in _CITE_RE.finditer(text))
-    for cite in needed:
-        raw = cite.replace("<cite>", "").replace("</cite>", "")
-        path, _sep, rest = raw.partition(":")
-        start_s = rest.split("-", 1)[0]
-        if path not in cited or start_s not in cited:
-            return False
-    return True
+        if token in existing or any(item == token or item.endswith("/" + token) for item in existing):
+            hits.append(f"absence:{token}")
+    return hits
 
 
 def has_api_routes_citation(

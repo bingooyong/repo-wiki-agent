@@ -440,7 +440,7 @@ def test_no_repo_specific_literals_in_audited_source() -> None:
 
 
 def test_generator_version_is_r17() -> None:
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r21-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r22-")
 
 
 def test_hedged_current_evidence_is_meta_talk() -> None:
@@ -462,7 +462,7 @@ def test_fallback_stub_detector_ignores_short_llm() -> None:
         "「数据库迁移」面向接手仓库的人，用来定位这个主题在仓库里的实现。\n"
         "## 可核对的文件\n"
     )
-    assert handbook_page_is_fallback_stub(llm) is False
+    assert handbook_page_is_fallback_stub(llm) is True
     assert handbook_page_is_fallback_stub(stub) is True
 
 

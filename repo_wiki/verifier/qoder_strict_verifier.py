@@ -355,6 +355,7 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_ROLE_CONSISTENCY",
         "QODER_HANDBOOK_SOURCE_FACTS",
         "QODER_HANDBOOK_ROUTE_CROSSCHECK",
+        "QODER_HANDBOOK_DROPPED_CORE",
         "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -526,6 +527,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_role_consistency(),
             self._check_handbook_source_facts(),
             self._check_handbook_route_crosscheck(),
+            self._check_handbook_dropped_cores(),
             self._check_qoder_source_evidence(),
         ]
 
@@ -836,8 +838,8 @@ class QoderLikeVerifierService(VerifierService):
 
         Same-app architectural layers (API, auth routes, database/query,
         data-model/schema) are sibling evidence, not high-confidence
-        wrong-service binds. FastAPI pages routinely cite ``app/db/queries``,
-        ``app/models``, schema tests, and ``app/api/**/authentication*.py``.
+        wrong-service binds. Catalog pages routinely cite query modules,
+        model packages, schema tests, and authentication route files.
 
         High-confidence mismatches are HARD failures in strict profile.
         Ambiguous cases that could be shared infrastructure are WARN only.
@@ -878,8 +880,7 @@ class QoderLikeVerifierService(VerifierService):
         # Domain services (billing) are distinct product areas.
         # Layer labels (api, auth, data-model, database) are the same app's
         # HTTP / auth-route / persistence / schema files, not competing services.
-        # FastAPI auth lives under app/api/**/authentication*.py, so auth is a
-        # sibling of api rather than a billing-like domain bind.
+        # Auth route files are a sibling of api rather than a billing-like domain bind.
         PAGE_SERVICE_MAP = {
             "auth": ["auth", "login", "session", "token", "oauth", "sso"],
             "billing": ["billing", "invoice", "payment", "subscription", "price"],
@@ -3163,12 +3164,17 @@ class QoderLikeVerifierService(VerifierService):
         )
 
     def _check_handbook_route_crosscheck(self) -> CheckResult:
-        from repo_wiki.scanner.fastapi_routes import fastapi_route_inventory_mismatch
+        from repo_wiki.verifier.handbook_routes import handbook_route_crosscheck_mismatches
 
         repo_root = self._handbook_repo_root()
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("qoder-handbook-route-crosscheck", "No markdown pages")
         files: list[tuple[str, str]] = []
         skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
-        for path in repo_root.rglob("*.py"):
+        for path in repo_root.rglob("*"):
+            if not path.is_file() or path.suffix not in {".py", ".go"}:
+                continue
             if any(part in skip for part in path.parts):
                 continue
             files.append(
@@ -3178,19 +3184,50 @@ class QoderLikeVerifierService(VerifierService):
                 )
             )
         if not files:
-            return self._skip_check("qoder-handbook-route-crosscheck", "No Python sources")
-        mismatch = fastapi_route_inventory_mismatch(files)
+            return self._skip_check("qoder-handbook-route-crosscheck", "No route sources")
+        mismatch: list[str] = []
+        for page in content_dir.rglob("*.md"):
+            name = page.name.lower()
+            if not any(token in name for token in ("api", "接口")):
+                continue
+            mismatch.extend(handbook_route_crosscheck_mismatches(page.read_text(encoding="utf-8", errors="ignore"), files))
         if mismatch:
             return self._handbook_fail(
                 "qoder-handbook-route-crosscheck",
                 "QODER_HANDBOOK_ROUTE_CROSSCHECK",
-                "FastAPI route inventory disagrees with the independent walker",
+                "Handbook HTTP paths are missing from the independent source extraction",
                 {"mismatch": mismatch[:20]},
             )
         return self._handbook_pass(
             "qoder-handbook-route-crosscheck",
-            "FastAPI route inventory matches the independent walker",
+            "Handbook HTTP paths match the independent source extraction",
         )
+    def _check_handbook_dropped_cores(self) -> CheckResult:
+        for path in self._candidate_artifact_paths("quality-report.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            raw_summary = payload.get("summary")
+            summary = raw_summary if isinstance(raw_summary, dict) else {}
+            count = int(summary.get("dropped_core_count") or 0)
+            if count:
+                return self._handbook_fail(
+                    "qoder-handbook-dropped-cores",
+                    "QODER_HANDBOOK_DROPPED_CORE",
+                    "Dropped core handbook pages are a hard fail",
+                    {
+                        "dropped_core_count": count,
+                        "dropped_core_page_ids": summary.get("dropped_core_page_ids") or [],
+                    },
+                )
+            return self._handbook_pass(
+                "qoder-handbook-dropped-cores",
+                "No dropped core handbook pages",
+            )
+        return self._skip_check("qoder-handbook-dropped-cores", "No quality report")
 
     def _handbook_backtick_cite_pages(self) -> list[str]:
         content_dir = self._find_content_dir()

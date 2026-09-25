@@ -147,8 +147,8 @@ def _is_product_sentence(text: str | None) -> bool:
     if _RST_FIELD_LIST_RE.match(stripped) or _RST_SUBSTITUTION_LINE_RE.fullmatch(stripped):
         return False
     if re.search(
-        r"more modern|other repositories|can be found in"
-        r"|^(?:first,|then |run |set environment|create database|for example using)",
+        r"more modern|other repositories|can be found in|changelog"
+        r"|^(?:first,|then |run |set environment|create database|for example using|a stray \d)",
         stripped,
         flags=re.I,
     ):
@@ -205,15 +205,21 @@ _NOTE_LINE_RE = re.compile(
 )
 _CHANGELOG_BULLET_RE = re.compile(r"^[-*]\s+v?\d+")
 _ARCHIVED_LINE_RE = re.compile(r"\barchiv|\bunmaintained|no longer maintained", re.I)
-_MASTER_VERSION_RE = re.compile(
-    r"(?:master|main|current(?:\s+branch)?)\s+is\s+v?(\d+(?:\.\d+){0,2})",
+_NUMBERED_HEADING_RE = re.compile(r"^\d+\.\s+\S")
+_VERSION_BULLET_RE = re.compile(
+    r"^(?:[-*]\s+)?(?:\*\*)?v\d+(?:\.\d+)*(?:\*\*)?\s*[:：]",
     re.IGNORECASE,
 )
 
 
+def _flatten_h1(match: re.Match[str]) -> str:
+    title = " ".join(_HTML_TAG_RE.sub(" ", match.group(1)).split()).strip()
+    return f"# {title}\n" if title else ""
+
+
 def _readme_visible_lines(content: str) -> list[str]:
     text = _HTML_ALIGN_P_RE.sub("", content or "")
-    text = _HTML_H1_RE.sub(lambda match: "# " + match.group(1), text)
+    text = _HTML_H1_RE.sub(_flatten_h1, text)
     text = _HTML_TAG_RE.sub(" ", text)
     lines: list[str] = []
     in_note_block = False
@@ -231,8 +237,13 @@ def _readme_visible_lines(content: str) -> list[str]:
             continue
         heading = stripped.lstrip("#").strip()
         if heading and (
-            _is_rst_noise_line(heading) or _RST_SUBSTITUTION_LINE_RE.fullmatch(heading)
+            _is_rst_noise_line(heading)
+            or _RST_SUBSTITUTION_LINE_RE.fullmatch(heading)
+            or _NUMBERED_HEADING_RE.match(heading)
+            or _VERSION_BULLET_RE.match(heading)
         ):
+            continue
+        if _VERSION_BULLET_RE.match(stripped) or _NUMBERED_HEADING_RE.match(stripped.lstrip("#").strip()):
             continue
         if (
             _is_rst_noise_line(stripped)
@@ -253,13 +264,20 @@ def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
         if heading:
             if heading.casefold() in _GENERIC_README_TITLES:
                 break
-            if _is_rst_noise_line(heading) or not _looks_like_heading(heading):
+            if (
+                _is_rst_noise_line(heading)
+                or _NUMBERED_HEADING_RE.match(heading)
+                or _VERSION_BULLET_RE.match(heading)
+                or not _looks_like_heading(heading)
+            ):
                 continue
             if title is None:
                 title = heading
             continue
         if line.casefold() in _GENERIC_README_TITLES:
             break
+        if _VERSION_BULLET_RE.match(line) or _NUMBERED_HEADING_RE.match(line):
+            continue
         if _looks_like_heading(line) and title is None:
             title = line
             continue
@@ -415,9 +433,8 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
                     version = match.group(1)
                     break
 
-    live = _latest_product_version(root)
-    if live:
-        version = live
+    if not version:
+        version = _latest_product_version(root)
 
     return RepositoryIdentity(
         name=best_name,
@@ -434,44 +451,7 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
 
 
 def _latest_product_version(root: Path) -> str | None:
-    """README 'master is vN' / title, then latest changelog, then git tag.
-
-    Never read go.mod ``go`` / toolchain lines. Skip archived changelog sections.
-    """
-    for name in _README_CANDIDATE_NAMES:
-        path = root / name
-        if not path.is_file():
-            continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        master = _MASTER_VERSION_RE.search(text)
-        if master:
-            return master.group(1)
-        title = re.search(r"^#\s+.+\bv(\d+(?:\.\d+){0,2})\b", text, flags=re.M)
-        if title:
-            return title.group(1)
-    go_mod = root / "go.mod"
-    go_toolchain = ""
-    if go_mod.is_file():
-        go_toolchain = go_mod.read_text(encoding="utf-8", errors="ignore")
-    toolchain_versions = set(
-        re.findall(r"(?m)^\s*(?:go|toolchain)\s+v?(\d+\.\d+(?:\.\d+)?)", go_toolchain)
-    )
-    for name in ("CHANGELOG.md", "CHANGES.md", "HISTORY.md"):
-        path = root / name
-        if not path.is_file():
-            continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        for match in re.finditer(
-            r"^#{1,3}\s+.*?(?:v)?(\d+\.\d+(?:\.\d+)?)\s*$",
-            text,
-            flags=re.M,
-        ):
-            window = text[max(0, match.start() - 80) : match.start() + 40]
-            if re.search(r"archiv", window, flags=re.I):
-                continue
-            if match.group(1) in toolchain_versions:
-                continue
-            return match.group(1)
+    """Git tag only. Never read README/changelog prose or go.mod toolchain lines."""
     try:
         tagged = subprocess.run(
             ["git", "-C", str(root), "describe", "--tags", "--abbrev=0"],
@@ -481,7 +461,7 @@ def _latest_product_version(root: Path) -> str | None:
         )
         if tagged.returncode == 0:
             hit = re.search(r"v?(\d+\.\d+(?:\.\d+)?)", tagged.stdout.strip())
-            if hit and hit.group(1) not in toolchain_versions:
+            if hit:
                 return hit.group(1)
     except OSError:
         return None

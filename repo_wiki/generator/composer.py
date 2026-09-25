@@ -1058,12 +1058,12 @@ class LLMPageComposer:
             if has_routes:
                 rules.append(
                     "- API 页：证据中已有 `api/routes` 文件时，正文必须至少有一条 `<cite>` "
-                    "指向该路由模块（例如 `app/api/routes/...`），不能只引用 models、db 或 tests。"
+                    "指向该路由模块，不能只引用 models、db 或 tests。"
                 )
             elif has_go_handlers:
                 rules.append(
                     "- API 页：证据中已有 Go handler 文件时，正文必须至少有一条 `<cite>` "
-                    "指向该 handler（例如 `internal/services/...`），不能只引用 SQL、docs 或配置。"
+                    "指向该 handler，不能只引用 SQL、docs 或配置。"
                 )
         if page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
             root = Path(self.workspace_root or ".")
@@ -1082,44 +1082,10 @@ class LLMPageComposer:
                 "用段落写清各核心包职责，不要只贴包名清单。"
             )
         if page.category == WikiTaxonomyCategory.DATA_MODELS:
-            root = Path(self.workspace_root or ".")
-            go_models = (root / "internal" / "models").is_dir()
-            python_domain = (root / "app" / "models" / "domain").is_dir()
-            if go_models:
-                from repo_wiki.generator.deterministic_sections import discover_go_struct_names
-
-                structs = "、".join(discover_go_struct_names(root)[:12]) or "源码 type 声明"
-                rules.append(
-                    "- 数据模型页：必须引用 `internal/models` 里 GORM 结构体的定义行"
-                    "（不要只引文件头），可选引用 `db/schema.sql`。"
-                    f"对源码中的业务 struct（{structs}）各写一段说明；"
-                    "配置类型用表格，不要堆成无说明清单。"
-                    "主键列以 GORM tag 为准。"
-                    "不要写 app/models 或 alembic。字段类型用源码真实类型，"
-                    "关系按 `*_id` / gorm foreignKey / schema REFERENCES，不要猜测自环。"
-                    "不要单独成行只写 `<cite>`。"
-                )
-            elif python_domain:
-                from repo_wiki.generator.deterministic_sections import load_alembic_migration_models
-
-                tables = (
-                    "、".join(
-                        str(item.get("name")) for item in load_alembic_migration_models(root)[:12]
-                    )
-                    or "迁移里 create_table 的表"
-                )
-                rules.append(
-                    "- 数据模型页：ER 以 `app/db/migrations/versions` 的表为准"
-                    f"（{tables}），并引用该 versions 文件与 `app/models/domain`。"
-                    "这些是 Pydantic 领域模型 + asyncpg/raw SQL，不是 ORM 实体；"
-                    "不要发明不在迁移里的表，不要把 request/response schema 列成实体，"
-                    "也不要只引用 alembic/env.py。"
-                )
-            else:
-                rules.append(
-                    "- 数据模型页：必须引用真实模型源码与迁移；`schema.sql` 不能代替模型源码。"
-                    "不要整段粘贴 README 的英文 NOTE。"
-                )
+            rules.append(
+                "- 数据模型页：只写真实表（table=True / __tablename__ / 被 DB 使用的结构体 / CREATE TABLE）。"
+                "DTO/Schema 标明 DTO，不要发明字段。引用至少一份 up-migration 或 schema，不要要求 down-migration。"
+            )
         if page.category == WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS:
             rules.append(
                 "- 部署页：提到数据库监听端口时必须写出 compose 里的真实端口数字，"
@@ -1138,15 +1104,7 @@ class LLMPageComposer:
                 "缺的协作规则整段跳过，不要写过程句。"
             )
         if "迁移" in blob or "migration" in blob.lower():
-            root = Path(self.workspace_root or ".")
-            alembic = (root / "alembic.ini").is_file()
-            versions = root / "app" / "db" / "migrations"
-            if alembic or versions.is_dir():
-                rules.append(
-                    "- 数据库迁移页：必须根据仓库搜索到的 Alembic 布局来写"
-                    "（`alembic.ini`、`app/db/migrations/`、命令 `alembic upgrade head`），"
-                    "不要猜测未出现的迁移工具或路径。每个 revision 的 upgrade 写清建了哪些表。"
-                )
+            rules.append("- 数据库迁移页：按搜到的 up-migration / schema 写，不要猜工具或路径。")
         source_facts = self._source_fact_block(page)
         if source_facts:
             rules.append("- 本页可核对的源码事实：\n" + source_facts)

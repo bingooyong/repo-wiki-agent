@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from repo_wiki.generator.compose_evidence import parse_compose_topology
@@ -74,26 +75,17 @@ _GENERIC_TABLES = frozenset(
 )
 _GENERIC_TYPES = frozenset(
     {
-        "Readme",
-        "Bearer",
-        "Docker",
-        "GitHub",
         "FastAPI",
         "PostgreSQL",
         "SQLAlchemy",
         "Alembic",
         "HTTPException",
         "Depends",
-        "Handle",
+        "Docker",
+        "GitHub",
         "Dockerfile",
-        "Caddyfile",
-        "AttributeError",
-        "REFERENCES",
-        "COMMIT",
-        "Session",
-        "Repository",
         "Makefile",
-        "SessionLocal",
+        "Handle",
     }
 )
 _SAMPLE_QUALIFIER_RE = re.compile(r"示例|README|文档样例|仅出现在")
@@ -148,25 +140,60 @@ def load_compose_healthcheck_services(root: Path) -> set[str]:
     return names
 
 
-_HEALTHCHECK_URL_RE = re.compile(r"(https?://[^\s\"']+|:\d+/(?:healthz?|readyz|livez)[^\s\"']*)")
+_HEALTHCHECK_URL_RE = re.compile(
+    r"(https?://[^\s\"']+|:\d+/(?:healthz?|readyz|livez|metrics)[^\s\"']*)"
+)
+
+
+@dataclass(frozen=True)
+class ComposeHealthBinding:
+    service: str
+    url: str
+    compose_file: str
+
+
+def load_compose_health_map(root: Path) -> list[ComposeHealthBinding]:
+    """Map each compose service to its health URL from ports + healthcheck test."""
+    found: list[ComposeHealthBinding] = []
+    seen: set[tuple[str, str]] = set()
+    for path in iter_compose_files(root):
+        try:
+            import yaml  # type: ignore
+
+            data = yaml.safe_load(path.read_text(encoding="utf-8", errors="ignore"))
+        except Exception:
+            data = None
+        services = data.get("services") if isinstance(data, dict) else None
+        if not isinstance(services, dict):
+            continue
+        for name, spec in services.items():
+            if not isinstance(spec, dict):
+                continue
+            check = spec.get("healthcheck")
+            test = check.get("test") if isinstance(check, dict) else check
+            items = test if isinstance(test, list) else [test]
+            blob = " ".join(str(item) for item in items if item)
+            urls = [m.group(1).rstrip('",]') for m in _HEALTHCHECK_URL_RE.finditer(blob)]
+            ports = [
+                m.group(1)
+                for item in (spec.get("ports") or [] if isinstance(spec.get("ports"), list) else [])
+                for m in [re.search(r"(\d+):\d+", str(item))]
+                if m
+            ]
+            if check and not urls:
+                urls = [f":{port}" for port in ports]
+            for url in urls:
+                key = (str(name), url)
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append(ComposeHealthBinding(str(name), url, path.name))
+    return found
 
 
 def load_compose_healthcheck_urls(root: Path) -> list[str]:
     """Healthcheck test URLs copied from compose files, never invented."""
-    found: list[str] = []
-    seen: set[str] = set()
-    for path in iter_compose_files(root):
-        for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            if raw.lstrip().startswith("#"):
-                continue
-            if "health" not in raw.lower() and "curl" not in raw.lower():
-                continue
-            for match in _HEALTHCHECK_URL_RE.finditer(raw):
-                item = match.group(1).rstrip('",]')
-                if item not in seen:
-                    seen.add(item)
-                    found.append(item)
-    return found
+    return list(dict.fromkeys(item.url for item in load_compose_health_map(root)))
 
 
 def load_database_tables(root: Path) -> set[str]:
@@ -362,11 +389,38 @@ def _healthcheck_url_mentioned(text: str, url: str) -> bool:
     blob = text or ""
     if url in blob:
         return True
-    port_path = re.search(r":\d+/[A-Za-z0-9_/?&=-]+", url)
-    if port_path and port_path.group(0) in blob:
+    port = re.search(r":(\d+)", url)
+    if port and f":{port.group(1)}" in blob:
         return True
-    path = re.search(r"/(?:healthz?|readyz|livez)[A-Za-z0-9_/?&=-]*", url)
+    path = re.search(r"/(?:healthz?|readyz|livez|metrics)[A-Za-z0-9_/?&=-]*", url)
     return bool(path and path.group(0) in blob)
+
+
+def _health_binding_mentioned(text: str, binding: ComposeHealthBinding) -> bool:
+    for sentence in re.split(r"[。\n]", text or ""):
+        if binding.service not in sentence:
+            continue
+        if _healthcheck_url_mentioned(sentence, binding.url):
+            return True
+        port = re.search(r":(\d+)", binding.url)
+        if port and (f":{port.group(1)}" in sentence or port.group(1) in sentence):
+            return True
+    return False
+
+
+def _health_map_conflicts(text: str, bindings: list[ComposeHealthBinding]) -> bool:
+    if len(bindings) < 2:
+        return False
+    for sentence in re.split(r"[。\n]", text or ""):
+        svcs = [item for item in bindings if item.service in sentence]
+        if not svcs:
+            continue
+        for item in svcs:
+            others = [other for other in bindings if other.service != item.service]
+            if any(_healthcheck_url_mentioned(sentence, other.url) for other in others):
+                if not _health_binding_mentioned(sentence, item):
+                    return True
+    return False
 
 
 def _mentioned_tables(text: str) -> set[str]:
@@ -445,11 +499,10 @@ def _orm_offenders(text: str, root: Path) -> list[str]:
     if alembic_uses_model_metadata(root):
         return []
     env_exists = any(
-        (root / rel).is_file()
-        for rel in (
-            Path("app") / "db" / "migrations" / "env.py",
-            Path("alembic") / "env.py",
-        )
+        path.name == "env.py"
+        and any(part in {"alembic", "migrations", "migration"} for part in path.parts)
+        for path in root.rglob("env.py")
+        if not any(part in _SKIP_DIRS for part in path.parts)
     )
     if not env_exists:
         return []
@@ -458,9 +511,13 @@ def _orm_offenders(text: str, root: Path) -> list[str]:
         hits.append("orm:Base.metadata")
     if re.search(r"--autogenerate|Autogenerate", text):
         hits.append("orm:autogenerate")
-    models_dir = root / "app" / "db" / "models"
-    if re.search(r"app\.db\.models|app/db/models", text) and not models_dir.exists():
-        hits.append("orm:app.db.models")
+    models_dirs = [
+        path
+        for path in root.rglob("models")
+        if path.is_dir() and not any(part in _SKIP_DIRS for part in path.parts)
+    ]
+    if re.search(r"[A-Za-z0-9_.]+(?:\.|/)models\b", text) and not models_dirs:
+        hits.append("orm:missing-models")
     return hits
 
 
@@ -549,10 +606,12 @@ def handbook_source_fact_offenders(
         if "健康检查" in path.name:
             if health_routes and not any(route in text for route in health_routes):
                 hits.append("health:missing-source-routes")
-            urls = load_compose_healthcheck_urls(repo_root)
-            missing_urls = [url for url in urls if not _healthcheck_url_mentioned(text, url)]
-            if missing_urls:
+            bindings = load_compose_health_map(repo_root)
+            urls = [item.url for item in bindings]
+            if any(not _healthcheck_url_mentioned(text, url) for url in urls):
                 hits.append("health:missing-compose-urls")
+            if _health_map_conflicts(text, bindings):
+                hits.append("health:service-url-mismatch")
         if hits:
             found[path.as_posix()] = hits[:12]
     return found
@@ -566,14 +625,18 @@ def source_fact_prompt_block(root: Path, *, page_id: str = "", title: str = "") 
         health = load_health_routes(root)
         if health:
             lines.append("本页健康检查路由：" + "、".join(f"`{item}`" for item in health[:6]))
-        urls = load_compose_healthcheck_urls(root)
-        if urls:
-            lines.append("本页编排 healthcheck：" + "、".join(f"`{item}`" for item in urls[:8]))
-        checks = sorted(load_compose_healthcheck_services(root))
-        if checks:
+        mapped = load_compose_health_map(root)
+        if mapped:
             lines.append(
-                "本页编排 healthcheck 服务：" + "、".join(f"`{name}`" for name in checks[:8])
+                "本页编排 healthcheck 映射："
+                + "、".join(f"`{item.service}`→`{item.url}`" for item in mapped[:8])
             )
+        else:
+            services = sorted(load_compose_healthcheck_services(root))
+            if services:
+                lines.append(
+                    "本页编排 healthcheck 服务：" + "、".join(f"`{name}`" for name in services[:8])
+                )
     if any(token in blob for token in ("数据模型", "data-model", "data_model", "data model")):
         tables = sorted(load_database_tables(root))
         if tables:

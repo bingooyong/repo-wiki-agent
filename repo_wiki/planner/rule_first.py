@@ -436,12 +436,7 @@ class RuleFirstPlanner:
                     for path in (
                         *self._cmd_main_files(),
                         *self._cmd_dir_names(),
-                        "internal/control",
-                        "internal/services",
-                        "internal/repository",
-                        "internal/exporter",
-                        "app/api/routes",
-                        "app/models",
+                        *self._core_package_files(),
                     )
                     if any(
                         (m.path or "").startswith(path) or path in (m.doc_path or "")
@@ -923,12 +918,12 @@ class RuleFirstPlanner:
             return []
 
     def _data_model_source_files(self) -> list[str]:
-        files = self._existing_source_files(
-            "internal/models",
-            "db/schema.sql",
-            "app/models",
-            "alembic",
-        )
+        try:
+            from repo_wiki.verifier.handbook import data_model_required_sources
+
+            files = data_model_required_sources(Path(self.identity.root_path))
+        except Exception:
+            files = []
         for model in self.snapshot.data_models:
             path = str(getattr(model, "file_path", "") or "")
             if path and path not in files:
