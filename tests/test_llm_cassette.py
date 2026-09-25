@@ -21,11 +21,10 @@ from repo_wiki.planner.schema import (
     WikiPagePlan,
     WikiTaxonomyCategory,
 )
+from tests.handbook_pad import pad_handbook_markdown
 
-RAW_REPLY = (
-    "<think>internal scratch, must not reach the page</think>\n"
-    "# Sample Page\n\n"
-    "Recorded raw model text for cassette replay.\n"
+RAW_REPLY = "<think>internal scratch, must not reach the page</think>\n" + pad_handbook_markdown(
+    "# Sample Page\n\nRecorded raw model text for cassette replay.\n"
 )
 
 
@@ -67,6 +66,7 @@ def test_record_appends_jsonl_per_call_llm_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cassette_dir = tmp_path / "cassettes"
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.setenv("REPO_WIKI_LLM_CASSETTE_DIR", str(cassette_dir))
     provider = create_mock_provider(response_content=RAW_REPLY)
     composer = LLMPageComposer(llm_provider=provider, llm_config=LLMProviderConfig(provider="mock"))
@@ -97,9 +97,10 @@ def test_record_never_writes_api_keys_or_auth_headers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cassette_dir = tmp_path / "cassettes"
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.setenv("REPO_WIKI_LLM_CASSETTE_DIR", str(cassette_dir))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-cassette-key-1234567890abcd")
-    provider = create_mock_provider(response_content="# Page\n\nsafe")
+    provider = create_mock_provider(response_content=pad_handbook_markdown("# Page\n\nsafe"))
     composer = LLMPageComposer(llm_provider=provider, llm_config=LLMProviderConfig(provider="mock"))
     asyncio.run(
         composer.compose_page(build_composer_input(_sample_page(), None, _sample_context()))

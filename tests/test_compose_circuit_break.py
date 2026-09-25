@@ -30,12 +30,14 @@ from repo_wiki.llm.models import (
 )
 from repo_wiki.orchestration.service import RepoWikiService
 from repo_wiki.planner.schema import WikiPagePlan, WikiPlanManifest, WikiTaxonomyCategory
+from tests.handbook_pad import pad_handbook_markdown
 
 PAGE_COUNT = 8
 MAX_FAILURES = 2
 CONCURRENCY = 2
 PAGE_TIMEOUT_SECONDS = 1.5
-SUCCESS_MARKDOWN = """# Sample Page
+SUCCESS_MARKDOWN = pad_handbook_markdown(
+    """# Sample Page
 
 ## 简介
 
@@ -48,6 +50,7 @@ it for insufficient content. Healthy providers must still compose every page.
 The repository layout is described here with extra padding sentences so
 validation passes without falling back to templates during the success path.
 """
+)
 
 # HTTP 200 + non-empty tokens, but almost no counted prose (headers / fences /
 # list items are stripped). Composer must reject this as insufficient prose.

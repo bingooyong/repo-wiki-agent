@@ -141,12 +141,19 @@ CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY);
 ```
 """
 
+    def _pad(slug: str) -> str:
+        return (
+            f"The {language_label} {slug} fixture continues with enough "
+            "reader-facing detail about module boundaries, call chains, "
+            "persistence, and how operators verify the service after a change. "
+        ) * 8
+
     return {
-        "00-overview": overview,
-        "01-architecture": architecture,
-        "02-services": services,
-        "04-api": api_page,
-        "05-data-model": data_model,
+        "00-overview": overview.replace("</cite>", f"</cite>\n\n{_pad('overview')}", 1),
+        "01-architecture": architecture.replace("</cite>", f"</cite>\n\n{_pad('architecture')}", 1),
+        "02-services": services.replace("</cite>", f"</cite>\n\n{_pad('services')}", 1),
+        "04-api": api_page.replace("</cite>", f"</cite>\n\n{_pad('api')}", 1),
+        "05-data-model": data_model.replace("</cite>", f"</cite>\n\n{_pad('data-model')}", 1),
     }
 
 

@@ -14,10 +14,11 @@ from repo_wiki.verifier.qoder_strict_verifier import (
     QoderLikeVerifierService,
     verify_qoder_like,
 )
+from tests.handbook_pad import pad_handbook_markdown
 
 runner = CliRunner()
 
-_PASSING_PAGE = """# {title}
+_PASSING_PAGE = pad_handbook_markdown("""# {title}
 
 ## Table of Contents
 - [Intro](#intro)
@@ -42,7 +43,7 @@ graph LR
 Relationship entity ERD schema 关系 实体 数据库 表 字段.
 
 <cite>src/app.py:12</cite>
-"""
+""")
 
 
 def _git(repo: Path, *args: str) -> None:

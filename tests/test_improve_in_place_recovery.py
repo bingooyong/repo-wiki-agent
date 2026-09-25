@@ -14,10 +14,11 @@ from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.models import ChatRequest, ChatResponse, LLMProvider, ProviderCapabilities
 from repo_wiki.orchestration.eval_layout import EvalOutputProfile
 from repo_wiki.orchestration.service import RepoWikiService
+from tests.handbook_pad import pad_handbook_markdown
 
 runner = CliRunner()
 
-ORIGINAL_MARKDOWN = """# Sample Page
+ORIGINAL_MARKDOWN = pad_handbook_markdown("""# Sample Page
 
 ## 简介
 
@@ -28,9 +29,9 @@ PASS pages. It includes enough prose so the composer keeps the page.
 
 The repository layout is described here with extra padding sentences so
 validation passes without falling back to templates during the success path.
-"""
+""")
 
-IMPROVED_MARKDOWN = """# Sample Page
+IMPROVED_MARKDOWN = pad_handbook_markdown("""# Sample Page
 
 ## 简介
 
@@ -41,7 +42,7 @@ priority pages. It includes enough prose so the composer keeps the page.
 
 The recovered chapter still describes layout with extra padding sentences so
 validation passes without falling back to templates during the success path.
-"""
+""")
 
 PASS_STAMP = "PASS_PAGE_MUST_STAY_INTACT"
 DEGRADED_STAMP = "OLD_DEGRADED_CONTENT_MUST_BE_REPLACED"

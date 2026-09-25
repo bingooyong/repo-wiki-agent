@@ -44,6 +44,7 @@ from repo_wiki.planner.schema import (
 )
 from repo_wiki.prompts.contracts import PagePromptContract, PagePromptType
 from repo_wiki.prompts.skeleton import build_skeleton
+from tests.handbook_pad import pad_handbook_markdown
 
 
 class _NamedMockProvider(MockLLMProvider):
@@ -293,7 +294,9 @@ class TestLLMPageComposer:
     @pytest.fixture
     def mock_provider(self) -> MockLLMProvider:
         """Create mock provider for testing."""
-        return create_mock_provider(response_content="# Test Page\n\nMock content.")
+        return create_mock_provider(
+            response_content=pad_handbook_markdown("# Test Page\n\nMock content.")
+        )
 
     @pytest.fixture
     def composer(self, mock_provider: MockLLMProvider) -> LLMPageComposer:
@@ -748,7 +751,9 @@ class TestLowConfidenceBehavior:
     @pytest.fixture
     def mock_provider(self) -> MockLLMProvider:
         """Create mock provider for testing."""
-        return create_mock_provider(response_content="# Test Page\n\nMock content.")
+        return create_mock_provider(
+            response_content=pad_handbook_markdown("# Test Page\n\nMock content.")
+        )
 
     @pytest.fixture
     def composer(self, mock_provider: MockLLMProvider) -> LLMPageComposer:
