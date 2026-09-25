@@ -83,8 +83,9 @@ def test_architecture_and_overview_prompts_state_roles(tmp_path: Path) -> None:
     overview_prompt = composer._build_compose_prompt(
         overview_input, composer._build_context(overview_input)
     )
-    assert "不是被" not in overview_prompt
+    assert "probe-agent" in overview_prompt and "数据面" in overview_prompt
     assert "拨号" in overview_prompt or "连向" in overview_prompt
+    assert "不是被" not in overview_prompt
 
 
 @pytest.mark.asyncio
