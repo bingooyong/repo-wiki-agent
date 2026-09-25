@@ -116,6 +116,10 @@ def resolve_source_docs_conflicts(
         doc_type = str(doc.get("doc_type", "overview")).lower()
 
         if stale_refs:
+            path_l = path.lower().replace("\\", "/")
+            if any(token in path_l for token in ("scaffold", "example", "template")):
+                stale_refs = []
+        if stale_refs:
             status, classification = _status_for_doc(doc, "flagged")
             items.append(
                 ConflictItem(

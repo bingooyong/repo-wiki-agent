@@ -641,13 +641,76 @@ _PORT_CLAIM_DOC_NAMES = frozenset(
         "readme",
         "quickstart.md",
         "quickstart.rst",
+        "install.md",
+        "installation.md",
     }
 )
+_PORT_EXCLUDE_PARTS = frozenset(
+    {
+        "progress",
+        "history",
+        "changelog",
+        "archive",
+        "test",
+        "tests",
+        "testdata",
+        "fixtures",
+    }
+)
+_STALE_SUGGESTION_MARKERS = (
+    "建议",
+    "consider",
+    "should add",
+    "可增加",
+    "example.com",
+    "your-repo",
+    "e.g.",
+    "例如",
+    "scaffold",
+    "template",
+)
+_STALE_MISSING_MARKERS = ("缺失", "n/a", "不存在", "todo", "—")
+
+
+def _is_current_system_run_doc(rel: str) -> bool:
+    """True for docs that describe running the current product, not history/tests."""
+    path = Path(rel)
+    parts = [part.lower() for part in path.parts]
+    name = path.name.lower()
+    if any(part in _PORT_EXCLUDE_PARTS for part in parts[:-1] if parts[:-1]):
+        return False
+    if any(part in {"progress", "history", "changelog", "archive"} for part in parts):
+        return False
+    if name in _PORT_CLAIM_DOC_NAMES:
+        return len(parts) == 1 or parts[0] in {"docs", "doc"}
+    return any(token in name for token in ("install", "deploy", "setup", "runbook"))
+
+
+def _claim_context_lines(text: str, claim: str) -> list[str]:
+    needle = claim.lower()
+    return [line for line in text.splitlines() if needle in line.lower()]
+
+
+def _is_non_blocking_stale_claim(rel: str, text: str, claim: str) -> bool:
+    lowered_rel = rel.lower().replace("\\", "/")
+    if any(token in lowered_rel for token in ("scaffold", "example", "template")):
+        return True
+    lines = _claim_context_lines(text, claim)
+    if not lines:
+        return False
+    blob = "\n".join(lines).lower()
+    if any(marker in blob for marker in _STALE_SUGGESTION_MARKERS):
+        return True
+    if any(marker in blob for marker in _STALE_MISSING_MARKERS):
+        return True
+    if any(line.lstrip().startswith("|") and "missing" in line.lower() for line in lines):
+        return True
+    return False
 
 
 def _listen_port_conflicts(repo_root: Path, rel: str, text: str) -> list[str]:
     """Flag doc localhost ports that disagree with config/compose listen ports."""
-    if Path(rel).name.lower() not in _PORT_CLAIM_DOC_NAMES:
+    if not _is_current_system_run_doc(rel):
         return []
     from repo_wiki.verifier.handbook import collect_doc_listen_ports, collect_source_listen_ports
 
@@ -938,6 +1001,7 @@ class DocumentationScanner:
                     if p not in paths
                     and _is_source_file_claim(p)
                     and not _repo_path_exists(self.repo_root, p)
+                    and not _is_non_blocking_stale_claim(rel, text, p)
                 ]
             )
             conflicting_claims = sorted(

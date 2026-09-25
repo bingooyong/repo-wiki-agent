@@ -1621,7 +1621,7 @@ class TestG005SecondRoundVerifierClosure:
         app_page.parent.mkdir(parents=True)
         app_page.write_text(
             "# Articles API\n\n"
-            "The articles service stores posts and comments for Conduit readers.\n"
+            "The article-catalog service stores posts and comments for Conduit readers.\n"
             "<cite>source:src/app.py:24</cite>\n",
             encoding="utf-8",
         )
@@ -1629,7 +1629,7 @@ class TestG005SecondRoundVerifierClosure:
         assert check.status == "FAIL"
         assert check.reason_code == "QODER_CRITICAL_FALSE_FACT"
         claims = [item.get("claim") for item in check.details.get("offenders", [])]
-        assert "articles" in claims
+        assert "article-catalog" in claims
 
     def test_scanner_alias_source_inventory_is_not_missing_required_inventories(self, tmp_path):
         """api_surfaces/data_models/kind-only services must populate required inventories."""

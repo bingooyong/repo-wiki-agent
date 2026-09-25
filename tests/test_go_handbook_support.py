@@ -1449,7 +1449,10 @@ def test_schema_sql_alone_does_not_satisfy_go_data_model_check(tmp_path: Path) -
     _write_synthetic_go_repo(tmp_path)
     page = "# 数据模型\n\n表结构见 schema。<cite>db/schema.sql:1-8</cite>\n"
     assert has_data_model_source_citation(page, tmp_path) is False
+    from repo_wiki.generator.deterministic_sections import _REQUIRED_GO_STRUCTS, go_struct_cite
+
     page += "<cite>internal/models/endpoint.go:4-20</cite>\n"
+    page += "".join(go_struct_cite(tmp_path, name) + "\n" for name in _REQUIRED_GO_STRUCTS)
     assert has_data_model_source_citation(page, tmp_path) is True
 
 

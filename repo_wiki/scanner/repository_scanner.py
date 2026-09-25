@@ -842,6 +842,27 @@ class RepositoryScanner:
                             table_name=table,
                         )
                     )
+                if suffix == ".py":
+                    from repo_wiki.generator.deterministic_sections import extract_alembic_tables
+
+                    for table_spec in extract_alembic_tables(file.text):
+                        raw_attrs = table_spec.get("attributes")
+                        raw_rels = table_spec.get("relationships")
+                        models.append(
+                            DataModel(
+                                name=str(table_spec["name"]),
+                                type="migration_table",
+                                module=module_name,
+                                file_path=path_str,
+                                attributes=[str(attr) for attr in raw_attrs]
+                                if isinstance(raw_attrs, list)
+                                else [],
+                                relationships=[str(rel) for rel in raw_rels]
+                                if isinstance(raw_rels, list)
+                                else [],
+                                table_name=str(table_spec.get("table_name") or table_spec["name"]),
+                            )
+                        )
 
         if go_files:
             module_by_path = {path: module for path, _text, module in go_files}

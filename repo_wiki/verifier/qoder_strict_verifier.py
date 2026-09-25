@@ -104,7 +104,7 @@ def _looks_like_inventory_symbol(token: str) -> bool:
         return True
     if re.match(r"^[A-Z][a-zA-Z0-9]+[A-Z][a-zA-Z0-9]*$", token):
         return True
-    return token.islower() and len(token) >= 6
+    return False
 
 
 def _prose_without_fences(text: str) -> str:
@@ -336,6 +336,7 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_ARCHITECTURE_CORE",
         "QODER_HANDBOOK_DATA_MODEL_SOURCE",
         "QODER_HANDBOOK_PLACEHOLDER_MERMAID",
+        "QODER_HANDBOOK_READER_HYGIENE",
         "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -491,6 +492,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_architecture_core(),
             self._check_handbook_data_model_source(),
             self._check_handbook_placeholder_mermaid(),
+            self._check_handbook_reader_hygiene(),
             self._check_qoder_source_evidence(),
         ]
 
@@ -2888,6 +2890,25 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-placeholder-mermaid",
             "No generic placeholder mermaid copied across pages",
+        )
+
+    def _check_handbook_reader_hygiene(self) -> CheckResult:
+        from repo_wiki.verifier.handbook import handbook_reader_hygiene_offenders
+
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("qoder-handbook-reader-hygiene", "No markdown pages")
+        offenders = handbook_reader_hygiene_offenders(content_dir, self._handbook_repo_root())
+        if offenders:
+            return self._handbook_fail(
+                "qoder-handbook-reader-hygiene",
+                "QODER_HANDBOOK_READER_HYGIENE",
+                "Repeated boilerplate, header-only cites, meta instructions, or duplicated fences",
+                offenders,
+            )
+        return self._handbook_pass(
+            "qoder-handbook-reader-hygiene",
+            "No appended boilerplate, header-only cites, or duplicated fences",
         )
 
     def _handbook_backtick_cite_pages(self) -> list[str]:

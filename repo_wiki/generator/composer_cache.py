@@ -202,7 +202,7 @@ def compute_context_hash(context: ComposerContext) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:24]
 
 
-COMPOSER_GENERATOR_VERSION = "handbook-r6-20260925"
+COMPOSER_GENERATOR_VERSION = "handbook-r7-20260925"
 
 
 def compute_composer_input_hash(

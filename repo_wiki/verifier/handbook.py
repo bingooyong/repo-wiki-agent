@@ -947,6 +947,14 @@ def has_data_model_source_citation(markdown: str, repo_root: Path) -> bool:
         markdown, repo_root
     ):
         return False
+    if (repo_root / "internal" / "models").is_dir() and not _has_required_go_struct_cites(
+        markdown, repo_root
+    ):
+        return False
+    versions = repo_root / "app" / "db" / "migrations" / "versions"
+    if versions.is_dir() and any(versions.glob("*.py")):
+        if "migrations/versions" not in cited and "fdf8821871d7" not in cited:
+            return False
     if required:
         return True
     return any(need.lower() in cited for need in optional)
@@ -995,6 +1003,25 @@ def _has_go_struct_definition_cite(markdown: str, repo_root: Path) -> bool:
     return False
 
 
+def _has_required_go_struct_cites(markdown: str, repo_root: Path) -> bool:
+    from repo_wiki.generator.deterministic_sections import _REQUIRED_GO_STRUCTS, go_struct_cite
+
+    text = markdown or ""
+    needed = [go_struct_cite(repo_root, name) for name in _REQUIRED_GO_STRUCTS]
+    needed = [item for item in needed if item]
+    if not needed:
+        return True
+    cited = " ".join(match.group(1) for match in _CITE_RE.finditer(text))
+    hits = 0
+    for cite in needed:
+        raw = cite.replace("<cite>", "").replace("</cite>", "")
+        path, _sep, rest = raw.partition(":")
+        start_s = rest.split("-", 1)[0]
+        if path in cited and start_s in cited:
+            hits += 1
+    return hits >= min(4, len(needed))
+
+
 def has_api_routes_citation(
     markdown: str, handler_files: list[str] | tuple[str, ...] | None = None
 ) -> bool:
@@ -1026,3 +1053,46 @@ def _cite_matches_handler(path: str, handlers: list[str]) -> bool:
         ):
             return True
     return False
+
+
+def handbook_reader_hygiene_offenders(
+    content_dir: Path | None, repo_root: Path | None
+) -> dict[str, list[str]]:
+    """Fail reader-facing boilerplate: repeated paragraphs, header cites, meta, dup fences."""
+    from repo_wiki.generator.deterministic_sections import (
+        is_header_only_cite,
+        page_has_meta_instruction,
+        page_has_repeated_fences,
+    )
+
+    found: dict[str, list[str]] = {
+        "repeated_paragraphs": [],
+        "header_only_cites": [],
+        "meta_instructions": [],
+        "repeated_fences": [],
+    }
+    if content_dir is None or not content_dir.exists():
+        return {}
+    paragraph_pages: dict[str, list[str]] = {}
+    for path in iter_markdown_pages(content_dir):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        rel = path.as_posix()
+        if page_has_meta_instruction(text):
+            found["meta_instructions"].append(rel)
+        if page_has_repeated_fences(text):
+            found["repeated_fences"].append(rel)
+        if repo_root is not None:
+            for match in _CITE_RE.finditer(text):
+                raw = match.group(0)
+                if is_header_only_cite(raw, repo_root):
+                    found["header_only_cites"].append(rel)
+                    break
+        for para in re.split(r"\n\s*\n", text):
+            key = re.sub(r"\s+", " ", para).strip()
+            if len(key) < 80 or "```" in key:
+                continue
+            paragraph_pages.setdefault(key, []).append(rel)
+    found["repeated_paragraphs"] = sorted(
+        {page for pages in paragraph_pages.values() if len(set(pages)) >= 4 for page in pages}
+    )
+    return {key: values for key, values in found.items() if values}

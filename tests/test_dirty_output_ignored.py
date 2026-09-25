@@ -24,7 +24,7 @@ _PASSING_PAGE = """# {title}
 
 ## Intro
 
-This is sufficient prose content for strict checks with citations and diagrams.
+This is sufficient prose content for {title} with citations and diagrams.
 
 GET /health POST /users PUT /users/{{id}} are owned by Service `api-gateway`.
 The schema is documented below.

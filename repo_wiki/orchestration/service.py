@@ -2318,12 +2318,14 @@ class RepoWikiService:
             return True
         if category == WikiTaxonomyCategory.API_REFERENCE:
             return True
-        if category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN and (
-            "overview" in page_id or "整体" in title
-        ):
+        if category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
             return True
-        if category == WikiTaxonomyCategory.SECURITY_COMPLIANCE and (
-            "auth" in page_id or "authentication" in page_id or "身份" in title
+        if category == WikiTaxonomyCategory.SECURITY_COMPLIANCE:
+            return True
+        if category == WikiTaxonomyCategory.CORE_SERVICES:
+            return True
+        if category == WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS and any(
+            token in title or token in page_id for token in ("部署", "compose", "拓扑", "deploy")
         ):
             return True
         return False
@@ -2334,6 +2336,20 @@ class RepoWikiService:
     def _content_has_er_mermaid(self, content: str) -> bool:
         blocks = re.findall(r"```mermaid\s*(.*?)```", content, flags=re.IGNORECASE | re.DOTALL)
         return any("erdiagram" in block.lower() for block in blocks)
+
+    def _existing_mermaid_is_thin(self, content: str) -> bool:
+        from repo_wiki.verifier.handbook import extract_mermaid_blocks, mermaid_edge_count
+
+        blocks = extract_mermaid_blocks(content)
+        if not blocks:
+            return False
+        return all(
+            mermaid_edge_count(block) < 2 and "||--" not in block and "||--o{" not in block
+            for block in blocks
+        )
+
+    def _strip_mermaid_fences(self, content: str) -> str:
+        return re.sub(r"```mermaid\s*.*?```", "", content, flags=re.IGNORECASE | re.DOTALL)
 
     def _enforce_qoder_page_contract(
         self,
@@ -2354,18 +2370,6 @@ class RepoWikiService:
             content = f"# {page.title}\n\n{content}"
         content = self._strip_reading_notes_boilerplate(content)
         content = self._strip_readme_english_note(content)
-
-        # Always rebuild 目录 from real H2s. LLM leftover 结论/项目结构 bullets
-        # and sentence-length TOC items must not remain as dangling targets.
-        content = self._rebuild_qoder_toc_from_real_h2s(page, content)
-
-        if self._count_prose_chars(content) < 260:
-            content += (
-                "\n\n## 正文\n\n"
-                f"{page.title} 页面基于仓库扫描、页面规划与证据绑定结果生成。"
-                "本页重点解释该主题在当前仓库中的职责、上下游依赖和实现边界，"
-                "并通过源码行号引用维持可追溯性。"
-            )
 
         is_api_like_page = self._is_qoder_api_contract_page(page)
         if is_api_like_page:
@@ -2392,10 +2396,19 @@ class RepoWikiService:
 
         is_api_page = page.category == WikiTaxonomyCategory.API_REFERENCE
         is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
+        if self._existing_mermaid_is_thin(content):
+            content = self._strip_mermaid_fences(content)
         needs_er_mermaid = is_data_model_page and not self._content_has_er_mermaid(content)
-        needs_any_mermaid = (add_mermaid or is_api_page) and not self._content_has_mermaid_fence(
-            content
-        )
+        needs_any_mermaid = (
+            add_mermaid
+            or is_api_page
+            or page.category
+            in {
+                WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+                WikiTaxonomyCategory.SECURITY_COMPLIANCE,
+                WikiTaxonomyCategory.CORE_SERVICES,
+            }
+        ) and not self._content_has_mermaid_fence(content)
         if needs_er_mermaid or needs_any_mermaid:
             if is_api_like_page and not self._evidence_backed_api_endpoints(
                 page, composition_context
@@ -2425,6 +2438,7 @@ class RepoWikiService:
         content = self._rewrite_install_page_contract(page, content)
         content = self._ensure_architecture_core_cites(page, content)
         content = self._ensure_data_model_source_cites(page, content)
+        content = self._ensure_security_source_cites(page, content)
         content = self._strip_readme_english_note(content)
         content = self._strip_empty_blockquotes(content)
         content = self._strip_language_mismatched_model_prose(content)
@@ -2432,6 +2446,15 @@ class RepoWikiService:
         content = self._strip_architecture_test_cites(content, page)
         content = self._rewrite_health_check_ports(content, page)
         content = self._strip_reading_notes_boilerplate(content)
+        from repo_wiki.generator.deterministic_sections import (
+            dedupe_identical_fences,
+            strip_header_only_cites,
+            strip_meta_instructions,
+        )
+
+        content = strip_meta_instructions(content)
+        content = strip_header_only_cites(content, self.root)
+        content = dedupe_identical_fences(content)
         content = self._fold_citation_only_lines(content)
         content = self._reduce_hedging_when_cited(content)
         content = self._strip_broken_local_markdown_links(content)
@@ -2443,184 +2466,49 @@ class RepoWikiService:
 
             content = attach_adjacent_cites(content, cites)
 
-        existing_cites = len(self._CITE_PATTERN.findall(content))
-        needed = max(0, 3 - existing_cites)
-        if needed > 0 and cites:
-            content += "\n\n## 源码引用\n\n"
-            for cite in cites[:needed]:
-                content += f"- {cite}\n"
-
         content = self._drop_uninventoried_snapshot_api_claims(content, composition_context)
+        content = self._rebuild_qoder_toc_from_real_h2s(page, content)
 
         # CiteBlock.render() and leftover LLM markup can still carry
         # ``path:start-end (label)`` after composer normalize; strip before write.
         return normalize_citation_markup(content, self.root).strip() + "\n"
 
-    def _cite_existing_path(self, rel: str, hint_lines: int = 8) -> str:
-        path = self.root / rel
-        if path.is_file():
-            n = max(
-                1,
-                min(
-                    hint_lines,
-                    len(path.read_text(encoding="utf-8", errors="ignore").splitlines()) or 1,
-                ),
-            )
-            return f"<cite>{rel}:1-{n}</cite>"
-        if path.is_dir():
-            children: list[Path] = []
-            fallback: list[Path] = []
-            for child in sorted(path.rglob("*")):
-                if not child.is_file() or child.name.endswith("_test.go"):
-                    continue
-                if child.suffix.lower() not in {".go", ".py", ".sql", ".ts"}:
-                    continue
-                if child.name in {"__init__.py", "__main__.py"}:
-                    fallback.append(child)
-                    continue
-                children.append(child)
-            chosen = children[0] if children else (fallback[0] if fallback else None)
-            if chosen is None:
-                return ""
-            child_rel = chosen.relative_to(self.root).as_posix()
-            n = max(
-                1,
-                min(
-                    hint_lines,
-                    len(chosen.read_text(encoding="utf-8", errors="ignore").splitlines()) or 1,
-                ),
-            )
-            return f"<cite>{child_rel}:1-{n}</cite>"
-        return ""
+    def _cite_existing_path(self, rel: str, hint_lines: int = 8) -> str:  # noqa: ARG002
+        from repo_wiki.generator.deterministic_sections import cite_existing_meaningful
+
+        return cite_existing_meaningful(self.root, rel)
 
     def _rewrite_install_page_contract(self, page: Any, content: str) -> str:
         from repo_wiki.generator.composer import is_handbook_install_page
-        from repo_wiki.verifier.handbook import (
-            collect_repo_install_commands,
-            has_fenced_install_run_command,
-            has_readme_run_section_citation,
-            install_fenced_commands_are_grounded,
-            install_go_builds_use_package_dir,
+        from repo_wiki.generator.deterministic_sections import (
+            build_install_section,
+            replace_h2_section,
         )
 
-        if not is_handbook_install_page(page):
+        title = str(getattr(page, "title", "") or "")
+        if not is_handbook_install_page(page) and "## 安装步骤" not in content:
             return content
-        commands = collect_repo_install_commands(self.root)
-        blob = content.lower()
-        needs_fence = False
-        if commands:
-            if (
-                not has_fenced_install_run_command(content, self.root)
-                or not install_fenced_commands_are_grounded(content, self.root)
-                or not install_go_builds_use_package_dir(content, self.root)
-            ):
-                needs_fence = True
-            else:
-                if any(
-                    token in cmd.lower()
-                    for cmd in commands
-                    for token in ("podman-compose", "docker compose", "docker-compose")
-                ) and not any(
-                    token in blob
-                    for token in ("podman-compose", "docker compose", "docker-compose")
-                ):
-                    needs_fence = True
-                if any("schema.sql" in cmd for cmd in commands) and "schema.sql" not in content:
-                    needs_fence = True
-                if any("ccagent" in cmd for cmd in commands) and "ccagent" not in content:
-                    needs_fence = True
-        if commands:
-            blob_commands = "\n".join(
-                body for body in re.findall(r"```(?:bash|sh)\n(.*?)```", content, flags=re.I | re.S)
-            ).lower()
-            if (
-                any("poetry install" in cmd.lower() for cmd in commands)
-                and "poetry install" not in blob
-            ):
-                needs_fence = True
-            if (
-                any("alembic upgrade" in cmd.lower() for cmd in commands)
-                and "alembic upgrade" not in blob
-            ):
-                needs_fence = True
-            if any("uvicorn" in cmd.lower() for cmd in commands) and "uvicorn" not in blob:
-                needs_fence = True
-            schema_at = blob.find("schema.sql")
-            compose_at = min(
-                (
-                    idx
-                    for idx in (
-                        blob.find("podman-compose"),
-                        blob.find("docker compose"),
-                        blob.find("docker-compose"),
-                    )
-                    if idx >= 0
-                ),
-                default=-1,
-            )
-            if schema_at >= 0 and compose_at >= 0 and schema_at < compose_at:
-                needs_fence = True
-            if "main.go" in blob_commands and any(
-                "go build" in cmd and "/main.go" not in cmd for cmd in commands
-            ):
-                needs_fence = True
-        if needs_fence and commands:
-            block = "```bash\n" + "\n".join(commands) + "\n```"
-            fence_re = re.compile(r"```(?:bash|sh)\n.*?```", re.IGNORECASE | re.DOTALL)
-            if fence_re.search(content):
-                content = fence_re.sub(block, content)
-            elif "## 安装步骤" in content:
-                content = content.replace("## 安装步骤", "## 安装步骤\n\n" + block, 1)
-            else:
-                content = content.rstrip() + "\n\n## 安装步骤\n\n" + block + "\n"
-        if not has_readme_run_section_citation(content, self.root):
-            cite = self._readme_run_section_cite()
-            if cite:
-                content = content.rstrip() + f"\n\n安装与启动步骤以仓库入口文档为准。 {cite}\n"
-        from repo_wiki.verifier.handbook import read_readme_text
-
-        readme = read_readme_text(self.root)
-        needed_env = ("APP_ENV", "DATABASE_URL", "SECRET_KEY")
-        if any(name in readme for name in needed_env) or (
-            (self.root / "app" / "core" / "settings").is_dir() and ".env" not in content.lower()
-        ):
-            assigns = [
-                line.strip()
-                for line in readme.splitlines()
-                if re.match(r"^[A-Z][A-Z0-9_]+=\S+", line.strip())
-            ]
-            have = {item.split("=", 1)[0] for item in assigns}
-            fastapi_local = (self.root / "app" / "main.py").is_file()
-            for key in needed_env:
-                if key not in have and (key in readme or fastapi_local):
-                    assigns.append(f"{key}=change-me")
-            if assigns and ".env" not in content.lower():
-                content = (
-                    content.rstrip()
-                    + "\n\n本地路径先创建 `.env`（不要用测试 settings）：\n\n```bash\n"
-                    + "\n".join(assigns[:8])
-                    + "\n```\n"
-                )
-            if fastapi_local and "poetry shell" not in content.lower():
-                content = (
-                    content.rstrip() + "\n\n本地路径用 `poetry install` 后进入 `poetry shell`，"
-                    "或直接 `poetry run`；先启动数据库，再 `alembic upgrade head`，"
-                    "最后 `poetry run uvicorn app.main:app --reload`。\n"
-                )
+        if "IDE" in title or "ide" in str(getattr(page, "page_id", "") or "").lower():
+            return content
+        section = build_install_section(self.root)
+        if not section:
+            return content
+        content = re.sub(r"```(?:bash|sh)\n.*?```", "", content, flags=re.IGNORECASE | re.DOTALL)
+        content = replace_h2_section(content, ("安装步骤",), section)
         if "make install" in content and "go install" not in content.lower():
             content = content.replace(
                 "make install",
                 "make install（该目标执行 `go install`，不会安装配置文件）",
                 1,
             )
-        content = re.sub(r"app/core/settings/test\.py", "app/core/settings/app.py", content)
-        if any(token in content.lower() for token in ("podman-compose", "docker compose")) and (
-            "go build" in content.lower() or "poetry install" in content.lower()
-        ):
-            content = content.replace("## 安装步骤", "## 安装步骤（容器路径与本地路径二选一）", 1)
-        return content
+        return re.sub(r"app/core/settings/test\.py", "app/core/settings/app.py", content)
 
     def _ensure_architecture_core_cites(self, page: Any, content: str) -> str:
+        from repo_wiki.generator.deterministic_sections import (
+            build_go_role_section,
+            cite_existing_meaningful,
+            replace_h2_section,
+        )
         from repo_wiki.planner.schema import WikiTaxonomyCategory
         from repo_wiki.verifier.handbook import (
             architecture_core_packages,
@@ -2629,12 +2517,15 @@ class RepoWikiService:
 
         if getattr(page, "category", None) != WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
             return content
+        role = build_go_role_section(self.root)
+        if role:
+            content = replace_h2_section(content, ("进程角色",), role)
         if has_architecture_core_citation(content, self.root):
             return content
         cites = [
             cite
             for rel in architecture_core_packages(self.root)
-            if (cite := self._cite_existing_path(rel))
+            if (cite := cite_existing_meaningful(self.root, rel))
         ]
         if not cites:
             return content
@@ -2643,70 +2534,47 @@ class RepoWikiService:
             "HTTP 请求从路由包进入，再由模型与服务完成业务与持久化。"
             if python_repo
             else "ccagent 是主 REST/Web 服务；probe-agent 是隧道客户端；"
-            "控制面通过 gRPC（ccprobe-control -serve -transport grpc）调度 "
-            "services → repository → exporter。不要把 package main 的 custom-probe 当成可导入库。"
+            "ccprobe-control 是 gRPC 控制面服务。"
         )
-        return content.rstrip() + "\n\n" + prose + " " + " ".join(cites) + "\n"
+        if "## 进程角色" in content:
+            return content.replace(
+                "## 进程角色", "## 进程角色\n\n" + prose + " " + " ".join(cites[:6]), 1
+            )
+        return content.rstrip() + "\n\n" + prose + " " + " ".join(cites[:6]) + "\n"
 
     def _ensure_data_model_source_cites(self, page: Any, content: str) -> str:
+        from repo_wiki.generator.deterministic_sections import build_data_model_cite_block
         from repo_wiki.planner.schema import WikiTaxonomyCategory
-        from repo_wiki.verifier.handbook import (
-            data_model_optional_sources,
-            data_model_required_sources,
-            has_data_model_source_citation,
-        )
+        from repo_wiki.verifier.handbook import has_data_model_source_citation
 
         if getattr(page, "category", None) != WikiTaxonomyCategory.DATA_MODELS:
             return content
-        if has_data_model_source_citation(content, self.root):
+        block = build_data_model_cite_block(self.root)
+        if block and not has_data_model_source_citation(content, self.root):
+            content = content.rstrip() + "\n\n" + block
+        return content
+
+    def _ensure_security_source_cites(self, page: Any, content: str) -> str:
+        from repo_wiki.generator.deterministic_sections import build_security_cite_block
+        from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+        if getattr(page, "category", None) != WikiTaxonomyCategory.SECURITY_COMPLIANCE:
             return content
-        cites = self._data_model_struct_cites()
-        if not cites:
-            cites = [
-                cite
-                for rel in (
-                    *data_model_required_sources(self.root),
-                    *data_model_optional_sources(self.root),
-                )
-                if (cite := self._cite_existing_path(rel))
-            ]
-        if not cites:
+        block = build_security_cite_block(self.root)
+        if not block:
             return content
-        go_repo = (self.root / "internal" / "models").is_dir()
-        python_domain = (self.root / "app" / "models" / "domain").is_dir()
-        if go_repo:
-            prose = "实体定义见 internal/models 中的 GORM 结构体，表结构见 db/schema.sql。"
-        elif python_domain:
-            prose = (
-                "持久化表以 app/db/migrations 为准；app/models/domain 是 Pydantic 领域模型，"
-                "不是 ORM 实体，请求/响应 schema 不列入实体。"
-            )
-        else:
-            prose = "实体与表结构以模型定义和 schema 为准。"
-        return content.rstrip() + "\n\n" + prose + " " + " ".join(cites) + "\n"
+        if any(token in content for token in ("internal/auth", "jwt.py", "apiauth.go", "netguard")):
+            return content
+        return content.rstrip() + "\n\n" + block
 
     def _data_model_struct_cites(self) -> list[str]:
-        from repo_wiki.verifier.handbook import _go_struct_definition_ranges
+        from repo_wiki.generator.deterministic_sections import (
+            _REQUIRED_GO_STRUCTS,
+            go_struct_cite,
+        )
 
-        cites = [
-            f"<cite>{rel}:{start}-{end}</cite>"
-            for rel, start, end in _go_struct_definition_ranges(self.root)[:8]
-        ]
-        domain = self.root / "app" / "models" / "domain"
-        if domain.is_dir():
-            for child in sorted(domain.rglob("*.py")):
-                if child.name.startswith("_"):
-                    continue
-                rel = child.relative_to(self.root).as_posix()
-                cite = self._cite_existing_path(rel, hint_lines=24)
-                if cite:
-                    cites.append(cite)
-        migrations = self.root / "app" / "db" / "migrations"
-        if migrations.exists():
-            cite = self._cite_existing_path("app/db/migrations", hint_lines=40)
-            if cite:
-                cites.append(cite)
-        return cites
+        cites = [go_struct_cite(self.root, name) for name in _REQUIRED_GO_STRUCTS]
+        return [item for item in cites if item]
 
     def _drop_uninventoried_snapshot_api_claims(
         self,
@@ -3035,12 +2903,17 @@ class RepoWikiService:
         context: dict[str, Any] = {
             "modules": getattr(composition_context, "modules", []),
             "endpoints": getattr(composition_context, "endpoints", []),
-            "data_models": getattr(composition_context, "models", []),
+            "data_models": list(getattr(composition_context, "models", []) or []),
             "commands": getattr(composition_context, "commands", {}),
             "key_directories": list(getattr(composition_context, "key_directories", []) or []),
             "snapshot_paths": _composition_snapshot_paths(composition_context),
             "import_edges": import_edges,
         }
+        from repo_wiki.generator.deterministic_sections import load_alembic_migration_models
+
+        alembic_models = load_alembic_migration_models(self.root)
+        if alembic_models:
+            context["data_models"] = list(context["data_models"]) + alembic_models
         plans = planner.plan_diagram_for_page(
             page_id=page.page_id,
             page_type=page_type,
@@ -3328,7 +3201,7 @@ class RepoWikiService:
         for line in content.splitlines():
             if self._line_is_citation_tags_only(line) and out:
                 prev = out[-1].rstrip()
-                if prev and not prev.startswith("#") and not prev.startswith("```"):
+                if prev and not prev.startswith("```"):
                     out[-1] = prev + " " + line.strip()
                     continue
             out.append(line)
@@ -3389,6 +3262,11 @@ class RepoWikiService:
             content = self._unwrap_list_items_to_prose(content)
         if not fails_floor(content):
             return content
+        from repo_wiki.generator.deterministic_sections import build_feature_prose
+
+        extra = build_feature_prose(self.root)
+        if extra and extra not in content:
+            content = content.rstrip() + "\n\n" + extra + "\n"
         return content
 
     def _unwrap_list_items_to_prose(self, content: str) -> str:
