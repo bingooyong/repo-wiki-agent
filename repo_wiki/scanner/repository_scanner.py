@@ -837,7 +837,11 @@ class RepositoryScanner:
 
         if go_files:
             module_by_path = {path: module for path, _text, module in go_files}
-            for item in extract_go_data_models([(path, text) for path, text, _module in go_files]):
+            go_model_files = [(path, text) for path, text, _module in go_files]
+            for file in files:
+                if file.path.suffix.lower() == ".sql":
+                    go_model_files.append((file.path.as_posix(), file.text))
+            for item in extract_go_data_models(go_model_files):
                 models.append(
                     DataModel(
                         name=item.name,

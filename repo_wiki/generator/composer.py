@@ -904,14 +904,18 @@ class LLMPageComposer:
                 )
         if page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
             rules.append(
-                "- 架构页：必须引用核心包（`cmd/ccagent`、`internal/control`、"
-                "`internal/services`、`internal/repository` 等），"
+                "- 架构页：必须引用核心包（Python 必引 `app/api/routes` 与 `app/models`；"
+                "Go 必引 `internal/control`、`internal/services`、`internal/repository`、"
+                "`internal/exporter`）。"
+                "Go 控制面是 `ccprobe-control -serve -transport grpc`，不要写成普通 CLI。"
                 "不要把示例/demo/scaffold 二进制当成系统架构。"
             )
         if page.category == WikiTaxonomyCategory.DATA_MODELS:
             rules.append(
-                "- 数据模型页：必须引用 `internal/models` 与 `db/schema.sql`（若存在），"
-                "字段类型用源码真实类型，关系按 schema 外键，不要用示例程序里的另一套结构体。"
+                "- 数据模型页：必须引用 `app/models` 或 `internal/models`（若存在），"
+                "以及 alembic 迁移；`schema.sql` 不能代替模型源码。"
+                "字段类型用源码真实类型，关系按 `*_id` / gorm foreignKey / schema REFERENCES，"
+                "不要猜测自环，也不要整段粘贴 README 的英文 NOTE。"
             )
         return "\n".join(rules)
 
@@ -954,7 +958,8 @@ class LLMPageComposer:
                 "\nAPI 页面附加要求：\n"
                 "- 正文必须 prose-first，禁止把端点清单作为主体。\n"
                 "- 端点表格只能放在附录且需限量（只列关键端点）。\n"
-                "- 每个关键结论必须配 `<cite>`；证据不足时必须显式写「待确认」。\n"
+                "- 每个关键结论必须配 `<cite>`；有证据时不要写「待确认」，"
+                "也不要粘贴 README 的英文 NOTE。\n"
             )
         handbook_cite_rules = self._handbook_cite_rules(input)
         if handbook_cite_rules:

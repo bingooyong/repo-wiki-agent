@@ -57,10 +57,10 @@ def mermaid_er_field(value: str) -> str:
 
 
 def _mermaid_scalar_type(value: str) -> str:
-    lowered = (value or "").split(".")[-1].lower()
+    lowered = (value or "").split(".")[-1].lower().lstrip("*[]")
     if lowered in {"int", "int8", "int16", "int32", "int64", "uint", "uint64"}:
         return "int"
-    if lowered in {"float32", "float64"}:
+    if lowered in {"float", "float32", "float64"}:
         return "float"
     if lowered in {"bool"}:
         return "bool"
@@ -404,6 +404,23 @@ def _module_label(module: Any, index: int = 0) -> str:
     return name
 
 
+def _python_request_flow_edges(context: dict[str, Any]) -> list[tuple[str, str]]:
+    """routes → services/dependencies → repositories/db from existing app/ packages."""
+    paths = _iter_snapshot_paths(context)
+    layers = [
+        label
+        for label, needle in (
+            ("app/api/routes", "app/api/routes"),
+            ("app/services", "app/services"),
+            ("app/api/dependencies", "app/api/dependencies"),
+            ("app/db", "app/db"),
+            ("app/models", "app/models"),
+        )
+        if _snapshot_contains_path(paths, needle)
+    ]
+    return [(layers[idx], layers[idx + 1]) for idx in range(len(layers) - 1)]
+
+
 def _import_edges_from_context(context: dict[str, Any]) -> list[tuple[str, str]]:
     edges: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -452,6 +469,15 @@ def _product_module_labels(modules: list[Any]) -> list[str]:
         parts = [part for part in path.replace("\\", "/").strip("/").split("/") if part]
         candidates: list[str] = []
         if len(parts) >= 2 and parts[0] in {"internal", "pkg", "cmd"}:
+            candidates.append("/".join(parts[:2]))
+        elif (
+            len(parts) >= 3
+            and parts[0] == "app"
+            and parts[1] == "api"
+            and not _is_filename_like_module_name(parts[2])
+        ):
+            candidates.append("/".join(parts[:3]))
+        elif len(parts) >= 2 and parts[0] == "app" and not _is_filename_like_module_name(parts[1]):
             candidates.append("/".join(parts[:2]))
         elif name and not _is_filename_like_module_name(name):
             candidates.append(name)
@@ -550,12 +576,16 @@ class MermaidPlanner:
         )
 
         # Plan based on page type
-        if page_type == "architecture" or (
+        if page_type in {"architecture", "security"} or (
             page_type == "overview" and _is_full_architecture_page(page_id)
         ):
             diagram = self._plan_overview_architecture_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
+            if page_type == "security":
+                auth = self._plan_auth_flow_diagram(page_id, evidence_binding, context)
+                if auth:
+                    diagrams.append(auth)
 
         elif page_type in ("service", "section"):
             diagram = self._plan_service_diagram(page_id, evidence_binding, context)
@@ -599,6 +629,7 @@ class MermaidPlanner:
                     "agent",
                     "models",
                     "control",
+                    "routes",
                 )
             )
         }
@@ -609,14 +640,22 @@ class MermaidPlanner:
         else:
             chosen = list(labels)
         if not chosen:
-            chosen = [label for label in labels if label.startswith("internal/")]
+            chosen = [label for label in labels if label.startswith(("internal/", "app/"))]
+        layer_edges = _python_request_flow_edges(context)
+        for src, dst in layer_edges:
+            if src not in chosen:
+                chosen.append(src)
+            if dst not in chosen:
+                chosen.append(dst)
         nodes = [
             DiagramNode(id=mermaid_ident(label), label=label, shape="rectangle") for label in chosen
         ]
         chosen_set = set(chosen)
         edges: list[DiagramEdge] = []
-        for src, dst in import_edges:
-            if src in chosen_set and dst in chosen_set:
+        seen_edges: set[tuple[str, str]] = set()
+        for src, dst in [*import_edges, *layer_edges]:
+            if src in chosen_set and dst in chosen_set and (src, dst) not in seen_edges:
+                seen_edges.add((src, dst))
                 edges.append(DiagramEdge(from_node=mermaid_ident(src), to_node=mermaid_ident(dst)))
 
         for layer_id, layer_label in _wiki_tool_layers_present(context):
@@ -632,6 +671,47 @@ class MermaidPlanner:
             diagram_type=MermaidDiagramType.FLOWCHART,
             title="Repository Architecture",
             description="Product module architecture",
+            nodes=nodes,
+            edges=edges,
+            evidence_spans=evidence_spans,
+        )
+
+    def _plan_auth_flow_diagram(
+        self,
+        page_id: str,
+        evidence_binding: PageEvidenceBinding | None,
+        context: dict[str, Any],
+    ) -> DiagramPlan | None:
+        paths = _iter_snapshot_paths(context)
+        layers = [
+            label
+            for label, needle in (
+                ("app/api/routes", "app/api/routes"),
+                ("app/api/dependencies", "app/api/dependencies"),
+                ("app/core", "app/core"),
+                ("app/models", "app/models"),
+            )
+            if _snapshot_contains_path(paths, needle)
+        ]
+        if len(layers) < 2:
+            return None
+        nodes = [
+            DiagramNode(id=mermaid_ident(label), label=label, shape="rectangle") for label in layers
+        ]
+        edges = [
+            DiagramEdge(
+                from_node=mermaid_ident(layers[idx]), to_node=mermaid_ident(layers[idx + 1])
+            )
+            for idx in range(len(layers) - 1)
+        ]
+        evidence_spans = []
+        if evidence_binding:
+            evidence_spans = [candidate.span for candidate in evidence_binding.candidates]
+        return DiagramPlan(
+            diagram_id=f"{page_id}-auth-flow",
+            diagram_type=MermaidDiagramType.FLOWCHART,
+            title="Authentication flow",
+            description="Request authentication path",
             nodes=nodes,
             edges=edges,
             evidence_spans=evidence_spans,
@@ -967,9 +1047,14 @@ class MermaidPlanner:
                 if not dest_name:
                     continue
                 if kind == "has_many":
-                    relationships.append((entity_name, dest_name, "fk"))
+                    edge = (entity_name, dest_name, "fk")
                 else:
-                    relationships.append((dest_name, entity_name, "fk"))
+                    edge = (dest_name, entity_name, "fk")
+                if edge[0] == edge[1] and kind != "belongs_to":
+                    continue
+                if edge in relationships:
+                    continue
+                relationships.append(edge)
 
         if not er_entities:
             return None

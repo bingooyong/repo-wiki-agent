@@ -633,6 +633,31 @@ def _basename_exists_casefold(
     return False
 
 
+_PORT_CLAIM_DOC_NAMES = frozenset(
+    {
+        "readme.md",
+        "readme.rst",
+        "readme.txt",
+        "readme",
+        "quickstart.md",
+        "quickstart.rst",
+    }
+)
+
+
+def _listen_port_conflicts(repo_root: Path, rel: str, text: str) -> list[str]:
+    """Flag doc localhost ports that disagree with config/compose listen ports."""
+    if Path(rel).name.lower() not in _PORT_CLAIM_DOC_NAMES:
+        return []
+    from repo_wiki.verifier.handbook import collect_doc_listen_ports, collect_source_listen_ports
+
+    source_ports = collect_source_listen_ports(repo_root)
+    if not source_ports:
+        return []
+    stale = collect_doc_listen_ports(text) - source_ports
+    return [f"listen-port:{port}" for port in sorted(stale)]
+
+
 def _extract_claims(text: str) -> tuple[set[str], set[str]]:
     service_like: set[str] = set()
     path_like: set[str] = set()
@@ -924,6 +949,9 @@ class DocumentationScanner:
                     and n.casefold() not in _TUTORIAL_PLACEHOLDER_TOKENS
                     and n not in _GENERIC_FACT_CLAIM_TOKENS
                 ]
+            )
+            conflicting_claims = sorted(
+                set(conflicting_claims) | set(_listen_port_conflicts(self.repo_root, rel, text))
             )
             freshness = max(0.0, 1.0 - (0.2 * len(stale_refs) + 0.15 * len(conflicting_claims)))
 

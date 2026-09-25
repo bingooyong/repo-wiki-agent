@@ -436,6 +436,9 @@ def _score_onboarding_evidence(
             else:
                 score += WEIGHT_ONBOARDING_ENTRY
                 signals.append("arch_cmd_main")
+        if "app/api/routes" in path or path.startswith("app/models"):
+            score += WEIGHT_ONBOARDING_SETTINGS + 2.0
+            signals.append("arch_python_core")
     elif _is_ops_config_page(page) or _is_database_troubleshooting_page(page):
         if "settings" in path or "database_url" in symbol or "database_url" in text:
             score += WEIGHT_ONBOARDING_SETTINGS
@@ -462,6 +465,9 @@ def _score_onboarding_evidence(
         if path.replace("\\", "/").endswith("db/schema.sql") or path.endswith("schema.sql"):
             score += WEIGHT_ONBOARDING_SETTINGS + 2.0
             signals.append("schema_sql")
+        if "alembic" in path.replace("\\", "/"):
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("alembic_migration")
     elif _is_security_onboarding_page(page):
         if "authentication.py" in path or path.endswith("/authentication.py"):
             score += WEIGHT_SECURITY_AUTH_FILE

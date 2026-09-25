@@ -361,26 +361,22 @@ class RuleFirstPlanner:
             tags=["overview", "index"],
         )
 
-        # README summary
-        self._add_page(
-            page_id=self._make_page_id("readme", WikiTaxonomyCategory.PROJECT_OVERVIEW),
-            title="自述文件",
-            category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
-            parent="project-overview",
-            source_requirements=SourceRequirement(files=["README.md"]),
-            sort_order=1,
-            tags=["readme", "introduction"],
-        )
-
-        # Project changelog
-        self._add_page(
-            page_id=self._make_page_id("changelog", WikiTaxonomyCategory.PROJECT_OVERVIEW),
-            title="更新日志",
-            category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
-            parent="project-overview",
-            sort_order=5,
-            tags=["changelog", "history"],
-        )
+        if self._existing_source_files(
+            "CHANGELOG.md", "CHANGELOG.rst", "CHANGES.rst", "CHANGES.md"
+        ):
+            self._add_page(
+                page_id=self._make_page_id("changelog", WikiTaxonomyCategory.PROJECT_OVERVIEW),
+                title="更新日志",
+                category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+                parent="project-overview",
+                source_requirements=SourceRequirement(
+                    files=self._existing_source_files(
+                        "CHANGELOG.md", "CHANGELOG.rst", "CHANGES.rst", "CHANGES.md"
+                    )
+                ),
+                sort_order=5,
+                tags=["changelog", "history"],
+            )
 
         # Quick start guide
         self._add_page(
@@ -439,10 +435,13 @@ class RuleFirstPlanner:
                     path
                     for path in (
                         "cmd/ccagent/main.go",
+                        "cmd/ccprobe-control",
                         "internal/control",
                         "internal/services",
                         "internal/repository",
                         "internal/exporter",
+                        "app/api/routes",
+                        "app/models",
                     )
                     if any(
                         (m.path or "").startswith(path) or path in (m.doc_path or "")
@@ -802,9 +801,14 @@ class RuleFirstPlanner:
             tags=["api", "errors", "status-codes"],
         )
 
+        _SKIP_THIN_API_LEAVES = frozenset(
+            {"custom-probe", "example", "demo", "scaffold", "hello", "agent"}
+        )
         # Per-service API articles are useful, but individual endpoint pages are not.
         for idx, (module_name, endpoints) in enumerate(sorted(by_module.items())):
             if not endpoints or not self._is_service_like_module_name(module_name):
+                continue
+            if _module_leaf_name(module_name).lower() in _SKIP_THIN_API_LEAVES:
                 continue
             self._add_page(
                 page_id=self._make_page_id(
@@ -864,6 +868,7 @@ class RuleFirstPlanner:
             "internal/models",
             "db/schema.sql",
             "app/models",
+            "alembic",
         )
         for model in self.snapshot.data_models:
             path = str(getattr(model, "file_path", "") or "")

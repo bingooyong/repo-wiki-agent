@@ -79,6 +79,8 @@ _PROMPT_LEAK_PHRASES = (
     "evidence 之外",
     "没有发现顶层 readme",
     "the repo gives no route table",
+    "(no reference document available)",
+    "no reference document available",
 )
 _QUALITY_METRIC_LEAK = re.compile(
     r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b|\b21\s*/\s*25\b",
@@ -2050,6 +2052,7 @@ class RepoWikiService:
 
     def _readme_run_section_cite(self) -> str:
         from repo_wiki.verifier.handbook import (
+            _text_has_install_clue,
             existing_readme_names,
             read_readme_text,
             readme_run_section_ranges,
@@ -2059,11 +2062,21 @@ class RepoWikiService:
         name = next((item for item in names if (self.root / item).is_file()), "")
         if not name:
             return ""
-        ranges = readme_run_section_ranges(read_readme_text(self.root))
-        if ranges:
-            start, end = ranges[0]
-            return f"<cite>{name}:{start}-{end}</cite>"
-        return ""
+        readme = read_readme_text(self.root)
+        ranges = readme_run_section_ranges(readme)
+        if not ranges:
+            return ""
+        lines = readme.splitlines()
+        for start, end in ranges:
+            clue_lines = [
+                index
+                for index in range(start, end + 1)
+                if 1 <= index <= len(lines) and _text_has_install_clue(lines[index - 1])
+            ]
+            if clue_lines:
+                return f"<cite>{name}:{clue_lines[0]}-{clue_lines[-1]}</cite>"
+        start, end = ranges[0]
+        return f"<cite>{name}:{start}-{end}</cite>"
 
     def _fallback_install_source_texts(
         self, evidence: dict[str, Any], binding: Any | None, *, include_root_readme: bool
@@ -2298,6 +2311,8 @@ class RepoWikiService:
         return getattr(page, "category", None) in {
             WikiTaxonomyCategory.API_REFERENCE,
             WikiTaxonomyCategory.DATA_MODELS,
+            WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+            WikiTaxonomyCategory.SECURITY_COMPLIANCE,
         }
 
     def _content_has_mermaid_fence(self, content: str) -> bool:
@@ -2324,6 +2339,8 @@ class RepoWikiService:
         content = markdown.strip() or f"# {page.title}\n"
         if not content.startswith("#"):
             content = f"# {page.title}\n\n{content}"
+        content = self._strip_reading_notes_boilerplate(content)
+        content = self._strip_readme_english_note(content)
 
         # Always rebuild 目录 from real H2s. LLM leftover 结论/项目结构 bullets
         # and sentence-length TOC items must not remain as dangling targets.
@@ -2375,12 +2392,11 @@ class RepoWikiService:
                 )
             if needs_er_mermaid:
                 er_blocks = [block for block in rendered_blocks if "erdiagram" in block.lower()]
-                content += "\n\n## 架构图\n\n" + (
-                    "\n\n".join(er_blocks) if er_blocks else self._build_minimal_mermaid_block(page)
-                )
+                if er_blocks:
+                    content += "\n\n## 架构图\n\n" + "\n\n".join(er_blocks)
             elif rendered_blocks:
                 content += "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
-            else:
+            elif is_api_like_page and needs_any_mermaid:
                 content += "\n\n## 架构图\n\n" + self._build_minimal_mermaid_block(page)
 
         citation_renderer = CitationRenderer(workspace_root=self.root)
@@ -2392,6 +2408,10 @@ class RepoWikiService:
         content = self._rewrite_install_page_contract(page, content)
         content = self._ensure_architecture_core_cites(page, content)
         content = self._ensure_data_model_source_cites(page, content)
+        content = self._strip_readme_english_note(content)
+        content = self._strip_reading_notes_boilerplate(content)
+        content = self._fold_citation_only_lines(content)
+        content = self._reduce_hedging_when_cited(content)
         content = self._strip_broken_local_markdown_links(content)
         content = self._strip_prompt_leakage(content)
         content = self._dedupe_repeated_blocks(content)
@@ -2426,20 +2446,29 @@ class RepoWikiService:
             )
             return f"<cite>{rel}:1-{n}</cite>"
         if path.is_dir():
+            children: list[Path] = []
+            fallback: list[Path] = []
             for child in sorted(path.rglob("*")):
                 if not child.is_file() or child.name.endswith("_test.go"):
                     continue
                 if child.suffix.lower() not in {".go", ".py", ".sql", ".ts"}:
                     continue
-                child_rel = child.relative_to(self.root).as_posix()
-                n = max(
-                    1,
-                    min(
-                        hint_lines,
-                        len(child.read_text(encoding="utf-8", errors="ignore").splitlines()) or 1,
-                    ),
-                )
-                return f"<cite>{child_rel}:1-{n}</cite>"
+                if child.name in {"__init__.py", "__main__.py"}:
+                    fallback.append(child)
+                    continue
+                children.append(child)
+            chosen = children[0] if children else (fallback[0] if fallback else None)
+            if chosen is None:
+                return ""
+            child_rel = chosen.relative_to(self.root).as_posix()
+            n = max(
+                1,
+                min(
+                    hint_lines,
+                    len(chosen.read_text(encoding="utf-8", errors="ignore").splitlines()) or 1,
+                ),
+            )
+            return f"<cite>{child_rel}:1-{n}</cite>"
         return ""
 
     def _rewrite_install_page_contract(self, page: Any, content: str) -> str:
@@ -2449,6 +2478,7 @@ class RepoWikiService:
             has_fenced_install_run_command,
             has_readme_run_section_citation,
             install_fenced_commands_are_grounded,
+            install_go_builds_use_package_dir,
         )
 
         if not is_handbook_install_page(page):
@@ -2457,9 +2487,11 @@ class RepoWikiService:
         blob = content.lower()
         needs_fence = False
         if commands:
-            if not has_fenced_install_run_command(
-                content, self.root
-            ) or not install_fenced_commands_are_grounded(content, self.root):
+            if (
+                not has_fenced_install_run_command(content, self.root)
+                or not install_fenced_commands_are_grounded(content, self.root)
+                or not install_go_builds_use_package_dir(content, self.root)
+            ):
                 needs_fence = True
             else:
                 if any(
@@ -2475,6 +2507,41 @@ class RepoWikiService:
                     needs_fence = True
                 if any("ccagent" in cmd for cmd in commands) and "ccagent" not in content:
                     needs_fence = True
+        if commands:
+            blob_commands = "\n".join(
+                body for body in re.findall(r"```(?:bash|sh)\n(.*?)```", content, flags=re.I | re.S)
+            ).lower()
+            if (
+                any("poetry install" in cmd.lower() for cmd in commands)
+                and "poetry install" not in blob
+            ):
+                needs_fence = True
+            if (
+                any("alembic upgrade" in cmd.lower() for cmd in commands)
+                and "alembic upgrade" not in blob
+            ):
+                needs_fence = True
+            if any("uvicorn" in cmd.lower() for cmd in commands) and "uvicorn" not in blob:
+                needs_fence = True
+            schema_at = blob.find("schema.sql")
+            compose_at = min(
+                (
+                    idx
+                    for idx in (
+                        blob.find("podman-compose"),
+                        blob.find("docker compose"),
+                        blob.find("docker-compose"),
+                    )
+                    if idx >= 0
+                ),
+                default=-1,
+            )
+            if schema_at >= 0 and compose_at >= 0 and schema_at < compose_at:
+                needs_fence = True
+            if "main.go" in blob_commands and any(
+                "go build" in cmd and "/main.go" not in cmd for cmd in commands
+            ):
+                needs_fence = True
         if needs_fence and commands:
             block = "```bash\n" + "\n".join(commands) + "\n```"
             fence_re = re.compile(r"```(?:bash|sh)\n.*?```", re.IGNORECASE | re.DOTALL)
@@ -2488,6 +2555,22 @@ class RepoWikiService:
             cite = self._readme_run_section_cite()
             if cite:
                 content = content.rstrip() + f"\n\n安装与启动步骤以仓库入口文档为准。 {cite}\n"
+        from repo_wiki.verifier.handbook import read_readme_text
+
+        readme = read_readme_text(self.root)
+        if ".env" in readme.lower() and ".env" not in content.lower():
+            assigns = [
+                line.strip()
+                for line in readme.splitlines()
+                if re.match(r"^[A-Z][A-Z0-9_]+=\S+", line.strip())
+            ]
+            if assigns:
+                content = (
+                    content.rstrip()
+                    + "\n\n本地 `.env` 需包含仓库文档中的变量：\n\n```bash\n"
+                    + "\n".join(assigns[:8])
+                    + "\n```\n"
+                )
         return content
 
     def _ensure_architecture_core_cites(self, page: Any, content: str) -> str:
@@ -2503,21 +2586,27 @@ class RepoWikiService:
             return content
         cites = [
             cite
-            for rel in architecture_core_packages(self.root)[:4]
+            for rel in architecture_core_packages(self.root)
             if (cite := self._cite_existing_path(rel))
         ]
         if not cites:
             return content
-        return (
-            content.rstrip()
-            + "\n\n核心实现位于控制面与内部包，而不是示例或脚手架程序。 "
-            + " ".join(cites)
-            + "\n"
+        python_repo = (self.root / "app" / "api" / "routes").exists()
+        prose = (
+            "HTTP 请求从路由包进入，再由模型与服务完成业务与持久化。"
+            if python_repo
+            else "控制面通过 gRPC（ccprobe-control -serve -transport grpc）调度 "
+            "services → repository → exporter，而不是把控制面当成普通 CLI。"
         )
+        return content.rstrip() + "\n\n" + prose + " " + " ".join(cites) + "\n"
 
     def _ensure_data_model_source_cites(self, page: Any, content: str) -> str:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
-        from repo_wiki.verifier.handbook import has_data_model_source_citation
+        from repo_wiki.verifier.handbook import (
+            data_model_optional_sources,
+            data_model_required_sources,
+            has_data_model_source_citation,
+        )
 
         if getattr(page, "category", None) != WikiTaxonomyCategory.DATA_MODELS:
             return content
@@ -2525,7 +2614,10 @@ class RepoWikiService:
             return content
         cites = [
             cite
-            for rel in ("internal/models", "db/schema.sql", "app/models")
+            for rel in (
+                *data_model_required_sources(self.root),
+                *data_model_optional_sources(self.root),
+            )
             if (cite := self._cite_existing_path(rel))
         ]
         if not cites:
@@ -2818,7 +2910,13 @@ class RepoWikiService:
 
         if is_handbook_install_page(page):
             return []
+        from repo_wiki.planner.schema import WikiTaxonomyCategory
+
         page_type = _category_to_doc_type(page.category)
+        if getattr(page, "category", None) == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
+            page_type = "architecture"
+        elif getattr(page, "category", None) == WikiTaxonomyCategory.SECURITY_COMPLIANCE:
+            page_type = "security"
 
         context: dict[str, Any] = {
             "modules": getattr(composition_context, "modules", []),
@@ -2827,6 +2925,7 @@ class RepoWikiService:
             "commands": getattr(composition_context, "commands", {}),
             "key_directories": list(getattr(composition_context, "key_directories", []) or []),
             "snapshot_paths": _composition_snapshot_paths(composition_context),
+            "import_edges": list(getattr(composition_context, "import_edges", []) or []),
         }
         plans = planner.plan_diagram_for_page(
             page_id=page.page_id,
@@ -2986,6 +3085,60 @@ class RepoWikiService:
         cleaned = _QUALITY_METRIC_LEAK.sub("", cleaned)
         return cleaned
 
+    def _strip_readme_english_note(self, content: str) -> str:
+        """Drop README maintenance NOTE pasted verbatim into Chinese handbook pages."""
+        cleaned = re.sub(
+            r"\*\*NOTE\*\*\s*:.*?(?=\n|$)",
+            "",
+            content,
+            flags=re.IGNORECASE,
+        )
+        return re.sub(
+            r"NOTE:\s*This repository is not actively maintained[^\n]*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+    def _strip_reading_notes_boilerplate(self, content: str) -> str:
+        lines = content.splitlines()
+        out: list[str] = []
+        skipping = False
+        for line in lines:
+            heading = re.match(r"^##\s+(.+)$", line.strip())
+            if heading and heading.group(1).strip() == "阅读说明":
+                skipping = True
+                continue
+            if skipping:
+                if re.match(r"^#{1,6}\s+\S", line.strip()):
+                    skipping = False
+                else:
+                    continue
+            if not skipping:
+                out.append(line)
+        return "\n".join(out)
+
+    def _fold_citation_only_lines(self, content: str) -> str:
+        cite_only = re.compile(r"^(?:\s*<cite>[^<]+</cite>\s*)+$", re.IGNORECASE)
+        out: list[str] = []
+        for line in content.splitlines():
+            if cite_only.match(line.strip()) and out:
+                prev = out[-1].rstrip()
+                if prev and not prev.startswith("#") and not prev.startswith("```"):
+                    out[-1] = prev + " " + line.strip()
+                    continue
+            out.append(line)
+        return "\n".join(out)
+
+    def _reduce_hedging_when_cited(self, content: str) -> str:
+        lines: list[str] = []
+        for line in content.splitlines():
+            if "<cite>" in line and ("待确认" in line or "[待确认]" in line):
+                line = line.replace("[待确认]", "").replace("待确认", "")
+                line = re.sub(r"\s{2,}", " ", line).rstrip()
+            lines.append(line)
+        return "\n".join(lines)
+
     def _dedupe_repeated_blocks(self, content: str) -> str:
         paragraphs = re.split(r"(\n\s*\n)", content)
         seen: dict[str, int] = {}
@@ -3012,7 +3165,7 @@ class RepoWikiService:
             kept.append(line)
         return "\n".join(kept)
 
-    def _ensure_minimum_prose_density(self, content: str, page: Any) -> str:
+    def _ensure_minimum_prose_density(self, content: str, _page: Any) -> str:
         """Lift list dumps and char density without repeating the same pad paragraph."""
         from repo_wiki.verifier.qoder_strict_verifier import (
             QoderLikeVerifierService,
@@ -3032,14 +3185,6 @@ class RepoWikiService:
             content = self._unwrap_list_items_to_prose(content)
         if not fails_floor(content):
             return content
-        if "## 阅读说明" not in content:
-            content += "\n\n## 阅读说明\n"
-        pad = (
-            f"{page.title} 需要把源码证据、模块职责和调用边界写清楚，"
-            "读者应对照文中的源码引用核对实现，而不是把未引用的通用说法当成事实。"
-        )
-        if pad not in content:
-            content += "\n" + pad + "\n"
         return content
 
     def _unwrap_list_items_to_prose(self, content: str) -> str:

@@ -56,12 +56,15 @@ from repo_wiki.scanner.source_spans import SourceSpanExtractor
 from repo_wiki.verifier.api_claim_inventory import api_claim_in_inventory
 from repo_wiki.verifier.handbook import (
     collect_repo_install_commands,
+    collect_source_listen_ports,
+    handbook_placeholder_mermaid_pages,
     has_api_routes_citation,
     has_architecture_core_citation,
     has_data_model_source_citation,
     has_fenced_install_run_command,
     has_readme_run_section_citation,
     install_fenced_commands_are_grounded,
+    install_go_builds_use_package_dir,
     install_run_clue_count,
     readme_run_section_ranges,
     repo_run_clue_names,
@@ -289,6 +292,46 @@ def _write_synthetic_go_repo(root: Path) -> None:
     (root / "cmd" / "ccagent" / "main.go").write_text(
         "package main\nfunc main() {}\n", encoding="utf-8"
     )
+    (root / "cmd" / "ccprobe-control").mkdir(parents=True)
+    (root / "cmd" / "ccprobe-control" / "main.go").write_text(
+        "package main\nfunc main() { runGRPCServe() }\n", encoding="utf-8"
+    )
+    (root / "cmd" / "ccprobe-control" / "serve.go").write_text(
+        "package main\nfunc runGRPCServe() {}\nfunc checkListenSecurity() {}\n",
+        encoding="utf-8",
+    )
+    (root / "config.yaml").write_text('listen: "0.0.0.0:1900"\n', encoding="utf-8")
+    (root / "internal" / "models" / "tree.go").write_text(
+        """
+package models
+
+type BizTreeNode struct {
+    ID       int64  `gorm:"primaryKey;column:id"`
+    ParentID *int64 `gorm:"column:parent_id"`
+}
+func (BizTreeNode) TableName() string { return "biz_tree_node" }
+
+type BizInstanceEndpoint struct {
+    ID        int64 `gorm:"primaryKey;column:id"`
+    ServiceID int64 `gorm:"column:service_id"`
+}
+func (BizInstanceEndpoint) TableName() string { return "biz_instance_endpoint" }
+
+type ProbePolicy struct {
+    ID        int64 `gorm:"primaryKey;column:id"`
+    ServiceID int64 `gorm:"column:service_id"`
+}
+func (ProbePolicy) TableName() string { return "probe_policy" }
+
+type ProbeResult struct {
+    ID         int64   `gorm:"primaryKey;column:id"`
+    EndpointID int64   `gorm:"column:endpoint_id"`
+    Latency    float64 `gorm:"column:latency"`
+}
+func (ProbeResult) TableName() string { return "probe_results" }
+""",
+        encoding="utf-8",
+    )
     (root / "cmd" / "custom-probe").mkdir(parents=True)
     (root / "cmd" / "custom-probe" / "main.go").write_text(
         "package main\nfunc main() {}\n", encoding="utf-8"
@@ -340,6 +383,16 @@ def _write_synthetic_go_repo(root: Path) -> None:
         "  id BIGINT PRIMARY KEY,\n"
         "  parent_id BIGINT,\n"
         "  FOREIGN KEY (parent_id) REFERENCES biz_tree_node(id)\n"
+        ");\n"
+        "CREATE TABLE biz_instance_endpoint (\n"
+        "  id BIGINT PRIMARY KEY,\n"
+        "  service_id BIGINT,\n"
+        "  FOREIGN KEY (service_id) REFERENCES biz_tree_node(id)\n"
+        ");\n"
+        "CREATE TABLE probe_policy (\n"
+        "  id BIGINT PRIMARY KEY,\n"
+        "  service_id BIGINT,\n"
+        "  FOREIGN KEY (service_id) REFERENCES biz_tree_node(id)\n"
         ");\n",
         encoding="utf-8",
     )
@@ -817,7 +870,7 @@ def test_go_install_commands_come_from_makefile_and_cmd(tmp_path: Path) -> None:
     assert "go build ./..." not in snapshot.commands.values()
     service = RepoWikiService(cfg)
     commands = service._install_commands_from_repo_files()
-    assert any("cmd/ccagent/main.go" in item for item in commands)
+    assert any("./cmd/ccagent" in item and "main.go" not in item for item in commands)
     assert not any(
         item.strip() in {"go run .", "go build -o probe_exporter ."} for item in commands
     )
@@ -1004,6 +1057,10 @@ def test_go_import_edges_include_repository_services_probe_exporter(tmp_path: Pa
         "ProbeEndpoint",
         "ProbeTag",
         "UserRow",
+        "BizTreeNode",
+        "BizInstanceEndpoint",
+        "ProbePolicy",
+        "ProbeResult",
     }
     planner = create_planner()
     diagrams = planner.plan_diagram_for_page(
@@ -1223,7 +1280,9 @@ def test_install_commands_prefer_core_over_demo(tmp_path: Path) -> None:
     assert "podman-compose" in blob
     assert "schema.sql" in blob
     assert "ccagent" in blob
-    assert "curl http://localhost:8000/health" in blob
+    assert "curl http://localhost:1900/health" in blob
+    assert any("./cmd/ccprobe-control" in item and "main.go" not in item for item in commands)
+    assert not any("ccprobe-control/main.go" in item for item in commands)
     assert not any("custom-probe" in item for item in commands)
     assert not any("probe_exporter" in item and "cmd/probe_exporter" in item for item in commands)
     planner = RuleFirstPlanner(
@@ -1384,3 +1443,188 @@ def test_backtick_path_then_line_normalizes() -> None:
 def test_page_dump_detects_21_25_and_endpoint_leak() -> None:
     assert is_qoder_page_dump("Tests 21/25 / Coverage 84%\n\n说明。\n") is True
     assert page_has_prompt_leakage("以下端点来自扫描结果") is True
+
+
+def test_schema_sql_alone_does_not_satisfy_go_data_model_check(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    page = "# 数据模型\n\n表结构见 schema。<cite>db/schema.sql:1-8</cite>\n"
+    assert has_data_model_source_citation(page, tmp_path) is False
+    page += "<cite>internal/models/endpoint.go:1-8</cite>\n"
+    assert has_data_model_source_citation(page, tmp_path) is True
+
+
+def test_architecture_requires_exporter_and_python_routes(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    go_page = (
+        "# 架构\n\n控制面。<cite>internal/control/tunnel.go:1-2</cite>"
+        "<cite>internal/services/serv_probe_endpoint.go:1-4</cite>\n"
+    )
+    assert has_architecture_core_citation(go_page, tmp_path) is False
+    go_page += "<cite>internal/exporter/prom.go:1-3</cite>\n"
+    assert has_architecture_core_citation(go_page, tmp_path) is True
+    py_root = tmp_path / "pyapp"
+    py_root.mkdir()
+    (py_root / "app" / "api" / "routes").mkdir(parents=True)
+    (py_root / "app" / "models").mkdir(parents=True)
+    (py_root / "app" / "api" / "routes" / "users.py").write_text("x=1\n", encoding="utf-8")
+    (py_root / "app" / "models" / "user.py").write_text("x=1\n", encoding="utf-8")
+    py_page = "# 架构\n\n模型。<cite>app/models/user.py:1-1</cite>\n"
+    assert has_architecture_core_citation(py_page, py_root) is False
+    py_page += "<cite>app/api/routes/users.py:1-1</cite>\n"
+    assert has_architecture_core_citation(py_page, py_root) is True
+
+
+def test_go_build_main_with_siblings_fails_install_check(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    page = (
+        "# 安装\n\n```bash\n"
+        "go build -o bin/ccprobe-control ./cmd/ccprobe-control/main.go\n"
+        "```\n<cite>README.md:12-20</cite>\n"
+    )
+    assert install_go_builds_use_package_dir(page, tmp_path) is False
+    assert install_fenced_commands_are_grounded(page, tmp_path) is False
+    fixed = page.replace("./cmd/ccprobe-control/main.go", "./cmd/ccprobe-control")
+    assert install_go_builds_use_package_dir(fixed, tmp_path) is True
+
+
+def test_heading_only_readme_cite_is_not_run_section(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    assert (
+        has_readme_run_section_citation("# 安装\n<cite>README.md:11-12</cite>\n", tmp_path) is False
+    )
+    ranges = readme_run_section_ranges((tmp_path / "README.md").read_text(encoding="utf-8"))
+    start, end = ranges[0]
+    cited = f"# 安装\n<cite>README.md:{start}-{end}</cite>\n"
+    assert has_readme_run_section_citation(cited, tmp_path) is True
+
+
+def test_placeholder_mermaid_copied_across_pages_fails(tmp_path: Path) -> None:
+    content = tmp_path / "content"
+    content.mkdir()
+    block = (
+        "```mermaid\nflowchart TD\n"
+        '    A["应用模块"] --> B["业务服务"]\n'
+        '    B --> C["数据与仓库"]\n```\n'
+    )
+    (content / "a.md").write_text("# A\n\n" + block, encoding="utf-8")
+    (content / "b.md").write_text("# B\n\n" + block, encoding="utf-8")
+    pages = handbook_placeholder_mermaid_pages(content)
+    assert len(pages) == 2
+    verifier = QoderLikeVerifierService(tmp_path, strict=True)
+    result = verifier._check_handbook_placeholder_mermaid()
+    assert result.status == "FAIL"
+    assert result.reason_code == "QODER_HANDBOOK_PLACEHOLDER_MERMAID"
+
+
+def test_er_derives_real_fks_and_skips_endpoint_self_loop(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    snapshot = RepositoryScanner(
+        RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+    ).scan()
+    by_name = {model.name: model for model in snapshot.data_models}
+    assert "belongs_to:BizTreeNode" in by_name["BizTreeNode"].relationships
+    assert "belongs_to:BizTreeNode" in by_name["BizInstanceEndpoint"].relationships
+    assert "belongs_to:BizTreeNode" in by_name["ProbePolicy"].relationships
+    assert "belongs_to:ProbeEndpoint" in by_name["ProbeResult"].relationships
+    assert "belongs_to:ProbeEndpoint" not in by_name["ProbeEndpoint"].relationships
+    planner = create_planner()
+    renderer = create_renderer()
+    diagrams = planner.plan_diagram_for_page(
+        "data-model",
+        "data",
+        None,
+        {
+            "data_models": [
+                {
+                    "name": model.name,
+                    "type": model.type,
+                    "file_path": model.file_path,
+                    "primary_key": model.primary_key,
+                    "attributes": model.attributes,
+                    "attribute_types": model.attribute_types,
+                    "relationships": model.relationships,
+                }
+                for model in snapshot.data_models
+            ]
+        },
+    )
+    rendered = renderer.render_diagram(diagrams[0])
+    assert "ProbeEndpoint ||--o{ ProbeEndpoint" not in rendered
+    assert "BizTreeNode ||--o{ BizTreeNode" in rendered
+    assert "BizTreeNode ||--o{ BizInstanceEndpoint" in rendered
+    assert "BizTreeNode ||--o{ ProbePolicy" in rendered
+    assert "ProbeEndpoint ||--o{ ProbeResult" in rendered
+    assert "float Latency" in rendered
+
+
+def test_source_listen_port_prefers_config_over_readme(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    assert 1900 in collect_source_listen_ports(tmp_path)
+    commands = collect_repo_install_commands(tmp_path)
+    assert any("localhost:1900" in item for item in commands)
+    assert not any("localhost:8000" in item for item in commands)
+
+
+def test_fastapi_install_collects_poetry_alembic_uvicorn(tmp_path: Path) -> None:
+    (tmp_path / "app" / "api" / "routes").mkdir(parents=True)
+    (tmp_path / "app" / "models").mkdir(parents=True)
+    (tmp_path / "alembic" / "versions").mkdir(parents=True)
+    (tmp_path / "app" / "main.py").write_text("app = None\n", encoding="utf-8")
+    (tmp_path / "app" / "api" / "routes" / "users.py").write_text("x=1\n", encoding="utf-8")
+    (tmp_path / "app" / "models" / "user.py").write_text("x=1\n", encoding="utf-8")
+    (tmp_path / "alembic.ini").write_text("[alembic]\n", encoding="utf-8")
+    (tmp_path / "alembic" / "versions" / "001_init.py").write_text("x=1\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("[tool.poetry]\nname='x'\n", encoding="utf-8")
+    (tmp_path / "README.rst").write_text(
+        "Install\n=======\n\n::\n\n    poetry install\n    alembic upgrade head\n"
+        "    uvicorn app.main:app --reload\n",
+        encoding="utf-8",
+    )
+    commands = collect_repo_install_commands(tmp_path)
+    blob = "\n".join(commands)
+    assert "poetry install" in blob
+    assert "alembic upgrade head" in blob
+    assert "uvicorn app.main:app --reload" in blob
+    model_page = "# 数据模型\n<cite>app/api/routes/users.py:1-1</cite>\n"
+    assert has_data_model_source_citation(model_page, tmp_path) is False
+    model_page += (
+        "<cite>app/models/user.py:1-1</cite><cite>alembic/versions/001_init.py:1-1</cite>\n"
+    )
+    assert has_data_model_source_citation(model_page, tmp_path) is True
+
+
+def test_page_contract_strips_note_and_reading_boilerplate(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    cfg = RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+    service = RepoWikiService(cfg)
+    page = WikiPagePlan(
+        page_id="data-models-overview",
+        title="数据模型",
+        category=WikiTaxonomyCategory.DATA_MODELS,
+        output_path="docs/pages/models.md",
+    )
+    raw = (
+        "# 数据模型\n\n**NOTE**: This repository is not actively maintained because "
+        "this example is quite complete.\n\n"
+        "实体已确认 <cite>docs/DESIGN.md:1-2</cite> 待确认。\n\n"
+        "## 阅读说明\n\n这是套话。\n"
+    )
+    rewritten = service._enforce_qoder_page_contract(page, raw, None, False)
+    assert "NOTE" not in rewritten
+    assert "阅读说明" not in rewritten
+    assert "待确认" not in rewritten
+    assert has_data_model_source_citation(rewritten, tmp_path) is True
+
+
+def test_planner_folds_thin_readme_and_demo_api_pages(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    planner = RuleFirstPlanner(
+        resolve_repository_identity(tmp_path),
+        RepositoryScanner(
+            RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+        ).scan(),
+    ).generate()
+    ids = {page.page_id for page in planner.pages}
+    assert "readme" not in ids
+    assert "changelog" not in ids
+    assert not any(page_id.endswith("custom-probe-api-reference") for page_id in ids)

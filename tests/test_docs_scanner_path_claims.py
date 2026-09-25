@@ -215,6 +215,24 @@ def test_github_badge_url_tails_are_not_extracted_as_source_paths() -> None:
     assert "src/legacy/gone.py" in path_like
 
 
+def test_readme_stale_listen_port_is_a_conflict(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text('listen: "0.0.0.0:1900"\n', encoding="utf-8")
+    (tmp_path / "podman-compose.yml").write_text(
+        'services:\n  app:\n    ports:\n      - "1900:1900"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text(
+        "# demo\n\ncurl http://localhost:8000/health\n",
+        encoding="utf-8",
+    )
+    inv = scan_repository_docs_inventory(
+        tmp_path, _source_inventory(), incremental=False, persist_cache=False
+    )
+    readme = next(d for d in inv["documents"] if d["path"].endswith("README.md"))
+    assert "listen-port:8000" in readme["conflicting_claims"]
+    assert readme["conflict_level"] == "conflicting"
+
+
 def test_casefold_existing_doc_is_not_stale(tmp_path: Path) -> None:
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "AI_Novel_Agent_PRD_Architecture.md").write_text(

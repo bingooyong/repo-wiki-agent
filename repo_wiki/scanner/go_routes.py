@@ -199,21 +199,69 @@ def extract_go_internal_import_edges(
     return edges
 
 
-def _related_model_name(field_name: str, type_name: str, known_models: set[str]) -> str | None:
+_SELF_FK_FIELDS = frozenset({"ParentID", "ParentId", "parent_id"})
+_GORM_COLUMN_RE = re.compile(r"""column:([A-Za-z_]\w*)""")
+
+
+def _snake_field_name(name: str) -> str:
+    pieces = re.findall(r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[0-9]+", name)
+    return "_".join(piece.lower() for piece in pieces if piece)
+
+
+def _related_model_name(
+    field_name: str,
+    type_name: str,
+    known_models: set[str],
+    *,
+    current_model: str | None = None,
+    current_table: str | None = None,
+    column: str | None = None,
+    table_to_model: dict[str, str] | None = None,
+    sql_fks: list[tuple[str, str, str]] | None = None,
+) -> str | None:
     if type_name in known_models:
+        if type_name == current_model and field_name not in _SELF_FK_FIELDS:
+            return None
         return type_name
-    if field_name.endswith("ID"):
-        stem = field_name[:-2]
-        if stem in known_models:
-            return stem
-        matches = [name for name in known_models if name.endswith(stem)]
-        if len(matches) == 1:
-            return matches[0]
+    if field_name in {"ID", "Id"}:
+        return None
+    if field_name in _SELF_FK_FIELDS:
+        return current_model
+    if sql_fks and current_table and table_to_model:
+        col = (column or _snake_field_name(field_name)).lower()
+        for from_table, fk_col, to_table in sql_fks:
+            if from_table.lower() == current_table.lower() and fk_col.lower() == col:
+                dest = table_to_model.get(to_table.lower())
+                if dest and dest in known_models:
+                    return dest
+    if not field_name.endswith("ID"):
+        return None
+    stem = field_name[:-2]
+    if not stem:
+        return None
+    if stem in known_models and stem != current_model:
+        return stem
+    prefixed = [
+        name
+        for prefix in ("Probe", "Biz")
+        if (name := f"{prefix}{stem}") in known_models and name != current_model
+    ]
+    if len(prefixed) == 1:
+        return prefixed[0]
+    matches = [name for name in known_models if name.endswith(stem) and name != current_model]
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 
 def _parse_gorm_fields(
-    body: str, known_models: set[str]
+    body: str,
+    known_models: set[str],
+    *,
+    current_model: str | None = None,
+    current_table: str | None = None,
+    table_to_model: dict[str, str] | None = None,
+    sql_fks: list[tuple[str, str, str]] | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...], str | None, tuple[str, ...]]:
     attrs: list[str] = []
     types: list[str] = []
@@ -230,10 +278,24 @@ def _parse_gorm_fields(
             types.append(type_name)
         if "primaryKey" in tag or "primary_key" in tag:
             pk = name
-        related = _related_model_name(name, type_name, known_models - {name})
-        if not related or related in seen_rel:
+        column_match = _GORM_COLUMN_RE.search(tag)
+        column = column_match.group(1) if column_match else None
+        related = _related_model_name(
+            name,
+            type_name,
+            known_models,
+            current_model=current_model,
+            current_table=current_table,
+            column=column,
+            table_to_model=table_to_model,
+            sql_fks=sql_fks,
+        )
+        if not related:
             continue
-        seen_rel.add(related)
+        key = f"{related}:{'has_many' if '[]' in (indirection or '') else 'belongs_to'}"
+        if key in seen_rel:
+            continue
+        seen_rel.add(key)
         if "[]" in (indirection or ""):
             rels.append(f"has_many:{related}")
         else:
@@ -251,14 +313,25 @@ _SQL_FK_RE = re.compile(
     r"FOREIGN KEY\s*\(\s*`?(\w+)`?\s*\)\s*REFERENCES\s+`?(\w+)`?",
     re.IGNORECASE,
 )
+_SQL_INLINE_REF_RE = re.compile(
+    r"`?(\w+)`?\s+\w+[^,\n]*?\s+REFERENCES\s+`?(\w+)`?",
+    re.IGNORECASE,
+)
 
 
 def extract_sql_foreign_keys(text: str) -> list[tuple[str, str, str]]:
     """Return ``(from_table, column, to_table)`` from CREATE TABLE FK clauses."""
     found: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
     for match in _SQL_CREATE_TABLE_RE.finditer(text or ""):
         table = match.group(1)
-        for column, dest in _SQL_FK_RE.findall(match.group(2)):
+        body = match.group(2)
+        pairs = list(_SQL_FK_RE.findall(body)) + list(_SQL_INLINE_REF_RE.findall(body))
+        for column, dest in pairs:
+            key = (table.lower(), column.lower(), dest.lower())
+            if key in seen:
+                continue
+            seen.add(key)
             found.append((table, column, dest))
     return found
 
@@ -467,10 +540,20 @@ def extract_go_data_models(files: Sequence[tuple[str, str]]) -> list[GoDataModel
             )
             raw.append((name, path, body, lineno, kind))
     known = {name for name, _path, _body, _lineno, _kind in raw}
+    table_to_model = {table.lower(): name for name, table in table_names.items() if table}
+    sql_fks: list[tuple[str, str, str]] = []
+    for _path, text in files:
+        if _path.replace("\\", "/").lower().endswith(".sql"):
+            sql_fks.extend(extract_sql_foreign_keys(text))
     models: list[GoDataModel] = []
     for name, path, body, lineno, kind in raw:
         attributes, attribute_types, primary_key, relations = _parse_gorm_fields(
-            body, known - {name}
+            body,
+            known,
+            current_model=name,
+            current_table=table_names.get(name),
+            table_to_model=table_to_model,
+            sql_fks=sql_fks,
         )
         models.append(
             GoDataModel(

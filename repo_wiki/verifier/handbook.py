@@ -49,6 +49,8 @@ _INSTALL_CLUE_PATTERNS = (
     ("pnpm", re.compile(r"\bpnpm\b", re.I)),
     ("pip install", re.compile(r"\bpip(?:3)?\s+install\b", re.I)),
     ("poetry", re.compile(r"\bpoetry\s+(?:install|run)\b", re.I)),
+    ("alembic", re.compile(r"\balembic\s+upgrade\b", re.I)),
+    ("uvicorn", re.compile(r"\buvicorn\s+[A-Za-z0-9_.:-]+", re.I)),
     ("go build", re.compile(r"\bgo\s+build\b", re.I)),
     ("go run", re.compile(r"\bgo\s+run\b", re.I)),
     ("go test", re.compile(r"\bgo\s+test\b", re.I)),
@@ -293,7 +295,23 @@ _RUN_HEADING_RE = re.compile(
 )
 _BADGE_LINE_RE = re.compile(r"img\.shields\.io|badge/|!\[[^\]]*\]\(https?://", re.I)
 _GO_BUILD_PATH_RE = re.compile(r"\bgo\s+build\b[^\n]*?\s(\./cmd/[A-Za-z0-9_./-]+)")
+_GO_BUILD_MAIN_RE = re.compile(
+    r"\bgo\s+build\b[^\n]*?(\./cmd/[A-Za-z0-9_-]+)/main\.go\b",
+    re.IGNORECASE,
+)
 _BIN_FLAG_RE = re.compile(r"\./bin/([A-Za-z0-9_-]+)\s+(--?[A-Za-z0-9_-]+)")
+_SOURCE_LISTEN_RE = re.compile(
+    r"""(?ix)
+    listen(?:_address|_addr)?\s*[:=]\s*["']?(?:[\d.]+|localhost)?:(\d{2,5})
+    | defaultListen\w*[^0-9]{0,24}(\d{4,5})
+    """
+)
+_COMPOSE_PORT_RE = re.compile(r"""["'](\d{2,5}):(\d{2,5})["']""")
+_DOC_LOCALHOST_PORT_RE = re.compile(r"localhost:(\d{2,5})", re.IGNORECASE)
+_GENERIC_PLACEHOLDER_MERMAID_RE = re.compile(
+    r'A\["应用模块"\]\s*-->\s*B\["业务服务"\].*?B\s*-->\s*C\["数据与仓库"\]',
+    re.DOTALL,
+)
 _REDIRECT_FILE_RE = re.compile(r"<\s*([A-Za-z0-9_./+*-]+\.\w+)")
 _CONFIG_FLAG_RE = re.compile(r"--?config(?:-file)?\s+([A-Za-z0-9_./-]+)")
 _CITE_RANGE_RE = re.compile(r"<cite>\s*([^<:]+):(\d+)(?:-(\d+))?\s*</cite>", re.IGNORECASE)
@@ -371,9 +389,6 @@ def has_readme_run_section_citation(markdown: str, repo_root: Path) -> bool:
             continue
         if _text_has_install_clue(cited):
             return True
-        for run_start, run_end in run_ranges:
-            if start <= run_end and end >= run_start:
-                return True
     if not found_readme:
         return False
     return not run_ranges
@@ -411,7 +426,10 @@ def install_fenced_commands_are_grounded(markdown: str, repo_root: Path) -> bool
     for body in iter_fenced_code_bodies(markdown or ""):
         for match in _GO_BUILD_PATH_RE.finditer(body):
             saw_path_command = True
-            if not _cmd_package_exists(repo_root, match.group(1)):
+            target = match.group(1)
+            if not _cmd_package_exists(repo_root, target):
+                return False
+            if install_go_build_targets_main_with_siblings(target, repo_root):
                 return False
         for match in _CONFIG_FLAG_RE.finditer(body):
             saw_path_command = True
@@ -434,6 +452,128 @@ def install_fenced_commands_are_grounded(markdown: str, repo_root: Path) -> bool
     return True if saw_path_command or "```" in (markdown or "") else True
 
 
+def _go_package_dir_from_build_target(target: str) -> str:
+    rel = target.lstrip("./")
+    if rel.endswith("/main.go"):
+        return rel[: -len("/main.go")]
+    return rel
+
+
+def _go_package_has_sibling_sources(repo_root: Path, package_rel: str) -> bool:
+    pkg = repo_root / package_rel.lstrip("./")
+    if not pkg.is_dir():
+        return False
+    return any(
+        path.is_file() and path.suffix == ".go" and not path.name.endswith("_test.go")
+        for path in pkg.glob("*.go")
+        if path.name != "main.go"
+    )
+
+
+def install_go_build_targets_main_with_siblings(target: str, repo_root: Path) -> bool:
+    """True when ``go build ./cmd/X/main.go`` would miss sibling package files."""
+    rel = target.lstrip("./")
+    if not rel.endswith("/main.go"):
+        return False
+    return _go_package_has_sibling_sources(repo_root, _go_package_dir_from_build_target(target))
+
+
+def install_go_builds_use_package_dir(markdown: str, repo_root: Path) -> bool:
+    """False when a fenced ``go build .../main.go`` has sibling non-test ``.go`` files."""
+    if not repo_root.is_dir():
+        return True
+    for body in iter_fenced_code_bodies(markdown or ""):
+        for match in _GO_BUILD_MAIN_RE.finditer(body):
+            if _go_package_has_sibling_sources(repo_root, match.group(1).lstrip("./")):
+                return False
+        for match in _GO_BUILD_PATH_RE.finditer(body):
+            if install_go_build_targets_main_with_siblings(match.group(1), repo_root):
+                return False
+    return True
+
+
+def normalize_go_build_command(command: str, repo_root: Path | None = None) -> str:
+    """Rewrite ``go build ./cmd/X/main.go`` to the package directory.
+
+    Always emit the package dir: ``go build ./cmd/X/main.go`` fails when the
+    package has sibling non-test ``.go`` files, and is never more correct
+    than building the directory.
+    """
+    del repo_root
+    return _GO_BUILD_MAIN_RE.sub(
+        lambda match: match.group(0).replace(f"{match.group(1)}/main.go", match.group(1)),
+        command,
+    )
+
+
+def collect_source_listen_ports(repo_root: Path) -> set[int]:
+    """Listen ports from config.go / config.yaml / compose mappings."""
+    ports: set[int] = set()
+    if not repo_root.is_dir():
+        return ports
+    for rel in ("config.yaml", "config.yml", "config.go"):
+        path = repo_root / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for match in _SOURCE_LISTEN_RE.finditer(text):
+            for group in match.groups():
+                if group:
+                    ports.add(int(group))
+    for name in (
+        "podman-compose.yml",
+        "podman-compose.yaml",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yml",
+        "compose.yaml",
+    ):
+        path = repo_root / name
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for host, container in _COMPOSE_PORT_RE.findall(text):
+            if host == container:
+                ports.add(int(host))
+    return ports
+
+
+def collect_doc_listen_ports(text: str) -> set[int]:
+    return {int(match.group(1)) for match in _DOC_LOCALHOST_PORT_RE.finditer(text or "")}
+
+
+def preferred_source_listen_port(repo_root: Path) -> int | None:
+    ports = collect_source_listen_ports(repo_root)
+    if not ports:
+        return None
+    if 1900 in ports:
+        return 1900
+    return min(ports)
+
+
+def rewrite_install_command_ports(command: str, repo_root: Path) -> str:
+    port = preferred_source_listen_port(repo_root)
+    if port is None or "localhost:" not in command.lower():
+        return command
+    return _DOC_LOCALHOST_PORT_RE.sub(f"localhost:{port}", command)
+
+
+def mermaid_block_is_generic_placeholder(block: str) -> bool:
+    return bool(_GENERIC_PLACEHOLDER_MERMAID_RE.search(block or ""))
+
+
+def handbook_placeholder_mermaid_pages(content_dir: Path | None) -> list[str]:
+    """Pages that reuse the generic 应用模块→业务服务→数据与仓库 flowchart."""
+    if content_dir is None or not content_dir.exists():
+        return []
+    found: list[str] = []
+    for path in iter_markdown_pages(content_dir):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if mermaid_block_is_generic_placeholder(text):
+            found.append(path.as_posix())
+    return found
+
+
 _GENERIC_GO_INSTALL = re.compile(
     r"\bgo\s+(?:build|run|mod\s+download)\s+(?:-o\s+\S+\s+)?(?:\.|./\.\.\.)\b",
     re.IGNORECASE,
@@ -453,6 +593,9 @@ _REPO_INSTALL_LINE_PATTERNS = (
     re.compile(r"\buv\s+run(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
     re.compile(r"\bnpm\s+install(?:\s+[A-Za-z0-9_@/-]+){0,4}", re.I),
     re.compile(r"\bpip(?:3)?\s+install(?:\s+[A-Za-z0-9_\[\]'\"=-]+){0,4}", re.I),
+    re.compile(r"\bpoetry\s+install(?:\s+[A-Za-z0-9_.-]*){0,4}", re.I),
+    re.compile(r"\balembic\s+upgrade\s+head\b", re.I),
+    re.compile(r"\buvicorn\s+[A-Za-z0-9_.:-]+(?:\s+--reload)?", re.I),
 )
 
 
@@ -461,16 +604,22 @@ def _install_command_priority(command: str) -> tuple[int, str]:
     score = 50
     if "podman-compose" in low or "docker compose" in low or "docker-compose" in low:
         score = 0
-    elif "schema.sql" in low:
+    elif "poetry install" in low or "pip install" in low or "uv sync" in low:
         score = 1
-    elif "ccagent" in low:
-        score = 2
-    elif "curl" in low and "health" in low:
-        score = 3
-    elif low.startswith("make "):
-        score = 4
     elif "go build" in low:
+        score = 2
+    elif "alembic" in low:
+        score = 3
+    elif "schema.sql" in low:
+        score = 4
+    elif "uvicorn" in low or low.startswith("./bin/"):
         score = 5
+    elif "ccagent" in low:
+        score = 6
+    elif "curl" in low and "health" in low:
+        score = 7
+    elif low.startswith("make "):
+        score = 8
     if any(token in low for token in _DEMO_CMD_NAMES):
         score += 40
     return (score, command)
@@ -500,7 +649,7 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
         for raw in text.splitlines():
             line = raw.split("#", 1)[0].strip()
             if re.search(r"\b(?:go\s+build|podman-compose|docker-compose|go\s+run)\b", line):
-                _add(line)
+                _add(normalize_go_build_command(line, root))
         if re.search(r"^install:", text, re.M):
             _add("make install")
         if re.search(r"^up:", text, re.M):
@@ -513,17 +662,25 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
         else:
             core_mains.append(main)
     for main in core_mains or demo_mains:
-        rel = main.relative_to(root).as_posix()
-        _add(f"go build -o bin/{main.parent.name} ./{rel}")
+        pkg = main.parent.relative_to(root).as_posix()
+        _add(f"go build -o bin/{main.parent.name} ./{pkg}")
     if (root / "db" / "schema.sql").is_file():
         _add("mysql < db/schema.sql")
-    for name in ("README.md", "QUICKSTART.md"):
+    if (root / "pyproject.toml").is_file():
+        pyproject = (root / "pyproject.toml").read_text(encoding="utf-8", errors="ignore")
+        if "[tool.poetry]" in pyproject or "poetry" in pyproject.lower():
+            _add("poetry install")
+    if (root / "alembic.ini").is_file() or (root / "alembic").is_dir():
+        _add("alembic upgrade head")
+    if (root / "app" / "main.py").is_file():
+        _add("uvicorn app.main:app --reload")
+    for name in ("README.md", "README.rst", "QUICKSTART.md"):
         path = root / name
         if not path.is_file():
             continue
         for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
             line = raw_line.strip().lstrip("$").strip()
-            if not line or line.startswith("#"):
+            if not line or line.startswith("#") or line.startswith(".."):
                 continue
             for pattern in _REPO_INSTALL_LINE_PATTERNS:
                 match = pattern.search(line)
@@ -531,7 +688,12 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
                     continue
                 command = " ".join(match.group(0).split()).rstrip(".,;:)")
                 if command and len(command) <= 120:
-                    _add(command)
+                    _add(
+                        rewrite_install_command_ports(
+                            normalize_go_build_command(command, root),
+                            root,
+                        )
+                    )
     commands.sort(key=_install_command_priority)
     return commands[:limit]
 
@@ -540,6 +702,7 @@ def architecture_core_packages(repo_root: Path) -> list[str]:
     """Product packages an architecture page should cite when they exist."""
     preferred = (
         "cmd/ccagent",
+        "cmd/ccprobe-control",
         "internal/control",
         "internal/services",
         "internal/repository",
@@ -556,6 +719,12 @@ def architecture_core_packages(repo_root: Path) -> list[str]:
     return found
 
 
+def architecture_required_packages(repo_root: Path) -> list[str]:
+    """Packages that must appear on the architecture page when they exist."""
+    cores = set(architecture_core_packages(repo_root))
+    return [rel for rel in ("app/api/routes", "internal/exporter") if rel in cores]
+
+
 def has_architecture_core_citation(markdown: str, repo_root: Path) -> bool:
     """True when an architecture page cites real core packages, not only demos."""
     cores = architecture_core_packages(repo_root)
@@ -564,25 +733,47 @@ def has_architecture_core_citation(markdown: str, repo_root: Path) -> bool:
     cited = " ".join(
         match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")
     ).lower()
+    if any(rel.lower() not in cited for rel in architecture_required_packages(repo_root)):
+        return False
     hits = sum(1 for rel in cores if rel.lower() in cited)
     return hits >= min(2, len(cores))
 
 
-def has_data_model_source_citation(markdown: str, repo_root: Path) -> bool:
-    """True when a data-model page cites models/ or schema.sql when those exist."""
-    needs: list[str] = []
+def data_model_required_sources(repo_root: Path) -> list[str]:
+    """Model packages that a data-model page must cite when they exist.
+
+    ``schema.sql`` alone is not enough when GORM/SQLAlchemy model sources exist.
+    """
+    required: list[str] = []
     if (repo_root / "internal" / "models").is_dir():
-        needs.append("internal/models")
-    if (repo_root / "db" / "schema.sql").is_file():
-        needs.append("db/schema.sql")
+        required.append("internal/models")
     if (repo_root / "app" / "models").is_dir():
-        needs.append("app/models")
-    if not needs:
+        required.append("app/models")
+    alembic = repo_root / "alembic"
+    if alembic.is_dir() and any(alembic.rglob("*.py")):
+        required.append("alembic")
+    return required
+
+
+def data_model_optional_sources(repo_root: Path) -> list[str]:
+    optional: list[str] = []
+    if (repo_root / "db" / "schema.sql").is_file():
+        optional.append("db/schema.sql")
+    return optional
+
+
+def has_data_model_source_citation(markdown: str, repo_root: Path) -> bool:
+    """True when a data-model page cites every existing model package."""
+    required = data_model_required_sources(repo_root)
+    optional = data_model_optional_sources(repo_root)
+    if not required and not optional:
         return True
     cited = " ".join(
         match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")
     ).lower()
-    return any(need.lower() in cited for need in needs)
+    if required:
+        return all(need.lower() in cited for need in required)
+    return any(need.lower() in cited for need in optional)
 
 
 def has_api_routes_citation(

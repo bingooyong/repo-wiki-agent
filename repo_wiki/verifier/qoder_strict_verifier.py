@@ -33,6 +33,7 @@ from repo_wiki.verifier.handbook import (
     contains_generator_meta,
     existing_readme_names,
     find_matching_pages,
+    handbook_placeholder_mermaid_pages,
     has_api_routes_citation,
     has_architecture_core_citation,
     has_data_model_source_citation,
@@ -40,6 +41,7 @@ from repo_wiki.verifier.handbook import (
     has_readme_citation,
     has_readme_run_section_citation,
     install_fenced_commands_are_grounded,
+    install_go_builds_use_package_dir,
     install_run_clue_count,
     iter_markdown_pages,
     overview_identity_satisfied,
@@ -65,6 +67,8 @@ _PROMPT_LEAK_PHRASES = (
     "evidence 之外",
     "没有发现顶层 readme",
     "the repo gives no route table",
+    "(no reference document available)",
+    "no reference document available",
 )
 _QUALITY_METRIC_LEAK = re.compile(
     r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b|\b21\s*/\s*25\b",
@@ -300,6 +304,7 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_API_ROUTE_FILE",
         "QODER_HANDBOOK_ARCHITECTURE_CORE",
         "QODER_HANDBOOK_DATA_MODEL_SOURCE",
+        "QODER_HANDBOOK_PLACEHOLDER_MERMAID",
         "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -454,6 +459,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_api_route_file(),
             self._check_handbook_architecture_core(),
             self._check_handbook_data_model_source(),
+            self._check_handbook_placeholder_mermaid(),
             self._check_qoder_source_evidence(),
         ]
 
@@ -2676,6 +2682,7 @@ class QoderLikeVerifierService(VerifierService):
                 or not has_readme_citation(text, readme_names)
                 or not has_readme_run_section_citation(text, repo_root)
                 or not install_fenced_commands_are_grounded(text, repo_root)
+                or not install_go_builds_use_package_dir(text, repo_root)
             ):
                 offenders.append(page.as_posix())
         if offenders:
@@ -2791,6 +2798,20 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-data-model-source",
             "Data-model page cites model sources",
+        )
+
+    def _check_handbook_placeholder_mermaid(self) -> CheckResult:
+        pages = handbook_placeholder_mermaid_pages(self._find_content_dir())
+        if len(pages) < 2:
+            return self._handbook_pass(
+                "qoder-handbook-placeholder-mermaid",
+                "No generic placeholder mermaid copied across pages",
+            )
+        return self._handbook_fail(
+            "qoder-handbook-placeholder-mermaid",
+            "QODER_HANDBOOK_PLACEHOLDER_MERMAID",
+            "Generic placeholder mermaid is copied across handbook pages",
+            {"pages": pages},
         )
 
     def _check_qoder_source_evidence(self) -> CheckResult:
