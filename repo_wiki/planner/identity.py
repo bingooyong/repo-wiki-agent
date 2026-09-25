@@ -28,7 +28,22 @@ _README_CANDIDATE_NAMES = (
     "README_CN.md",
     "README_en.md",
 )
-_GENERIC_README_TITLES = frozenset({"readme", "overview", "index", "documentation", "docs"})
+_GENERIC_README_TITLES = frozenset(
+    {
+        "readme",
+        "overview",
+        "index",
+        "documentation",
+        "docs",
+        "quickstart",
+        "installation",
+        "install",
+        "usage",
+    }
+)
+_README_COMMAND_RE = re.compile(
+    r"^(export |docker |podman |poetry |alembic |uvicorn |touch |echo |mysql |git |go |\$ )"
+)
 _SECONDARY_README_MARKERS = (
     "scaffold",
     "template",
@@ -53,6 +68,10 @@ def has_img_shields_io_url(text: str) -> bool:
 
 
 _RST_SUBSTITUTION_LINE_RE = re.compile(r"^(\|[^|]+\|\s*)+$")
+_README_NOTE_RE = re.compile(
+    r"More modern and relevant examples can be found in",
+    re.IGNORECASE,
+)
 _PYPROJECT_STRING_FIELD_RE = re.compile(
     r'^\s*(name|version|description)\s*=\s*"([^"]+)"', re.MULTILINE
 )
@@ -147,18 +166,37 @@ def _readme_title_and_description(root: Path) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _trim_identity_description(text: str, limit: int = 200) -> str:
+    """Keep a complete sentence/word. Never emit a mid-word stump like ``in oth``."""
+    stripped = (text or "").strip()
+    if len(stripped) <= limit:
+        return stripped
+    cut = stripped[:limit]
+    sentence = max(cut.rfind("。"), cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    if sentence >= 40:
+        return cut[: sentence + 1].strip()
+    space = cut.rfind(" ")
+    if space >= 40:
+        return cut[:space].rstrip(" ,;:") + "."
+    return cut.rstrip()
+
+
 def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
     substantial: list[str] = []
     for line in content.splitlines():
         stripped = line.strip()
-        if _is_rst_noise_line(stripped):
+        if (
+            _is_rst_noise_line(stripped)
+            or _README_NOTE_RE.search(stripped)
+            or _README_COMMAND_RE.match(stripped)
+        ):
             continue
         if stripped.startswith("#"):
             stripped = stripped.lstrip("#").strip()
-            if not stripped or _is_rst_noise_line(stripped):
+            if not stripped or _is_rst_noise_line(stripped) or _README_NOTE_RE.search(stripped):
                 continue
         substantial.append(stripped)
-        if len(substantial) >= 4:
+        if len(substantial) >= 8:
             break
     if not substantial:
         return None, None
@@ -171,7 +209,7 @@ def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
         joined = " ".join(body_parts).strip()
         description = joined or title
     if description:
-        description = description[:200]
+        description = _trim_identity_description(description)
     if not _is_product_sentence(description):
         description = None
     return title, description

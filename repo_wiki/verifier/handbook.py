@@ -6,11 +6,13 @@ import json
 import re
 from pathlib import Path
 
+_README_SAMPLE_LEAK = "".join(("README sample", ", not in code"))
 HANDBOOK_META_PHRASES: tuple[str, ...] = (
     "fallback composer",
     "repo-agent",
     "该页面对应",
     "evidence ranking",
+    _README_SAMPLE_LEAK,
 )
 
 GENERATOR_META_REJECTION = "Handbook generator meta content"
@@ -39,7 +41,7 @@ _CITE_RE = re.compile(r"<cite>\s*([^<]+?)\s*</cite>", re.IGNORECASE)
 _INSTRUCTION_VOICE_RE = re.compile(
     r"不要只标|如果证据不足|不要在此凭空扩展|不要用套话填空|不要过度推断"
     r"|引用时写|引用时使用"
-    r"|进程角色必须|禁止写 cmd/|禁止用「前者"
+    r"|进程角色必须|禁止写 cmd/|禁止用「前者|" + re.escape(_README_SAMPLE_LEAK)
 )
 _EVIDENCE_META_TALK_RE = re.compile(
     r"证据片段|证据范围|"

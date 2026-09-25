@@ -494,7 +494,7 @@ def _factory_return_class(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str |
             names.add(named)
     if len(names) == 1:
         return next(iter(names))
-    # RealWorld: `-> AppSettings` plus `return config()` is not unique; keep the
+    # Settings injection: `-> AppSettings` plus `return config()` is not unique; keep the
     # annotation. Prefix lookup later succeeds only if that class has a string
     # constant attr (e.g. api_prefix="/api"); otherwise no prefix is invented.
     if annotated and annotated not in _ROUTER_CTORS:

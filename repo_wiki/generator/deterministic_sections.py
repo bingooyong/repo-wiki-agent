@@ -36,7 +36,7 @@ _AUTH_ENV_RE = re.compile(
 )
 _AUTH_HEADER_RE = re.compile(r'["\'](X-[A-Za-z0-9-]*Token)["\']')
 _AUTH_FILE_HINT_RE = re.compile(
-    r"apiAuthMiddleware|Bearer|Authorization|jwt|Authenticate|Apply\b",
+    r"Bearer|Authorization|jwt|Authenticate|Apply\b|\w*Auth\w*Middleware",
     re.I,
 )
 
@@ -128,7 +128,7 @@ def discover_auth_implementation(root: Path) -> str:
             env_name = quoted.group(1) if quoted else env_hit.group(0)
         if header_hit:
             header = header_hit.group(1)
-        cite = cite_first_match(root, rel, r"Env[A-Z][A-Za-z0-9]*Token|apiAuthMiddleware|Bearer")
+        cite = cite_first_match(root, rel, r"Env[A-Z][A-Za-z0-9]*Token|Bearer|\w*Auth\w*")
         if cite and (env_hit or header_hit or "middleware" in text.lower()):
             best = rel
             best_cite = cite
@@ -294,7 +294,7 @@ def leftover_request_flow_is_untrustworthy(block: str) -> bool:
     text = block or ""
     if "ErrorWrapper" in text:
         return True
-    if "/healthz" in text and re.search(r"X-[A-Za-z0-9-]*Token|APIAuth", text):
+    if "/healthz" in text and re.search(r"X-[A-Za-z0-9-]*Token", text):
         return True
     if re.search(r"GET\s+/force-resync", text):
         return True
@@ -948,6 +948,54 @@ def strip_meta_instructions(content: str) -> str:
     return "\n".join(kept)
 
 
+def _readme_shell_lines(root: Path) -> list[str]:
+    """Command lines copied from README / migration notes, never invented."""
+    blobs: list[str] = [read_readme_text(root)]
+    for rel in ("db/migrations/README.md", "QUICKSTART.md"):
+        path = root / rel
+        if path.is_file():
+            blobs.append(path.read_text(encoding="utf-8", errors="ignore"))
+    found: list[str] = []
+    prefixes = (
+        "export ",
+        "docker ",
+        "podman ",
+        "poetry ",
+        "alembic ",
+        "uvicorn ",
+        "touch ",
+        "echo ",
+        "mysql ",
+        "createdb ",
+        "go ",
+        "git clone",
+    )
+    for blob in blobs:
+        for raw in blob.splitlines():
+            stripped = raw.strip().lstrip("$").strip()
+            if stripped.startswith(prefixes):
+                found.append(stripped)
+    return found
+
+
+def _first_readme_command(root: Path, *needles: str) -> str:
+    lowered = [needle.lower() for needle in needles]
+    for line in _readme_shell_lines(root):
+        hay = line.lower()
+        if all(needle in hay for needle in lowered):
+            return line
+    return ""
+
+
+def _schema_import_command(root: Path) -> str:
+    found = _first_readme_command(root, "mysql", "schema.sql")
+    if found:
+        return found
+    if (root / "db" / "schema.sql").is_file():
+        return "mysql < db/schema.sql"
+    return ""
+
+
 def _go_local_db_start_lines(root: Path) -> list[str]:
     lines: list[str] = []
     readme = read_readme_text(root).splitlines()
@@ -1009,9 +1057,7 @@ def build_go_install_section(root: Path) -> str:
     )
     run = cite_readme_line(root, f"./bin/{binary}") or cite_readme_line(root, "./bin/")
     health = cite_readme_line(root, "/health")
-    schema_cmd = "podman exec mysql-db mysql < db/schema.sql"
-    if (root / "db" / "schema.sql").is_file() is False:
-        schema_cmd = "mysql < db/schema.sql"
+    schema_cmd = _schema_import_command(root) or "# 按仓库 README 导入 schema"
     return "\n".join(
         [
             "## 安装步骤",
@@ -1047,7 +1093,7 @@ def build_go_install_section(root: Path) -> str:
             *_go_local_db_start_lines(root),
             "```",
             "",
-            f"2. 再导入结构。 {cite_readme_line(root, 'podman exec mysql-db', last=True) or schema}",
+            f"2. 再导入结构。 {cite_readme_line(root, 'schema.sql', last=True) or schema}",
             "",
             "```bash",
             "# 本地路径：导入结构",
@@ -1076,11 +1122,27 @@ def build_fastapi_install_section(root: Path) -> str:
     poetry = cite_readme_line(root, "poetry install")
     alembic = cite_readme_line(root, "alembic upgrade")
     uvicorn = cite_readme_line(root, "uvicorn app.main:app")
-    pg = cite_readme_line(root, "docker run --name pgdb") or cite_readme_line(root, "POSTGRES")
-    compose_db = cite_readme_line(root, "docker-compose up -d db") or cite_readme_line(
-        root, "docker-compose up"
+    pg = cite_readme_line(root, "docker run") or cite_readme_line(root, "POSTGRES")
+    compose_db = cite_readme_line(root, "docker-compose up") or cite_readme_line(
+        root, "docker compose up"
     )
-    compose_app = cite_readme_line(root, "docker-compose up -d app")
+    env_lines = [
+        line
+        for line in _readme_shell_lines(root)
+        if line.startswith(("touch .env", "echo APP_ENV", "echo DATABASE_URL", "echo SECRET_KEY"))
+    ]
+    docker_line = _first_readme_command(root, "docker run") or _first_readme_command(
+        root, "podman run"
+    )
+    poetry_line = _first_readme_command(root, "poetry install") or "poetry install"
+    alembic_line = _first_readme_command(root, "alembic upgrade") or "alembic upgrade head"
+    uvicorn_line = _first_readme_command(root, "uvicorn") or "uvicorn app.main:app --reload"
+    compose_line = _first_readme_command(root, "docker-compose up") or _first_readme_command(
+        root, "docker compose up"
+    )
+    env_block = "\n".join(env_lines) if env_lines else "touch .env"
+    docker_block = docker_line or "# 按仓库 README 启动数据库"
+    compose_block = compose_line or "# 按仓库 README 启动编排"
     return "\n".join(
         [
             "## 安装步骤",
@@ -1092,35 +1154,31 @@ def build_fastapi_install_section(root: Path) -> str:
             f"1. 创建 `.env`（alembic `env.py` 会加载应用设置，必须先有 APP_ENV、DATABASE_URL、SECRET_KEY）。 {env}",
             "",
             "```bash",
-            "touch .env",
-            "echo APP_ENV=dev >> .env",
-            "echo DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/rwdb >> .env",
-            "echo SECRET_KEY=change-me >> .env",
+            env_block,
             "```",
             "",
             f"2. 先启动 PostgreSQL。 {pg}",
             "",
             "```bash",
-            "docker run --name pgdb --rm -e POSTGRES_USER=postgres "
-            "-e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=rwdb -p 5432:5432 postgres",
+            docker_block,
             "```",
             "",
             f"3. 安装依赖。 {poetry}",
             "",
             "```bash",
-            "poetry install",
+            poetry_line,
             "```",
             "",
             f"4. 迁移数据库。 {alembic}",
             "",
             "```bash",
-            "poetry run alembic upgrade head",
+            alembic_line,
             "```",
             "",
             f"5. 启动应用。 {uvicorn}",
             "",
             "```bash",
-            "poetry run uvicorn app.main:app --reload",
+            uvicorn_line,
             "```",
             "",
             "### 路径 B：Compose",
@@ -1128,17 +1186,13 @@ def build_fastapi_install_section(root: Path) -> str:
             f"1. 先创建 `.env`（compose 通过 env_file 注入 APP_ENV、DATABASE_URL、SECRET_KEY）。 {env}",
             "",
             "```bash",
-            "touch .env",
-            "echo APP_ENV=dev >> .env",
-            "echo DATABASE_URL=postgresql://postgres:postgres@db:5432/rwdb >> .env",
-            "echo SECRET_KEY=change-me >> .env",
+            env_block,
             "```",
             "",
-            f"2. 先启动数据库服务，再启动应用服务。 {compose_db} {compose_app}",
+            f"2. 按仓库文档启动编排。 {compose_db}",
             "",
             "```bash",
-            "docker-compose up -d db",
-            "docker-compose up -d app",
+            compose_block,
             "```",
             "",
         ]
@@ -1794,7 +1848,9 @@ def apply_deterministic_rewrites(
             )
     if "数据模型" in (title or "") or "data" in (category or "").lower():
         block = build_data_model_cite_block(root)
-        if block and "ProbeEndpoint" not in text and "create_table" not in text:
+        structs = discover_go_struct_names(root)
+        already = "create_table" in text or any(name in text for name in structs[:12])
+        if block and not already:
             text = replace_h2_section(text, ("实体定义", "持久化表", "数据模型"), block)
     if is_security_owner_page(page_id=page_id, title=title) or (
         not page_id and title in {"安全合规", "安全合规概览"}

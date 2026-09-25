@@ -245,8 +245,6 @@ def _related_model_name(
         return None
     if field_name in _SELF_FK_FIELDS:
         return current_model
-    if field_name in {"ServiceID", "ServiceId"} and "BizTreeNode" in known_models:
-        return "BizTreeNode"
     if sql_fks and current_table and table_to_model:
         col = (column or _snake_field_name(field_name)).lower()
         for from_table, fk_col, to_table in sql_fks:

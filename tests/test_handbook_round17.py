@@ -49,6 +49,15 @@ _FORBIDDEN_LITERALS = (
     "not actively maintained",
     "不再积极维护",
     "1900",
+    "rwdb",
+    "pgdb",
+    "probe-network",
+    "mysql-data",
+    "mysql-db",
+    "ProbeEndpoint",
+    "BizTreeNode",
+    "APIAuth",
+    "README sample, not in code",
 )
 _FORBIDDEN_PATH_JOINS = (
     r"""["']cmd["']\s*,\s*["']ccagent["']""",
@@ -57,6 +66,12 @@ _FORBIDDEN_PATH_JOINS = (
     r"""["']cmd["']\s*/\s*["']ccprobe-control["']""",
     r"""["']cmd["']\s*,\s*["']probe-agent["']""",
     r"""["']cmd["']\s*/\s*["']probe-agent["']""",
+    r"""Path\(\s*["']cmd["']\s*\)\s*/\s*["']ccagent["']""",
+    r"""Path\(\s*["']cmd["']\s*\)\s*/\s*["']ccprobe-control["']""",
+    r"""Path\(\s*["']cmd["']\s*\)\s*/\s*["']probe-agent["']""",
+    r"""os\.path\.join\(\s*["']cmd["']\s*,\s*["']ccagent["']""",
+    r"""os\.path\.join\(\s*["']cmd["']\s*,\s*["']ccprobe-control["']""",
+    r"""os\.path\.join\(\s*["']cmd["']\s*,\s*["']probe-agent["']""",
 )
 
 
@@ -198,6 +213,38 @@ def test_role_section_gated_on_derived_facts(tmp_path: Path) -> None:
     assert "进程角色见整体架构概览" not in out
 
 
+def test_identity_does_not_truncate_readme_mid_word() -> None:
+    from repo_wiki.planner.identity import _parse_readme_identity
+
+    title, description = _parse_readme_identity(
+        "**NOTE**: This repository is not actively maintained because this example "
+        "is quite complete and does its primary goal - passing Conduit testsuite.\n\n"
+        "More modern and relevant examples can be found in other repositories with "
+        "``fastapi`` tag on GitHub.\n"
+    )
+    assert description
+    assert "in oth" not in description
+    assert "other repositories" not in description
+    assert "Conduit" in description
+
+
+def test_prompt_echo_flags_readme_sample_english(tmp_path: Path) -> None:
+    from repo_wiki.verifier.handbook import (
+        contains_generator_meta,
+        handbook_reader_hygiene_offenders,
+    )
+
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "身份认证.md").write_text(
+        "# 身份认证\n\nApplyAuth 是 README sample, not in code。\n",
+        encoding="utf-8",
+    )
+    assert contains_generator_meta("README sample, not in code")
+    offenders = handbook_reader_hygiene_offenders(content, tmp_path)
+    assert offenders.get("instruction_voice")
+
+
 def test_readme_note_is_found_by_structure(tmp_path: Path) -> None:
     (tmp_path / "README.rst").write_text(
         ".. image:: logo.png\n\n----------\n\n"
@@ -304,11 +351,12 @@ def test_no_repo_specific_literals_in_audited_source() -> None:
     for path in sorted((repo / "repo_wiki").rglob("*.py")):
         text = path.read_text(encoding="utf-8")
         rel = path.relative_to(repo).as_posix()
+        lowered = text.lower()
         for token in _FORBIDDEN_LITERALS:
-            if token in text:
+            if token.lower() in lowered:
                 hits.append(f"{rel}:{token}")
         for pattern in _FORBIDDEN_PATH_JOINS:
-            if re.search(pattern, text):
+            if re.search(pattern, text, flags=re.I):
                 hits.append(f"{rel}:path-join:{pattern}")
     assert hits == []
 

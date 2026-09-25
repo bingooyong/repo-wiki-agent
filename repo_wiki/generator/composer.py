@@ -1244,8 +1244,8 @@ class LLMPageComposer:
             return ""
         listed = "、".join(sorted(set(names))[:8])
         return (
-            f"- 以下标识只出现在 README，源码中不存在（README sample, not in code）：{listed}。"
-            "不要写成接口合同，应标明为文档示例。"
+            f"- 以下标识只出现在仓库说明文档，源码中没有对应定义（勿把文档示例写成接口）：{listed}。"
+            "正文里要标明这是文档示例，不要写成源码接口合同。"
         )
 
     def _build_low_confidence_guidance(self, input: ComposerInput) -> str:

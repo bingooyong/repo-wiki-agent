@@ -178,7 +178,7 @@ def invented_compose_edges(markdown: str, allowed: list[tuple[str, str]]) -> lis
                 continue
             if (
                 (src, dest) not in allowed_set
-                and {src, dest} & (allowed_names | {"probe-network", "mysql-data"})
+                and {src, dest} & allowed_names
                 or src.endswith("-network")
                 or dest.endswith("-data")
                 or dest.endswith("-logs")

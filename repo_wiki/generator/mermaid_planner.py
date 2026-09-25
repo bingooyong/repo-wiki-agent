@@ -124,18 +124,18 @@ _PAGE_SCOPE_ALIASES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("控制", "control", "grpc"), ("control", "grpc", "tunnel")),
     (("部署", "compose", "运维", "ops"), ("deploy", "compose")),
     (("错误", "error", "status"), ("error", "exception", "handler")),
-    (("system-components", "system", "组件"), ("cmd", "internal/control", "internal/services")),
+    (("system-components", "system", "组件"), ("cmd", "control", "services")),
     (
         ("module-relationships", "module", "模块"),
-        ("internal/control", "internal/services", "internal/repository"),
+        ("control", "services", "repository"),
     ),
     (
         ("data-flow", "数据流", "调用链"),
-        ("internal/services", "internal/repository", "internal/exporter"),
+        ("services", "repository", "exporter"),
     ),
     (
         ("event-architecture", "event", "事件"),
-        ("internal/control", "internal/agent"),
+        ("control", "agent"),
     ),
     (("database-schema", "数据库架构", "数据迁移"), ("migration", "models")),
 )
@@ -270,6 +270,33 @@ def _discover_auth_header_label(root: Path | None) -> str:
     return (preferred or found or ["Authorization"])[0]
 
 
+def _discover_auth_node_label(root: Path | None, *, python: bool) -> str:
+    """Auth hop name from source symbols; no sample-repo default."""
+    if root is None:
+        return "Auth"
+    skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
+    go_re = re.compile(r"\bfunc\s+(\w*Auth\w*)\(")
+    py_re = re.compile(r"\bdef\s+(\w*(?:auth|authorizer)\w*)\s*\(", re.I)
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
+            continue
+        if any(part in skip for part in path.parts) or path.name.endswith("_test.go"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if python and path.suffix == ".py":
+            match = py_re.search(text)
+            if match:
+                return match.group(1)
+        if not python and path.suffix == ".go":
+            match = go_re.search(text)
+            if match:
+                return match.group(1)
+    return "Auth"
+
+
 def _auth_hop(
     endpoint: dict[str, Any],
     *,
@@ -285,9 +312,9 @@ def _auth_hop(
     if path_looks_like_example_cmd(file_path):
         return None, None
     if go_auth:
-        return "APIAuth", _discover_auth_header_label(root)
+        return _discover_auth_node_label(root, python=False), _discover_auth_header_label(root)
     if py_auth:
-        return "AuthenticationDep", "Authorization"
+        return _discover_auth_node_label(root, python=True), "Authorization"
     return None, None
 
 
@@ -304,8 +331,14 @@ def _real_error_node(root: Path | None, endpoint: dict[str, Any]) -> str:
     if "writeJSON" in text:
         return "writeJSON"
     if root:
-        for rel in ("internal/agent", "internal/control"):
-            if (root / rel).exists():
+        for path in root.rglob("*.go"):
+            if path.name.endswith("_test.go"):
+                continue
+            try:
+                blob = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if re.search(r"\bfunc writeJSON\b", blob):
                 return "writeJSON"
     return "HTTPException"
 
@@ -803,7 +836,7 @@ def _architecture_prefer_tokens(page_id: str) -> tuple[str, ...] | None:
     if any(token in pid for token in ("module", "模块")):
         return ("control", "services", "repository", "app/api", "app/models")
     if any(token in pid for token in ("system", "组件")):
-        return ("cmd/", "app/api", "app/core", "internal/control", "internal/services")
+        return ("cmd/", "app/api", "app/core", "control", "services")
     return None
 
 
