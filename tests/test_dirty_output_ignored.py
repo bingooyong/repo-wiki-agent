@@ -26,7 +26,7 @@ _PASSING_PAGE = """# {title}
 
 This is sufficient prose content for {title} with citations and diagrams.
 
-GET /health POST /users PUT /users/{{id}} are owned by Service `api-gateway`.
+On {title}, GET /health POST /users PUT /users/{{id}} are owned by Service `api-gateway`.
 The schema is documented below.
 
 ```json
