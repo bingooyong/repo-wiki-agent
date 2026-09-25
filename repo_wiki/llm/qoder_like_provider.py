@@ -72,6 +72,28 @@ def resolve_qoder_like_llm(
         "force_mock_config": force_mock_llm_config,
     }
 
+    if str(llm_config.provider or "").strip().lower() == "cassette":
+        from repo_wiki.llm.cassette import CassetteLLMProvider
+
+        provider = CassetteLLMProvider.from_env(llm_config)
+        log_info(
+            "Qoder-like LLM: using CASSETTE replay "
+            f"(dir={os.environ.get('REPO_WIKI_LLM_CASSETTE_DIR', '') or '(unset)'}). "
+            "No API key is required; cleanup/contract run on recorded raw replies."
+        )
+        return (
+            provider,
+            llm_config,
+            {
+                **summary_base,
+                "effective_provider": getattr(provider, "name", "cassette"),
+                "model": llm_config.model,
+                "mode": "cassette",
+                "mock_reason": None,
+                "fallback_warning": None,
+            },
+        )
+
     def _mock_bundle(reason: str | None) -> tuple[Any, LLMProviderConfig, dict[str, Any]]:
         effective = LLMProviderConfig(
             provider="mock",

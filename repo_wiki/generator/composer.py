@@ -30,6 +30,11 @@ from repo_wiki.evidence.citation_renderer import (
     unique_root_readme_name,
 )
 from repo_wiki.evidence.ranking import PageEvidenceBinding
+from repo_wiki.llm.cassette import (
+    prompt_hash_for_messages,
+    record_cassette_attempt,
+    set_cassette_call_context,
+)
 from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.models import (
     ChatMessage,
@@ -542,6 +547,14 @@ class LLMPageComposer:
             last_rejected: ComposerOutput | None = None
             rewrite_max_tokens: int | None = None
             rewrite_extra_body: dict[str, Any] | None = None
+            from repo_wiki.generator.composer_cache import compute_composer_input_hash
+
+            input_hash = compute_composer_input_hash(
+                input,
+                model_name=self.model_name,
+                temperature=self._llm_config.temperature,
+                max_tokens=self._resolve_request_max_tokens(),
+            )
 
             for attempt in range(2):
                 try:
@@ -553,6 +566,9 @@ class LLMPageComposer:
                             extra_body=(
                                 rewrite_extra_body or self._empty_content_rewrite_extra_body()
                             ),
+                            page_id=page_id,
+                            attempt=attempt,
+                            input_hash=input_hash,
                         ),
                         timeout=self._resolve_page_timeout(),
                     )
@@ -1121,8 +1137,11 @@ class LLMPageComposer:
         *,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
+        page_id: str = "",
+        attempt: int = 0,
+        input_hash: str = "",
     ) -> ChatResponse:
-        """Call LLM provider with prompt."""
+        """Call LLM provider with prompt and optionally record the raw reply."""
         messages = [
             ChatMessage(
                 role="system",
@@ -1133,6 +1152,16 @@ class LLMPageComposer:
             ),
             ChatMessage(role="user", content=prompt),
         ]
+        prompt_hash = prompt_hash_for_messages(messages)
+        from repo_wiki.generator.composer_cache import COMPOSER_GENERATOR_VERSION
+
+        set_cassette_call_context(
+            page_id=page_id,
+            attempt=attempt,
+            prompt_hash=prompt_hash,
+            input_hash=input_hash,
+            generator_version=COMPOSER_GENERATOR_VERSION,
+        )
 
         request = ChatRequest(
             messages=messages,
@@ -1145,7 +1174,22 @@ class LLMPageComposer:
             extra_body=dict(extra_body or {}),
         )
 
-        return await chat_with_retry(self._provider, request)
+        response = await chat_with_retry(self._provider, request)
+        record_cassette_attempt(
+            page_id=page_id,
+            attempt=attempt,
+            input_hash=input_hash,
+            prompt_hash=prompt_hash,
+            generator_version=COMPOSER_GENERATOR_VERSION,
+            model=self.model_name,
+            messages=messages,
+            raw_reply=response.content,
+            usage=response.usage,
+            finish_reason=response.finish_reason,
+            temperature=self._llm_config.temperature,
+            max_tokens=request.max_tokens,
+        )
+        return response
 
     def _resolve_page_timeout(self) -> float:
         """Per-call timeout for one LLM attempt. Rewrite uses a second call, not a longer budget."""

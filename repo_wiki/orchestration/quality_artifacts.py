@@ -222,6 +222,11 @@ def build_generation_quality_documents(
             "checks_pass": sum(1 for p in quality_pages if p["quality_state"] in _READY_STATES),
             "evidence_total": sum(int(p["evidence_count"]) for p in quality_pages),
             "citation_total": sum(int(p["citation_count"]) for p in quality_pages),
+            **(
+                {"cassette_prompt_mismatch": llm_summary.get("cassette_prompt_mismatch")}
+                if llm_summary.get("cassette_prompt_mismatch")
+                else {}
+            ),
         },
         "aggregate_summary": {"quality_states": dict(counts)},
         "page_quality": quality_pages,

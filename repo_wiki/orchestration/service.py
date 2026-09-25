@@ -1358,6 +1358,13 @@ class RepoWikiService:
         )
 
         provider, llm_config, llm_summary = self._resolve_qoder_like_llm()
+        cassette_mode = str(getattr(provider, "name", "") or llm_config.provider).lower() == (
+            "cassette"
+        )
+        if os.environ.get("REPO_WIKI_LLM_CASSETTE_DIR") and not os.environ.get(
+            "REPO_WIKI_LLM_CASSETTE_RUN_ID"
+        ):
+            os.environ["REPO_WIKI_LLM_CASSETTE_RUN_ID"] = output_dir.name
         composer = create_composer(
             provider=provider,
             llm_config=llm_config,
@@ -1611,7 +1618,7 @@ class RepoWikiService:
                 cost_usd=estimate_cost_from_tokens(output.tokens_used, llm_config.model),
             )
             page_results[page_idx] = (page.output_path, enriched)
-            effective_mode = "llm" if llm_summary.get("mode") == "real" else "rule"
+            effective_mode = "llm" if llm_summary.get("mode") in {"real", "cassette"} else "rule"
             reasons = []
             if llm_summary.get("mode") == "mock":
                 reasons.append(f"mock_llm:{llm_summary.get('mock_reason') or 'forced'}")
@@ -1635,15 +1642,17 @@ class RepoWikiService:
             )
             estimated_tokens += page.estimated_tokens or 1000
 
-            cached = self._observe_composer_cache_hit(
-                cache,
-                page.page_id,
-                input_hash,
-                input_data=input_data,
-                model_name=llm_config.model,
-                temperature=llm_config.temperature,
-                max_tokens=llm_config.max_tokens,
-            )
+            cached = None
+            if not cassette_mode:
+                cached = self._observe_composer_cache_hit(
+                    cache,
+                    page.page_id,
+                    input_hash,
+                    input_data=input_data,
+                    model_name=llm_config.model,
+                    temperature=llm_config.temperature,
+                    max_tokens=llm_config.max_tokens,
+                )
             if cached and cached.output_markdown:
                 cache_hits += 1
                 info(f"compose cache hit page_id={page.page_id} title={page.title}")
@@ -1792,6 +1801,7 @@ class RepoWikiService:
                 "page_limit": page_limit,
                 "composed_page_count": len(pages),
                 "quality_warning_count": len(quality_warnings),
+                "cassette_prompt_mismatch": list(getattr(provider, "prompt_mismatches", []) or []),
             }
         )
 
