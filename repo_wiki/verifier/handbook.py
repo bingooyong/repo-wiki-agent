@@ -19,6 +19,8 @@ ROLE_CONTRADICTION_REJECTION = "Architecture role contradiction"
 EVIDENCE_META_REJECTION = "Handbook evidence meta talk"
 TINY_OR_TRUNCATED_REJECTION = "Tiny or truncated page body"
 MIN_HANDBOOK_BODY_CHARS = 800
+_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+_HANDBOOK_STRUCTURE_CJK_MIN = 20
 PAGE_TIMEOUT_REJECTION_PREFIX = "LLM page timeout after"
 PAGE_SERVER_ERROR_REJECTION_PREFIX = "LLM page server error"
 
@@ -1114,12 +1116,13 @@ def handbook_reader_hygiene_offenders(
             found["instruction_voice"].append(rel)
         if _EVIDENCE_META_TALK_RE.search(text):
             found["evidence_meta_talk"].append(rel)
-        if not _H1_RE.search(text):
-            found["missing_h1"].append(rel)
-        if handbook_page_body_len(text) < MIN_HANDBOOK_BODY_CHARS or handbook_page_is_truncated(
-            text
-        ):
-            found["tiny_body"].append(rel)
+        if handbook_structure_gate_applies(text, path=path):
+            if not _H1_RE.search(text):
+                found["missing_h1"].append(rel)
+            if handbook_page_body_len(text) < MIN_HANDBOOK_BODY_CHARS or handbook_page_is_truncated(
+                text
+            ):
+                found["tiny_body"].append(rel)
         if repo_root is not None:
             for match in _CITE_RE.finditer(text):
                 raw = match.group(0)
@@ -1137,6 +1140,24 @@ def handbook_reader_hygiene_offenders(
         {page for pages in paragraph_pages.values() if len(set(pages)) >= 4 for page in pages}
     )
     return {key: values for key, values in found.items() if values}
+
+
+def handbook_structure_gate_applies(
+    text: str = "",
+    *,
+    path: Path | str | None = None,
+    title: str = "",
+) -> bool:
+    """True when the body is a Chinese handbook page.
+
+    English mocks, goldens, and circuit-break fixtures may use a Chinese title
+    or a couple of canned headings (``简介`` / ``项目结构``) without taking the
+    800-character handbook structure floor. ``path`` / ``title`` are accepted
+    for callers but do not by themselves turn a short English body into a
+    handbook page.
+    """
+    del path, title
+    return len(_CJK_RE.findall(text or "")) >= _HANDBOOK_STRUCTURE_CJK_MIN
 
 
 def handbook_page_body_len(markdown: str) -> int:

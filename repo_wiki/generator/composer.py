@@ -76,6 +76,7 @@ from repo_wiki.verifier.handbook import (
     contains_generator_meta,
     handbook_page_body_len,
     handbook_page_is_truncated,
+    handbook_structure_gate_applies,
     has_unclosed_fence,
     is_page_timeout_rejection,
     is_transient_server_error,
@@ -1456,9 +1457,17 @@ class LLMPageComposer:
         if not result.rejection_reason and _EVIDENCE_META_TALK_RE.search(content or ""):
             result.rejection_reason = EVIDENCE_META_REJECTION
 
-        if not result.rejection_reason and (
-            handbook_page_body_len(content or "") < MIN_HANDBOOK_BODY_CHARS
-            or handbook_page_is_truncated(content or "")
+        if (
+            not result.rejection_reason
+            and handbook_structure_gate_applies(
+                content or "",
+                path=input.page_plan.output_path,
+                title=input.page_plan.title,
+            )
+            and (
+                handbook_page_body_len(content or "") < MIN_HANDBOOK_BODY_CHARS
+                or handbook_page_is_truncated(content or "")
+            )
         ):
             result.rejection_reason = TINY_OR_TRUNCATED_REJECTION
 
