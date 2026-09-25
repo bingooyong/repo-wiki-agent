@@ -89,7 +89,9 @@ def test_overview_negated_not_scheduled_does_not_flag() -> None:
     assert generator_role_contradictions(ok, _overview_page()) == []
     assert generator_role_contradictions(treated, _overview_page()) == []
     wrong = "probe-agent 被 ccagent 调度执行拨测任务。"
-    assert "probe-agent-scheduled-by-ccagent" in generator_role_contradictions(wrong, _overview_page())
+    assert "probe-agent-scheduled-by-ccagent" in generator_role_contradictions(
+        wrong, _overview_page()
+    )
 
 
 def test_role_check_still_fails_rather_than_tunnel_client() -> None:
