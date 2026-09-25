@@ -89,6 +89,33 @@ def is_data_model_owner_page(*, page_id: str = "", title: str = "") -> bool:
     return pid in _DATA_MODEL_OWNER_IDS or (title or "") in {"数据模型"}
 
 
+def is_join_er_owner_page(*, page_id: str = "", title: str = "") -> bool:
+    pid = (page_id or "").lower().rsplit("/", 1)[-1]
+    title_s = title or ""
+    if "迁移" in title_s or "问题" in title_s:
+        return False
+    return pid in {"database-schema", "database-architecture"} or title_s == "数据库架构"
+
+
+_INVENTED_JOIN_ID_PK_RE = re.compile(
+    r"(?P<head>(?:followers_to_followings|articles_to_tags|favorites)\s*\{)"
+    r"(?P<body>[^}]*)"
+    r"(?P<tail>\})",
+    re.S,
+)
+
+
+def strip_invented_join_id_pk(content: str) -> str:
+    """Drop renderer fallback ``string id PK`` from join tables that already have keys."""
+
+    def _repl(match: re.Match[str]) -> str:
+        body = re.sub(r"\n[ \t]*string id PK[ \t]*", "\n", match.group("body"))
+        body = re.sub(r"[ \t]*string id PK[ \t]*", "", body)
+        return f"{match.group('head')}{body}{match.group('tail')}"
+
+    return _INVENTED_JOIN_ID_PK_RE.sub(_repl, content or "")
+
+
 def is_auth_identity_page(*, page_id: str = "", title: str = "") -> bool:
     pid = (page_id or "").lower().rsplit("/", 1)[-1]
     if "api" in pid or "授权" in (title or ""):
@@ -1030,6 +1057,16 @@ def apply_deterministic_rewrites(
         block = build_security_cite_block(root)
         if block:
             text = replace_h2_section(text, ("安全实现",), block)
+    jwt_owner = title in {"认证授权API", "认证授权"} or page_id in {
+        "authentication-authorization-api",
+    }
+    if not jwt_owner and "JWTService" in text:
+        text = re.sub(
+            r"```mermaid\s*sequenceDiagram[^`]*JWTService[^`]*```",
+            "",
+            text,
+            flags=re.I | re.S,
+        )
     if is_auth_identity_page(page_id=page_id, title=title):
         token = cite_first_match(
             root, "apiauth.go", r"EnvAPIToken|PROBE_API_TOKEN|apiAuthMiddleware"
@@ -1061,6 +1098,7 @@ def apply_deterministic_rewrites(
         and "followers_to_followings" in text
     ):
         text = re.sub(r"```mermaid\s*erDiagram.*?```", "", text, flags=re.I | re.S)
+    text = strip_invented_join_id_pk(text)
     text = strip_empty_numbered_steps(text)
     text = strip_dangling_colon_leads(text)
     text = strip_empty_sections_and_footnotes(text)

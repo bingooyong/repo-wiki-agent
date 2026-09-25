@@ -1825,11 +1825,12 @@ class MermaidRenderer:
         for entity in plan.er_entities:
             entity_name = mermaid_er_field(str(entity.get("entity") or "Unknown"))
             attributes = entity.get("attributes") or []
-            primary_key = mermaid_er_field(str(entity.get("primary_key") or ""))
+            raw_pk = str(entity.get("primary_key") or "").strip()
+            primary_key = mermaid_er_field(raw_pk) if raw_pk else ""
             pk_set = {
                 mermaid_er_field(str(item))
                 for item in (entity.get("primary_keys") or [])
-                if mermaid_er_field(str(item))
+                if str(item).strip() and mermaid_er_field(str(item))
             }
             if primary_key:
                 pk_set.add(primary_key)

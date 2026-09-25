@@ -14,9 +14,10 @@ from repo_wiki.generator.deterministic_sections import (
     extract_alembic_tables,
     is_header_only_cite,
     page_has_meta_instruction,
+    strip_invented_join_id_pk,
     strip_reader_unresolved_markers,
 )
-from repo_wiki.generator.mermaid_planner import MermaidPlanner
+from repo_wiki.generator.mermaid_planner import MermaidPlanner, MermaidRenderer
 from repo_wiki.scanner.go_routes import extract_go_endpoints
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 from repo_wiki.verifier.handbook import handbook_reader_hygiene_offenders
@@ -79,6 +80,35 @@ op.create_primary_key(
         "following_id",
     }
     assert by_name["followers_to_followings"]["primary_key"] == ""
+
+
+def test_join_key_diagram_does_not_invent_id_pk() -> None:
+    planner = MermaidPlanner()
+    plan = planner._plan_join_key_diagram(
+        "database-schema",
+        None,
+        {
+            "data_models": [
+                {
+                    "name": "followers_to_followings",
+                    "type": "migration_table",
+                    "attributes": ["follower_id", "following_id"],
+                    "primary_key": "",
+                    "primary_keys": ["follower_id", "following_id"],
+                }
+            ]
+        },
+    )
+    assert plan is not None
+    rendered = MermaidRenderer().render_diagram(plan)
+    assert "follower_id PK" in rendered
+    assert "following_id PK" in rendered
+    assert "string id PK" not in rendered
+    cleaned = strip_invented_join_id_pk(
+        "```mermaid\nerDiagram\n    followers_to_followings {\n"
+        "        int follower_id PK\n        string id PK\n    }\n```"
+    )
+    assert "string id PK" not in cleaned
 
 
 def test_auth_flow_falls_back_to_request_sequence(tmp_path: Path) -> None:
