@@ -913,7 +913,7 @@ class MermaidPlanner:
                 diagrams.append(request_flow)
             if any(
                 token in pid
-                for token in ("auth", "认证", "jwt", "frontend", "前端", "error", "错误")
+                for token in ("auth", "认证", "授权", "jwt", "frontend", "前端", "error", "错误")
             ):
                 auth = self._plan_auth_flow_diagram(page_id, evidence_binding, context)
                 if auth:
@@ -992,8 +992,9 @@ class MermaidPlanner:
                     for label in labels
                     if any(token in label.lower() for token in prefer_tokens)
                 ]
-                if token_scoped:
-                    scoped = token_scoped
+                if not token_scoped:
+                    return None
+                scoped = token_scoped
             if not scoped:
                 scoped = [label for label in labels if label.startswith(("internal/", "app/"))]
             if not scoped:
@@ -1849,13 +1850,23 @@ class MermaidPlanner:
                 }
             ]
         elif not selected:
-            if any(token in leaf for token in ("auth", "认证", "jwt")):
-                selected = [
-                    item
-                    for item in endpoints
-                    if "auth" in str(item.get("file_path") or "").lower()
-                    or "login" in str(item.get("path") or "")
-                ] or list(endpoints[:1])
+            if any(token in leaf for token in ("auth", "认证", "授权", "jwt")):
+                selected = (
+                    [
+                        item
+                        for item in endpoints
+                        if "auth" in str(item.get("file_path") or "").lower()
+                        or "login" in str(item.get("path") or "")
+                        or "apiauth" in str(item.get("file_path") or "").lower()
+                    ]
+                    or [
+                        item
+                        for item in endpoints
+                        if not _endpoint_is_anonymous(item)
+                        and "health" not in str(item.get("path") or "").lower()
+                    ][:1]
+                    or list(endpoints[:1])
+                )
             elif any(token in leaf for token in ("error", "错误")):
                 selected = list(endpoints[:1])
             elif "python" in leaf:
