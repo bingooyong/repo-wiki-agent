@@ -385,7 +385,7 @@ def rewrite_fastapi_intro_cites(
         support = cite_readme_supporting_line(root, readme, line)
         if not support or support == match.group(0):
             continue
-        _replace_adjacent_cite(lines, index, support)
+        lines[index] = _README_HEADER_CITE_RE.sub(support, lines[index], count=1)
         changed = True
     if (root / alembic_rel).is_file():
         mig_cite = cite_alembic_upgrade_range(root, alembic_rel) or (

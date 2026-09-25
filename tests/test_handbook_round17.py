@@ -272,10 +272,15 @@ def test_readme_header_range_cite_is_rewritten(tmp_path: Path) -> None:
         WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
         "开发指南/开发指南.md",
     )
-    markdown = "仓库已停止主动维护。<cite>README.rst:1-10</cite>\n"
+    markdown = (
+        "工厂保持接口稳定 <cite>README.rst:28-28</cite>"
+        "<cite>app/api/dependencies/authentication.py:21-34</cite>。"
+        "同时请注意仓库已停止主动维护。<cite>README.rst:1-10</cite>\n"
+    )
     out = rewrite_fastapi_intro_cites(markdown, page, tmp_path)
     assert "README.rst:1-10" not in out
-    assert "README.rst:" in out
+    assert "README.rst:4-4" in out
+    assert "authentication.py:21-34" in out
 
 
 def test_no_repo_specific_literals_in_audited_source() -> None:
@@ -298,8 +303,10 @@ def test_hedged_current_evidence_is_not_meta_talk() -> None:
     from repo_wiki.verifier.handbook import contains_evidence_meta_talk
 
     assert contains_evidence_meta_talk("当前可见的源码证据只覆盖令牌解析。")
+    assert contains_evidence_meta_talk("本页限定在提供的证据范围内描述迁移。")
     assert not contains_evidence_meta_talk("其余状态码在当前证据之外，不再推断。")
     assert not contains_evidence_meta_talk("当前证据集中在迁移 revision 的 upgrade。")
+    assert not contains_evidence_meta_talk("额外模块不在源码证据范围内，应避免凭空假设。")
 
 
 def test_fallback_stub_detector_ignores_short_llm() -> None:
