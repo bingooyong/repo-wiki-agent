@@ -128,6 +128,21 @@ def _page_tokens(page_id: str) -> set[str]:
     return {part for part in re.split(r"[-_/]", (page_id or "").lower()) if len(part) >= 3}
 
 
+_GENERIC_SCOPE_TOKENS = frozenset(
+    {
+        "api",
+        "ref",
+        "reference",
+        "overview",
+        "page",
+        "docs",
+        "wiki",
+        "service",
+        "application",
+    }
+)
+
+
 def _page_scope_needles(page_id: str) -> set[str]:
     tokens = set(_page_tokens(page_id))
     blob = (page_id or "").lower()
@@ -135,6 +150,11 @@ def _page_scope_needles(page_id: str) -> set[str]:
         if any(key in blob for key in keys) or tokens & set(keys):
             tokens.update(aliases)
     return tokens
+
+
+def _specific_page_scope_needles(page_id: str) -> set[str]:
+    """Page tokens that can scope a route list without matching every /api path."""
+    return {token for token in _page_scope_needles(page_id) if token not in _GENERIC_SCOPE_TOKENS}
 
 
 def _endpoint_matches_page(endpoint: dict[str, Any], tokens: set[str]) -> bool:
@@ -559,10 +579,7 @@ def _is_full_architecture_page(page_id: str) -> bool:
     return pid in {
         "architecture-overview",
         "architecture",
-        "overview",
-        "project-overview",
         "整体架构概览",
-        "项目概述",
     }
 
 
@@ -729,12 +746,9 @@ class MermaidPlanner:
             if auth:
                 diagrams.append(auth)
         elif page_type in {"architecture", "overview"}:
-            if page_type == "overview" or _is_full_architecture_page(page_id):
-                diagram = self._plan_overview_architecture_diagram(
-                    page_id, evidence_binding, context
-                )
-                if diagram:
-                    diagrams.append(diagram)
+            diagram = self._plan_overview_architecture_diagram(page_id, evidence_binding, context)
+            if diagram:
+                diagrams.append(diagram)
             tunnel = self._plan_grpc_tunnel(page_id, evidence_binding, context)
             if tunnel:
                 diagrams.append(tunnel)
@@ -781,13 +795,10 @@ class MermaidPlanner:
             diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
-            elif any(token in pid.lower() for token in ("schema", "架构", "database")):
+            if not is_data_model_owner_page(page_id=pid, title=""):
                 keys = self._plan_join_key_diagram(page_id, evidence_binding, context)
                 if keys:
                     diagrams.append(keys)
-            if any(
-                token in pid.lower() for token in ("migration", "迁移", "database-schema", "schema")
-            ) and not is_data_model_owner_page(page_id=pid, title=""):
                 migration = self._plan_migration_flow(page_id, evidence_binding, context)
                 if migration:
                     diagrams.append(migration)
@@ -823,16 +834,9 @@ class MermaidPlanner:
         ]
         if not _is_full_architecture_page(page_id):
             if not scoped:
-                pool = [label for label in labels if label.startswith(("internal/", "app/"))]
-                if pool:
-                    seed = pool[sum(ord(ch) for ch in (page_id or "arch")) % len(pool)]
-                    neighbors = {seed}
-                    for src, dst in import_edges:
-                        if src == seed:
-                            neighbors.add(dst)
-                        if dst == seed:
-                            neighbors.add(src)
-                    scoped = [label for label in labels if label in neighbors]
+                scoped = [label for label in labels if label.startswith(("internal/", "app/"))]
+            if not scoped:
+                scoped = list(labels)
             if not scoped:
                 return None
             labels = scoped
@@ -876,6 +880,10 @@ class MermaidPlanner:
         nodes = [node for node in nodes if node.id in used]
         if len(edges) < 1:
             return None
+        if not _is_full_architecture_page(page_id) and len(edges) > 12:
+            edges = edges[:12]
+            used = {edge.from_node for edge in edges} | {edge.to_node for edge in edges}
+            nodes = [node for node in nodes if node.id in used]
 
         evidence_spans = []
         if evidence_binding:
@@ -1206,7 +1214,7 @@ class MermaidPlanner:
                     {
                         "entity": symbol.replace(" ", "_"),
                         "attributes": [],
-                        "primary_key": "id",
+                        "primary_key": "",
                     }
                 )
 

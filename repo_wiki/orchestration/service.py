@@ -2736,34 +2736,27 @@ class RepoWikiService:
                     continue
             normalized.append(endpoint)
         from repo_wiki.generator.deterministic_sections import is_api_catalog_owner_page
-        from repo_wiki.generator.mermaid_planner import _endpoint_matches_page, _page_scope_needles
+        from repo_wiki.generator.mermaid_planner import (
+            _endpoint_matches_page,
+            _specific_page_scope_needles,
+        )
 
         page_id = str(getattr(page, "page_id", "") or "")
         title = str(getattr(page, "title", "") or "")
         leaf = page_id.lower().rsplit("/", 1)[-1]
         if is_api_catalog_owner_page(page_id=page_id, title=title):
             return self._order_api_endpoints_for_pages(normalized)
-        group_pages = {
-            "authentication-authorization-api",
-            "frontend-application-api",
-            "agent-proxy-api",
-            "ccprobe-control-api-reference",
-            "error-handling-status-codes",
-            "error-codes",
-        }
         if leaf in {"error-handling-status-codes", "error-codes"}:
             return []
-        tokens = _page_scope_needles(page_id) | _page_scope_needles(title)
-        generic = {"api", "ref", "reference", "overview", "page", "docs", "service"}
-        specific = {token for token in tokens if token not in generic}
-        if specific:
-            filtered = [item for item in normalized if _endpoint_matches_page(item, specific)]
-            if filtered:
-                return self._order_api_endpoints_for_pages(filtered)
-        if leaf in group_pages:
-            filtered = [item for item in normalized if _endpoint_matches_page(item, tokens)]
-            return self._order_api_endpoints_for_pages(filtered)
-        return []
+        tokens = _specific_page_scope_needles(page_id) | _specific_page_scope_needles(title)
+        if not tokens:
+            return []
+        filtered = [item for item in normalized if _endpoint_matches_page(item, tokens)]
+        if not filtered:
+            return []
+        if len(filtered) == len(normalized) and len(normalized) >= 8:
+            return []
+        return self._order_api_endpoints_for_pages(filtered)
 
     def _strip_unsupported_generic_api_claims(
         self,
