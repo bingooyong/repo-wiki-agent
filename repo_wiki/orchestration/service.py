@@ -3141,7 +3141,8 @@ class RepoWikiService:
             from repo_wiki.planner.schema import WikiTaxonomyCategory as _Cat
 
             force_er = is_er and getattr(page, "category", None) == _Cat.DATA_MODELS
-            if mermaid_key in self._seen_mermaid_hashes and not force_er:
+            force_arch = getattr(page, "category", None) == _Cat.ARCHITECTURE_DESIGN
+            if mermaid_key in self._seen_mermaid_hashes and not force_er and not force_arch:
                 continue
             if not is_er and not is_seq and mermaid_edge_count(rendered) < 2:
                 continue

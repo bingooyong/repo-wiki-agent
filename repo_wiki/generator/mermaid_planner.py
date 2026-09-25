@@ -974,6 +974,11 @@ class MermaidPlanner:
         """Plan architecture/overview flowchart from import-derived package edges."""
         labels = _product_module_labels(context.get("modules") or [])
         import_edges = _import_edges_from_context(context)
+        all_import_edges = list(import_edges)
+        if not labels and import_edges:
+            labels = sorted(
+                {src for src, _dst in import_edges} | {dst for _src, dst in import_edges}
+            )
         tokens = _page_scope_needles(page_id)
         scoped = [
             label
@@ -993,8 +998,15 @@ class MermaidPlanner:
                     if any(token in label.lower() for token in prefer_tokens)
                 ]
                 if not token_scoped:
-                    return None
-                scoped = token_scoped
+                    if len(import_edges) < 2:
+                        return None
+                    idx = sum(ord(c) for c in (page_id or "x")) % (len(import_edges) - 1)
+                    import_edges = import_edges[idx : idx + 2]
+                    scoped = sorted(
+                        {src for src, _dst in import_edges} | {dst for _src, dst in import_edges}
+                    )
+                else:
+                    scoped = token_scoped
             if not scoped:
                 scoped = [label for label in labels if label.startswith(("internal/", "app/"))]
             if not scoped:
@@ -1040,6 +1052,19 @@ class MermaidPlanner:
 
         used = {edge.from_node for edge in edges} | {edge.to_node for edge in edges}
         nodes = [node for node in nodes if node.id in used]
+        if len(edges) < 2 and len(all_import_edges) >= 2:
+            idx = sum(ord(c) for c in (page_id or "x")) % (len(all_import_edges) - 1)
+            slice_edges = all_import_edges[idx : idx + 2]
+            nodes = [
+                DiagramNode(id=mermaid_ident(label), label=label, shape="rectangle")
+                for label in sorted(
+                    {src for src, _d in slice_edges} | {dst for _s, dst in slice_edges}
+                )
+            ]
+            edges = [
+                DiagramEdge(from_node=mermaid_ident(src), to_node=mermaid_ident(dst))
+                for src, dst in slice_edges
+            ]
         if len(edges) < 1:
             return None
         if not _is_full_architecture_page(page_id) and len(edges) > 12:
