@@ -335,11 +335,7 @@ def _main_entry_candidates(processes: list[RepoProcess]) -> list[RepoProcess]:
     ]
     if eligible:
         return eligible
-    return [
-        item
-        for item in processes
-        if not item.example and "http_server" in item.kinds
-    ]
+    return [item for item in processes if not item.example and "http_server" in item.kinds]
 
 
 def _score_main_entry(item: RepoProcess) -> tuple[int, int, int, str]:

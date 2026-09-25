@@ -434,9 +434,7 @@ def _score_onboarding_evidence(
         from repo_wiki.generator.process_roles import cmd_dir_name
 
         cmd_name = cmd_dir_name(path)
-        if cmd_name and (
-            cmd_name.lower() in blob or cmd_name.replace("-", " ").lower() in blob
-        ):
+        if cmd_name and (cmd_name.lower() in blob or cmd_name.replace("-", " ").lower() in blob):
             score += WEIGHT_ONBOARDING_ENTRY + 3.0
             signals.append("core_named_cmd")
         if path_looks_like_example_cmd(path):

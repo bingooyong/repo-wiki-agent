@@ -1459,7 +1459,9 @@ def test_schema_sql_alone_does_not_satisfy_go_data_model_check(tmp_path: Path) -
     from repo_wiki.generator.deterministic_sections import discover_go_struct_names, go_struct_cite
 
     page += "<cite>internal/models/endpoint.go:4-20</cite>\n"
-    page += "".join(go_struct_cite(tmp_path, name) + "\n" for name in discover_go_struct_names(tmp_path))
+    page += "".join(
+        go_struct_cite(tmp_path, name) + "\n" for name in discover_go_struct_names(tmp_path)
+    )
     assert has_data_model_source_citation(page, tmp_path) is True
 
 

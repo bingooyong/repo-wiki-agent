@@ -1321,9 +1321,11 @@ def handbook_code_integrity_offenders(
     found: dict[str, list[str]] = {}
     for path in iter_markdown_pages(content_dir):
         text = path.read_text(encoding="utf-8", errors="ignore")
-        raw = (raw_replies or {}).get(path.relative_to(content_dir).as_posix()) or (
-            raw_replies or {}
-        ).get(path.stem) or ""
+        raw = (
+            (raw_replies or {}).get(path.relative_to(content_dir).as_posix())
+            or (raw_replies or {}).get(path.stem)
+            or ""
+        )
         missing: list[str] = []
         if has_unclosed_fence(text):
             missing.append("unclosed-fence")

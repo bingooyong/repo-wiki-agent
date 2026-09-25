@@ -2536,9 +2536,7 @@ class RepoWikiService:
         content = map_outside_code(
             content, lambda text: rewrite_route_methods_from_table(text, self.root)
         )
-        content = map_outside_code(
-            content, lambda text: strip_unknown_go_packages(text, self.root)
-        )
+        content = map_outside_code(content, lambda text: strip_unknown_go_packages(text, self.root))
         content = map_outside_code(content, lambda text: rewrite_token_const_cite(text, self.root))
         endpoints_for_cites = (
             list(getattr(composition_context, "endpoints", []) or [])
@@ -2822,7 +2820,9 @@ class RepoWikiService:
             go_struct_cite,
         )
 
-        cites = [go_struct_cite(self.root, name) for name in discover_go_struct_names(self.root)[:8]]
+        cites = [
+            go_struct_cite(self.root, name) for name in discover_go_struct_names(self.root)[:8]
+        ]
         return [item for item in cites if item]
 
     def _drop_uninventoried_snapshot_api_claims(

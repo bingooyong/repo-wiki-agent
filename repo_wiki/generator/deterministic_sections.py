@@ -115,6 +115,8 @@ def discover_auth_implementation(root: Path) -> str:
     if header:
         bits.append(f"请求头 `{header}` 或 Bearer")
     return "，".join(bits) + f"。 {best_cite}\n"
+
+
 _INSTALL_OWNER_IDS = frozenset({"installation"})
 _INSTALL_SATELLITE_IDS = frozenset(
     {"quick-start", "quickstart", "getting-started", "local-setup", "environment-setup"}
@@ -1129,12 +1131,7 @@ def build_go_role_section(root: Path) -> str:
         )
         if cite:
             cites.append(cite)
-    return (
-        "## 进程角色\n\n"
-        + facts
-        + (" " + " ".join(cites) if cites else "")
-        + "\n"
-    )
+    return "## 进程角色\n\n" + facts + (" " + " ".join(cites) if cites else "") + "\n"
 
 
 def extract_alembic_tables(text: str) -> list[dict[str, object]]:
@@ -1409,7 +1406,9 @@ def build_feature_prose(root: Path) -> str:
             None,
         )
         owner = rest.name if rest is not None else "主 HTTP 入口"
-        return f"核心功能由 {owner} 对外提供 REST/Web 接口，并由 services 与 repository 完成请求处理。"
+        return (
+            f"核心功能由 {owner} 对外提供 REST/Web 接口，并由 services 与 repository 完成请求处理。"
+        )
     return ""
 
 

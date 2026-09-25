@@ -446,7 +446,9 @@ def _endpoint_actor(endpoint: dict[str, Any]) -> str:
         if leaf in {"ProbeHandler", "HealthHandler"}:
             return leaf
         return example_name or "example"
-    if "internal/agent" in file_path or (cmd_dir_name(file_path) and "agent" in cmd_dir_name(file_path)):
+    if "internal/agent" in file_path or (
+        cmd_dir_name(file_path) and "agent" in cmd_dir_name(file_path)
+    ):
         if handler and handler not in _GENERIC_GO_HANDLERS:
             return handler
         return "NewHTTPHandler"
@@ -2058,14 +2060,18 @@ class MermaidPlanner:
                     break
         profiles = routes / "profiles.py" if routes.is_dir() else None
         if profiles is not None and not profiles.is_file():
-            profiles = next(
-                (
-                    path
-                    for path in routes.rglob("*.py")
-                    if "follow" in path.read_text(encoding="utf-8", errors="ignore").lower()
-                ),
-                None,
-            ) if routes.is_dir() else None
+            profiles = (
+                next(
+                    (
+                        path
+                        for path in routes.rglob("*.py")
+                        if "follow" in path.read_text(encoding="utf-8", errors="ignore").lower()
+                    ),
+                    None,
+                )
+                if routes.is_dir()
+                else None
+            )
         if not (common and Path(common).is_file() and profiles and Path(profiles).is_file()):
             return None
         return DiagramPlan(
@@ -2362,11 +2368,7 @@ class MermaidPlanner:
             return None
         root = Path(self.workspace_root) if self.workspace_root else None
         go_auth = bool(
-            root
-            and (
-                any(root.glob("*auth*.go"))
-                or (root / "internal" / "auth").is_dir()
-            )
+            root and (any(root.glob("*auth*.go")) or (root / "internal" / "auth").is_dir())
         )
         py_auth = bool(
             root and (root / "app" / "api" / "dependencies" / "authentication.py").is_file()
@@ -2382,9 +2384,7 @@ class MermaidPlanner:
             ]
         else:
             handler = mermaid_ident(_endpoint_actor(sample), prefix="h")
-            auth_name, auth_label = _auth_hop(
-                sample, go_auth=go_auth, py_auth=py_auth, root=root
-            )
+            auth_name, auth_label = _auth_hop(sample, go_auth=go_auth, py_auth=py_auth, root=root)
             if auth_name and auth_label:
                 service = mermaid_ident(
                     _package_from_file(str(sample.get("file_path") or "")) or "Service",
