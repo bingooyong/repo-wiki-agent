@@ -807,6 +807,11 @@ class LLMPageComposer:
 
         return derive_process_role_facts(self.workspace_root)
 
+    def _source_fact_block(self) -> str:
+        from repo_wiki.verifier.source_facts import source_fact_prompt_block
+
+        return source_fact_prompt_block(Path(self.workspace_root or "."))
+
     def _build_compose_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         if self._use_compact_prompt():
             return self._build_compact_prompt(input, context)
@@ -822,7 +827,9 @@ class LLMPageComposer:
                 + self._build_evidence_context(input.evidence_binding)
             )
         skeleton_md = input.skeleton.render_skeleton_markdown()
-        return prompt + "\n\n## Article Structure\n" + skeleton_md
+        source_facts = self._source_fact_block()
+        fact_tail = f"\n\n## 源码事实\n{source_facts}" if source_facts else ""
+        return prompt + "\n\n## Article Structure\n" + skeleton_md + fact_tail
 
     def _strip_fenced_blocks(self, markdown: str) -> str:
         lines: list[str] = []
@@ -882,10 +889,12 @@ class LLMPageComposer:
         role_facts = ""
         if self._page_needs_process_roles(input.page_plan):
             role_facts = f"{self._process_role_facts()}\n"
+        source_facts = self._source_fact_block()
+        fact_block = f"源码事实：\n{source_facts}\n" if source_facts else ""
         return (
             f"请重写 Wiki 页「{title}」为段落为主的中文 Markdown。\n"
             f"产品身份：{product}\n"
-            f"{role_facts}"
+            f"{role_facts}{fact_block}"
             "禁止空回复，不要返回空正文；必须写出至少两段可读段落，不能只回标题或空白。\n"
             "不要评论材料齐不齐，直接写实现；不要自我介绍本页写给谁。\n"
             f"{fence_rule}"
@@ -1081,6 +1090,12 @@ class LLMPageComposer:
         mismatches = self._doc_only_identifier_note()
         if mismatches:
             rules.append(mismatches)
+        source_facts = self._source_fact_block()
+        if source_facts:
+            rules.append(
+                "- 只能使用下列从仓库解析出的事实，不要发明服务名、表名、旗标或类型：\n"
+                + source_facts
+            )
         return "\n".join(rules)
 
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
@@ -1131,6 +1146,12 @@ class LLMPageComposer:
         role_facts = ""
         if self._page_needs_process_roles(page):
             role_facts = f"进程角色：{self._process_role_facts()}\n"
+        source_facts = self._source_fact_block()
+        fact_block = (
+            f"源码事实（只能写这些，不要发明服务/表/旗标/类型）：\n{source_facts}\n"
+            if source_facts
+            else ""
+        )
         install_command_block = ""
         if is_handbook_install_page(page):
             from repo_wiki.verifier.handbook import collect_repo_install_commands
@@ -1152,7 +1173,7 @@ class LLMPageComposer:
 仓库名称：{repository_name}
 产品身份（必须写入{identity_slot}，优先于仓库 slug 或通用 api-server/core-platform 表述）：
 {product_description}
-{role_facts}相关模块：{modules}
+{role_facts}{fact_block}相关模块：{modules}
 相关 API：{endpoints}
 相关数据模型：{data_models}
 

@@ -43,6 +43,7 @@ def test_pinned_verifier_gate_thresholds() -> None:
     assert "QODER_PAGE_QUALITY_STATE_DEGRADED" in threshold.STRICT_HARD_CODES
     assert "QODER_HANDBOOK_CODE_INTEGRITY" in threshold.STRICT_HARD_CODES
     assert "QODER_HANDBOOK_DOC_CODE_MISMATCH" in threshold.STRICT_HARD_CODES
+    assert "QODER_HANDBOOK_SOURCE_FACTS" in threshold.STRICT_HARD_CODES
     assert "Docker" in _DOC_MISMATCH_SKIP
     assert "TestClient" in _DOC_MISMATCH_SKIP
 

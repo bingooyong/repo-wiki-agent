@@ -353,6 +353,7 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_INSTALL_PATH",
         "QODER_HANDBOOK_IMPORT_CONSISTENCY",
         "QODER_HANDBOOK_ROLE_CONSISTENCY",
+        "QODER_HANDBOOK_SOURCE_FACTS",
         "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -522,6 +523,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_install_path(),
             self._check_handbook_import_consistency(),
             self._check_handbook_role_consistency(),
+            self._check_handbook_source_facts(),
             self._check_qoder_source_evidence(),
         ]
 
@@ -2306,6 +2308,7 @@ class QoderLikeVerifierService(VerifierService):
         apis: set[tuple[str, str]] = set()
         endpoint_auth: dict[tuple[str, str], str] = {}
         handler_files: set[str] = set()
+        endpoints: list[dict[str, Any]] = []
         services: set[str] = set()
         models: set[str] = set()
         runtimes: set[str] = set()
@@ -2337,6 +2340,17 @@ class QoderLikeVerifierService(VerifierService):
                         )
                         if isinstance(file_path, str) and file_path.strip():
                             handler_files.add(file_path.strip().replace("\\", "/"))
+                        endpoints.append(
+                            {
+                                "method": item["method"].upper(),
+                                "path": endpoint_path,
+                                "file_path": (
+                                    str(file_path).replace("\\", "/")
+                                    if isinstance(file_path, str) and file_path.strip()
+                                    else ""
+                                ),
+                            }
+                        )
                 services_payload = self._inventory_lists(data, "services")
                 for item in services_payload:
                     if not isinstance(item, dict):
@@ -2388,6 +2402,7 @@ class QoderLikeVerifierService(VerifierService):
             "apis": apis,
             "endpoint_auth": endpoint_auth,
             "handler_files": handler_files,
+            "endpoints": endpoints,
             "services": services,
             "models": models,
             "runtimes": runtimes,
@@ -3116,6 +3131,30 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-role-consistency",
             "Architecture prose agrees with deterministic process roles",
+        )
+
+    def _check_handbook_source_facts(self) -> CheckResult:
+        from repo_wiki.verifier.source_facts import handbook_source_fact_offenders
+
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("qoder-handbook-source-facts", "No markdown pages")
+        inventories = self._load_structured_inventory_sets()
+        found = handbook_source_fact_offenders(
+            content_dir,
+            self._handbook_repo_root(),
+            inventories.get("endpoints") or None,
+        )
+        if found:
+            return self._handbook_fail(
+                "qoder-handbook-source-facts",
+                "QODER_HANDBOOK_SOURCE_FACTS",
+                "Handbook claims invent compose services, tables, flags, types, or route files",
+                found,
+            )
+        return self._handbook_pass(
+            "qoder-handbook-source-facts",
+            "Handbook facts match parsed compose, tables, flags, types, and route files",
         )
 
     def _handbook_backtick_cite_pages(self) -> list[str]:
