@@ -135,20 +135,23 @@ def test_pinned_verifier_gate_thresholds() -> None:
         )
         == _DOC_MISMATCH_SKIP
     )
-    assert _GENERIC_TYPES == frozenset(
-        {
-            "FastAPI",
-            "PostgreSQL",
-            "SQLAlchemy",
-            "Alembic",
-            "HTTPException",
-            "Depends",
-            "Docker",
-            "GitHub",
-            "Dockerfile",
-            "Makefile",
-            "Handle",
-        }
+    assert (
+        frozenset(
+            {
+                "FastAPI",
+                "PostgreSQL",
+                "SQLAlchemy",
+                "Alembic",
+                "HTTPException",
+                "Depends",
+                "Docker",
+                "GitHub",
+                "Dockerfile",
+                "Makefile",
+                "Handle",
+            }
+        )
+        == _GENERIC_TYPES
     )
     assert "schema" in _GENERIC_TABLES
     assert "healthcheck" in _GENERIC_COMPOSE
