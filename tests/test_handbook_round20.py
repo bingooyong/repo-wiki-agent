@@ -267,6 +267,30 @@ def test_empty_span_rejection_constant() -> None:
     assert EMPTY_SPAN_REJECTION
 
 
+def test_fallback_rst_inline_is_not_empty_span() -> None:
+    from repo_wiki.core.config import RepoWikiConfig
+    from repo_wiki.orchestration.service import RepoWikiService
+
+    service = RepoWikiService(RepoWikiConfig())
+    lines = service._fallback_snippet_paragraphs(
+        {
+            "snippets": [
+                {
+                    "path": "README.rst",
+                    "symbol": "Quickstart",
+                    "summary": "First, run ``PostgreSQL`` then ``docker``.",
+                    "line_start": 1,
+                    "line_end": 4,
+                }
+            ]
+        }
+    )
+    text = "\n".join(lines)
+    assert "PostgreSQL" in text
+    assert empty_inline_spans(text) == []
+    assert "``PostgreSQL``" not in text
+
+
 def test_sacred_cassette_excerpts_run_real_post_processing(tmp_path: Path) -> None:
     from repo_wiki.core.config import RepoWikiConfig
     from repo_wiki.generator.adjacent_cites import attach_adjacent_cites

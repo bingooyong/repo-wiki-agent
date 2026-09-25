@@ -1928,7 +1928,11 @@ class RepoWikiService:
         lines: list[str] = []
         for item in (evidence.get("snippets") or [])[:limit]:
             path = str(item.get("path") or "").strip()
-            summary = str(item.get("summary") or "").strip()
+            summary = re.sub(
+                r"``([^`\n]+)``",
+                r"`\1`",
+                str(item.get("summary") or "").strip(),
+            )
             if not path or not summary:
                 continue
             cite = self._fallback_cite(item)
