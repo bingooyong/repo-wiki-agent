@@ -16,21 +16,7 @@ _PLACEHOLDER_OPS_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _GENERIC_OPS_LABEL_RE = re.compile(r"\[(start|build|test|lint)\]", re.IGNORECASE)
-_ROLE_CCAGENT_TUNNEL_RE = re.compile(
-    r"ccagent(?:(?!probe-agent|探针|才是)[^。\n]){0,80}"
-    r"(?<!不)(?<!不作为)(?<!探针)(?<!才是)隧道客户端"
-    r"(?![^。\n]{0,60}(?:由|交由)\s*`?probe-agent)",
-    re.IGNORECASE,
-)
-_ROLE_CCAGENT_REVERSE_RE = re.compile(
-    r"ccagent[^。\n]{0,120}建立反向控制链路|"
-    r"ccagent[^。\n]{0,80}通过\s*`?-agent-url",
-    re.IGNORECASE,
-)
-_ROLE_CUSTOM_SUBPROCESS_RE = re.compile(
-    r"custom-probe[^。\n]{0,80}(?:子进程|外部进程被拉起|作为外部进程|subprocess)",
-    re.IGNORECASE,
-)
+_TUNNEL_CLIENT_CLAIM_RE = re.compile(r"隧道客户端|建立反向控制链路")
 _SVC_NODE_RE = re.compile(r"^\s*([A-Za-z][\w-]*)\[([^\]]+)\]\s*$", re.MULTILINE)
 _FLOW_EDGE_RE = re.compile(r"^\s*([A-Za-z][\w-]*)\s*-->\s*([A-Za-z][\w-]*)\s*$", re.MULTILINE)
 _STARTED_RE = re.compile(
@@ -327,34 +313,67 @@ def _clause_negates_tunnel_role(window: str) -> bool:
     return bool(_TUNNEL_CLAUSE_NEGATION_RE.search(target))
 
 
-def prose_role_contradictions(markdown: str) -> list[str]:
-    """Flag architecture prose that contradicts the deterministic process roles."""
+def _role_name_sets(
+    root: Path | str | None,
+) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
+    from repo_wiki.generator.process_roles import derive_process_roles
+
+    rest: set[str] = set()
+    tunnel: set[str] = set()
+    control: set[str] = set()
+    data: set[str] = set()
+    example: set[str] = set()
+    for item in derive_process_roles(root):
+        aliases = {item.name, f"cmd/{item.name}"}
+        if "rest_entry" in item.kinds:
+            rest.update(aliases)
+        if "tunnel_client" in item.kinds:
+            tunnel.update(aliases)
+        if "control_plane" in item.kinds:
+            control.update(aliases)
+        if "data_plane" in item.kinds:
+            data.update(aliases)
+        if item.example:
+            example.update(aliases)
+    return rest, tunnel, control, data, example
+
+
+def prose_role_contradictions(markdown: str, root: Path | str | None = None) -> list[str]:
+    """Flag architecture prose that contradicts derived process roles."""
     text = markdown or ""
+    rest, _tunnel, _control, data, example = _role_name_sets(root)
     found: list[str] = []
-    if any(
-        not _clause_negates_tunnel_role(match.group(0))
-        for match in _ROLE_CCAGENT_TUNNEL_RE.finditer(text)
-    ):
-        found.append("ccagent-as-tunnel-client")
-    if _ROLE_CCAGENT_REVERSE_RE.search(text):
-        found.append("ccagent-reverse-agent-url")
-    if _ROLE_CUSTOM_SUBPROCESS_RE.search(text):
-        found.append("custom-probe-as-subprocess")
+    skip = "|".join(re.escape(item) for item in sorted(data, key=len, reverse=True))
+    for name in sorted(rest, key=len, reverse=True):
+        body = (
+            rf"{re.escape(name)}(?:(?!{skip})[^。\n]){{0,80}}隧道客户端"
+            if skip
+            else (rf"{re.escape(name)}[^。\n]{{0,80}}隧道客户端")
+        )
+        pattern = re.compile(body, re.IGNORECASE)
+        if any(not _clause_negates_tunnel_role(match.group(0)) for match in pattern.finditer(text)):
+            found.append(f"{name.split('/')[-1]}-as-tunnel-client")
+        if re.search(
+            rf"{re.escape(name)}[^。\n]{{0,120}}(?:建立反向控制链路|通过\s*`?-agent-url)",
+            text,
+            re.I,
+        ):
+            found.append(f"{name.split('/')[-1]}-reverse-agent-url")
+    for name in {item.split("/")[-1] for item in example}:
+        if re.search(
+            rf"{re.escape(name)}[^。\n]{{0,80}}(?:子进程|外部进程被拉起|作为外部进程|subprocess)",
+            text,
+            re.I,
+        ):
+            found.append(f"{name}-as-subprocess")
     return found
 
 
-_FORMER_LATTER_ROLE_SWAP_RE = re.compile(
-    r"ccprobe-control[^。\n]{0,80}ccagent[^。\n]{0,40}前者[^。\n]{0,80}"
-    r"(?:主 REST|REST/Web)[^。\n]{0,80}后者[^。\n]{0,80}隧道客户端",
-    re.IGNORECASE,
-)
-_PROBE_AGENT_SCHEDULED_BY_CCAGENT_RE = re.compile(
-    r"probe-agent[^。\n]{0,48}被\s*`?ccagent`?\s*调度",
-    re.IGNORECASE,
-)
-
-
-def generator_role_contradictions(markdown: str, page: object | None = None) -> list[str]:
+def generator_role_contradictions(
+    markdown: str,
+    page: object | None = None,
+    root: Path | str | None = None,
+) -> list[str]:
     """Composer-only role checks, including 前者/后者 swaps. Does not change the verifier."""
     title = str(getattr(page, "title", "") or "")
     page_id = str(getattr(page, "page_id", "") or "")
@@ -368,17 +387,33 @@ def generator_role_contradictions(markdown: str, page: object | None = None) -> 
         "项目概览",
         "project overview",
     }
+    rest, _tunnel, control, data, _example = _role_name_sets(root)
     found: list[str] = []
     if architecture:
-        found.extend(prose_role_contradictions(markdown))
-        if _FORMER_LATTER_ROLE_SWAP_RE.search(markdown or ""):
-            found.append("former-latter-role-swap")
+        found.extend(prose_role_contradictions(markdown, root))
+        rest_name = next(iter(sorted(rest, key=len)), "")
+        control_name = next(iter(sorted(control, key=len)), "")
+        if rest_name and control_name:
+            swap = re.compile(
+                rf"{re.escape(control_name)}[^。\n]{{0,80}}{re.escape(rest_name)}[^。\n]{{0,40}}"
+                r"前者[^。\n]{0,80}(?:主 REST|REST/Web)[^。\n]{0,80}后者[^。\n]{0,80}隧道客户端",
+                re.I,
+            )
+            if swap.search(markdown or ""):
+                found.append("former-latter-role-swap")
     if overview:
-        for match in _PROBE_AGENT_SCHEDULED_BY_CCAGENT_RE.finditer(markdown or ""):
-            if re.search(r"不是|并非|不要把|误认为|当作|而非", match.group(0)):
-                continue
-            found.append("probe-agent-scheduled-by-ccagent")
-            break
+        data_name = next((item.split("/")[-1] for item in sorted(data, key=len)), "")
+        rest_name = next((item.split("/")[-1] for item in sorted(rest, key=len)), "")
+        if data_name and rest_name:
+            pattern = re.compile(
+                rf"{re.escape(data_name)}[^。\n]{{0,48}}被\s*`?{re.escape(rest_name)}`?\s*调度",
+                re.I,
+            )
+            for match in pattern.finditer(markdown or ""):
+                if re.search(r"不是|并非|不要把|误认为|当作|而非", match.group(0)):
+                    continue
+                found.append(f"{data_name}-scheduled-by-{rest_name}")
+                break
     return found
 
 

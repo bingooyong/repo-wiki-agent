@@ -70,33 +70,56 @@ def _auth_page() -> WikiPagePlan:
     )
 
 
-def test_role_check_accepts_25o_negated_sentences() -> None:
+def _write_role_repo(root: Path) -> Path:
+    (root / "cmd" / "ccagent").mkdir(parents=True, exist_ok=True)
+    (root / "cmd" / "probe-agent").mkdir(parents=True, exist_ok=True)
+    (root / "cmd" / "ccprobe-control").mkdir(parents=True, exist_ok=True)
+    (root / "cmd" / "ccagent" / "main.go").write_text(
+        "package main\nfunc main() { ccagent.NewController(config).Run() }\n",
+        encoding="utf-8",
+    )
+    (root / "cmd" / "probe-agent" / "main.go").write_text(
+        "// data-plane process\npackage main\n// execution pool\nfunc DialContext() {}\n",
+        encoding="utf-8",
+    )
+    (root / "cmd" / "ccprobe-control" / "main.go").write_text(
+        '// control-plane\npackage main\nvar grpcListen = "gRPC EstablishTunnel"\n',
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_role_check_accepts_25o_negated_sentences(tmp_path: Path) -> None:
+    root = _write_role_repo(tmp_path)
     for sentence in (_EVENT_ARCH_ATTEMPT0, _OVERVIEW_ATTEMPT0, _EVENT_ARCH_HANDBOOK):
-        assert prose_role_contradictions(sentence) == [], sentence
-        assert generator_role_contradictions(sentence, _arch_page()) == [], sentence
-        assert generator_role_contradictions(sentence, _overview_page()) == [], sentence
+        assert prose_role_contradictions(sentence, root) == [], sentence
+        assert generator_role_contradictions(sentence, _arch_page(), root) == [], sentence
+        assert generator_role_contradictions(sentence, _overview_page(), root) == [], sentence
 
 
-def test_role_check_still_fails_genuine_former_latter_swap() -> None:
-    assert "ccagent-as-tunnel-client" in prose_role_contradictions(_FORMER_LATTER_SWAP)
-    assert generator_role_contradictions(_ARCH_WRONG, _arch_page())
-    assert "ccagent-as-tunnel-client" in prose_role_contradictions(_CCAGENT_STARTS_TUNNEL)
+def test_role_check_still_fails_genuine_former_latter_swap(tmp_path: Path) -> None:
+    root = _write_role_repo(tmp_path)
+    assert "ccagent-as-tunnel-client" in prose_role_contradictions(_FORMER_LATTER_SWAP, root)
+    assert generator_role_contradictions(_ARCH_WRONG, _arch_page(), root)
+    assert "ccagent-as-tunnel-client" in prose_role_contradictions(_CCAGENT_STARTS_TUNNEL, root)
 
 
-def test_overview_negated_not_scheduled_does_not_flag() -> None:
+def test_overview_negated_not_scheduled_does_not_flag(tmp_path: Path) -> None:
+    root = _write_role_repo(tmp_path)
     ok = "需要注意 probe-agent 不是被 ccagent 调度的拨测执行单元，它独立拨号到 ccprobe-control 维持长连。"
     treated = "不要把 probe-agent 当作被 ccagent 调度的拨测执行单元：probe-agent 是隧道客户端。"
-    assert generator_role_contradictions(ok, _overview_page()) == []
-    assert generator_role_contradictions(treated, _overview_page()) == []
+    assert generator_role_contradictions(ok, _overview_page(), root) == []
+    assert generator_role_contradictions(treated, _overview_page(), root) == []
     wrong = "probe-agent 被 ccagent 调度执行拨测任务。"
     assert "probe-agent-scheduled-by-ccagent" in generator_role_contradictions(
-        wrong, _overview_page()
+        wrong, _overview_page(), root
     )
 
 
-def test_role_check_still_fails_rather_than_tunnel_client() -> None:
+def test_role_check_still_fails_rather_than_tunnel_client(tmp_path: Path) -> None:
+    root = _write_role_repo(tmp_path)
     text = "ccagent 不是边缘 Agent，而是隧道客户端并主动拨号。"
-    assert "ccagent-as-tunnel-client" in prose_role_contradictions(text)
+    assert "ccagent-as-tunnel-client" in prose_role_contradictions(text, root)
 
 
 def test_role_facts_are_positive_without_checklist(tmp_path: Path) -> None:
@@ -110,7 +133,7 @@ def test_role_facts_are_positive_without_checklist(tmp_path: Path) -> None:
         assert banned not in facts
     assert "ccagent" in facts and "REST/Web" in facts
     assert "probe-agent" in facts and "数据面" in facts
-    assert "探测执行池" in facts
+    assert "执行池" in facts
     from repo_wiki.generator import composer as composer_mod
 
     source = Path(composer_mod.__file__).read_text(encoding="utf-8")

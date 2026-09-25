@@ -39,7 +39,7 @@ DEFAULT_FASTAPI_SRC = Path(
 WAVES = ("25m", "25n", "25o", "25p", "25q")
 REPOS = ("probe", "fastapi")
 
-_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
+_FENCE_RE = re.compile(r"```([^\n]*)\n(.*?)```", re.S)
 _INLINE_RE = re.compile(r"`([^`\n]+)`")
 _CITE_RE = re.compile(r"<cite>.*?</cite>", re.I)
 _GAP_RE = re.compile(
@@ -99,7 +99,10 @@ def _text_gaps(pages: dict[str, str]) -> int:
 def _code_units(markdown: str) -> list[str]:
     units: list[str] = []
     for match in _FENCE_RE.finditer(markdown or ""):
-        body = match.group(1).strip()
+        lang = (match.group(1) or "").strip().split()[0].lower() if match.group(1) else ""
+        if lang in {"mermaid", "plantuml", "graphviz"}:
+            continue
+        body = match.group(2).strip()
         if body:
             units.append(body)
     stripped = _FENCE_RE.sub("", markdown or "")
@@ -350,7 +353,9 @@ def _eval_one(
         # cite_relevance prints JSON to stdout; copy from log last line
         pass
     text = (out_dir / f"{which}-cite-strict.stdout").read_text(encoding="utf-8", errors="ignore")
-    match = re.search(r"\{.*\}\s*$", text, re.S)
+    match = re.search(r"\{[^{}]*relevant_pct[^{}]*\}", text, re.S)
+    if match is None:
+        match = re.search(r"\{.*relevant_pct.*\}", text, re.S)
     cite_data: dict[str, object] = {}
     if match:
         try:
@@ -482,7 +487,7 @@ def _markdown_table(rows: list[dict[str, object]]) -> str:
                 [
                     str(row.get("which") or ""),
                     str(row.get("verify_label") or ""),
-                    ",".join(str(row.get("failed_checks") or [])[:6]) or "-",
+                    ",".join((row.get("failed_checks") or [])[:4]) or "-",
                     str(row.get("degraded")),
                     str(row.get("claim_coverage_pct")),
                     str(row.get("strict_relevant_pct")),

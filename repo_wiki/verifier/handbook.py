@@ -38,13 +38,13 @@ _CITE_RE = re.compile(r"<cite>\s*([^<]+?)\s*</cite>", re.IGNORECASE)
 _INSTRUCTION_VOICE_RE = re.compile(
     r"不要只标|如果证据不足|不要在此凭空扩展|不要用套话填空|不要过度推断"
     r"|引用时写|引用时使用"
-    r"|进程角色必须|禁止写 cmd/ccagent|禁止用「前者"
+    r"|进程角色必须|禁止写 cmd/|禁止用「前者"
 )
 _EVIDENCE_META_TALK_RE = re.compile(
     r"证据片段|证据范围|"
     r"当前证据|提供的证据|"
-    r"当前(?:可用|可见|提供的)(?:源码)?证据|"
-    r"(?:可用|可见|提供的)源码证据"
+    r"当前(?:可用|可见|提供的)的?(?:源码)?证据|"
+    r"(?:可用|可见|提供的)的?源码证据"
 )
 _H1_RE = re.compile(r"^# [^#\n]", re.MULTILINE)
 _README_NAMES = ("README.md", "README.rst", "README.txt", "README")
@@ -212,17 +212,19 @@ def page_contains_identity_token(markdown: str, token: str) -> bool:
 
 
 def overview_identity_satisfied(markdown: str, repo_root: Path) -> bool:
-    """Return True when overview page states sample identity or resolved identity."""
+    """Return True when overview page states README/module/directory identity."""
+    from repo_wiki.generator.process_roles import derive_repo_identity_names
+
+    tokens = list(identity_match_tokens(repo_root))
+    tokens.extend(sorted(derive_repo_identity_names(repo_root)))
     readme = read_readme_text(repo_root)
-    page_lower = markdown.lower()
-    readme_lower = readme.lower()
-    if "conduit" in readme_lower or "realworld" in readme_lower:
-        has_product = "conduit" in page_lower or "realworld" in page_lower
-        has_fastapi = "fastapi" in page_lower
-        return has_product and has_fastapi
-    return any(
-        page_contains_identity_token(markdown, token) for token in identity_match_tokens(repo_root)
+    skip = {"this", "that", "with", "from", "backend", "readme", "note", "image"}
+    tokens.extend(
+        word
+        for word in re.findall(r"[A-Za-z][A-Za-z0-9_-]{3,}", readme)
+        if word.lower() not in skip
     )
+    return any(page_contains_identity_token(markdown, token) for token in tokens if token)
 
 
 def _repo_run_source_text(repo_root: Path) -> str:
@@ -750,7 +752,7 @@ _GENERIC_GO_INSTALL = re.compile(
     r"\bgo\s+(?:build|run|mod\s+download)\s+(?:-o\s+\S+\s+)?(?:\.|./\.\.\.)\b",
     re.IGNORECASE,
 )
-_DEMO_CMD_NAMES = frozenset({"custom-probe", "example", "demo", "scaffold", "hello"})
+_EXAMPLE_CMD_HINT_RE = re.compile(r"example|示例|demo|scaffold|sample|hello", re.I)
 _REPO_INSTALL_LINE_PATTERNS = (
     re.compile(r"docker(?:-|\s+)compose(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
     re.compile(r"\bpodman-compose(?:\s+[A-Za-z0-9_-]+){0,6}", re.I),
@@ -786,13 +788,13 @@ def _install_command_priority(command: str) -> tuple[int, str]:
         score = 4
     elif "uvicorn" in low or low.startswith("./bin/"):
         score = 5
-    elif "ccagent" in low:
+    elif re.search(r"\./bin/", low):
         score = 6
     elif "curl" in low and "health" in low:
         score = 7
     elif low.startswith("make "):
         score = 8
-    if any(token in low for token in _DEMO_CMD_NAMES):
+    if _EXAMPLE_CMD_HINT_RE.search(low):
         score += 40
     return (score, command)
 
@@ -829,7 +831,14 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
     core_mains: list[Path] = []
     demo_mains: list[Path] = []
     for main in sorted(root.glob("cmd/*/main.go")):
-        if main.parent.name.lower() in _DEMO_CMD_NAMES:
+        docs = ""
+        for readme in ("README.md", "README.rst", "README.txt"):
+            candidate = main.parent / readme
+            if candidate.is_file():
+                docs = candidate.read_text(encoding="utf-8", errors="ignore")
+                break
+        hint = f"{main.parent.name}\n{docs[:400]}"
+        if _EXAMPLE_CMD_HINT_RE.search(hint):
             demo_mains.append(main)
         else:
             core_mains.append(main)
@@ -880,7 +889,7 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
         commands = [item for item in commands if "schema.sql" not in item]
         commands.append(preferred_schema)
     if has_compose:
-        commands = [item for item in commands if "./bin/ccagent" not in item]
+        commands = [item for item in commands if "./bin/" not in item]
     commands = [f"poetry run {item}" if item.startswith("uvicorn ") else item for item in commands]
     commands.sort(key=_install_command_priority)
     return commands[:limit]
@@ -888,20 +897,18 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
 
 def architecture_core_packages(repo_root: Path) -> list[str]:
     """Product packages an architecture page should cite when they exist."""
-    preferred = (
-        "cmd/ccagent",
-        "cmd/ccprobe-control",
-        "internal/control",
-        "internal/services",
-        "internal/repository",
-        "internal/exporter",
-        "internal/agent",
-        "internal/probe",
-        "app/api/routes",
-        "app/models",
-    )
     found: list[str] = []
-    for rel in preferred:
+    cmd = repo_root / "cmd"
+    if cmd.is_dir():
+        for child in sorted(cmd.iterdir()):
+            if child.is_dir() and any(child.glob("*.go")):
+                found.append(f"cmd/{child.name}")
+    internal = repo_root / "internal"
+    if internal.is_dir():
+        for child in sorted(internal.iterdir()):
+            if child.is_dir() and child.name not in {"testdata", "test", "__pycache__"}:
+                found.append(f"internal/{child.name}")
+    for rel in ("app/api/routes", "app/models"):
         if (repo_root / rel).exists():
             found.append(rel)
     return found
@@ -909,8 +916,12 @@ def architecture_core_packages(repo_root: Path) -> list[str]:
 
 def architecture_required_packages(repo_root: Path) -> list[str]:
     """Packages that must appear on the architecture page when they exist."""
-    cores = set(architecture_core_packages(repo_root))
-    return [rel for rel in ("app/api/routes", "internal/exporter") if rel in cores]
+    cores = architecture_core_packages(repo_root)
+    preferred = [rel for rel in cores if rel.startswith("app/")]
+    if preferred:
+        return preferred[:2]
+    internal = [rel for rel in cores if rel.startswith("internal/")]
+    return (internal or cores)[:4]
 
 
 def has_architecture_core_citation(markdown: str, repo_root: Path) -> bool:
@@ -921,8 +932,11 @@ def has_architecture_core_citation(markdown: str, repo_root: Path) -> bool:
     cited = " ".join(
         match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")
     ).lower()
-    if any(rel.lower() not in cited for rel in architecture_required_packages(repo_root)):
-        return False
+    needed = architecture_required_packages(repo_root)
+    if needed:
+        required_hits = sum(1 for rel in needed if rel.lower() in cited)
+        if required_hits < min(2, len(needed)):
+            return False
     hits = sum(1 for rel in cores if rel.lower() in cited)
     return hits >= min(2, len(cores))
 
@@ -976,7 +990,7 @@ def has_data_model_source_citation(markdown: str, repo_root: Path) -> bool:
         return False
     versions = repo_root / "app" / "db" / "migrations" / "versions"
     if versions.is_dir() and any(versions.glob("*.py")):
-        if "migrations/versions" not in cited and "fdf8821871d7" not in cited:
+        if "migrations/versions" not in cited:
             return False
     if required:
         return True
@@ -1206,3 +1220,125 @@ def handbook_unknown_process_offenders(
         if names:
             found[path.as_posix()] = names
     return found
+
+
+_FENCE_BODY_RE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
+_INLINE_BODY_RE = re.compile(r"`([^`\n]+)`")
+_STALE_METHOD_RE = re.compile(r"`([A-Z][A-Za-z0-9]+)`")
+
+
+def _iter_page_code_units(markdown: str) -> list[str]:
+    units: list[str] = []
+    for match in re.finditer(r"```([^\n]*)\n(.*?)```", markdown or "", flags=re.S):
+        lang = (match.group(1) or "").strip().split()[0].lower() if match.group(1) else ""
+        if lang in {"mermaid", "plantuml", "graphviz"}:
+            continue
+        body = match.group(2).strip()
+        if body:
+            units.append(body)
+    stripped = _FENCE_BODY_RE.sub("", markdown or "")
+    stripped = _CITE_RE.sub("", stripped)
+    for match in _INLINE_BODY_RE.finditer(stripped):
+        body = match.group(1).strip()
+        if body and not re.fullmatch(r"[\w./-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?", body):
+            units.append(body)
+    return units
+
+
+def handbook_code_integrity_offenders(
+    content_dir: Path | None,
+    repo_root: Path | None,
+    raw_replies: dict[str, str] | None = None,
+) -> dict[str, list[str]]:
+    """Code spans/fences in the final page that are in neither raw reply nor source."""
+    if content_dir is None or not content_dir.exists() or repo_root is None:
+        return {}
+    source_blob = _repo_source_blob(repo_root)
+    raw_replies = raw_replies or _load_raw_replies(content_dir)
+    found: dict[str, list[str]] = {}
+    for path in iter_markdown_pages(content_dir):
+        rel = path.relative_to(content_dir).as_posix()
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        raw = (raw_replies or {}).get(rel) or (raw_replies or {}).get(path.stem) or ""
+        missing: list[str] = []
+        for unit in _iter_page_code_units(text):
+            if unit in raw or unit in source_blob:
+                continue
+            missing.append(unit[:160])
+        if missing:
+            found[path.as_posix()] = missing[:12]
+    return found
+
+
+def handbook_doc_code_mismatches(
+    content_dir: Path | None, repo_root: Path | None
+) -> dict[str, list[str]]:
+    """Stale README method names that do not appear in repository source."""
+    if content_dir is None or not content_dir.exists() or repo_root is None:
+        return {}
+    source_blob = _repo_source_blob(repo_root)
+    found: dict[str, list[str]] = {}
+    for path in iter_markdown_pages(content_dir):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        stale: list[str] = []
+        for name in _STALE_METHOD_RE.findall(text):
+            if len(name) < 6 or name.lower() in {"readme", "bearer"}:
+                continue
+            if name in source_blob:
+                continue
+            if re.search(
+                rf"\bdef\s+{re.escape(name)}\b|\bfunc\s+\([^)]+\)\s+{re.escape(name)}\b|\bfunc\s+{re.escape(name)}\b",
+                source_blob,
+            ):
+                continue
+            if (
+                name.endswith("Repository")
+                or name.endswith("Controller")
+                or name.endswith("Service")
+            ):
+                continue
+            stale.append(name)
+        if stale:
+            found[path.as_posix()] = sorted(set(stale))[:8]
+    return found
+
+
+def _raw_reply_dir(content_dir: Path) -> Path:
+    return content_dir.parent / "meta" / "raw-replies"
+
+
+def _load_raw_replies(content_dir: Path) -> dict[str, str]:
+    folder = _raw_reply_dir(content_dir)
+    if not folder.is_dir():
+        return {}
+    loaded: dict[str, str] = {}
+    for path in folder.rglob("*.md"):
+        loaded[path.relative_to(folder).as_posix()] = path.read_text(
+            encoding="utf-8", errors="ignore"
+        )
+        loaded[path.stem] = path.read_text(encoding="utf-8", errors="ignore")
+    return loaded
+
+
+def _repo_source_blob(repo_root: Path) -> str:
+    skip = {".git", ".repo-agent-eval", "node_modules", "vendor", "__pycache__", ".venv"}
+    parts: list[str] = []
+    for path in repo_root.rglob("*"):
+        if not path.is_file() or any(part in skip for part in path.parts):
+            continue
+        if path.suffix.lower() not in {
+            ".go",
+            ".py",
+            ".md",
+            ".rst",
+            ".yml",
+            ".yaml",
+            ".toml",
+            ".sql",
+        }:
+            continue
+        try:
+            parts.append(path.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            continue
+    return "\n".join(parts)

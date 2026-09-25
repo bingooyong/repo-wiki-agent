@@ -52,10 +52,17 @@ _GENERIC_IDENTIFIERS = frozenset(
 )
 _FILE_LINE_RE = re.compile(r"^((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+):(\d+)(?:-(\d+))?$")
 _MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\n]+)\)")
-_PRODUCT_IDENTITY_RE = re.compile(r"产品身份|不再积极维护|不再活跃维护|not actively maintained")
+_PRODUCT_IDENTITY_RE = re.compile(r"产品身份|不再.{0,8}维护")
 _DANGLING_README_RE = re.compile(r"(?:(?<=[。；])|^)\s*`README\.(?:rst|md)`\s*[。；]?")
+_README_HEADER_CITE_RE = re.compile(r"<cite>\s*(README\.(?:rst|md|txt)):1-1?\d\s*</cite>", re.I)
 _SEVEN_TABLES_RE = re.compile(r"7\s*张业务表")
 _RST_SKIP_RE = re.compile(r"^(?:\.\.|:|\||---+)")
+_NOTE_LINE_RE = re.compile(r"^(?:\.\.\s+note::|\*\*NOTE\*\*\s*:|NOTE\s*:)", re.I)
+_ROUTE_PATH_RE = re.compile(r"`(/[A-Za-z0-9_.:{}/-]*)`")
+_ROUTE_REG_RE = re.compile(
+    r"""(?:HandleFunc|Handle|GET|POST|PUT|DELETE|PATCH|Group|Register)\s*\(\s*['\"]""",
+    re.I,
+)
 
 
 def sentence_identifiers(text: str) -> set[str]:
@@ -273,15 +280,46 @@ def _section_bounds(lines: list[str], heading: str) -> tuple[int, int] | None:
     return start, end
 
 
+def find_alembic_revision_rel(root: Path) -> str:
+    """Return the Alembic revision with the most create_table calls."""
+    candidates: list[Path] = []
+    for rel in (
+        "app/db/migrations/versions",
+        "alembic/versions",
+        "migrations/versions",
+    ):
+        folder = root / rel
+        if folder.is_dir():
+            candidates.extend(path for path in folder.glob("*.py") if path.is_file())
+    if not candidates:
+        for path in root.rglob("*.py"):
+            if path.parent.name == "versions" and "migration" in path.as_posix().lower():
+                candidates.append(path)
+    best = ""
+    best_count = -1
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        count = len(re.findall(r"\bop\.create_table\b", text))
+        if count > best_count:
+            best = path.relative_to(root).as_posix()
+            best_count = count
+    return best
+
+
 def rewrite_fastapi_intro_cites(
     markdown: str,
     page: object | None,
     workspace_root: str | Path,
 ) -> str:
-    """Point FastAPI intro identity at README and 7-table claims at Alembic."""
+    """Point intro identity at the README NOTE/H1 and table claims at Alembic."""
     root = Path(workspace_root)
-    alembic_rel = "app/db/migrations/versions/fdf8821871d7_main_tables.py"
-    if not (root / alembic_rel).is_file() and not (root / "app" / "main.py").is_file():
+    alembic_rel = find_alembic_revision_rel(root)
+    if not alembic_rel and not any(
+        (root / name).is_file() for name in ("README.rst", "README.md", "README.txt", "README")
+    ):
         return markdown
     from repo_wiki.generator.deterministic_sections import cite_existing_meaningful
 
@@ -361,7 +399,11 @@ def rewrite_fastapi_intro_cites(
 
 def _is_identity_intro_line(line: str) -> bool:
     """True only for maintenance-status prose or a leftover ``README.rst`` token."""
-    return bool(_PRODUCT_IDENTITY_RE.search(line) or _DANGLING_README_RE.search(line))
+    if _PRODUCT_IDENTITY_RE.search(line) or _DANGLING_README_RE.search(line):
+        return True
+    return bool(
+        _README_HEADER_CITE_RE.search(line) and re.search(r"不再|维护|产品身份|参考实现", line)
+    )
 
 
 def _readme_line_is_skippable(stripped: str) -> bool:
@@ -369,7 +411,7 @@ def _readme_line_is_skippable(stripped: str) -> bool:
 
 
 def cite_readme_supporting_line(root: Path, readme: str, claim: str) -> str:
-    """Cite the README line that actually supports the identity sentence."""
+    """Cite the README NOTE or H1 that actually supports the identity sentence."""
     path = Path(root) / readme
     if not path.is_file():
         return ""
@@ -377,23 +419,15 @@ def cite_readme_supporting_line(root: Path, readme: str, claim: str) -> str:
         rows = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError:
         return ""
-    lowered = (claim or "").lower()
-    keywords = [
-        token
-        for token in (
-            "not actively maintained",
-            "不再积极维护",
-            "不再活跃维护",
-            "NOTE",
-        )
-        if token.lower() in lowered or token in (claim or "")
-    ] or ["not actively maintained", "NOTE"]
-    for index, line in enumerate(rows, 1):
-        stripped = line.strip()
-        if _readme_line_is_skippable(stripped):
-            continue
-        if any(token.lower() in stripped.lower() for token in keywords):
-            return f"<cite>{readme}:{index}-{index}</cite>"
+    note_line = _readme_note_line(rows)
+    h1_line = _readme_h1_line(rows)
+    wants_note = bool(_PRODUCT_IDENTITY_RE.search(claim or "") or "维护" in (claim or ""))
+    if wants_note and note_line:
+        return f"<cite>{readme}:{note_line}-{note_line}</cite>"
+    if h1_line:
+        return f"<cite>{readme}:{h1_line}-{h1_line}</cite>"
+    if note_line:
+        return f"<cite>{readme}:{note_line}-{note_line}</cite>"
     for index, line in enumerate(rows, 1):
         stripped = line.strip()
         if _readme_line_is_skippable(stripped):
@@ -401,6 +435,91 @@ def cite_readme_supporting_line(root: Path, readme: str, claim: str) -> str:
         if len(stripped) > 40:
             return f"<cite>{readme}:{index}-{index}</cite>"
     return ""
+
+
+def _readme_note_line(rows: list[str]) -> int:
+    for index, line in enumerate(rows, 1):
+        stripped = line.strip()
+        if _NOTE_LINE_RE.match(stripped):
+            if re.match(r"^\.\.\s+note::", stripped, re.I):
+                for follow in range(index, min(len(rows), index + 4)):
+                    nxt = rows[follow].strip()
+                    if nxt and not nxt.startswith(".."):
+                        return follow + 1 if follow != index - 1 else index
+            return index
+    return 0
+
+
+def _readme_h1_line(rows: list[str]) -> int:
+    for index, line in enumerate(rows, 1):
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            return index
+        if index < len(rows) and re.fullmatch(r"[-=]{3,}", rows[index].strip()):
+            if stripped and not stripped.startswith("..") and not stripped.startswith(":"):
+                return index
+    return 0
+
+
+def realign_route_registration_cites(markdown: str, workspace_root: str | Path) -> str:
+    """Point route path cites at the registration line, not a later mention."""
+    root = Path(workspace_root)
+    if not markdown:
+        return markdown
+    index = _route_registration_index(root)
+    if not index:
+        return markdown
+    lines = markdown.splitlines()
+    changed = False
+    for lineno, line in enumerate(lines):
+        if "<cite>" not in line:
+            continue
+        paths = _ROUTE_PATH_RE.findall(line)
+        if not paths:
+            continue
+        for route in paths:
+            target = index.get(route)
+            if target is None:
+                continue
+            rel, start = target
+            new_cite = f"<cite>{rel}:{start}-{start}</cite>"
+            updated = _CITE_TAG_RE.sub(
+                lambda match: (
+                    new_cite if match.group(1).replace("\\", "/") == rel else match.group(0)
+                ),
+                line,
+            )
+            if updated != line:
+                lines[lineno] = updated
+                changed = True
+    if not changed:
+        return markdown
+    rewritten = "\n".join(lines)
+    if markdown.endswith("\n") and not rewritten.endswith("\n"):
+        rewritten += "\n"
+    return rewritten
+
+
+def _route_registration_index(root: Path) -> dict[str, tuple[str, int]]:
+    found: dict[str, tuple[str, int]] = {}
+    skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
+            continue
+        if any(part in skip for part in path.parts) or path.name.endswith("_test.go"):
+            continue
+        rel = path.relative_to(root).as_posix()
+        try:
+            rows = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        for index, line in enumerate(rows, 1):
+            for route in re.findall(r"""['\"](/[A-Za-z0-9_.:{}/-]*)['\"]""", line):
+                if route in found and not _ROUTE_REG_RE.search(line):
+                    continue
+                if _ROUTE_REG_RE.search(line) or route not in found:
+                    found[route] = (rel, index)
+    return found
 
 
 def cite_alembic_upgrade_range(root: Path, rel: str) -> str:

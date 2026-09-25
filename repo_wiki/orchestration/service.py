@@ -684,6 +684,7 @@ class RepoWikiService:
         writer = ContentLayoutWriter(profile=eval_profile, run_id=run_id)
         output_dir = writer.run_dir
         content_dir = writer.content_dir
+        self._current_run_raw_dir = content_dir.parent / "meta" / "raw-replies"
         composition = asyncio.run(
             self._compose_qoder_like_pages(
                 plan=plan,
@@ -1614,6 +1615,12 @@ class RepoWikiService:
                 composition_context=context,
                 inject_planner_mermaid=False,
             )
+            self._write_raw_reply(page, getattr(output, "raw_markdown", "") or output.markdown)
+            from repo_wiki.verifier.handbook import MIN_HANDBOOK_BODY_CHARS, handbook_page_body_len
+
+            if handbook_page_body_len(enriched) < MIN_HANDBOOK_BODY_CHARS:
+                write_fallback(page, binding, page_idx, "tiny_or_stub_page")
+                return
             self._store_composer_cache_page(
                 cache,
                 page_id=page.page_id,
@@ -2621,12 +2628,12 @@ class RepoWikiService:
             content = realign_irrelevant_cites(content, cites, self.root)
         content = rewrite_fastapi_intro_cites(content, page, self.root)
         from repo_wiki.evidence.citation_renderer import strip_empty_cite_parens
-        from repo_wiki.generator.process_roles import (
-            derive_repo_process_names,
-            strip_unknown_process_clauses,
-        )
+        from repo_wiki.generator.adjacent_cites import realign_route_registration_cites
 
-        content = strip_unknown_process_clauses(content, derive_repo_process_names(self.root))
+        title = str(getattr(page, "title", "") or "")
+        page_id = str(getattr(page, "page_id", "") or "")
+        if "API" in title or "api" in page_id.lower():
+            content = realign_route_registration_cites(content, self.root)
         content = strip_empty_cite_parens(content)
 
         content = self._drop_uninventoried_snapshot_api_claims(content, composition_context)
@@ -2639,6 +2646,20 @@ class RepoWikiService:
         content = normalize_citation_markup(content, self.root)
         content = strip_header_only_cites(content, self.root)
         return content.strip() + "\n"
+
+    def _write_raw_reply(self, page: Any, raw_markdown: str) -> None:
+        rel = str(getattr(page, "output_path", "") or getattr(page, "page_id", "page") or "page")
+        run_meta = getattr(self, "_current_run_raw_dir", None)
+        target = (
+            run_meta / rel
+            if isinstance(run_meta, Path)
+            else self.root / ".repo-agent-eval" / "raw-replies" / rel
+        )
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(raw_markdown or "", encoding="utf-8")
+        except OSError:
+            return
 
     def _cite_existing_path(self, rel: str, hint_lines: int = 8) -> str:  # noqa: ARG002
         from repo_wiki.generator.deterministic_sections import cite_existing_meaningful
@@ -2701,11 +2722,14 @@ class RepoWikiService:
 
         page_id = str(getattr(page, "page_id", "") or "")
         title = str(getattr(page, "title", "") or "")
+        from repo_wiki.generator.process_roles import derive_process_role_facts
+
+        role_facts = derive_process_role_facts(self.root)
         if is_architecture_owner_page(page_id=page_id, title=title):
             role = build_go_role_section(self.root)
             if role:
                 content = replace_h2_section(content, ("进程角色",), role)
-        else:
+        elif role_facts:
             content = replace_h2_section(
                 content,
                 ("进程角色",),
@@ -2742,19 +2766,7 @@ class RepoWikiService:
         ]
         extra = [(rel, cite_existing_meaningful(self.root, rel)) for rel in missing]
         extra = [(rel, item) for rel, item in extra if item]
-        duties = {
-            "internal/exporter": "把探测结果写出到配置的下游。",
-            "internal/services": "实现探测、标签与策略等业务用例。",
-            "internal/repository": "访问 GORM 模型与存储。",
-            "internal/control": "维护 TunnelHub 与会话。",
-            "internal/agent": "实现 probe-agent 的隧道传输。",
-            "internal/probe": "执行探测并解析结果。",
-            "cmd/ccagent": "作为主 REST/Web 入口。",
-            "cmd/ccprobe-control": "作为 gRPC 控制面入口。",
-            "app/api/routes": "注册 HTTP 路由。",
-            "app/models": "定义领域模型。",
-        }
-        sentences = " ".join(f"{duties[rel]} {cite}" for rel, cite in extra[:4] if rel in duties)
+        sentences = " ".join(f"`{rel}` 是仓库中的实现包。 {cite}" for rel, cite in extra[:4])
         if sentences:
             content = content.rstrip() + f"\n\n{sentences}\n"
         return content
@@ -3491,17 +3503,11 @@ class RepoWikiService:
             content,
             flags=re.IGNORECASE,
         )
-        cleaned = re.sub(
-            r"NOTE:\s*This repository is not actively maintained[^\n]*",
-            "",
-            cleaned,
-            flags=re.IGNORECASE,
-        )
         return re.sub(
-            r"This repository is not actively maintained[^\n]*",
+            r"^NOTE\s*:.*?(?=\n|$)",
             "",
             cleaned,
-            flags=re.IGNORECASE,
+            flags=re.IGNORECASE | re.M,
         )
 
     def _strip_empty_blockquotes(self, content: str) -> str:
@@ -3529,16 +3535,10 @@ class RepoWikiService:
         return "\n".join(lines)
 
     def _strip_package_main_import_claims(self, content: str) -> str:
-        cleaned = re.sub(
-            r"[^。\n]*custom-probe[^。\n]*(?:internal/services|internal/exporter)[^。\n]*[。]?",
-            "",
-            content,
-            flags=re.IGNORECASE,
-        )
         return re.sub(
             r"[^。\n]*从\s+package\s+main[^。\n]*导入[^。\n]*[。]?",
             "",
-            cleaned,
+            content,
             flags=re.IGNORECASE,
         )
 

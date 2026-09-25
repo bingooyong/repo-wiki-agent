@@ -303,10 +303,25 @@ def normalize_citation_markup(text: str, workspace_root: str | Path | None = Non
     return strip_empty_cite_parens(collapse_citation_text_gaps(rewritten))
 
 
+_FENCE_BLOCK_RE = re.compile(r"```.*?```", re.S)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+
+
 def strip_empty_cite_parens(text: str) -> str:
-    """Remove empty fullwidth/halfwidth parens left after a dropped cite."""
-    cleaned = re.sub(r"（\s*）", "", text or "")
-    cleaned = re.sub(r"\(\s*\)", "", cleaned)
+    """Remove empty parens left after a dropped cite; never touch code."""
+    held: dict[str, str] = {}
+
+    def _hold(match: re.Match[str]) -> str:
+        key = f"\x00CODE{len(held)}\x00"
+        held[key] = match.group(0)
+        return key
+
+    protected = _FENCE_BLOCK_RE.sub(_hold, text or "")
+    protected = _INLINE_CODE_RE.sub(_hold, protected)
+    cleaned = re.sub(r"（\s*）", "", protected)
+    cleaned = re.sub(r"(?<=[\u4e00-\u9fff，。；：、）>])\(\s*\)", "", cleaned)
+    for key, value in held.items():
+        cleaned = cleaned.replace(key, value)
     return cleaned
 
 

@@ -161,13 +161,19 @@ def test_product_name_from_readme_not_directory(tmp_path: Path) -> None:
 
 
 def test_role_contradictions_and_rewrite(tmp_path: Path) -> None:
-    (tmp_path / "cmd" / "ccagent").mkdir(parents=True)
+    from tests.test_handbook_round15 import _write_role_repo
+
+    _write_role_repo(tmp_path)
+    example = tmp_path / "cmd" / "custom-probe"
+    example.mkdir(parents=True)
+    (example / "README.md").write_text("# 示例工具\n", encoding="utf-8")
+    (example / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
     text = (
         "`cmd/ccagent`（探针 Agent，作为隧道客户端连接到控制面）\n"
         "ccagent 通过 `-agent-url`/`-agent-token` 与 `ccprobe-control` 建立反向控制链路。\n"
         "custom-probe 作为外部进程被拉起以返回 JSON 探针结果。\n"
     )
-    assert prose_role_contradictions(text)
+    assert prose_role_contradictions(text, tmp_path)
     out = apply_deterministic_rewrites(
         text, tmp_path, title="整体架构概览", category="架构设计", page_id="architecture-overview"
     )

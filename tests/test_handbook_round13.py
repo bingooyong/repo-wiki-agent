@@ -267,7 +267,7 @@ def test_host_port_backticks_are_not_turned_into_cites() -> None:
     assert "<cite>internal/models/endpoint.go:12</cite>" in out
 
 
-def test_role_regex_accepts_25m_probe_agent_after_tunnel_client() -> None:
+def test_role_regex_accepts_25m_probe_agent_after_tunnel_client(tmp_path: Path) -> None:
     s1 = (
         "管理面由 `ccagent` 主进程承担，并非由 `ccprobe-control` 承担，"
         "边缘隧道客户端的角色则交由 `probe-agent` 负责。"
@@ -280,7 +280,10 @@ def test_role_regex_accepts_25m_probe_agent_after_tunnel_client() -> None:
     assert prose_role_contradictions(s1) == []
     assert prose_role_contradictions(s2) == []
     still_wrong = "后续 ccagent 作为隧道客户端连向 ccprobe-control。"
-    assert "ccagent-as-tunnel-client" in prose_role_contradictions(still_wrong)
+    from tests.test_handbook_round15 import _write_role_repo
+
+    root = _write_role_repo(tmp_path)
+    assert "ccagent-as-tunnel-client" in prose_role_contradictions(still_wrong, root)
 
 
 def test_hygiene_flags_instruction_voice_and_evidence_meta(tmp_path: Path) -> None:

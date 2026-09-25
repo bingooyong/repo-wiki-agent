@@ -96,8 +96,8 @@ _PROSE_RECOVERY_REASONS = frozenset(
 _EVIDENCE_META_TALK_RE = re.compile(
     r"证据片段|证据范围|"
     r"当前证据|提供的证据|"
-    r"当前(?:可用|可见|提供的)(?:源码)?证据|"
-    r"(?:可用|可见|提供的)源码证据"
+    r"当前(?:可用|可见|提供的)的?(?:源码)?证据|"
+    r"(?:可用|可见|提供的)的?源码证据"
 )
 _KEEP_MARKDOWN_AFTER_RETRY = frozenset({ROLE_CONTRADICTION_REJECTION})
 EMPTY_CONTENT_REWRITE_MAX_TOKENS = 16384
@@ -326,6 +326,7 @@ class ComposerOutput:
     model: str = "mock-gpt"
     low_confidence: bool = False
     uncertainty_reasons: list[str] = field(default_factory=list)
+    raw_markdown: str = ""
 
 
 @dataclass
@@ -561,6 +562,8 @@ class LLMPageComposer:
             completion_tokens = 0
             total_tokens = 0
             last_rejected: ComposerOutput | None = None
+            best_structured: ComposerOutput | None = None
+            best_score = (-1, -1, -1)
             rewrite_max_tokens: int | None = None
             rewrite_extra_body: dict[str, Any] | None = None
             from repo_wiki.generator.composer_cache import compute_composer_input_hash
@@ -656,8 +659,9 @@ class LLMPageComposer:
                         return last_rejected
                     raise
 
+                raw_reply = response.content or ""
                 response_content = self._normalize_markdown_response(
-                    response.content, input.page_plan.title
+                    raw_reply, input.page_plan.title
                 )
                 usage = response.usage or {}
                 prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
@@ -680,8 +684,21 @@ class LLMPageComposer:
                     model=self.model_name,
                     low_confidence=validation_result.low_confidence,
                     uncertainty_reasons=validation_result.uncertainty_reasons,
+                    raw_markdown=raw_reply,
                 )
+                score = self._attempt_structure_score(response_content)
+                prev_score = best_score
+                if best_structured is None or (
+                    score[0] >= prev_score[0] and score[1] >= prev_score[1]
+                ):
+                    best_structured = output
+                    best_score = score
                 if not output.rejected:
+                    if prev_score[0] >= 0 and (
+                        score[0] < prev_score[0] or score[1] < prev_score[1]
+                    ):
+                        last_rejected = output
+                        break
                     return output
                 last_rejected = output
                 extra_retry = validation_result.rejection_reason in {
@@ -704,9 +721,19 @@ class LLMPageComposer:
                     output.rejected = False
                     output.rejection_reason = None
                     return output
-                return output
+                break
 
-            return last_rejected or output
+            chosen = best_structured or last_rejected or output
+            if (
+                chosen is not None
+                and chosen.rejected
+                and self._attempt_structure_score(chosen.markdown)[0] >= 1
+                and self._attempt_structure_score(chosen.markdown)[1] >= 1
+                and handbook_page_body_len(chosen.markdown) >= MIN_HANDBOOK_BODY_CHARS
+            ):
+                chosen.rejected = False
+                chosen.rejection_reason = None
+            return chosen
 
         except Exception as e:
             return ComposerOutput(
@@ -873,10 +900,16 @@ class LLMPageComposer:
             return "No evidence available."
 
         lines = ["Evidence spans:"]
-        for i, candidate in enumerate(binding.candidates[:8]):  # Limit to 8
+        page_blob = f"{getattr(binding, 'page_id', '')} {getattr(binding, 'doc_type', '')}"
+        wide = "migration" in page_blob.lower() or "迁移" in page_blob
+        limit = 16 if wide else 8
+        snippet_chars = 900 if wide else 320
+        for i, candidate in enumerate(binding.candidates[:limit]):
             span = candidate.span
             symbol_info = f" (symbol: {span.symbol})" if span.symbol else ""
-            snippet = self._compact_snippet(getattr(span, "span_text", "") or "", max_chars=320)
+            snippet = self._compact_snippet(
+                getattr(span, "span_text", "") or "", max_chars=snippet_chars
+            )
             if snippet:
                 lines.append(
                     f"- {span.file_path}:{span.line_start}-{span.line_end}{symbol_info}: {snippet}"
@@ -1450,7 +1483,7 @@ class LLMPageComposer:
         if not result.rejection_reason:
             from repo_wiki.generator.compose_evidence import generator_role_contradictions
 
-            if generator_role_contradictions(content, input.page_plan):
+            if generator_role_contradictions(content, input.page_plan, self.workspace_root):
                 result.rejection_reason = ROLE_CONTRADICTION_REJECTION
 
         if not result.rejection_reason and _EVIDENCE_META_TALK_RE.search(content or ""):
@@ -1508,6 +1541,13 @@ class LLMPageComposer:
         result.tokens_used = len(content.split()) * 4
 
         return result
+
+    @staticmethod
+    def _attempt_structure_score(markdown: str) -> tuple[int, int, int]:
+        text = markdown or ""
+        headings = len(re.findall(r"^##\s+", text, flags=re.M))
+        cites = len(re.findall(r"<cite>", text, flags=re.I))
+        return (headings, cites, handbook_page_body_len(text))
 
     def _detect_unsupported_claims(self, content: str) -> bool:
         """Detect potential unsupported claims in content.

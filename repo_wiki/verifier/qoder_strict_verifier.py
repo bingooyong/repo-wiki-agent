@@ -502,6 +502,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_placeholder_mermaid(),
             self._check_handbook_reader_hygiene(),
             self._check_handbook_unknown_process(),
+            self._check_handbook_code_integrity(),
             self._check_handbook_diagram_evidence(),
             self._check_handbook_install_path(),
             self._check_handbook_import_consistency(),
@@ -2943,6 +2944,28 @@ class QoderLikeVerifierService(VerifierService):
             "Named processes exist in the documented repo",
         )
 
+    def _check_handbook_code_integrity(self) -> CheckResult:
+        from repo_wiki.verifier.handbook import handbook_code_integrity_offenders
+
+        content_dir = self._find_content_dir()
+        if not content_dir:
+            return self._skip_check("qoder-handbook-code-integrity", "No markdown pages")
+        raw_dir = content_dir.parent / "meta" / "raw-replies"
+        if not raw_dir.is_dir():
+            return self._skip_check("qoder-handbook-code-integrity", "No raw replies")
+        offenders = handbook_code_integrity_offenders(content_dir, self._handbook_repo_root())
+        if offenders:
+            return self._handbook_fail(
+                "qoder-handbook-code-integrity",
+                "QODER_HANDBOOK_CODE_INTEGRITY",
+                "Inline or fenced code was mutated and is not in the raw reply or repo source",
+                offenders,
+            )
+        return self._handbook_pass(
+            "qoder-handbook-code-integrity",
+            "Code spans and fences match the raw reply or repository source",
+        )
+
     def _check_handbook_diagram_evidence(self) -> CheckResult:
         from repo_wiki.generator.compose_evidence import (
             invented_compose_edges,
@@ -3041,7 +3064,10 @@ class QoderLikeVerifierService(VerifierService):
             rel = page.as_posix()
             if "架构" not in rel and "architecture" not in rel.lower():
                 continue
-            hits = prose_role_contradictions(page.read_text(encoding="utf-8", errors="ignore"))
+            hits = prose_role_contradictions(
+                page.read_text(encoding="utf-8", errors="ignore"),
+                self._handbook_repo_root(),
+            )
             if hits:
                 found[rel] = hits
         if found:

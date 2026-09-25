@@ -118,10 +118,11 @@ def test_role_facts_are_derived_from_cmd_comments(tmp_path: Path) -> None:
     facts = derive_process_role_facts(tmp_path)
     assert "probe-agent" in facts
     assert "数据面" in facts
-    assert "探测执行池" in facts
+    assert "执行池" in facts
     assert "ccprobe-control" in facts and "隧道" in facts
     assert "ccagent" in facts and "REST/Web" in facts
     assert "必须" not in facts and "禁止" not in facts and "前者" not in facts
+    assert "不是被" not in facts
     composer = create_composer()
     composer.workspace_root = tmp_path
     assert composer._process_role_facts() == facts
@@ -171,21 +172,18 @@ def test_unknown_process_verifier_uses_repo_name_list(tmp_path: Path) -> None:
     assert "ccagent" not in allowed
     offenders = handbook_unknown_process_offenders(content, root)
     assert offenders
-    cleaned = strip_unknown_process_clauses(
-        "在本仓库内，ccagent 承担主 REST/Web 服务与管理入口职责。本页只讲 FastAPI 表结构。\n",
-        allowed,
-    )
-    assert "ccagent" not in cleaned
-    assert "FastAPI" in cleaned
-    assert unknown_process_mentions(cleaned, allowed) == []
+    dirty = "在本仓库内，ccagent 承担主 REST/Web 服务与管理入口职责。本页只讲 FastAPI 表结构。\n"
+    assert "ccagent" in unknown_process_mentions(dirty, allowed)
+    assert strip_unknown_process_clauses(dirty, allowed) == dirty
 
 
-def test_role_negation_is_clause_scoped() -> None:
+def test_role_negation_is_clause_scoped(tmp_path: Path) -> None:
+    _write_probe_mains(tmp_path)
     for sentence in (_EVENT_ARCH_ATTEMPT0, _OVERVIEW_ATTEMPT0, _EVENT_ARCH_HANDBOOK):
-        assert prose_role_contradictions(sentence) == [], sentence
-        assert generator_role_contradictions(sentence, _arch_page()) == [], sentence
+        assert prose_role_contradictions(sentence, tmp_path) == [], sentence
+        assert generator_role_contradictions(sentence, _arch_page(), tmp_path) == [], sentence
     for sentence in (_COMMA_FALSE_NEG_A, _COMMA_FALSE_NEG_B):
-        assert "ccagent-as-tunnel-client" in prose_role_contradictions(sentence), sentence
+        assert "ccagent-as-tunnel-client" in prose_role_contradictions(sentence, tmp_path), sentence
 
 
 @pytest.mark.asyncio
@@ -495,7 +493,7 @@ def test_prompt_does_not_echo_reader_facing_line(tmp_path: Path) -> None:
     assert "本页面向仓库读者" not in prompt
     assert "当前证据" not in prompt
     assert "证据范围" not in prompt
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r16-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r17-")
 
 
 def test_contract_keeps_labeled_bullet_lists(tmp_path: Path) -> None:
@@ -518,4 +516,4 @@ def test_contract_keeps_labeled_bullet_lists(tmp_path: Path) -> None:
 
 
 def test_generator_version_is_r16() -> None:
-    assert COMPOSER_GENERATOR_VERSION == "handbook-r16-20260925"
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r17-")

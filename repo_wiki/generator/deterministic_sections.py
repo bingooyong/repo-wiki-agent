@@ -1724,14 +1724,17 @@ def apply_deterministic_rewrites(
             text = replace_h2_section(text, ("进程角色",), role)
         text = strip_meta_instructions(text)
     elif arch_like:
-        text = replace_h2_section(
-            text,
-            ("进程角色",),
-            "## 角色说明\n\n进程角色见整体架构概览。\n",
-        )
+        from repo_wiki.generator.process_roles import derive_process_role_facts
+
+        if derive_process_role_facts(root):
+            text = replace_h2_section(
+                text,
+                ("进程角色",),
+                "## 角色说明\n\n进程角色见整体架构概览。\n",
+            )
     if "数据模型" in (title or "") or "data" in (category or "").lower():
         block = build_data_model_cite_block(root)
-        if block and "ProbeEndpoint" not in text and "fdf8821871d7" not in text:
+        if block and "ProbeEndpoint" not in text and "create_table" not in text:
             text = replace_h2_section(text, ("实体定义", "持久化表", "数据模型"), block)
     if is_security_owner_page(page_id=page_id, title=title) or (
         not page_id and title in {"安全合规", "安全合规概览"}
