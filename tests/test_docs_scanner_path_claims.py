@@ -123,6 +123,18 @@ def test_source_file_claim_rejects_slugs_git_refs_and_dotted_paths() -> None:
     assert not ds._is_source_file_claim("app/logs/ccagent.log")
     assert not ds._is_source_file_claim("docs/xxx")
     assert not ds._is_source_file_claim(".env.local")
+    assert not ds._is_source_file_claim("docs/progress/phase7_p1-p5_")
+
+
+def test_extract_claims_skips_container_slash_and_filename_prefix() -> None:
+    names, path_like = _extract_claims(
+        "Copy binaries into /app/ccagent and /app/probe-agent. "
+        "See docs/progress/phase7_p1-p5_ notes and target-service later."
+    )
+    assert "app/ccagent" not in path_like
+    assert "app/probe-agent" not in path_like
+    assert "docs/progress/phase7_p1-p5_" not in path_like
+    assert "target-service" not in names
 
 
 def test_extract_claims_skips_library_tokens_and_non_source_refs() -> None:

@@ -202,6 +202,9 @@ def compute_context_hash(context: ComposerContext) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:24]
 
 
+COMPOSER_GENERATOR_VERSION = "handbook-r4-20260925"
+
+
 def compute_composer_input_hash(
     input_data: ComposerInput,
     model_name: str = "mock-gpt",
@@ -238,6 +241,7 @@ def compute_composer_input_hash(
             skeleton_hash,
             context_hash,
             contract_id,
+            COMPOSER_GENERATOR_VERSION,
             model_name,
             str(temperature),
             str(max_tokens),

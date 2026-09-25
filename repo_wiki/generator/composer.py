@@ -153,7 +153,7 @@ _HANDBOOK_INSTALL_STRUCTURE = """推荐结构：
 列出仓库文档里出现的运行时、语言版本、包管理器和外部依赖。证据不足时省略该事实，不要用套话填空。
 
 ## 安装步骤
-使用编号步骤。每一步若涉及命令，必须给出可复制的 ```bash 或 ```sh 围栏，不要只把命令写在行内反引号里。
+使用编号步骤。每一步若涉及命令，必须给出可复制的 ```bash 或 ```sh 围栏，不要只把命令写在行内反引号里。命令必须使用仓库里真实存在的路径、二进制和 flag。
 
 ## 启动与验证
 给出启动命令和如何确认服务已起来（同样优先围栏命令）。
@@ -870,8 +870,8 @@ class LLMPageComposer:
                 "- 不要把源码证据原文整段放进 Markdown 代码围栏。"
                 "安装/运行命令必须写成可复制的 ```bash 或 ```sh 围栏，"
                 "禁止只把命令写在行内反引号里；围栏不能替代段落说明。",
-                "- 安装页：README 证据的 `<cite>` 必须写在论断的同一行或下一行"
-                "（same-line / next-line），不要把 README 引用甩到段落很远的地方。",
+                "- 安装页：README 的 `<cite>` 必须覆盖快速开始/安装/启动章节，"
+                "禁止只引用徽章或标题行。命令必须使用仓库里真实存在的路径、二进制和 flag。",
             ]
         elif is_handbook_overview_page(page):
             rules = [
@@ -879,8 +879,8 @@ class LLMPageComposer:
                 "不要把引用只堆在文末「源码引用」列表里。",
                 "- 正文必须用段落解释；不要把项目概述写成安装步骤清单。列表行不计入 prose 下限。",
                 "- 不要把源码证据原文整段放进 Markdown 代码围栏；本页不要求 ```bash / ```sh 安装命令围栏。",
-                "- 概述页：README 证据的 `<cite>` 必须写在论断的同一行或下一行"
-                "（same-line / next-line），不要把 README 引用甩到段落很远的地方。",
+                "- 概述页：README 的 `<cite>` 必须覆盖快速开始/运行章节，不要只引用徽章行。"
+                "若仓库有 `cmd/ccagent`，核心流程必须写到该控制面进程。",
             ]
         else:
             rules = [
@@ -902,6 +902,17 @@ class LLMPageComposer:
                     "- API 页：证据中已有 Go handler 文件时，正文必须至少有一条 `<cite>` "
                     "指向该 handler（例如 `internal/services/...`），不能只引用 SQL、docs 或配置。"
                 )
+        if page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
+            rules.append(
+                "- 架构页：必须引用核心包（`cmd/ccagent`、`internal/control`、"
+                "`internal/services`、`internal/repository` 等），"
+                "不要把示例/demo/scaffold 二进制当成系统架构。"
+            )
+        if page.category == WikiTaxonomyCategory.DATA_MODELS:
+            rules.append(
+                "- 数据模型页：必须引用 `internal/models` 与 `db/schema.sql`（若存在），"
+                "字段类型用源码真实类型，关系按 schema 外键，不要用示例程序里的另一套结构体。"
+            )
         return "\n".join(rules)
 
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
@@ -948,6 +959,18 @@ class LLMPageComposer:
         handbook_cite_rules = self._handbook_cite_rules(input)
         if handbook_cite_rules:
             handbook_cite_rules = handbook_cite_rules + "\n"
+        install_command_block = ""
+        if is_handbook_install_page(page):
+            from repo_wiki.verifier.handbook import collect_repo_install_commands
+
+            commands = collect_repo_install_commands(Path(self.workspace_root or "."))
+            if commands:
+                listed = "\n".join(f"- `{item}`" for item in commands)
+                install_command_block = (
+                    "仓库中可核对的安装/启动命令（必须原样写入 ```bash 围栏，"
+                    "不要改路径或 flag，不要编造不存在的 cmd/ 目录）：\n"
+                    f"{listed}\n"
+                )
 
         return f"""请基于源码证据生成一篇中文 Repo Wiki Markdown 页面。
 
@@ -981,6 +1004,7 @@ class LLMPageComposer:
 源码证据：
 {evidence_context}
 
+{install_command_block}
 {recommended_structure}
 """
 

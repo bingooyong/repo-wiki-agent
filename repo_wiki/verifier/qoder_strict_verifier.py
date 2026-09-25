@@ -34,8 +34,12 @@ from repo_wiki.verifier.handbook import (
     existing_readme_names,
     find_matching_pages,
     has_api_routes_citation,
+    has_architecture_core_citation,
+    has_data_model_source_citation,
     has_fenced_install_run_command,
     has_readme_citation,
+    has_readme_run_section_citation,
+    install_fenced_commands_are_grounded,
     install_run_clue_count,
     iter_markdown_pages,
     overview_identity_satisfied,
@@ -55,6 +59,7 @@ _PROMPT_LEAK_PHRASES = (
     "根据以下证据撰写",
     "根据下列证据",
     "以下端点来自仓库扫描证据上下文",
+    "以下端点来自",
     "仓库扫描证据上下文",
     "evidence 中被截断",
     "evidence 之外",
@@ -62,7 +67,7 @@ _PROMPT_LEAK_PHRASES = (
     "the repo gives no route table",
 )
 _QUALITY_METRIC_LEAK = re.compile(
-    r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b",
+    r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b|\b21\s*/\s*25\b",
     re.IGNORECASE,
 )
 
@@ -293,6 +298,8 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_INSTALL_RUN",
         "QODER_HANDBOOK_INSTALL_FENCE",
         "QODER_HANDBOOK_API_ROUTE_FILE",
+        "QODER_HANDBOOK_ARCHITECTURE_CORE",
+        "QODER_HANDBOOK_DATA_MODEL_SOURCE",
         "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -445,6 +452,8 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_install_run(),
             self._check_handbook_install_fence(),
             self._check_handbook_api_route_file(),
+            self._check_handbook_architecture_core(),
+            self._check_handbook_data_model_source(),
             self._check_qoder_source_evidence(),
         ]
 
@@ -2662,7 +2671,12 @@ class QoderLikeVerifierService(VerifierService):
         for page in pages:
             text = page.read_text(encoding="utf-8", errors="ignore")
             clues = install_run_clue_count(text, repo_root)
-            if clues < 2 or not has_readme_citation(text, readme_names):
+            if (
+                clues < 2
+                or not has_readme_citation(text, readme_names)
+                or not has_readme_run_section_citation(text, repo_root)
+                or not install_fenced_commands_are_grounded(text, repo_root)
+            ):
                 offenders.append(page.as_posix())
         if offenders:
             return self._handbook_fail(
@@ -2724,6 +2738,61 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-api-route-file",
             "API page cites api/routes implementation files",
+        )
+
+    def _check_handbook_architecture_core(self) -> CheckResult:
+        pages = find_matching_pages(
+            self._find_content_dir(),
+            ("architecture-overview", "整体架构概览", "architecture"),
+        )
+        if not pages:
+            return self._skip_check(
+                "qoder-handbook-architecture-core", "Architecture page absent"
+            )
+        repo_root = self._handbook_repo_root()
+        missing = [
+            page.as_posix()
+            for page in pages
+            if not has_architecture_core_citation(
+                page.read_text(encoding="utf-8", errors="ignore"), repo_root
+            )
+        ]
+        if missing:
+            return self._handbook_fail(
+                "qoder-handbook-architecture-core",
+                "QODER_HANDBOOK_ARCHITECTURE_CORE",
+                "Architecture page missing citations to core packages it should describe",
+                {"pages": missing},
+            )
+        return self._handbook_pass(
+            "qoder-handbook-architecture-core",
+            "Architecture page cites core implementation packages",
+        )
+
+    def _check_handbook_data_model_source(self) -> CheckResult:
+        pages = find_matching_pages(
+            self._find_content_dir(), ("data-model", "数据模型", "data-models")
+        )
+        if not pages:
+            return self._skip_check("qoder-handbook-data-model-source", "Data-model page absent")
+        repo_root = self._handbook_repo_root()
+        missing = [
+            page.as_posix()
+            for page in pages
+            if not has_data_model_source_citation(
+                page.read_text(encoding="utf-8", errors="ignore"), repo_root
+            )
+        ]
+        if missing:
+            return self._handbook_fail(
+                "qoder-handbook-data-model-source",
+                "QODER_HANDBOOK_DATA_MODEL_SOURCE",
+                "Data-model page missing citations to model sources or schema.sql",
+                {"pages": missing},
+            )
+        return self._handbook_pass(
+            "qoder-handbook-data-model-source",
+            "Data-model page cites model sources",
         )
 
     def _check_qoder_source_evidence(self) -> CheckResult:

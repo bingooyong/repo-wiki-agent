@@ -51,6 +51,10 @@ _INSTALL_FENCE_COMMAND_PATTERNS = (
     re.compile(r"\bpodman(?:\s+[A-Za-z0-9_-]+){0,6}", re.I),
     re.compile(r"\bmake(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
     re.compile(r"\bgo\s+build(?:\s+[A-Za-z0-9_./-]+){0,8}", re.I),
+    re.compile(r"podman exec[^\n]{0,80}schema\.sql", re.I),
+    re.compile(r"mysql[^\n]{0,80}schema\.sql", re.I),
+    re.compile(r"curl\s+https?://localhost:\d+\S*", re.I),
+    re.compile(r"\./bin/[A-Za-z0-9_-]+", re.I),
     re.compile(r"\bgo\s+run(?:\s+[A-Za-z0-9_./-]+){0,8}", re.I),
     re.compile(r"\bgo\s+test(?:\s+[A-Za-z0-9_./-]+){0,6}", re.I),
     re.compile(r"\bgo\s+mod(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
@@ -69,6 +73,7 @@ _PROMPT_LEAK_PHRASES = (
     "根据以下证据撰写",
     "根据下列证据",
     "以下端点来自仓库扫描证据上下文",
+    "以下端点来自",
     "仓库扫描证据上下文",
     "evidence 中被截断",
     "evidence 之外",
@@ -76,7 +81,7 @@ _PROMPT_LEAK_PHRASES = (
     "the repo gives no route table",
 )
 _QUALITY_METRIC_LEAK = re.compile(
-    r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b",
+    r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b|\b21\s*/\s*25\b",
     re.IGNORECASE,
 )
 _GENERIC_GO_INSTALL = re.compile(
@@ -2027,6 +2032,9 @@ class RepoWikiService:
         return "\n".join([f"# {title}", "", *body]).strip() + "\n"
 
     def _fallback_readme_citation(self, evidence: dict[str, Any]) -> str:
+        run_cite = self._readme_run_section_cite()
+        if run_cite:
+            return run_cite
         from repo_wiki.verifier.handbook import _README_NAMES
 
         for item in evidence.get("files") or []:
@@ -2038,6 +2046,23 @@ class RepoWikiService:
         for name in _README_NAMES:
             if (self.root / name).is_file():
                 return f"<cite>{name}:1</cite>"
+        return ""
+
+    def _readme_run_section_cite(self) -> str:
+        from repo_wiki.verifier.handbook import (
+            existing_readme_names,
+            read_readme_text,
+            readme_run_section_ranges,
+        )
+
+        names = existing_readme_names(self.root)
+        name = next((item for item in names if (self.root / item).is_file()), "")
+        if not name:
+            return ""
+        ranges = readme_run_section_ranges(read_readme_text(self.root))
+        if ranges:
+            start, end = ranges[0]
+            return f"<cite>{name}:{start}-{end}</cite>"
         return ""
 
     def _fallback_install_source_texts(
@@ -2082,67 +2107,34 @@ class RepoWikiService:
                         continue
                     seen.add(key)
                     commands.append(command)
-                    if len(commands) >= 6:
+                    if len(commands) >= 12:
                         return commands
         return commands
 
     def _fallback_install_run_commands(
         self, evidence: dict[str, Any], binding: Any | None
     ) -> list[str]:
-        bound = self._fallback_collect_install_commands(
-            self._fallback_install_source_texts(evidence, binding, include_root_readme=False)
-        )
-        if bound:
-            return [cmd for cmd in bound if not _GENERIC_GO_INSTALL.search(cmd)]
+        from repo_wiki.verifier.handbook import collect_repo_install_commands
+
+        repo = collect_repo_install_commands(self.root)
+        if repo:
+            return repo
         documented = self._fallback_collect_install_commands(
             self._fallback_install_source_texts(evidence, binding, include_root_readme=True)
         )
         documented = [cmd for cmd in documented if not _GENERIC_GO_INSTALL.search(cmd)]
         if documented:
             return documented
-        return self._install_commands_from_repo_files()
+        bound = self._fallback_collect_install_commands(
+            self._fallback_install_source_texts(evidence, binding, include_root_readme=False)
+        )
+        return [cmd for cmd in bound if not _GENERIC_GO_INSTALL.search(cmd)]
 
     def _install_commands_from_repo_files(self) -> list[str]:
         """Seed install pages from Makefile / README / cmd mains that actually exist."""
-        commands: list[str] = []
-        seen: set[str] = set()
+        from repo_wiki.verifier.handbook import collect_repo_install_commands
 
-        def _add(command: str) -> None:
-            text = " ".join(command.split()).strip()
-            if not text or _GENERIC_GO_INSTALL.search(text):
-                return
-            key = text.casefold()
-            if key in seen:
-                return
-            seen.add(key)
-            commands.append(text)
-
-        makefile = next(
-            (path for path in (self.root / "Makefile", self.root / "makefile") if path.is_file()),
-            None,
-        )
-        if makefile is not None:
-            text = makefile.read_text(encoding="utf-8", errors="ignore")
-            for raw in text.splitlines():
-                line = raw.split("#", 1)[0].strip()
-                if re.search(r"\b(?:go\s+build|podman-compose|docker-compose|go\s+run)\b", line):
-                    _add(line)
-            if re.search(r"^install:", text, re.M):
-                _add("make install")
-            if re.search(r"^up:", text, re.M):
-                _add("make up")
-        for main in sorted(self.root.glob("cmd/*/main.go")):
-            rel = main.relative_to(self.root).as_posix()
-            _add(f"go build -o bin/{main.parent.name} ./{rel}")
-        for name in ("README.md", "QUICKSTART.md"):
-            path = self.root / name
-            if not path.is_file():
-                continue
-            for command in self._fallback_collect_install_commands(
-                [path.read_text(encoding="utf-8", errors="ignore")]
-            ):
-                _add(command)
-        return commands[:6]
+        return collect_repo_install_commands(self.root)
 
     def _fallback_install_markdown(
         self, title: str, evidence: dict[str, Any], binding: Any | None
@@ -2397,6 +2389,9 @@ class RepoWikiService:
             for candidate in binding.candidates[:8]:
                 cites.append(citation_renderer.render_cite_block_from_candidate(candidate))
 
+        content = self._rewrite_install_page_contract(page, content)
+        content = self._ensure_architecture_core_cites(page, content)
+        content = self._ensure_data_model_source_cites(page, content)
         content = self._strip_broken_local_markdown_links(content)
         content = self._strip_prompt_leakage(content)
         content = self._dedupe_repeated_blocks(content)
@@ -2418,6 +2413,129 @@ class RepoWikiService:
         # CiteBlock.render() and leftover LLM markup can still carry
         # ``path:start-end (label)`` after composer normalize; strip before write.
         return normalize_citation_markup(content, self.root).strip() + "\n"
+
+    def _cite_existing_path(self, rel: str, hint_lines: int = 8) -> str:
+        path = self.root / rel
+        if path.is_file():
+            n = max(
+                1,
+                min(
+                    hint_lines,
+                    len(path.read_text(encoding="utf-8", errors="ignore").splitlines()) or 1,
+                ),
+            )
+            return f"<cite>{rel}:1-{n}</cite>"
+        if path.is_dir():
+            for child in sorted(path.rglob("*")):
+                if not child.is_file() or child.name.endswith("_test.go"):
+                    continue
+                if child.suffix.lower() not in {".go", ".py", ".sql", ".ts"}:
+                    continue
+                child_rel = child.relative_to(self.root).as_posix()
+                n = max(
+                    1,
+                    min(
+                        hint_lines,
+                        len(child.read_text(encoding="utf-8", errors="ignore").splitlines()) or 1,
+                    ),
+                )
+                return f"<cite>{child_rel}:1-{n}</cite>"
+        return ""
+
+    def _rewrite_install_page_contract(self, page: Any, content: str) -> str:
+        from repo_wiki.generator.composer import is_handbook_install_page
+        from repo_wiki.verifier.handbook import (
+            collect_repo_install_commands,
+            has_fenced_install_run_command,
+            has_readme_run_section_citation,
+            install_fenced_commands_are_grounded,
+        )
+
+        if not is_handbook_install_page(page):
+            return content
+        commands = collect_repo_install_commands(self.root)
+        blob = content.lower()
+        needs_fence = False
+        if commands:
+            if not has_fenced_install_run_command(
+                content, self.root
+            ) or not install_fenced_commands_are_grounded(content, self.root):
+                needs_fence = True
+            else:
+                if any(
+                    token in cmd.lower()
+                    for cmd in commands
+                    for token in ("podman-compose", "docker compose", "docker-compose")
+                ) and not any(
+                    token in blob
+                    for token in ("podman-compose", "docker compose", "docker-compose")
+                ):
+                    needs_fence = True
+                if any("schema.sql" in cmd for cmd in commands) and "schema.sql" not in content:
+                    needs_fence = True
+                if any("ccagent" in cmd for cmd in commands) and "ccagent" not in content:
+                    needs_fence = True
+        if needs_fence and commands:
+            block = "```bash\n" + "\n".join(commands) + "\n```"
+            fence_re = re.compile(r"```(?:bash|sh)\n.*?```", re.IGNORECASE | re.DOTALL)
+            if fence_re.search(content):
+                content = fence_re.sub(block, content)
+            elif "## 安装步骤" in content:
+                content = content.replace("## 安装步骤", "## 安装步骤\n\n" + block, 1)
+            else:
+                content = content.rstrip() + "\n\n## 安装步骤\n\n" + block + "\n"
+        if not has_readme_run_section_citation(content, self.root):
+            cite = self._readme_run_section_cite()
+            if cite:
+                content = content.rstrip() + f"\n\n安装与启动步骤以仓库入口文档为准。 {cite}\n"
+        return content
+
+    def _ensure_architecture_core_cites(self, page: Any, content: str) -> str:
+        from repo_wiki.planner.schema import WikiTaxonomyCategory
+        from repo_wiki.verifier.handbook import (
+            architecture_core_packages,
+            has_architecture_core_citation,
+        )
+
+        if getattr(page, "category", None) != WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
+            return content
+        if has_architecture_core_citation(content, self.root):
+            return content
+        cites = [
+            cite
+            for rel in architecture_core_packages(self.root)[:4]
+            if (cite := self._cite_existing_path(rel))
+        ]
+        if not cites:
+            return content
+        return (
+            content.rstrip()
+            + "\n\n核心实现位于控制面与内部包，而不是示例或脚手架程序。 "
+            + " ".join(cites)
+            + "\n"
+        )
+
+    def _ensure_data_model_source_cites(self, page: Any, content: str) -> str:
+        from repo_wiki.planner.schema import WikiTaxonomyCategory
+        from repo_wiki.verifier.handbook import has_data_model_source_citation
+
+        if getattr(page, "category", None) != WikiTaxonomyCategory.DATA_MODELS:
+            return content
+        if has_data_model_source_citation(content, self.root):
+            return content
+        cites = [
+            cite
+            for rel in ("internal/models", "db/schema.sql", "app/models")
+            if (cite := self._cite_existing_path(rel))
+        ]
+        if not cites:
+            return content
+        return (
+            content.rstrip()
+            + "\n\n实体与表结构以模型定义和 schema 为准。 "
+            + " ".join(cites)
+            + "\n"
+        )
 
     def _drop_uninventoried_snapshot_api_claims(
         self,

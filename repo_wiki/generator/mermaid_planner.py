@@ -56,6 +56,19 @@ def mermaid_er_field(value: str) -> str:
     return text or "id"
 
 
+def _mermaid_scalar_type(value: str) -> str:
+    lowered = (value or "").split(".")[-1].lower()
+    if lowered in {"int", "int8", "int16", "int32", "int64", "uint", "uint64"}:
+        return "int"
+    if lowered in {"float32", "float64"}:
+        return "float"
+    if lowered in {"bool"}:
+        return "bool"
+    if lowered in {"time", "datetime"}:
+        return "datetime"
+    return "string"
+
+
 def _page_tokens(page_id: str) -> set[str]:
     return {part for part in re.split(r"[-_/]", (page_id or "").lower()) if len(part) >= 3}
 
@@ -928,11 +941,14 @@ class MermaidPlanner:
             if entity_name.lower() in seen_names:
                 continue
             seen_names.add(entity_name.lower())
-            attributes = [
-                mermaid_er_field(str(item))
-                for item in (model.get("attributes") or [])
-                if str(item).strip()
-            ]
+            attr_types = [str(item) for item in (model.get("attribute_types") or [])]
+            attributes = []
+            for index, item in enumerate(model.get("attributes") or []):
+                name = mermaid_er_field(str(item))
+                if not name:
+                    continue
+                raw_type = attr_types[index] if index < len(attr_types) else "string"
+                attributes.append({"name": name, "type": _mermaid_scalar_type(raw_type)})
             primary_key = mermaid_er_field(str(model.get("primary_key") or "")) or ""
             er_entities.append(
                 {
@@ -943,9 +959,17 @@ class MermaidPlanner:
                 }
             )
             for target in model.get("relationships") or []:
-                dest = mermaid_er_field(str(target))
-                if dest:
-                    relationships.append((entity_name, dest, "fk"))
+                raw = str(target)
+                kind, sep, dest = raw.partition(":")
+                if not sep:
+                    dest, kind = kind, "belongs_to"
+                dest_name = mermaid_er_field(dest)
+                if not dest_name:
+                    continue
+                if kind == "has_many":
+                    relationships.append((entity_name, dest_name, "fk"))
+                else:
+                    relationships.append((dest_name, entity_name, "fk"))
 
         if not er_entities:
             return None
@@ -1097,14 +1121,24 @@ class MermaidRenderer:
             lines.append(f"    {entity_name} {{")
             seen: set[str] = set()
             if primary_key:
-                lines.append(f"        string {primary_key} PK")
+                pk_type = "string"
+                for attr in attributes:
+                    if isinstance(attr, dict) and mermaid_er_field(str(attr.get("name") or "")) == primary_key:
+                        pk_type = _mermaid_scalar_type(str(attr.get("type") or "string"))
+                        break
+                lines.append(f"        {pk_type} {primary_key} PK")
                 seen.add(primary_key)
             for attr in attributes[:8]:
-                field = mermaid_er_field(str(attr))
+                if isinstance(attr, dict):
+                    field = mermaid_er_field(str(attr.get("name") or ""))
+                    field_type = _mermaid_scalar_type(str(attr.get("type") or "string"))
+                else:
+                    field = mermaid_er_field(str(attr))
+                    field_type = "string"
                 if field in seen:
                     continue
                 seen.add(field)
-                lines.append(f"        string {field}")
+                lines.append(f"        {field_type} {field}")
             lines.append("    }")
         known = {mermaid_er_field(str(entity.get("entity") or "")) for entity in plan.er_entities}
         for rel in plan.er_relationships:
@@ -1113,7 +1147,7 @@ class MermaidRenderer:
             left = mermaid_er_field(str(rel[0]))
             right = mermaid_er_field(str(rel[1]))
             label = mermaid_er_field(str(rel[2] if len(rel) > 2 else "fk")) or "fk"
-            if left in known and right in known and left != right:
+            if left in known and right in known:
                 lines.append(f"    {left} ||--o{{ {right} : {label}")
 
         return "\n".join(lines)

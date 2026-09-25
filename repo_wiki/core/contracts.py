@@ -70,6 +70,8 @@ class DataModel(BaseModel):
     attributes: list[str] = Field(default_factory=list)
     primary_key: str = ""
     relationships: list[str] = Field(default_factory=list)
+    attribute_types: list[str] = Field(default_factory=list)
+    table_name: str = ""
 
 
 class RepositoryStats(BaseModel):

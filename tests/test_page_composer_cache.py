@@ -25,6 +25,7 @@ from repo_wiki.generator.composer import (
     ComposerInput,
 )
 from repo_wiki.generator.composer_cache import (
+    COMPOSER_GENERATOR_VERSION,
     CachedComposerMixin,
     ComposerCache,
     ComposerCacheStats,
@@ -471,6 +472,49 @@ class TestComputeComposerInputHash:
         hash2 = compute_composer_input_hash(input2)
 
         assert hash1 == hash2
+        assert COMPOSER_GENERATOR_VERSION
+
+    def test_generator_version_changes_hash_and_is_not_legacy_migrate(
+        self,
+        sample_page: WikiPagePlan,
+        sample_context: ComposerContext,
+        sample_skeleton: ArticleSkeleton,
+    ):
+        from repo_wiki.generator import composer_cache as cache_mod
+        from repo_wiki.prompts.contracts import get_contract_for_page_type
+
+        contract = get_contract_for_page_type(PagePromptType.OVERVIEW)
+        input_data = ComposerInput(
+            page_plan=sample_page,
+            evidence_binding=None,
+            skeleton=sample_skeleton,
+            contract=contract,
+            context=sample_context,
+        )
+        current = compute_composer_input_hash(input_data, model_name="minimax")
+        original = cache_mod.COMPOSER_GENERATOR_VERSION
+        cache_mod.COMPOSER_GENERATOR_VERSION = "handbook-r3-old"
+        try:
+            previous = compute_composer_input_hash(input_data, model_name="minimax")
+        finally:
+            cache_mod.COMPOSER_GENERATOR_VERSION = original
+        assert current != previous
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ComposerCache(Path(tmpdir) / "cache.sqlite3")
+            cache.put(
+                page_id=sample_page.page_id,
+                input_hash=previous,
+                output_markdown="# stale from previous generator",
+                tokens_used=11,
+            )
+            found_hash, record = lookup_composer_cache(
+                cache,
+                sample_page.page_id,
+                input_data,
+                model_name="minimax",
+            )
+            assert found_hash == current
+            assert record is None
 
     def test_different_model_different_hash(
         self,

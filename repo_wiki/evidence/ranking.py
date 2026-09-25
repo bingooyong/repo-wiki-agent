@@ -36,6 +36,21 @@ WEIGHT_ONBOARDING_ENTRY = 2.5
 WEIGHT_SECURITY_AUTH_FILE = 4.0
 WEIGHT_API_ROUTES_FILE = 3.0
 
+
+def _span_is_readme_run_section(span: EvidenceSpanRecord) -> bool:
+    from repo_wiki.verifier.handbook import _heading_is_run_usage, _text_has_install_clue
+
+    symbol = str(getattr(span, "symbol", "") or "")
+    text = str(getattr(span, "span_text", "") or "")
+    return _heading_is_run_usage(symbol) or _text_has_install_clue(text)
+
+
+def _span_is_readme_badge_header(span: EvidenceSpanRecord) -> bool:
+    from repo_wiki.verifier.handbook import _text_is_badge_header
+
+    return _text_is_badge_header(str(getattr(span, "span_text", "") or ""))
+
+
 _ONBOARDING_OVERVIEW_INSTALL_IDS = frozenset(
     {
         "project-overview",
@@ -368,6 +383,12 @@ def _score_onboarding_evidence(
         if name == "readme.md":
             score += WEIGHT_ONBOARDING_README + 1.5
             signals.append("onboarding_primary_readme")
+            if _span_is_readme_run_section(span):
+                score += WEIGHT_ONBOARDING_README + 2.5
+                signals.append("onboarding_readme_run")
+            elif _span_is_readme_badge_header(span):
+                score -= 2.5
+                signals.append("onboarding_readme_badge")
         elif name.startswith("readme") and not any(
             marker in name for marker in ("scaffold", "template", "boilerplate")
         ):
@@ -392,9 +413,29 @@ def _score_onboarding_evidence(
         if path.endswith(".go") and (path.startswith("internal/") or "/internal/" in path):
             score += WEIGHT_ONBOARDING_SETTINGS + 2.0
             signals.append("arch_go_internal")
+            if any(
+                token in path
+                for token in (
+                    "/control/",
+                    "/services/",
+                    "/repository/",
+                    "/exporter/",
+                    "/agent/",
+                    "/probe/",
+                )
+            ):
+                score += 2.0
+                signals.append("arch_go_core")
         if path.startswith("cmd/") and name == "main.go":
-            score += WEIGHT_ONBOARDING_ENTRY
-            signals.append("arch_cmd_main")
+            if any(token in path for token in ("custom-probe", "example", "demo", "scaffold")):
+                score -= 4.0
+                signals.append("arch_demo_cmd")
+            elif "ccagent" in path or "probe-agent" in path or "ccprobe-control" in path:
+                score += WEIGHT_ONBOARDING_ENTRY + 2.0
+                signals.append("arch_cmd_core")
+            else:
+                score += WEIGHT_ONBOARDING_ENTRY
+                signals.append("arch_cmd_main")
     elif _is_ops_config_page(page) or _is_database_troubleshooting_page(page):
         if "settings" in path or "database_url" in symbol or "database_url" in text:
             score += WEIGHT_ONBOARDING_SETTINGS
@@ -418,6 +459,9 @@ def _score_onboarding_evidence(
         ):
             score += WEIGHT_ONBOARDING_SETTINGS + 1.0
             signals.append("go_gorm_model")
+        if path.replace("\\", "/").endswith("db/schema.sql") or path.endswith("schema.sql"):
+            score += WEIGHT_ONBOARDING_SETTINGS + 2.0
+            signals.append("schema_sql")
     elif _is_security_onboarding_page(page):
         if "authentication.py" in path or path.endswith("/authentication.py"):
             score += WEIGHT_SECURITY_AUTH_FILE
@@ -535,6 +579,19 @@ def rank_evidence_for_page(
     return _pin_required_file_candidates(page, available_spans, results[:MIN_CANDIDATES_PER_PAGE])
 
 
+def _span_matches_required_file(span: EvidenceSpanRecord, req: str) -> bool:
+    path = _normalized_span_path(span)
+    req_n = req.replace("\\", "/").lower().rstrip("/")
+    if not req_n:
+        return False
+    if path == req_n or path.endswith("/" + req_n):
+        return True
+    if path.startswith(req_n + "/"):
+        return True
+    req_name = Path(req_n).name
+    return "." in req_name and Path(path).name == req_name
+
+
 def _pin_required_file_candidates(
     page: WikiPagePlan,
     available_spans: list[EvidenceSpanRecord],
@@ -550,24 +607,36 @@ def _pin_required_file_candidates(
         return results
     present = {_normalized_span_path(candidate.span) for candidate in results}
     extras: list[EvidenceCandidate] = []
-    for span in available_spans:
+    pinned_paths: set[str] = set()
+    required_spans = [
+        span
+        for span in available_spans
+        if any(_span_matches_required_file(span, req) for req in required)
+    ]
+    required_spans.sort(
+        key=lambda span: (
+            0 if _span_is_readme_run_section(span) else 1,
+            0 if not _span_is_readme_badge_header(span) else 1,
+        )
+    )
+    for span in required_spans:
         path = _normalized_span_path(span)
-        name = Path(path).name.lower()
-        for req in required:
-            req_n = req.replace("\\", "/").lower()
-            if path.endswith(req_n) or name == Path(req_n).name:
-                if path not in present:
-                    extras.append(
-                        EvidenceCandidate(
-                            evidence_id=int(getattr(span, "id", 0) or 0),
-                            span=span,
-                            score=WEIGHT_ONBOARDING_README + 2.0,
-                            match_signals=["required_file"],
-                            citation_order=0,
-                        )
-                    )
-                    present.add(path)
-                break
+        if path in present and path in pinned_paths:
+            continue
+        extras.append(
+            EvidenceCandidate(
+                evidence_id=int(getattr(span, "id", 0) or 0),
+                span=span,
+                score=WEIGHT_ONBOARDING_README
+                + (4.0 if _span_is_readme_run_section(span) else 2.0),
+                match_signals=["required_file", "required_run_section"]
+                if _span_is_readme_run_section(span)
+                else ["required_file"],
+                citation_order=0,
+            )
+        )
+        present.add(path)
+        pinned_paths.add(path)
     if not extras:
         return results
     merged = extras + results

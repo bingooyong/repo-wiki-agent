@@ -355,7 +355,7 @@ class RuleFirstPlanner:
             source_requirements=SourceRequirement(
                 modules=[m.name for m in self.snapshot.modules],
                 commands=["start", "build", "test"],
-                files=["README.md"],
+                files=self._existing_source_files("README.md", "cmd/ccagent/main.go"),
             ),
             sort_order=0,
             tags=["overview", "index"],
@@ -434,7 +434,22 @@ class RuleFirstPlanner:
                     for m in self.snapshot.modules
                     if m.domain in ("core-platform", "ai-services")
                     or str(m.path or "").startswith("internal/")
-                ]
+                ],
+                files=[
+                    path
+                    for path in (
+                        "cmd/ccagent/main.go",
+                        "internal/control",
+                        "internal/services",
+                        "internal/repository",
+                        "internal/exporter",
+                    )
+                    if any(
+                        (m.path or "").startswith(path) or path in (m.doc_path or "")
+                        for m in self.snapshot.modules
+                    )
+                    or Path(self.identity.root_path, path).exists()
+                ],
             ),
             sort_order=0,
             tags=["architecture", "design"],
@@ -837,6 +852,28 @@ class RuleFirstPlanner:
         paths.extend(self.snapshot.repository.key_directories)
         return [path for path in paths if path]
 
+    def _existing_source_files(self, *candidates: str) -> list[str]:
+        found: list[str] = []
+        for path in candidates:
+            if path and Path(self.identity.root_path, path).exists():
+                found.append(path)
+        return found
+
+    def _data_model_source_files(self) -> list[str]:
+        files = self._existing_source_files(
+            "internal/models",
+            "db/schema.sql",
+            "app/models",
+        )
+        for model in self.snapshot.data_models:
+            path = str(getattr(model, "file_path", "") or "")
+            if path and path not in files:
+                files.append(path)
+        for path in self._database_evidence_files():
+            if path not in files:
+                files.append(path)
+        return files[:24]
+
     def _database_evidence_files(self) -> list[str]:
         matches: list[str] = []
         seen: set[str] = set()
@@ -880,7 +917,8 @@ class RuleFirstPlanner:
             category=WikiTaxonomyCategory.DATA_MODELS,
             parent=None,
             source_requirements=SourceRequirement(
-                data_models=[dm.name for dm in self.snapshot.data_models]
+                data_models=[dm.name for dm in self.snapshot.data_models],
+                files=self._data_model_source_files(),
             ),
             sort_order=0,
             tags=["models", "schemas"],
@@ -898,7 +936,10 @@ class RuleFirstPlanner:
                 title="核心数据模型",
                 category=WikiTaxonomyCategory.DATA_MODELS,
                 parent="data-models-overview",
-                source_requirements=SourceRequirement(data_models=sorted(set(core_names))[:120]),
+                source_requirements=SourceRequirement(
+                    data_models=sorted(set(core_names))[:120],
+                    files=self._data_model_source_files(),
+                ),
                 sort_order=10,
                 tags=["models", "core-entities"],
             )

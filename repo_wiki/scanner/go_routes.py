@@ -86,6 +86,7 @@ class GoDataModel:
     attributes: tuple[str, ...] = ()
     primary_key: str | None = None
     relations: tuple[str, ...] = ()
+    attribute_types: tuple[str, ...] = ()
 
 
 def is_go_test_path(path: str) -> bool:
@@ -198,31 +199,68 @@ def extract_go_internal_import_edges(
     return edges
 
 
+def _related_model_name(field_name: str, type_name: str, known_models: set[str]) -> str | None:
+    if type_name in known_models:
+        return type_name
+    if field_name.endswith("ID"):
+        stem = field_name[:-2]
+        if stem in known_models:
+            return stem
+        matches = [name for name in known_models if name.endswith(stem)]
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
 def _parse_gorm_fields(
     body: str, known_models: set[str]
-) -> tuple[tuple[str, ...], str | None, tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...], str | None, tuple[str, ...]]:
     attrs: list[str] = []
+    types: list[str] = []
     pk: str | None = None
     rels: list[str] = []
     seen_rel: set[str] = set()
-    for name, _indirection, typ, tag in _GO_FIELD_RE.findall(body):
+    for name, indirection, typ, tag in _GO_FIELD_RE.findall(body):
         if not name or name[0].islower():
             continue
         tag = tag or ""
+        type_name = typ.split(".")[-1]
         if name not in attrs:
             attrs.append(name)
+            types.append(type_name)
         if "primaryKey" in tag or "primary_key" in tag:
             pk = name
-        type_name = typ.split(".")[-1]
-        if type_name in known_models and type_name not in seen_rel:
-            seen_rel.add(type_name)
-            rels.append(type_name)
-        if name.endswith("ID") and name[:-2] in known_models and name[:-2] not in seen_rel:
-            seen_rel.add(name[:-2])
-            rels.append(name[:-2])
+        related = _related_model_name(name, type_name, known_models - {name})
+        if not related or related in seen_rel:
+            continue
+        seen_rel.add(related)
+        if "[]" in (indirection or ""):
+            rels.append(f"has_many:{related}")
+        else:
+            rels.append(f"belongs_to:{related}")
     if pk is None and "ID" in attrs:
         pk = "ID"
-    return tuple(attrs), pk, tuple(rels)
+    return tuple(attrs), tuple(types), pk, tuple(rels)
+
+
+_SQL_CREATE_TABLE_RE = re.compile(
+    r"CREATE TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+`?(\w+)`?\s*\((.*?)\)\s*;",
+    re.IGNORECASE | re.DOTALL,
+)
+_SQL_FK_RE = re.compile(
+    r"FOREIGN KEY\s*\(\s*`?(\w+)`?\s*\)\s*REFERENCES\s+`?(\w+)`?",
+    re.IGNORECASE,
+)
+
+
+def extract_sql_foreign_keys(text: str) -> list[tuple[str, str, str]]:
+    """Return ``(from_table, column, to_table)`` from CREATE TABLE FK clauses."""
+    found: list[tuple[str, str, str]] = []
+    for match in _SQL_CREATE_TABLE_RE.finditer(text or ""):
+        table = match.group(1)
+        for column, dest in _SQL_FK_RE.findall(match.group(2)):
+            found.append((table, column, dest))
+    return found
 
 
 def _is_non_model_struct(name: str, body: str, table_names: dict[str, str]) -> bool:
@@ -431,7 +469,9 @@ def extract_go_data_models(files: Sequence[tuple[str, str]]) -> list[GoDataModel
     known = {name for name, _path, _body, _lineno, _kind in raw}
     models: list[GoDataModel] = []
     for name, path, body, lineno, kind in raw:
-        attributes, primary_key, relations = _parse_gorm_fields(body, known - {name})
+        attributes, attribute_types, primary_key, relations = _parse_gorm_fields(
+            body, known - {name}
+        )
         models.append(
             GoDataModel(
                 name=name,
@@ -442,6 +482,7 @@ def extract_go_data_models(files: Sequence[tuple[str, str]]) -> list[GoDataModel
                 attributes=attributes,
                 primary_key=primary_key,
                 relations=relations,
+                attribute_types=attribute_types,
             )
         )
     return models

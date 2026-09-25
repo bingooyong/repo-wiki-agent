@@ -32,6 +32,7 @@ from repo_wiki.scanner.fastapi_routes import extract_fastapi_endpoints
 from repo_wiki.scanner.go_routes import (
     extract_go_data_models,
     extract_go_endpoints,
+    extract_sql_foreign_keys,
     go_quoted_imports,
     is_go_test_path,
 )
@@ -846,6 +847,8 @@ class RepositoryScanner:
                         attributes=list(item.attributes),
                         primary_key=item.primary_key or "",
                         relationships=list(item.relations),
+                        attribute_types=list(item.attribute_types),
+                        table_name=item.table_name or "",
                     )
                 )
 
@@ -855,6 +858,23 @@ class RepositoryScanner:
         models = list(dedup.values())
         if any(model.type in {"go_gorm", "go_struct_db"} for model in models):
             models = [model for model in models if model.type in {"go_gorm", "go_struct_db"}]
+        table_to_model = {
+            (model.table_name or "").lower(): model for model in models if model.table_name
+        }
+        for file in files:
+            if file.path.suffix.lower() != ".sql":
+                continue
+            lowered = file.path.as_posix().lower()
+            if "schema.sql" not in lowered and "migration" not in lowered:
+                continue
+            for from_table, _column, to_table in extract_sql_foreign_keys(file.text):
+                source = table_to_model.get(from_table.lower())
+                dest = table_to_model.get(to_table.lower())
+                if source is None or dest is None:
+                    continue
+                rel = f"belongs_to:{dest.name}"
+                if rel not in source.relationships:
+                    source.relationships.append(rel)
         return models
 
     def _ensure_modules_cover_entities(
@@ -1211,16 +1231,23 @@ class RepositoryScanner:
             endpoint.error_codes = [400, 401, 403, 404, 500]
 
             # Preserve extractor line numbers when the handler search misses.
-            found = self._find_handler_line(endpoint, file_contents.get(endpoint.file_path, ""))
-            if found > 0:
-                endpoint.line_number = found
-                endpoint.line_end = found + 10
-            elif endpoint.line_number > 0:
+            content = file_contents.get(endpoint.file_path, "")
+            if endpoint.line_number > 1 and self._line_matches_handler(
+                content, endpoint.line_number, endpoint.handler
+            ):
                 if endpoint.line_end <= 0:
-                    endpoint.line_end = endpoint.line_number
+                    endpoint.line_end = endpoint.line_number + 10
             else:
-                endpoint.line_number = 0
-                endpoint.line_end = 0
+                found = self._find_handler_line(endpoint, content)
+                if found > 0:
+                    endpoint.line_number = found
+                    endpoint.line_end = found + 10
+                elif endpoint.line_number > 0:
+                    if endpoint.line_end <= 0:
+                        endpoint.line_end = endpoint.line_number
+                else:
+                    endpoint.line_number = 0
+                    endpoint.line_end = 0
 
     def _is_webhook_path(self, path: str) -> bool:
         """Check if path looks like a webhook."""
@@ -1260,6 +1287,24 @@ class RepositoryScanner:
 
         return "bearer"  # Default for unknown
 
+    def _line_matches_handler(self, file_content: str, line_number: int, handler: str) -> bool:
+        if not file_content or line_number < 1 or not handler or handler == "unknown":
+            return False
+        lines = file_content.splitlines()
+        if line_number > len(lines):
+            return False
+        line = lines[line_number - 1].strip()
+        method = handler.rsplit(".", 1)[-1]
+        receiver = handler.rsplit(".", 1)[0] if "." in handler else ""
+        if receiver:
+            return bool(
+                re.match(
+                    rf"^func\s+\(\s*\w+\s+\*?{re.escape(receiver)}\s*\)\s+{re.escape(method)}\s*\(",
+                    line,
+                )
+            )
+        return bool(method) and method in line
+
     def _find_handler_line(self, endpoint: Endpoint, file_content: str) -> int:
         """Find the line number where the handler function is defined."""
         if not file_content:
@@ -1270,17 +1315,25 @@ class RepositoryScanner:
             return 0
 
         method = handler.rsplit(".", 1)[-1]
-        # Search for function definition
-        patterns = [
-            rf"^def\s+{re.escape(handler)}\s*\(",
-            rf"^async\s+def\s+{re.escape(handler)}\s*\(",
-            rf"^function\s+{re.escape(handler)}\s*\(",
-            rf"^export\s+function\s+{re.escape(handler)}\s*\(",
-            rf"^export\s+const\s+{re.escape(handler)}\s*=",
-            rf"^\s*func\s+{re.escape(handler)}\s*\(",
-            rf"^\s*fun\s+{re.escape(handler)}\s*\(",
-            rf"^func\s+\([^)]+\)\s+{re.escape(method)}\s*\(",
-        ]
+        receiver = handler.rsplit(".", 1)[0] if "." in handler else ""
+        patterns = []
+        if receiver:
+            patterns.append(
+                rf"^func\s+\(\s*\w+\s+\*?{re.escape(receiver)}\s*\)\s+{re.escape(method)}\s*\("
+            )
+        patterns.extend(
+            [
+                rf"^def\s+{re.escape(handler)}\s*\(",
+                rf"^async\s+def\s+{re.escape(handler)}\s*\(",
+                rf"^function\s+{re.escape(handler)}\s*\(",
+                rf"^export\s+function\s+{re.escape(handler)}\s*\(",
+                rf"^export\s+const\s+{re.escape(handler)}\s*=",
+                rf"^\s*func\s+{re.escape(handler)}\s*\(",
+                rf"^\s*fun\s+{re.escape(handler)}\s*\(",
+            ]
+        )
+        if not receiver:
+            patterns.append(rf"^func\s+\([^)]+\)\s+{re.escape(method)}\s*\(")
 
         lines = file_content.splitlines()
         for i, line in enumerate(lines, start=1):

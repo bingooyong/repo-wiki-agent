@@ -24,6 +24,9 @@ _DROP_CITATION_SCHEMES = ("file:", "path:", "relpath:")
 _PLACEHOLDER_CITE_BODY = "start-end"
 _CITE_BLOCK_RE = re.compile(r"(<cite>\s*)([^<]+?)(\s*</cite>)")
 _BACKTICK_CITE_RE = re.compile(r"`((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?)`")
+_BACKTICK_PATH_THEN_LINE_RE = re.compile(
+    r"`((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+)`:(\d+(?:-\d+)?)"
+)
 _BRACKET_CITE_RE = re.compile(r"(\[cite:\s*)([^\]]+?)(\])")
 _CITE_PATH_SUFFIX_RE = re.compile(r"^(.+?)(:\d+(?:-\d+)?(?:\s*\([^)]+\))?)$")
 _CITE_PAREN_RE = re.compile(r"（[^）]*）|\([^)]*\)")
@@ -204,7 +207,10 @@ def normalize_citation_markup(text: str, workspace_root: str | Path | None = Non
         payloads = sanitize_citation_payloads(match.group(2), workspace_root)
         return "".join(f"[cite: {item}]" for item in payloads)
 
-    unwrapped = _BACKTICK_CITE_RE.sub(lambda match: f"<cite>{match.group(1)}</cite>", text)
+    unwrapped = _BACKTICK_PATH_THEN_LINE_RE.sub(
+        lambda match: f"<cite>{match.group(1)}:{match.group(2)}</cite>", text
+    )
+    unwrapped = _BACKTICK_CITE_RE.sub(lambda match: f"<cite>{match.group(1)}</cite>", unwrapped)
     rewritten = _CITE_BLOCK_RE.sub(_rewrite_blocks, unwrapped)
     return _BRACKET_CITE_RE.sub(_rewrite_brackets, rewritten)
 

@@ -283,6 +283,7 @@ _GENERIC_FACT_CLAIM_TOKENS = frozenset(
         "user-api",
         "httpservice",
         "scheduledservice",
+        "target-service",
     }
 )
 _ENV_FILE_NAME = re.compile(r"^\.env(?:\.[A-Za-z0-9_.-]+)?$", re.IGNORECASE)
@@ -337,6 +338,7 @@ _TUTORIAL_PLACEHOLDER_TOKENS = frozenset(
         "user-api",
         "httpservice",
         "scheduledservice",
+        "target-service",
     }
 )
 _CAMEL_INVENTORY_NAME = re.compile(r"[A-Z][A-Za-z0-9]*(?:Service|Model|API|Api|Router)$")
@@ -484,6 +486,8 @@ def _is_source_file_claim(value: str) -> bool:
     if parts[0].lower() in _GIT_REMOTE_FIRST:
         return False
     name = Path(parts[-1]).name
+    if name.endswith(("_", "-")):
+        return False
     if _ENV_FILE_NAME.fullmatch(name):
         return False
     if name.lower() in _PLACEHOLDER_PATH_NAMES:
@@ -532,7 +536,7 @@ _PLAUSIBLE_REL_PATH = re.compile(r"^[A-Za-z0-9_./\\-]+$")
 _HTTP_URL = re.compile(r"https?://[^\s<>\]`'\"|]+", re.IGNORECASE)
 # Do not treat `example-app/blob/...` GitHub URL tails as repo path `app/blob/...`.
 _REPO_REL_PATH_PREFIX = re.compile(
-    r"(?<![A-Za-z0-9_-])(?:src|app|repo_wiki|docs|tests)/[A-Za-z0-9_./-]+"
+    r"(?<![A-Za-z0-9_/-])(?:src|app|repo_wiki|docs|tests)/[A-Za-z0-9_./-]+"
 )
 
 

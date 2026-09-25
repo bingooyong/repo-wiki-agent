@@ -286,6 +286,305 @@ def has_readme_citation(markdown: str, readme_names: tuple[str, ...]) -> bool:
     return False
 
 
+_RUN_HEADING_RE = re.compile(
+    r"(quick\s*start|getting\s*started|\brun\b|usage|install|setup|"
+    r"快速开始|安装|启动|验证安装|运行)",
+    re.I,
+)
+_BADGE_LINE_RE = re.compile(r"img\.shields\.io|badge/|!\[[^\]]*\]\(https?://", re.I)
+_GO_BUILD_PATH_RE = re.compile(r"\bgo\s+build\b[^\n]*?\s(\./cmd/[A-Za-z0-9_./-]+)")
+_BIN_FLAG_RE = re.compile(r"\./bin/([A-Za-z0-9_-]+)\s+(--?[A-Za-z0-9_-]+)")
+_REDIRECT_FILE_RE = re.compile(r"<\s*([A-Za-z0-9_./+*-]+\.\w+)")
+_CONFIG_FLAG_RE = re.compile(r"--?config(?:-file)?\s+([A-Za-z0-9_./-]+)")
+_CITE_RANGE_RE = re.compile(r"<cite>\s*([^<:]+):(\d+)(?:-(\d+))?\s*</cite>", re.IGNORECASE)
+
+
+def _heading_is_run_usage(title: str) -> bool:
+    return bool(_RUN_HEADING_RE.search(title or ""))
+
+
+def _text_has_install_clue(text: str) -> bool:
+    return any(pattern.search(text or "") for _name, pattern in _INSTALL_CLUE_PATTERNS)
+
+
+def _text_is_badge_header(text: str) -> bool:
+    if not text.strip():
+        return False
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return False
+    badge_lines = sum(1 for line in lines if _BADGE_LINE_RE.search(line))
+    return badge_lines >= max(1, len(lines) // 2) and not _text_has_install_clue(text)
+
+
+def readme_run_section_ranges(readme_text: str) -> list[tuple[int, int]]:
+    """Return 1-based inclusive line ranges for README run/usage sections."""
+    lines = (readme_text or "").splitlines()
+    if not lines:
+        return []
+    headings: list[tuple[int, int, str]] = []
+    for index, line in enumerate(lines, start=1):
+        match = re.match(r"^(#{1,3})\s+(.+)$", line.strip())
+        if match:
+            headings.append((index, len(match.group(1)), match.group(2).strip()))
+    ranges: list[tuple[int, int]] = []
+    for idx, (start, level, title) in enumerate(headings):
+        if not _heading_is_run_usage(title):
+            continue
+        end = len(lines)
+        for later_start, later_level, _later in headings[idx + 1 :]:
+            if later_level <= level:
+                end = later_start - 1
+                break
+        ranges.append((start, max(start, end)))
+    if ranges:
+        return ranges
+    for index, line in enumerate(lines, start=1):
+        if _text_has_install_clue(line):
+            return [(index, min(len(lines), index + 40))]
+    return []
+
+
+def _cite_range(match: re.Match[str]) -> tuple[str, int, int]:
+    path = match.group(1).replace("\\", "/").strip()
+    start = int(match.group(2))
+    end = int(match.group(3) or start)
+    return path, start, end
+
+
+def has_readme_run_section_citation(markdown: str, repo_root: Path) -> bool:
+    """True when an install/overview README cite covers the run/usage section."""
+    readme_names = {name.lower() for name in existing_readme_names(repo_root)}
+    readme_text = read_readme_text(repo_root)
+    if not readme_text.strip():
+        return has_readme_citation(markdown, existing_readme_names(repo_root))
+    run_ranges = readme_run_section_ranges(readme_text)
+    lines = readme_text.splitlines()
+    found_readme = False
+    for match in _CITE_RANGE_RE.finditer(markdown or ""):
+        path, start, end = _cite_range(match)
+        if Path(path).name.lower() not in readme_names:
+            continue
+        found_readme = True
+        cited = "\n".join(lines[max(0, start - 1) : max(start, end)])
+        if _text_is_badge_header(cited):
+            continue
+        if _text_has_install_clue(cited):
+            return True
+        for run_start, run_end in run_ranges:
+            if start <= run_end and end >= run_start:
+                return True
+    if not found_readme:
+        return False
+    return not run_ranges
+
+
+def _cmd_package_exists(repo_root: Path, target: str) -> bool:
+    rel = target.lstrip("./")
+    path = repo_root / rel
+    if path.is_file():
+        return True
+    if path.is_dir() and any(path.glob("*.go")):
+        return True
+    return False
+
+
+def _flag_defined_in_cmd(repo_root: Path, binary: str, flag: str) -> bool:
+    cmd_dir = repo_root / "cmd" / binary
+    if not cmd_dir.is_dir():
+        return True
+    needle = flag.lstrip("-")
+    blob = ""
+    for path in cmd_dir.rglob("*.go"):
+        blob += path.read_text(encoding="utf-8", errors="ignore")
+    return bool(
+        re.search(rf'"(?:-)?{re.escape(needle)}"', blob)
+        or re.search(rf"\b{re.escape(needle)}\b", blob)
+    )
+
+
+def install_fenced_commands_are_grounded(markdown: str, repo_root: Path) -> bool:
+    """False when fenced install commands invent missing paths, bins, or flags."""
+    if not repo_root.is_dir():
+        return True
+    saw_path_command = False
+    for body in iter_fenced_code_bodies(markdown or ""):
+        for match in _GO_BUILD_PATH_RE.finditer(body):
+            saw_path_command = True
+            if not _cmd_package_exists(repo_root, match.group(1)):
+                return False
+        for match in _CONFIG_FLAG_RE.finditer(body):
+            saw_path_command = True
+            rel = match.group(1).lstrip("./")
+            if not (repo_root / rel).exists():
+                return False
+        for match in _REDIRECT_FILE_RE.finditer(body):
+            raw = match.group(1)
+            if "*" in raw:
+                return False
+            if not (repo_root / raw.lstrip("./")).exists():
+                return False
+        for match in _BIN_FLAG_RE.finditer(body):
+            saw_path_command = True
+            binary, flag = match.group(1), match.group(2)
+            if not (repo_root / "cmd" / binary).is_dir():
+                return False
+            if not _flag_defined_in_cmd(repo_root, binary, flag):
+                return False
+    return True if saw_path_command or "```" in (markdown or "") else True
+
+
+_GENERIC_GO_INSTALL = re.compile(
+    r"\bgo\s+(?:build|run|mod\s+download)\s+(?:-o\s+\S+\s+)?(?:\.|./\.\.\.)\b",
+    re.IGNORECASE,
+)
+_DEMO_CMD_NAMES = frozenset({"custom-probe", "example", "demo", "scaffold", "hello"})
+_REPO_INSTALL_LINE_PATTERNS = (
+    re.compile(r"docker(?:-|\s+)compose(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bpodman-compose(?:\s+[A-Za-z0-9_-]+){0,6}", re.I),
+    re.compile(r"\bmake(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bgo\s+build(?:\s+[A-Za-z0-9_./-]+){0,8}", re.I),
+    re.compile(r"podman exec[^\n]{0,80}schema\.sql", re.I),
+    re.compile(r"mysql[^\n]{0,80}schema\.sql", re.I),
+    re.compile(r"curl\s+https?://localhost:\d+\S*", re.I),
+    re.compile(r"\./bin/[A-Za-z0-9_-]+", re.I),
+    re.compile(r"\bgo\s+run(?:\s+[A-Za-z0-9_./-]+){0,8}", re.I),
+    re.compile(r"\buv\s+sync\b", re.I),
+    re.compile(r"\buv\s+run(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
+    re.compile(r"\bnpm\s+install(?:\s+[A-Za-z0-9_@/-]+){0,4}", re.I),
+    re.compile(r"\bpip(?:3)?\s+install(?:\s+[A-Za-z0-9_\[\]'\"=-]+){0,4}", re.I),
+)
+
+
+def _install_command_priority(command: str) -> tuple[int, str]:
+    low = command.lower()
+    score = 50
+    if "podman-compose" in low or "docker compose" in low or "docker-compose" in low:
+        score = 0
+    elif "schema.sql" in low:
+        score = 1
+    elif "ccagent" in low:
+        score = 2
+    elif "curl" in low and "health" in low:
+        score = 3
+    elif low.startswith("make "):
+        score = 4
+    elif "go build" in low:
+        score = 5
+    if any(token in low for token in _DEMO_CMD_NAMES):
+        score += 40
+    return (score, command)
+
+
+def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
+    """Collect install/run commands from Makefile, README, and real cmd mains."""
+    commands: list[str] = []
+    seen: set[str] = set()
+
+    def _add(command: str) -> None:
+        text = " ".join(command.split()).strip()
+        if not text or _GENERIC_GO_INSTALL.search(text):
+            return
+        key = text.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        commands.append(text)
+
+    makefile = next(
+        (path for path in (root / "Makefile", root / "makefile") if path.is_file()),
+        None,
+    )
+    if makefile is not None:
+        text = makefile.read_text(encoding="utf-8", errors="ignore")
+        for raw in text.splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if re.search(r"\b(?:go\s+build|podman-compose|docker-compose|go\s+run)\b", line):
+                _add(line)
+        if re.search(r"^install:", text, re.M):
+            _add("make install")
+        if re.search(r"^up:", text, re.M):
+            _add("make up")
+    core_mains: list[Path] = []
+    demo_mains: list[Path] = []
+    for main in sorted(root.glob("cmd/*/main.go")):
+        if main.parent.name.lower() in _DEMO_CMD_NAMES:
+            demo_mains.append(main)
+        else:
+            core_mains.append(main)
+    for main in core_mains or demo_mains:
+        rel = main.relative_to(root).as_posix()
+        _add(f"go build -o bin/{main.parent.name} ./{rel}")
+    if (root / "db" / "schema.sql").is_file():
+        _add("mysql < db/schema.sql")
+    for name in ("README.md", "QUICKSTART.md"):
+        path = root / name
+        if not path.is_file():
+            continue
+        for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = raw_line.strip().lstrip("$").strip()
+            if not line or line.startswith("#"):
+                continue
+            for pattern in _REPO_INSTALL_LINE_PATTERNS:
+                match = pattern.search(line)
+                if not match:
+                    continue
+                command = " ".join(match.group(0).split()).rstrip(".,;:)")
+                if command and len(command) <= 120:
+                    _add(command)
+    commands.sort(key=_install_command_priority)
+    return commands[:limit]
+
+
+def architecture_core_packages(repo_root: Path) -> list[str]:
+    """Product packages an architecture page should cite when they exist."""
+    preferred = (
+        "cmd/ccagent",
+        "internal/control",
+        "internal/services",
+        "internal/repository",
+        "internal/exporter",
+        "internal/agent",
+        "internal/probe",
+        "app/api/routes",
+        "app/models",
+    )
+    found: list[str] = []
+    for rel in preferred:
+        if (repo_root / rel).exists():
+            found.append(rel)
+    return found
+
+
+def has_architecture_core_citation(markdown: str, repo_root: Path) -> bool:
+    """True when an architecture page cites real core packages, not only demos."""
+    cores = architecture_core_packages(repo_root)
+    if len(cores) < 2:
+        return True
+    cited = " ".join(
+        match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")
+    ).lower()
+    hits = sum(1 for rel in cores if rel.lower() in cited)
+    return hits >= min(2, len(cores))
+
+
+def has_data_model_source_citation(markdown: str, repo_root: Path) -> bool:
+    """True when a data-model page cites models/ or schema.sql when those exist."""
+    needs: list[str] = []
+    if (repo_root / "internal" / "models").is_dir():
+        needs.append("internal/models")
+    if (repo_root / "db" / "schema.sql").is_file():
+        needs.append("db/schema.sql")
+    if (repo_root / "app" / "models").is_dir():
+        needs.append("app/models")
+    if not needs:
+        return True
+    cited = " ".join(
+        match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")
+    ).lower()
+    return any(need.lower() in cited for need in needs)
+
+
 def has_api_routes_citation(
     markdown: str, handler_files: list[str] | tuple[str, ...] | None = None
 ) -> bool:

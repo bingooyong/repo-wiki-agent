@@ -55,9 +55,15 @@ from repo_wiki.scanner.repository_scanner import RepositoryScanner
 from repo_wiki.scanner.source_spans import SourceSpanExtractor
 from repo_wiki.verifier.api_claim_inventory import api_claim_in_inventory
 from repo_wiki.verifier.handbook import (
+    collect_repo_install_commands,
     has_api_routes_citation,
+    has_architecture_core_citation,
+    has_data_model_source_citation,
     has_fenced_install_run_command,
+    has_readme_run_section_citation,
+    install_fenced_commands_are_grounded,
     install_run_clue_count,
+    readme_run_section_ranges,
     repo_run_clue_names,
 )
 from repo_wiki.verifier.qoder_strict_verifier import (
@@ -105,7 +111,12 @@ func NewServiceProbeEndpoint() *ServiceProbeEndpoint { return &ServiceProbeEndpo
 
 func init() {
     ccagent.RegisterService("/probe/endpoint", NewServiceProbeEndpoint())
+    ccagent.RegisterService("/biz/instance", NewServiceBizTree())
 }
+
+type ServiceBizTree struct{}
+
+func NewServiceBizTree() *ServiceBizTree { return &ServiceBizTree{} }
 
 type ServeCreateRequest struct {
     Name string `json:"name"`
@@ -119,6 +130,10 @@ type ServeListRequest struct{}
 
 type ServeDeleteRequest struct {
     ID int64 `path:"id"`
+}
+
+func (s *ServiceBizTree) ServeCreate(req *ServeCreateRequest) (*ServeCreateResponse, error) {
+    return nil, nil
 }
 
 func (s *ServiceProbeEndpoint) ServeCreate(req *ServeCreateRequest) (*ServeCreateResponse, error) {
@@ -274,6 +289,10 @@ def _write_synthetic_go_repo(root: Path) -> None:
     (root / "cmd" / "ccagent" / "main.go").write_text(
         "package main\nfunc main() {}\n", encoding="utf-8"
     )
+    (root / "cmd" / "custom-probe").mkdir(parents=True)
+    (root / "cmd" / "custom-probe" / "main.go").write_text(
+        "package main\nfunc main() {}\n", encoding="utf-8"
+    )
     (root / "go.mod").write_text("module ccagent\n\ngo 1.22\n", encoding="utf-8")
     (root / "Makefile").write_text(
         "install:\n\tgo build -o bin/ccagent ./cmd/ccagent/main.go\ntest:\n\tgo test ./...\n",
@@ -281,14 +300,23 @@ def _write_synthetic_go_repo(root: Path) -> None:
     )
     (root / "README.md").write_text(
         "# probe_exporter\n\n"
-        "[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8)](https://go.dev/)\n\n"
-        "企业级服务探针拨测与结果导出平台。\n\n"
-        "## Run\n\n"
+        "[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8)](https://go.dev/)\n"
+        "[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)\n"
+        "[![CI](https://img.shields.io/badge/CI-passing-brightgreen)](https://example.com)\n"
+        "[![Release](https://img.shields.io/badge/release-stable-blue)](https://example.com)\n"
+        "[![Docs](https://img.shields.io/badge/docs-latest-lightgrey)](https://example.com)\n"
+        "[![Coverage](https://img.shields.io/badge/coverage-80-yellow)](https://example.com)\n"
+        "[![Build](https://img.shields.io/badge/build-ok-success)](https://example.com)\n"
+        "\n企业级服务探针拨测与结果导出平台。\n\n"
+        "## 🚀 快速开始\n\n"
         "需要 MySQL，并先执行 `db/schema.sql`。\n\n"
         "```bash\n"
+        "podman-compose up -d\n"
+        "mysql < db/schema.sql\n"
         "make install\n"
         "go build -o bin/ccagent ./cmd/ccagent/main.go\n"
-        "podman-compose up -d\n"
+        "./bin/ccagent\n"
+        "curl http://localhost:8000/health\n"
         "```\n",
         encoding="utf-8",
     )
@@ -296,6 +324,25 @@ def _write_synthetic_go_repo(root: Path) -> None:
     (root / "docs" / "PLAN.md").write_text("# Plan\nControl-plane rollout.\n", encoding="utf-8")
     (root / "db").mkdir(exist_ok=True)
     (root / "db" / "migrations").mkdir(exist_ok=True)
+    (root / "db" / "schema.sql").write_text(
+        "CREATE TABLE probe_endpoints (id BIGINT PRIMARY KEY, name VARCHAR(64));\n"
+        "CREATE TABLE probe_tags (\n"
+        "  id BIGINT PRIMARY KEY,\n"
+        "  endpoint_id BIGINT,\n"
+        "  FOREIGN KEY (endpoint_id) REFERENCES probe_endpoints(id)\n"
+        ");\n"
+        "CREATE TABLE probe_results (\n"
+        "  id BIGINT PRIMARY KEY,\n"
+        "  endpoint_id BIGINT,\n"
+        "  FOREIGN KEY (endpoint_id) REFERENCES probe_endpoints(id)\n"
+        ");\n"
+        "CREATE TABLE biz_tree_node (\n"
+        "  id BIGINT PRIMARY KEY,\n"
+        "  parent_id BIGINT,\n"
+        "  FOREIGN KEY (parent_id) REFERENCES biz_tree_node(id)\n"
+        ");\n",
+        encoding="utf-8",
+    )
     (root / "db" / "migrations" / "001_init.sql").write_text(
         "CREATE TABLE probe_endpoints (id BIGINT);\n", encoding="utf-8"
     )
@@ -352,6 +399,7 @@ def test_extract_gin_and_register_service_excludes_test_routes(tmp_path: Path) -
 
     assert "/health" in paths
     assert "/probe/endpoint/create" in paths
+    assert "/biz/instance/create" in paths
     assert "/probe/endpoint/list" in paths
     assert "/probe/endpoint/get/:id" in paths
     assert "/probe/endpoint/delete/:id" in paths
@@ -951,7 +999,7 @@ def test_go_import_edges_include_repository_services_probe_exporter(tmp_path: Pa
     endpoint = next(model for model in snapshot.data_models if model.name == "ProbeEndpoint")
     assert "ID" in endpoint.attributes
     assert endpoint.primary_key == "ID"
-    assert "ProbeTag" in endpoint.relationships
+    assert any(item.endswith("ProbeTag") for item in endpoint.relationships)
     assert {model.name for model in snapshot.data_models} <= {
         "ProbeEndpoint",
         "ProbeTag",
@@ -1089,3 +1137,250 @@ def test_fact_conflict_placeholders_and_docs_plan_lookup(tmp_path: Path) -> None
     assert _is_source_file_claim("app/api/routes/authentication.py") is True
     assert _repo_path_exists(tmp_path, "plan.md") is True
     assert _repo_path_exists(tmp_path, "docs/plan.md") is True
+    assert _is_source_file_claim("docs/progress/phase7_p1-p5_") is False
+
+
+_25D_INSTALL = """# 安装指南
+
+probe_exporter 是探针平台 <cite>README.md:1-9</cite>。
+
+## 安装步骤
+
+```bash
+go build -o bin/probe_exporter ./cmd/probe_exporter
+go build -o bin/custom-probe ./cmd/custom-probe
+mysql -uuser -p < db/migrations/*.sql
+```
+
+## 启动与验证
+
+```bash
+./bin/probe_exporter --config configs/config.yaml
+./bin/custom-probe --target http://127.0.0.1:8080
+```
+"""
+
+_25D_ARCH = """# 整体架构概览
+
+系统由 QuickModule、DefaultModule、DeepModule 组成。
+<cite>cmd/custom-probe/main.go:1-40</cite>
+<cite>cmd/custom-probe/main.go:41-80</cite>
+"""
+
+_25D_MODEL = """# 数据模型
+
+ProbeType 只有 http 与 script。AgentRegistry 定义在文档里。
+<cite>docs/DESIGN.md:1-20</cite>
+<cite>cmd/custom-probe/main.go:10-30</cite>
+"""
+
+
+def test_readme_run_section_is_not_badge_header(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    text = (tmp_path / "README.md").read_text(encoding="utf-8")
+    ranges = readme_run_section_ranges(text)
+    assert ranges
+    start, _end = ranges[0]
+    assert start > 9
+    page = WikiPagePlan(
+        page_id="installation",
+        title="安装指南",
+        category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        output_path="docs/pages/install.md",
+        source_requirements=SourceRequirement(files=["README.md"]),
+        tags=["installation"],
+    )
+    spans = [
+        EvidenceSpanRecord(
+            digest="badge",
+            file_path="README.md",
+            line_start=1,
+            line_end=9,
+            language="markdown",
+            span_text="\n".join(text.splitlines()[:9]),
+            symbol="README",
+        ),
+        EvidenceSpanRecord(
+            digest="run",
+            file_path="README.md",
+            line_start=start,
+            line_end=start + 8,
+            language="markdown",
+            span_text="\n".join(text.splitlines()[start - 1 : start + 8]),
+            symbol="快速开始",
+        ),
+    ]
+    ranked = rank_evidence_for_page(page, spans)
+    assert ranked
+    top = ranked[0].span
+    assert top.line_start >= start
+
+
+def test_install_commands_prefer_core_over_demo(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    commands = collect_repo_install_commands(tmp_path)
+    blob = "\n".join(commands)
+    assert "podman-compose" in blob
+    assert "schema.sql" in blob
+    assert "ccagent" in blob
+    assert "curl http://localhost:8000/health" in blob
+    assert not any("custom-probe" in item for item in commands)
+    assert not any("probe_exporter" in item and "cmd/probe_exporter" in item for item in commands)
+    planner = RuleFirstPlanner(
+        resolve_repository_identity(tmp_path),
+        RepositoryScanner(
+            RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+        ).scan(),
+    ).generate()
+    install = next(page for page in planner.pages if page.page_id == "installation")
+    overview = next(page for page in planner.pages if page.page_id == "project-overview")
+    models = next(page for page in planner.pages if page.page_id == "data-models-overview")
+    assert "README.md" in install.source_requirements.files
+    assert any("ccagent" in item for item in overview.source_requirements.files)
+    assert any(
+        "internal/models" in item or item.endswith("schema.sql")
+        for item in models.source_requirements.files
+    )
+
+
+def test_25d_like_pages_fail_tightened_handbook_checks(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "安装与配置.md").write_text(_25D_INSTALL, encoding="utf-8")
+    (content / "整体架构概览.md").write_text(_25D_ARCH, encoding="utf-8")
+    (content / "数据模型.md").write_text(_25D_MODEL, encoding="utf-8")
+    verifier = QoderLikeVerifierService(tmp_path, strict=True)
+    install = verifier._check_handbook_install_run()
+    arch = verifier._check_handbook_architecture_core()
+    model = verifier._check_handbook_data_model_source()
+    assert install.status == "FAIL"
+    assert install.reason_code == "QODER_HANDBOOK_INSTALL_RUN"
+    assert arch.status == "FAIL"
+    assert arch.reason_code == "QODER_HANDBOOK_ARCHITECTURE_CORE"
+    assert model.status == "FAIL"
+    assert model.reason_code == "QODER_HANDBOOK_DATA_MODEL_SOURCE"
+    assert install_fenced_commands_are_grounded(_25D_INSTALL, tmp_path) is False
+    assert has_readme_run_section_citation(_25D_INSTALL, tmp_path) is False
+    assert has_architecture_core_citation(_25D_ARCH, tmp_path) is False
+    assert has_data_model_source_citation(_25D_MODEL, tmp_path) is False
+
+
+def test_page_contract_rewrites_install_and_attaches_core_cites(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    cfg = RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+    service = RepoWikiService(cfg)
+    install_page = WikiPagePlan(
+        page_id="installation",
+        title="安装指南",
+        category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        output_path="docs/pages/install.md",
+        tags=["installation"],
+    )
+    rewritten = service._enforce_qoder_page_contract(install_page, _25D_INSTALL, None, False)
+    assert "cmd/probe_exporter" not in rewritten
+    assert "custom-probe --target" not in rewritten
+    assert "db/migrations/*.sql" not in rewritten
+    assert "podman-compose" in rewritten
+    assert "schema.sql" in rewritten
+    assert "ccagent" in rewritten
+    assert has_readme_run_section_citation(rewritten, tmp_path) is True
+    assert install_fenced_commands_are_grounded(rewritten, tmp_path) is True
+    arch_page = WikiPagePlan(
+        page_id="architecture-overview",
+        title="架构设计",
+        category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+        output_path="docs/pages/arch.md",
+    )
+    arch = service._enforce_qoder_page_contract(arch_page, _25D_ARCH, None, False)
+    assert has_architecture_core_citation(arch, tmp_path) is True
+    model_page = WikiPagePlan(
+        page_id="data-models-overview",
+        title="数据模型",
+        category=WikiTaxonomyCategory.DATA_MODELS,
+        output_path="docs/pages/models.md",
+    )
+    model = service._enforce_qoder_page_contract(model_page, _25D_MODEL, None, False)
+    assert has_data_model_source_citation(model, tmp_path) is True
+
+
+def test_receiver_typed_handler_keeps_extractor_line(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    snapshot = RepositoryScanner(
+        RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+    ).scan()
+    probe = next(ep for ep in snapshot.endpoints if ep.path == "/probe/endpoint/create")
+    biz = next(ep for ep in snapshot.endpoints if ep.path == "/biz/instance/create")
+    assert probe.handler.endswith("ServiceProbeEndpoint.ServeCreate")
+    assert biz.handler.endswith("ServiceBizTree.ServeCreate")
+    assert probe.line_number > biz.line_number > 1
+
+
+def test_er_uses_go_types_and_belongs_to_direction() -> None:
+    planner = create_planner()
+    renderer = create_renderer()
+    diagrams = planner.plan_diagram_for_page(
+        "data-model",
+        "data",
+        None,
+        {
+            "data_models": [
+                {
+                    "name": "ProbeEndpoint",
+                    "type": "go_gorm",
+                    "file_path": "internal/models/endpoint.go",
+                    "primary_key": "ID",
+                    "attributes": ["ID", "Name"],
+                    "attribute_types": ["int64", "string"],
+                    "relationships": ["has_many:ProbeTag"],
+                },
+                {
+                    "name": "ProbeTag",
+                    "type": "go_gorm",
+                    "file_path": "internal/models/endpoint.go",
+                    "primary_key": "ID",
+                    "attributes": ["ID", "EndpointID"],
+                    "attribute_types": ["int64", "int64"],
+                    "relationships": ["belongs_to:ProbeEndpoint"],
+                },
+                {
+                    "name": "BizTreeNode",
+                    "type": "go_gorm",
+                    "file_path": "internal/models/tree.go",
+                    "primary_key": "ID",
+                    "attributes": ["ID", "ParentID"],
+                    "attribute_types": ["int64", "int64"],
+                    "relationships": ["belongs_to:BizTreeNode"],
+                },
+            ]
+        },
+    )
+    rendered = renderer.render_diagram(diagrams[0])
+    assert "int ID PK" in rendered
+    assert "string ID PK" not in rendered
+    assert "ProbeEndpoint ||--o{ ProbeTag" in rendered
+    assert "ProbeTag ||--o{ ProbeEndpoint" not in rendered
+    assert "BizTreeNode ||--o{ BizTreeNode" in rendered
+
+
+def test_schema_sql_foreign_keys_merge_into_snapshot(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    snapshot = RepositoryScanner(
+        RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+    ).scan()
+    endpoint = next(model for model in snapshot.data_models if model.name == "ProbeEndpoint")
+    tag = next(model for model in snapshot.data_models if model.name == "ProbeTag")
+    assert endpoint.attribute_types
+    assert any(item != "string" for item in endpoint.attribute_types)
+    assert any(item.startswith("belongs_to:ProbeEndpoint") for item in tag.relationships)
+
+
+def test_backtick_path_then_line_normalizes() -> None:
+    rewritten = normalize_citation_markup("见 `internal/models/endpoint.go`:12-20。")
+    assert "<cite>internal/models/endpoint.go:12-20</cite>" in rewritten
+    assert "`internal/models/endpoint.go`:12-20" not in rewritten
+
+
+def test_page_dump_detects_21_25_and_endpoint_leak() -> None:
+    assert is_qoder_page_dump("Tests 21/25 / Coverage 84%\n\n说明。\n") is True
+    assert page_has_prompt_leakage("以下端点来自扫描结果") is True
