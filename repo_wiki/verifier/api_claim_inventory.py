@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 API_CLAIM_PATTERN = re.compile(
-    r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(/[-A-Za-z0-9_./{}:]+)"
+    r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|ANY)\s+(/[-A-Za-z0-9_./{}:]+)"
 )
 FASTAPI_AUTODOC_PATHS = frozenset({"/docs", "/redoc"})
 # Extra denylist for obvious test-404 fixtures; inventory check is the primary gate.
@@ -17,10 +17,48 @@ _TEST_ONLY_PATH_PATTERN = re.compile(
 )
 
 
+_PATH_PARAM_SEGMENT = re.compile(r"^\{[^{}/]+\}$")
+_GO_PATH_PARAM_SEGMENT = re.compile(r"^[:*][A-Za-z0-9_]+$")
+
+
 def normalize_claimed_api_path(path: str) -> str:
-    if path != "/" and path.endswith("/"):
-        return path.rstrip("/")
-    return path
+    """Strip schema punctuation without dropping trailing ``{param}``.
+
+    ``GET /api/articles:`` is schema punctuation. FastAPI converters such as
+    ``/{slug:path}`` already end with ``}`` and stay intact.
+    """
+    text = (path or "").strip()
+    while text.endswith(":") and not text.endswith("}"):
+        text = text[:-1]
+    if text != "/" and text.endswith("/"):
+        return text.rstrip("/")
+    return text
+
+
+def extract_http_method_paths(text: str) -> list[tuple[str, str]]:
+    """Extract ``METHOD /path`` claims, keeping ``{slug}`` path params."""
+    pairs: list[tuple[str, str]] = []
+    for method, raw_path in API_CLAIM_PATTERN.findall(text):
+        path = normalize_claimed_api_path(raw_path)
+        if path:
+            pairs.append((method.upper(), path))
+    return pairs
+
+
+def remainder_is_trailing_path_params(claimed_path: str, inventory_path: str) -> bool:
+    """True when inventory is the claimed path plus only ``/{param}`` segments."""
+    claimed = normalize_claimed_api_path(claimed_path)
+    inventory = normalize_claimed_api_path(inventory_path)
+    if not inventory.startswith(claimed):
+        return False
+    remainder = inventory[len(claimed) :]
+    if not remainder.startswith("/"):
+        return False
+    segments = [segment for segment in remainder.split("/") if segment]
+    return bool(segments) and all(
+        _PATH_PARAM_SEGMENT.fullmatch(segment) or _GO_PATH_PARAM_SEGMENT.fullmatch(segment)
+        for segment in segments
+    )
 
 
 def api_path_slot_key(path: str) -> str:
@@ -60,7 +98,12 @@ def apply_api_mount_prefix(path: str, prefix: str) -> str:
 
 
 def api_claim_in_inventory(method: str, path: str, apis: set[tuple[str, str]]) -> bool:
-    """True when method+path is a product route, including `/api` mount-prefix matches."""
+    """True when method+path is a product route, including `/api` mount-prefix matches.
+
+    Inventory method ``ANY`` matches any claimed method on the same path, and a
+    claimed ``ANY`` matches any inventory method on that path. Concrete method
+    mismatches (GET vs POST) still fail.
+    """
     method = method.upper()
     claimed = normalize_claimed_api_path(path)
     if (method, path) in apis or (method, claimed) in apis:
@@ -70,8 +113,19 @@ def api_claim_in_inventory(method: str, path: str, apis: set[tuple[str, str]]) -
         apply_api_mount_prefix(claimed, inventory_api_mount_prefix(apis))
     )
     candidate_keys = {claimed_key, prefixed_key}
+
+    def _path_matches(inv_path: str) -> bool:
+        if api_path_slot_key(inv_path) in candidate_keys:
+            return True
+        if remainder_is_trailing_path_params(claimed, inv_path):
+            return True
+        prefixed = apply_api_mount_prefix(claimed, inventory_api_mount_prefix(apis))
+        return remainder_is_trailing_path_params(prefixed, inv_path)
+
+    if method == "ANY":
+        return any(_path_matches(inv_path) for _inv_method, inv_path in apis)
     return any(
-        inv_method == method and api_path_slot_key(inv_path) in candidate_keys
+        (inv_method == method or inv_method == "ANY") and _path_matches(inv_path)
         for inv_method, inv_path in apis
     )
 

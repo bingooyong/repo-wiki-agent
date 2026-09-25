@@ -38,9 +38,9 @@ from repo_wiki.scanner.go_routes import (
 _CODE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".kt"}
 _MODEL_FILE_HINTS = ("model", "schema", "entity", "dto", "migration", "alembic")
 _MODULE_ROOT_HINTS = {"src", "app", "apps", "services", "modules", "internal", "cmd"}
-_HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
+_HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ANY")
 _HTTP_METHOD_LITERALS: dict[
-    str, Literal["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
+    str, Literal["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ANY"]
 ] = {
     "GET": "GET",
     "POST": "POST",
@@ -49,6 +49,7 @@ _HTTP_METHOD_LITERALS: dict[
     "DELETE": "DELETE",
     "OPTIONS": "OPTIONS",
     "HEAD": "HEAD",
+    "ANY": "ANY",
 }
 
 # Domain classification signals
@@ -432,6 +433,11 @@ class RepositoryScanner:
                         commands[key] = f"make {key}"
 
         language = self._detect_language(files)
+        if language == "go":
+            go_commands = self._extract_go_commands(files, makefile)
+            for key, value in go_commands.items():
+                if value and not commands[key]:
+                    commands[key] = value
         fallback = {
             "python": {"start": "python -m app", "test": "pytest -q", "lint": "ruff check ."},
             "typescript": {
@@ -446,17 +452,40 @@ class RepositoryScanner:
                 "test": "npm run test",
                 "lint": "npm run lint",
             },
-            "go": {
-                "start": "go run ./cmd/...",
-                "build": "go build ./...",
-                "test": "go test ./...",
-                "lint": "golangci-lint run",
-            },
         }.get(language, {})
         for key, value in fallback.items():
             if not commands[key]:
                 commands[key] = value
         return commands
+
+    def _extract_go_commands(
+        self, files: list[ScannedFile], makefile: ScannedFile | None
+    ) -> dict[str, str]:
+        """Use Makefile recipes and ``cmd/*/main.go`` only — never invent ``go run .``."""
+        found: dict[str, str] = {}
+        if makefile:
+            for raw in makefile.text.splitlines():
+                line = raw.split("#", 1)[0].strip()
+                if not line or line.endswith(":"):
+                    continue
+                if re.search(r"\bgo\s+build\b", line) and "build" not in found:
+                    found["build"] = " ".join(line.split())
+                if re.search(r"\b(?:podman-compose|docker-compose|go\s+run)\b", line) and "start" not in found:
+                    found["start"] = " ".join(line.split())
+                if re.search(r"\bgo\s+test\b", line) and "test" not in found:
+                    found["test"] = " ".join(line.split())
+            if "build" not in found and re.search(r"^install:", makefile.text, re.M):
+                found["build"] = "make install"
+            if "start" not in found and re.search(r"^(?:up|run|start):", makefile.text, re.M):
+                found["start"] = "make up" if re.search(r"^up:", makefile.text, re.M) else "make run"
+        if "build" not in found:
+            for file in files:
+                rel = file.path.as_posix()
+                if rel.startswith("cmd/") and file.path.name == "main.go":
+                    name = file.path.parent.name
+                    found["build"] = f"go build -o bin/{name} ./{rel}"
+                    break
+        return found
 
     def _detect_entry_points(self, files: list[ScannedFile], commands: dict[str, str]) -> list[str]:
         entries: set[str] = set()
@@ -554,8 +583,6 @@ class RepositoryScanner:
         go_files_with_routes = {item.file_path for item in go_endpoints}
         for item in go_endpoints:
             method = item.method.upper()
-            if method == "ANY":
-                method = "GET"
             method_lit = _HTTP_METHOD_LITERALS.get(method)
             if method_lit is None:
                 continue

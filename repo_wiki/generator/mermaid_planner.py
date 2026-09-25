@@ -33,6 +33,52 @@ _WIKI_TOOL_LAYERS: tuple[tuple[str, str], ...] = (
     ("layer_ai", "ai/source-of-truth"),
     ("layer_repo_wiki", ".repo-wiki"),
 )
+_MERMAID_UNSAFE_ID = re.compile(r"[^A-Za-z0-9_]")
+_WIKI_PIPELINE_LABELS = frozenset(
+    {"仓库扫描", "llm生成", "质量校验", "repo-wiki", "wiki生成", "llm generate"}
+)
+
+
+def mermaid_ident(value: str, prefix: str = "n") -> str:
+    """Return a Mermaid 11-safe node/entity id."""
+    text = _MERMAID_UNSAFE_ID.sub("_", (value or "").strip())
+    text = re.sub(r"_+", "_", text).strip("_")
+    if not text or text[0].isdigit():
+        text = f"{prefix}_{text}" if text else prefix
+    return text[:48]
+
+
+def mermaid_er_field(value: str) -> str:
+    """Strip `{id}` / punctuation so ER attributes parse in Mermaid 11."""
+    text = re.sub(r"[{}]", "", value or "").strip()
+    text = _MERMAID_UNSAFE_ID.sub("_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text or "id"
+
+
+def _page_tokens(page_id: str) -> set[str]:
+    return {part for part in re.split(r"[-_/]", (page_id or "").lower()) if len(part) >= 3}
+
+
+def _package_from_file(path: str) -> str:
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    if "internal" in parts:
+        index = parts.index("internal")
+        return "/".join(parts[index : index + 2])
+    if len(parts) >= 2:
+        return parts[-2]
+    return parts[-1] if parts else ""
+
+
+def _endpoint_actor(endpoint: dict[str, Any]) -> str:
+    handler = str(endpoint.get("handler") or endpoint.get("service") or "").strip()
+    if handler:
+        return handler
+    file_path = str(endpoint.get("file_path") or "").replace("\\", "/")
+    name = file_path.rsplit("/", 1)[-1]
+    if "." in name:
+        return name.rsplit(".", 1)[0]
+    return _package_from_file(file_path) or "API"
 
 # ============================================================================
 # DIAGRAM TYPE DEFINITIONS
@@ -274,6 +320,8 @@ def _validate_er_syntax(code: str, lines: list[str]) -> list[str]:
     has_entities = any(entity_pattern.match(line) for line in lines)
     if not has_entities:
         errors.append("ER diagram has no entity declarations")
+    if re.search(r"\{[A-Za-z0-9_]*\{", code) or "{id}" in code:
+        errors.append("ER attribute names must not contain braces")
 
     return errors
 
@@ -462,13 +510,23 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        """Plan architecture/overview flowchart from product modules in the snapshot."""
+        """Plan architecture/overview flowchart from product packages, not a folder star."""
+        labels = _product_module_labels(context.get("modules") or [])
+        internal = [label for label in labels if label.startswith("internal/")]
+        others = [label for label in labels if not label.startswith("internal/")]
+        chosen = (internal + others)[:10]
         nodes = [DiagramNode(id="repo", label="Repository", shape="round")]
         edges: list[DiagramEdge] = []
-
-        for label in _product_module_labels(context.get("modules") or [])[:10]:
-            nodes.append(DiagramNode(id=label, label=label, shape="rectangle"))
-            edges.append(DiagramEdge(from_node="repo", to_node=label))
+        if any(label.startswith("internal/") for label in chosen):
+            nodes.append(DiagramNode(id="internal", label="internal", shape="round"))
+            edges.append(DiagramEdge(from_node="repo", to_node="internal"))
+        for label in chosen:
+            node_id = mermaid_ident(label)
+            nodes.append(DiagramNode(id=node_id, label=label, shape="rectangle"))
+            if label.startswith("internal/"):
+                edges.append(DiagramEdge(from_node="internal", to_node=node_id))
+            else:
+                edges.append(DiagramEdge(from_node="repo", to_node=node_id))
 
         for layer_id, layer_label in _wiki_tool_layers_present(context):
             nodes.append(DiagramNode(id=layer_id, label=layer_label, shape="rectangle"))
@@ -499,12 +557,17 @@ class MermaidPlanner:
         nodes = []
         edges: list[DiagramEdge] = []
 
-        labels = _product_module_labels(context.get("modules") or [])[:8]
-        for label in labels:
-            nodes.append(DiagramNode(id=label, label=label, shape="rectangle"))
-        if len(labels) >= 2:
-            for left, right in zip(labels, labels[1:], strict=False):
-                edges.append(DiagramEdge(from_node=left, to_node=right))
+        labels = _product_module_labels(context.get("modules") or [])
+        tokens = _page_tokens(page_id)
+        related = [label for label in labels if any(token in label.lower() for token in tokens)]
+        chosen = (related or labels)[:8]
+        for label in chosen:
+            nodes.append(DiagramNode(id=mermaid_ident(label), label=label, shape="rectangle"))
+        if len(chosen) >= 2:
+            for left, right in zip(chosen, chosen[1:], strict=False):
+                edges.append(
+                    DiagramEdge(from_node=mermaid_ident(left), to_node=mermaid_ident(right))
+                )
 
         evidence_spans = []
         if evidence_binding:
@@ -567,18 +630,30 @@ class MermaidPlanner:
         messages: list[tuple[str, str, str]] = []
         participants_seen: set[str] = {"Client"}
 
-        def _add_participant(name: str) -> None:
-            normalized = name.strip() or "API"
+        def _add_participant(name: str) -> str:
+            normalized = mermaid_ident(name.strip() or "API", prefix="api")
             if normalized not in participants_seen:
                 participants.append(normalized)
                 participants_seen.add(normalized)
+            return normalized
 
-        _add_participant("Controller")
-        _add_participant("Repository")
+        tokens = _page_tokens(page_id)
+        selected: list[dict[str, Any]] = []
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                continue
+            path = str(endpoint.get("path") or "")
+            if tokens and not any(token in path.lower() for token in tokens):
+                continue
+            selected.append(endpoint)
+        if not selected:
+            selected = [endpoint for endpoint in endpoints if isinstance(endpoint, dict)]
 
-        for endpoint in endpoints[:16]:
+        for endpoint in selected[:16]:
             path = str(endpoint.get("path", "/unknown"))
             method = str(endpoint.get("method", "GET")).upper()
+            handler = _endpoint_actor(endpoint)
+            target = _add_participant(handler)
             flow_name = f"{method} {path}"
             path_lower = path.lower()
 
@@ -586,15 +661,13 @@ class MermaidPlanner:
                 flow_tag = "count flow"
             elif "param" in path_lower or "query" in path_lower:
                 flow_tag = "parameter flow"
-            elif path_lower.endswith("}") or "/{" in path_lower:
+            elif path_lower.endswith("}") or "/{" in path_lower or "/:" in path_lower:
                 flow_tag = "detail flow"
             else:
                 flow_tag = "list flow"
 
-            messages.append(("Client", "Controller", f"{flow_name} ({flow_tag})"))
-            messages.append(("Controller", "Repository", "query/read"))
-            messages.append(("Repository", "Controller", "result set"))
-            messages.append(("Controller", "Client", "response"))
+            messages.append(("Client", target, f"{flow_name} ({flow_tag})"))
+            messages.append((target, "Client", "response"))
 
         evidence_spans = []
         if evidence_binding:
@@ -617,31 +690,54 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        """Map service/controller/repository/entity relationships into flowchart."""
-        nodes: list[DiagramNode] = [
-            DiagramNode(id="frontend", label="Frontend", shape="rectangle"),
-            DiagramNode(id="controller", label="Controller", shape="rectangle"),
-            DiagramNode(id="service", label="Service", shape="rectangle"),
-            DiagramNode(id="repository", label="Repository", shape="rectangle"),
-            DiagramNode(id="entity", label="Entity/DTO", shape="rectangle"),
-        ]
-        edges: list[DiagramEdge] = [
-            DiagramEdge(from_node="frontend", to_node="controller", label="API call"),
-            DiagramEdge(from_node="controller", to_node="service", label="orchestrate"),
-            DiagramEdge(from_node="service", to_node="repository", label="read/write"),
-            DiagramEdge(from_node="repository", to_node="entity", label="map"),
-            DiagramEdge(from_node="service", to_node="entity", label="DTO transform"),
-        ]
-
-        if evidence_binding:
-            for candidate in evidence_binding.candidates[:12]:
-                symbol = (candidate.span.symbol or "").lower()
-                if "controller" in symbol:
-                    edges.append(DiagramEdge("frontend", "controller", "request"))
-                elif "repositor" in symbol:
-                    edges.append(DiagramEdge("service", "repository", "persistence"))
-                elif "entity" in symbol or "dto" in symbol:
-                    edges.append(DiagramEdge("repository", "entity", "materialize"))
+        """Map real handler/package relationships; skip the generic MVC stencil."""
+        endpoints = [item for item in context.get("endpoints") or [] if isinstance(item, dict)]
+        tokens = _page_tokens(page_id)
+        selected = [
+            item
+            for item in endpoints
+            if not tokens or any(token in str(item.get("path") or "").lower() for token in tokens)
+        ] or endpoints
+        labels: list[str] = []
+        seen: set[str] = set()
+        for endpoint in selected:
+            raw = str(
+                endpoint.get("service")
+                or endpoint.get("handler")
+                or _package_from_file(str(endpoint.get("file_path") or ""))
+                or ""
+            ).strip()
+            if not raw or raw.lower() in _WIKI_PIPELINE_LABELS:
+                continue
+            if raw not in seen:
+                seen.add(raw)
+                labels.append(raw)
+        if len(labels) < 2:
+            labels = _product_module_labels(context.get("modules") or [])[:5]
+        if len(labels) >= 2:
+            nodes = [
+                DiagramNode(id=mermaid_ident(label, prefix="svc"), label=label, shape="rectangle")
+                for label in labels[:8]
+            ]
+            edges = [
+                DiagramEdge(from_node=nodes[index].id, to_node=nodes[index + 1].id)
+                for index in range(len(nodes) - 1)
+            ]
+        else:
+            nodes = [
+                DiagramNode(id="frontend", label="Frontend", shape="rectangle"),
+                DiagramNode(id="controller", label="Controller", shape="rectangle"),
+                DiagramNode(id="service", label="Service", shape="rectangle"),
+                DiagramNode(id="repository", label="Repository", shape="rectangle"),
+                DiagramNode(id="entity", label="Entity/DTO", shape="rectangle"),
+            ]
+            edges = [
+                DiagramEdge(from_node="frontend", to_node="controller", label="API call"),
+                DiagramEdge(from_node="controller", to_node="service", label="orchestrate"),
+                DiagramEdge(from_node="service", to_node="repository", label="read/write"),
+                DiagramEdge(from_node="repository", to_node="entity", label="map"),
+                DiagramEdge(from_node="service", to_node="entity", label="DTO transform"),
+            ]
 
         return DiagramPlan(
             diagram_id=f"{page_id}-service-relationship-flow",
@@ -721,14 +817,19 @@ class MermaidPlanner:
 
         er_entities = []
         for model in models[:10]:  # Limit to 10 models
-            entity_name = model.get("name", model.get("table", "unknown"))
-            attributes = model.get("attributes", [])
-            primary_key = model.get("primary_key", "id")
+            entity_name = mermaid_er_field(str(model.get("name") or model.get("table") or "unknown"))
+            attributes = [
+                mermaid_er_field(str(item))
+                for item in (model.get("attributes") or [])
+                if str(item).strip()
+            ]
+            primary_key = mermaid_er_field(str(model.get("primary_key") or "id"))
             er_entities.append(
                 {
                     "entity": entity_name,
                     "attributes": attributes,
                     "primary_key": primary_key,
+                    "file_path": str(model.get("file_path") or ""),
                 }
             )
 
@@ -882,18 +983,24 @@ class MermaidRenderer:
         """Render ER diagram."""
         lines = ["erDiagram"]
 
+        names: list[str] = []
         for entity in plan.er_entities:
-            entity_name = entity.get("entity", "Unknown")
-            attributes = entity.get("attributes", [])
-            primary_key = entity.get("primary_key", "id")
-
-            # Format attributes string
-            attr_str = ""
-            if attributes:
-                attr_list = [f"{attr}" for attr in attributes]
-                attr_str = " {" + ", ".join(attr_list) + "}"
-
-            lines.append(f"    {entity_name} {{{primary_key}{attr_str}}}")
+            entity_name = mermaid_er_field(str(entity.get("entity") or "Unknown"))
+            names.append(entity_name)
+            attributes = entity.get("attributes") or []
+            primary_key = mermaid_er_field(str(entity.get("primary_key") or "id"))
+            lines.append(f"    {entity_name} {{")
+            lines.append(f"        string {primary_key} PK")
+            seen = {primary_key}
+            for attr in attributes[:8]:
+                field = mermaid_er_field(str(attr))
+                if field in seen:
+                    continue
+                seen.add(field)
+                lines.append(f"        string {field}")
+            lines.append("    }")
+        for left, right in zip(names, names[1:], strict=False):
+            lines.append(f"    {left} ||--o{{ {right} : relates")
 
         return "\n".join(lines)
 

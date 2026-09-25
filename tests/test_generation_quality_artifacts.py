@@ -101,6 +101,13 @@ def test_qoder_like_generation_emits_quality_registry_and_conflict_artifacts(
 
     assert registry_paths == set(content_pages)
     assert quality_paths == set(content_pages)
+    from repo_wiki.verifier.qoder_strict_verifier import QoderLikeVerifierService
+
+    verifier = QoderLikeVerifierService(run_dir, strict=True)
+    _, quality_path_errors = verifier._collect_artifact_page_quality_states(
+        quality_report, containers=("page_quality", "pages")
+    )
+    assert not any("duplicate page entry" in err for err in quality_path_errors)
     assert all(p["page_id"] and p["stable_page_id"] for p in page_registry["pages"])
     assert {p["generation_mode"] for p in page_registry["pages"]} == {"fallback"}
     assert {p["quality_state"] for p in page_registry["pages"]} == {"DEGRADED"}

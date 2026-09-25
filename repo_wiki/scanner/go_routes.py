@@ -33,7 +33,21 @@ _GIN_ROUTE_RE = re.compile(
     r"""\b([A-Za-z_]\w*)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|Any|Handle)\(\s*"""
     r"""(?:((?:http\.Method\w+)|(?:"[A-Z]+"))\s*,\s*)?["']([^"']+)["']""",
 )
-_HANDLE_FUNC_RE = re.compile(r"""http\.HandleFunc\(\s*["']([^"']+)["']\s*,\s*([A-Za-z_]\w*)""")
+_HANDLE_FUNC_RE = re.compile(
+    r"""(?:http\.)?HandleFunc\(\s*["']([^"']+)["']\s*,\s*([A-Za-z_]\w*)"""
+)
+_MUX_HANDLE_RE = re.compile(
+    r"""(?:^|[^\w.])(?:\w+\.)?Handle\(\s*["']([^"']+)["']""",
+    re.MULTILINE,
+)
+_ROUTE_TABLE_PAIR_RE = re.compile(
+    r"""\{\s*"(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|ANY)"\s*,\s*"(/[^"]*)"(?:\s*,)?""",
+    re.IGNORECASE,
+)
+_METHOD_PATH_LITERAL_RE = re.compile(
+    r"^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|ANY)\s+(/.+)$",
+    re.IGNORECASE,
+)
 _GORM_TAG_RE = re.compile(r"`[^`]*\bgorm:")
 _DB_TAG_RE = re.compile(r"`[^`]*\bdb:")
 _GORM_MODEL_EMBED_RE = re.compile(r"\bgorm\.Model\b")
@@ -166,6 +180,16 @@ def _join_reflected_path(base: str, method_name: str, req_body: str) -> str:
     return path
 
 
+def _split_method_path(raw: str, default_method: str = "GET") -> tuple[str, str]:
+    """Split Go 1.22 ``GET /debug/pprof/`` patterns from a single string."""
+    text = (raw or "").strip()
+    match = _METHOD_PATH_LITERAL_RE.match(text)
+    if match:
+        return match.group(1).upper(), match.group(2)
+    path = text if text.startswith("/") else "/" + text.lstrip()
+    return default_method, path
+
+
 def _resolve_http_method_expr(expr: str | None) -> str:
     if not expr:
         return "GET"
@@ -222,14 +246,29 @@ def extract_go_endpoints(files: Sequence[tuple[str, str]]) -> list[GoEndpoint]:
 
         for match in _HANDLE_FUNC_RE.finditer(text):
             lineno = text[: match.start()].count("\n") + 1
-            _add("GET", match.group(1), match.group(2), path, lineno, "go_nethttp")
+            method, route_path = _split_method_path(match.group(1))
+            _add(method, route_path, match.group(2), path, lineno, "go_nethttp")
+
+        for match in _MUX_HANDLE_RE.finditer(text):
+            raw = match.group(1)
+            if not _METHOD_PATH_LITERAL_RE.match(raw.strip()):
+                continue
+            lineno = text[: match.start()].count("\n") + 1
+            method, route_path = _split_method_path(raw)
+            _add(method, route_path, "Handle", path, lineno, "go_nethttp")
+
+        for match in _ROUTE_TABLE_PAIR_RE.finditer(text):
+            lineno = text[: match.start()].count("\n") + 1
+            _add(match.group(1).upper(), match.group(2), "pprof", path, lineno, "go_pprof")
 
         for match in _GIN_ROUTE_RE.finditer(text):
             call = match.group(2)
             method_expr = match.group(3)
             route_path = match.group(4)
             lineno = text[: match.start()].count("\n") + 1
-            if call == "Handle":
+            if _METHOD_PATH_LITERAL_RE.match(route_path.strip()):
+                method, route_path = _split_method_path(route_path)
+            elif call == "Handle":
                 method = _resolve_http_method_expr(method_expr)
             elif call == "Any":
                 method = "ANY"

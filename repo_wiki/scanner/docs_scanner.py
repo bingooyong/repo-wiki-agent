@@ -244,15 +244,54 @@ def _flatten_source_tokens(source_inventory: dict[str, Any]) -> tuple[set[str], 
         for item in bucket:
             if not isinstance(item, dict):
                 continue
-            for field in ("name", "service", "service_id", "handler", "path", "evidence_path"):
+            for field in (
+                "name",
+                "service",
+                "service_id",
+                "handler",
+                "path",
+                "kind",
+                "evidence_path",
+            ):
                 val = item.get(field)
                 if isinstance(val, str) and val.strip():
                     token = val.strip()
                     if "/" in token or "." in token:
                         paths.add(token.lower())
-                    for piece in re.findall(r"[A-Za-z_][A-Za-z0-9_-]{2,}", token):
-                        names.add(piece.lower())
+                    names.update(_iter_name_tokens(token))
     return names, paths
+
+
+_NAME_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{2,}")
+_GENERIC_FACT_CLAIM_TOKENS = frozenset(
+    {
+        "api",
+        "service",
+        "model",
+        "router",
+        "payment-api",
+        "google-api",
+        "test-service",
+        "example-api",
+        "sample-api",
+        "registerservice",
+        "openapi",
+        "newservice",
+    }
+)
+_ENV_FILE_NAME = re.compile(r"^\.env(?:\.[A-Za-z0-9_.-]+)?$", re.IGNORECASE)
+_PLACEHOLDER_PATH_NAMES = frozenset({"xxx", "todo", "placeholder", "example"})
+
+
+def _iter_name_tokens(value: str) -> set[str]:
+    tokens: set[str] = set()
+    for piece in _NAME_TOKEN.findall(value):
+        lowered = piece.lower()
+        tokens.add(lowered)
+        for part in re.split(r"[_-]+", lowered):
+            if len(part) >= 3:
+                tokens.add(part)
+    return tokens
 
 
 _PLANNING_FILENAMES = frozenset({"handoff.md", "verification-report.md"})
@@ -278,6 +317,14 @@ _TUTORIAL_PLACEHOLDER_TOKENS = frozenset(
         "weather-service",
         "example-service",
         "sample-service",
+        "payment-api",
+        "google-api",
+        "test-service",
+        "example-api",
+        "sample-api",
+        "registerservice",
+        "openapi",
+        "newservice",
     }
 )
 _CAMEL_INVENTORY_NAME = re.compile(r"[A-Z][A-Za-z0-9]*(?:Service|Model|API|Api|Router)$")
@@ -353,6 +400,9 @@ _NON_SOURCE_FILE_EXTS = frozenset(
         ".ico",
         ".pdf",
         ".zip",
+        ".log",
+        ".pid",
+        ".sock",
     }
 )
 _GIT_REMOTE_FIRST = frozenset({"origin", "upstream", "head"})
@@ -420,6 +470,11 @@ def _is_source_file_claim(value: str) -> bool:
     if not parts or all(p.isdigit() for p in parts):
         return False
     if parts[0].lower() in _GIT_REMOTE_FIRST:
+        return False
+    name = Path(parts[-1]).name
+    if _ENV_FILE_NAME.fullmatch(name):
+        return False
+    if name.lower() in _PLACEHOLDER_PATH_NAMES:
         return False
     suffix = Path(parts[-1]).suffix.lower()
     if suffix in _NON_SOURCE_FILE_EXTS:
@@ -829,6 +884,7 @@ class DocumentationScanner:
                     if n not in names
                     and n.endswith(("service", "api", "model"))
                     and n.casefold() not in _TUTORIAL_PLACEHOLDER_TOKENS
+                    and n not in _GENERIC_FACT_CLAIM_TOKENS
                 ]
             )
             freshness = max(0.0, 1.0 - (0.2 * len(stale_refs) + 0.15 * len(conflicting_claims)))

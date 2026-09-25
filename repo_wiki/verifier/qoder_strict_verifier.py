@@ -24,6 +24,7 @@ from repo_wiki.verifier.api_claim_inventory import (
     api_claim_in_inventory,
     api_path_slot_key,
     apply_api_mount_prefix,
+    extract_http_method_paths,
     inventory_api_mount_prefix,
     is_fastapi_framework_docs_path,
     normalize_claimed_api_path,
@@ -47,6 +48,70 @@ _PADDING_HEADING_NAMES = frozenset({"正文", "阅读说明", "源码引用"})
 _HEADING_PATTERN = re.compile(r"^(#{2,6})\s+(.+)$")
 _TOC_ITEM_PATTERN = re.compile(r"^\s*(?:\d+\.|[-*+])\s+(.+)$")
 _TOC_LINK_PATTERN = re.compile(r"^\[([^\]]+)\]\([^)]+\)\s*$")
+_CODE_FENCE_LINE = re.compile(r"^\s*(```|~~~)")
+_PROMPT_LEAK_PHRASES = (
+    "端点由用户在请求中提供",
+    "you are a technical writer",
+    "根据以下证据撰写",
+    "根据下列证据",
+)
+_QUALITY_METRIC_LEAK = re.compile(
+    r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b",
+    re.IGNORECASE,
+)
+
+
+def _prose_without_fences(text: str) -> str:
+    """Drop fenced code/mermaid so diagram node ids are not inventory claims."""
+    lines: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if _CODE_FENCE_LINE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def page_has_prompt_leakage(content: str) -> bool:
+    lowered = content.lower()
+    if any(phrase.lower() in lowered for phrase in _PROMPT_LEAK_PHRASES):
+        return True
+    return bool(_QUALITY_METRIC_LEAK.search(content))
+
+
+def page_has_repeated_filler(
+    content: str,
+    *,
+    min_paragraph_len: int = 40,
+    min_paragraph_repeats: int = 4,
+    min_line_len: int = 40,
+    min_line_repeats: int = 8,
+) -> bool:
+    """True when the same long paragraph or line is pasted many times."""
+    paragraph_counts: dict[str, int] = {}
+    for para in re.split(r"\n\s*\n", content):
+        text = re.sub(r"\s+", " ", para.strip())
+        if len(text) < min_paragraph_len:
+            continue
+        paragraph_counts[text] = paragraph_counts.get(text, 0) + 1
+        if paragraph_counts[text] >= min_paragraph_repeats:
+            return True
+    line_counts: dict[str, int] = {}
+    in_fence = False
+    for raw in content.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence or len(stripped) < min_line_len:
+            continue
+        line_counts[stripped] = line_counts.get(stripped, 0) + 1
+        if line_counts[stripped] >= min_line_repeats:
+            return True
+    return False
 
 
 def _iter_markdown_content_lines(content: str):
@@ -108,6 +173,73 @@ def _heading_name_matches(entry: str, headings: list[str]) -> bool:
         if re.sub(r"\s+", " ", heading).strip().lower() == needle:
             return True
     return False
+
+
+def count_qoder_list_metrics(content: str) -> tuple[int, int, float]:
+    """Return (prose_lines, list_items, list_ratio) used by QODER_PAGE_DUMP."""
+    prose_lines = 0
+    list_items = 0
+    in_code_block = False
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block or stripped.startswith("#"):
+            continue
+        if stripped.startswith("-") or stripped.startswith("*"):
+            list_items += 1
+        else:
+            prose_lines += 1
+    total = prose_lines + list_items
+    ratio = (list_items / total) if total else 0.0
+    return prose_lines, list_items, ratio
+
+
+def is_qoder_page_dump(
+    content: str,
+    *,
+    max_list_ratio: float = 0.6,
+    min_list_items: int = 10,
+) -> bool:
+    """True when the page would HARD-fail QODER_PAGE_DUMP."""
+    if page_has_prompt_leakage(content) or page_has_repeated_filler(content):
+        return True
+    _, list_items, ratio = count_qoder_list_metrics(content)
+    return list_items > min_list_items and ratio > max_list_ratio
+
+
+def count_qoder_prose_chars(content: str) -> int:
+    """Count prose characters the same way QODER_PROSE_TOO_LOW does."""
+    prose_lines: list[str] = []
+    in_code_block = False
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        if (
+            stripped.startswith("#")
+            or stripped.startswith("-")
+            or stripped.startswith("*")
+            or stripped.startswith("|")
+        ):
+            continue
+        prose_lines.append(stripped)
+    return len(" ".join(prose_lines))
+
+
+def qoder_prose_density(content: str) -> float:
+    total = len(content)
+    if total <= 0:
+        return 1.0
+    return count_qoder_prose_chars(content) / total
 
 
 class QoderLikeSeverityThreshold(SeverityThreshold):
@@ -1164,6 +1296,9 @@ class QoderLikeVerifierService(VerifierService):
                 list_ratio = list_items / total
                 if list_ratio > self.MAX_LIST_RATIO and list_items > 10:
                     dump_pages.append(f.name)
+                    continue
+            if page_has_prompt_leakage(content) or page_has_repeated_filler(content):
+                dump_pages.append(f.name)
 
         if dump_pages:
             return CheckResult(
@@ -1657,12 +1792,10 @@ class QoderLikeVerifierService(VerifierService):
         fastapi_app = self._repo_looks_like_fastapi()
         for page in content_dir.rglob("*.md"):
             text = page.read_text(encoding="utf-8", errors="ignore")
+            prose = _prose_without_fences(text)
             rel = page.relative_to(content_dir).as_posix()
             if inventories["apis"]:
-                for method, api_path in re.findall(
-                    r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(/[-A-Za-z0-9_./{}:]+)",
-                    text,
-                ):
+                for method, api_path in extract_http_method_paths(prose):
                     if fastapi_app and self._is_fastapi_framework_docs_path(api_path):
                         continue
                     if not self._api_claim_in_inventory(
@@ -1672,11 +1805,11 @@ class QoderLikeVerifierService(VerifierService):
                             {
                                 "page": rel,
                                 "claim_type": "api",
-                                "claim": f"{method.upper()} {api_path}",
+                                "claim": f"{method} {api_path}",
                             }
                         )
             if inventories["services"]:
-                for service in self._extract_structured_name_claims(text, "service"):
+                for service in self._extract_structured_name_claims(prose, "service"):
                     if self._is_non_product_service_token(service):
                         continue
                     if self._is_github_actions_reserved_service_token(service, text, rel):
@@ -1684,7 +1817,7 @@ class QoderLikeVerifierService(VerifierService):
                     if service not in inventories["services"]:
                         offenders.append({"page": rel, "claim_type": "service", "claim": service})
             if inventories["models"]:
-                for model in self._extract_structured_name_claims(text, "model"):
+                for model in self._extract_structured_name_claims(prose, "model"):
                     if model not in inventories["models"]:
                         offenders.append({"page": rel, "claim_type": "model", "claim": model})
             for endpoint, claimed_auth in self._extract_endpoint_auth_claims(text).items():
@@ -2198,25 +2331,27 @@ class QoderLikeVerifierService(VerifierService):
 
     def _extract_structured_name_claims(self, text: str, kind: str) -> set[str]:
         """Extract deterministic service/model identifiers from ordinary prose."""
+        prose = _prose_without_fences(text)
         if kind == "service":
+            # Same-line only: mermaid `entity\\n    service` is a node id pair, not a claim.
             patterns = (
-                r"\b[Ss]ervice\s+`([^`]+)`",
-                r"\b`([^`]+)`\s+service\b",
-                r"\b[Ss]ervice\s+([a-z][a-z0-9_-]{2,})\b",
-                r"\b([a-z][a-z0-9_-]{2,})\s+service\b",
+                r"\b[Ss]ervice[ \t]+`([^`]+)`",
+                r"\b`([^`]+)`[ \t]+service\b",
+                r"\b[Ss]ervice[ \t]+([a-z][a-z0-9_-]{2,})\b",
+                r"\b([a-z][a-z0-9_-]{2,})[ \t]+service\b",
             )
             generic = {"service", "services", "core", "public", "entity"}
         else:
             patterns = (
-                r"\b(?:Model|Entity)\s+`([^`]+)`",
-                r"\b`([^`]+)`\s+(?:model|entity)\b",
-                r"\b(?:Model|Entity)\s+([A-Za-z][A-Za-z0-9_-]{2,})\b",
-                r"\b([A-Za-z][A-Za-z0-9_-]{2,})\s+(?:model|entity)\b",
+                r"\b(?:Model|Entity)[ \t]+`([^`]+)`",
+                r"\b`([^`]+)`[ \t]+(?:model|entity)\b",
+                r"\b(?:Model|Entity)[ \t]+([A-Za-z][A-Za-z0-9_-]{2,})\b",
+                r"\b([A-Za-z][A-Za-z0-9_-]{2,})[ \t]+(?:model|entity)\b",
             )
             generic = {"model", "models", "entity", "entities", "data"}
         claims: set[str] = set()
         for pattern in patterns:
-            for value in re.findall(pattern, text):
+            for value in re.findall(pattern, prose):
                 claim = value.strip("`.,;:()[]{} ")
                 if claim and claim.lower() not in generic:
                     claims.add(claim)

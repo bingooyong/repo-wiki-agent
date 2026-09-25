@@ -65,7 +65,7 @@ def count_product_source_files(repo_root: Path) -> int:
             continue
         if path.suffix.lower() in PRODUCT_SOURCE_EXTS:
             name = path.name.lower()
-            if name.endswith("_test.go") or name.startswith("test_") or name.endswith("_test.py"):
+            if _is_generated_or_test_source(path.as_posix()):
                 continue
             count += 1
     return count
@@ -93,14 +93,30 @@ def handbook_source_citation_stats(content_dir: Path, repo_root: Path) -> Source
             if not path_text:
                 continue
             total += 1
-            suffix = Path(path_text).suffix.lower()
-            if suffix in PRODUCT_SOURCE_EXTS:
+            if _is_product_source_citation(path_text):
                 source += 1
     return SourceCitationStats(
         total_citations=total,
         source_citations=source,
         product_source_files=count_product_source_files(repo_root),
     )
+
+
+def _is_generated_or_test_source(path_text: str) -> bool:
+    name = Path(path_text).name.lower()
+    if name.endswith(".pb.go") or name.endswith("_grpc.pb.go"):
+        return True
+    if name.endswith("_test.go") or name.startswith("test_") or name.endswith("_test.py"):
+        return True
+    parts = [part.lower() for part in Path(path_text.replace("\\", "/")).parts]
+    return "testdata" in parts
+
+
+def _is_product_source_citation(path_text: str) -> bool:
+    suffix = Path(path_text).suffix.lower()
+    if suffix not in PRODUCT_SOURCE_EXTS:
+        return False
+    return not _is_generated_or_test_source(path_text)
 
 
 def source_evidence_is_sufficient(stats: SourceCitationStats) -> bool:

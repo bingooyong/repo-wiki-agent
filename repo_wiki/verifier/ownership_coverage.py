@@ -135,6 +135,8 @@ def item_owner_coverage(
         return True, "defining file/handler"
     if item.kind == "model" and _has_defining_owner(item):
         return True, "defining file/class"
+    if item.kind == "service" and _has_defining_owner(item):
+        return True, "defining file"
     for page_text in pages:
         covered, reason = page_has_owner_or_warning(page_text, item.identifier)
         if covered:
@@ -162,7 +164,14 @@ def _collect_services(data: dict[str, Any], source: str, items: list[OwnerInvent
         if isinstance(item, dict):
             identifier = _first_str(item, ("service_id", "id", "name", "display_name"))
             if identifier and _is_core(item):
-                items.append(OwnerInventoryItem("service", identifier, source))
+                items.append(
+                    OwnerInventoryItem(
+                        "service",
+                        identifier,
+                        source,
+                        defining_file=_first_str(item, ("file_path", "evidence_path")) or "",
+                    )
+                )
 
 
 def _collect_apis(data: dict[str, Any], source: str, items: list[OwnerInventoryItem]) -> None:

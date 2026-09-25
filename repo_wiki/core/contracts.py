@@ -42,7 +42,7 @@ class Module(BaseModel):
 
 
 class Endpoint(BaseModel):
-    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ANY"]
     path: str
     module: str
     handler: str

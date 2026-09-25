@@ -207,22 +207,20 @@ def _score_by_api_match(page: WikiPagePlan, span: EvidenceSpanRecord) -> float:
     sr = page.source_requirements
     if not sr or not sr.endpoints:
         return 0.0
-    if not span.symbol:
-        return 0.0
-
-    symbol_lower = span.symbol.lower()
+    symbol_lower = (span.symbol or "").lower()
+    span_path = _normalized_span_path(span)
+    best = 0.0
     for endpoint in sr.endpoints:
         # endpoint format: "METHOD /path" or just "path"
         path = endpoint.split()[-1] if " " in endpoint else endpoint
         path_lower = _normalize_for_matching(path)
-        # Check symbol against path segments
-        if path_lower in symbol_lower or symbol_lower in path_lower:
-            return WEIGHT_API
-        # Check path keyword overlap
-        path_keywords = set(path_lower.split())
-        if path_lower in symbol_lower:
-            return WEIGHT_API * 0.7
-    return 0.0
+        if symbol_lower and (path_lower in symbol_lower or symbol_lower in path_lower):
+            best = max(best, WEIGHT_API)
+            continue
+        parts = [part for part in path.split("/") if part and not part.startswith((":", "{", "*"))]
+        if len(parts) >= 2 and all(part.lower() in span_path for part in parts[-2:]):
+            best = max(best, WEIGHT_API)
+    return best
 
 
 def _score_by_data_model_match(page: WikiPagePlan, span: EvidenceSpanRecord) -> float:
@@ -349,8 +347,20 @@ def _score_onboarding_evidence(
             score += WEIGHT_API_ROUTES_FILE
             signals.append("api_routes_file")
         if path.endswith(".go") and not name.endswith("_test.go"):
-            score += WEIGHT_API_ROUTES_FILE
-            signals.append("go_api_source")
+            if path.startswith("internal/") or "/internal/" in path:
+                score += WEIGHT_API_ROUTES_FILE + 1.5
+                signals.append("go_internal_handler")
+            elif name.endswith(".pb.go") or name.endswith("_grpc.pb.go"):
+                score -= 2.0
+                signals.append("go_generated_api")
+            else:
+                score += WEIGHT_API_ROUTES_FILE * 0.4
+                signals.append("go_api_source")
+            if name in {"main.go", "config.go"} and (
+                path.startswith("cmd/") or path.count("/") == 0
+            ):
+                score -= 2.0
+                signals.append("go_entrypoint_not_handler")
         return score, signals
 
     if _is_overview_or_install_page(page):
@@ -374,6 +384,9 @@ def _score_onboarding_evidence(
         if name in {"main.py", "main.go"}:
             score += WEIGHT_ONBOARDING_ENTRY
             signals.append("onboarding_entry")
+        if path.startswith("cmd/") and name == "main.go":
+            score += WEIGHT_ONBOARDING_ENTRY + 1.0
+            signals.append("onboarding_cmd_main")
     elif _is_ops_config_page(page) or _is_database_troubleshooting_page(page):
         if "settings" in path or "database_url" in symbol or "database_url" in text:
             score += WEIGHT_ONBOARDING_SETTINGS
@@ -390,9 +403,12 @@ def _score_onboarding_evidence(
             score += WEIGHT_ONBOARDING_SETTINGS
             signals.append("data_model_file")
         if path.endswith(".go") and (
-            "gorm:" in text or "tablename" in symbol or "/models/" in path
+            "gorm:" in text
+            or "tablename" in symbol
+            or "/models/" in path
+            or path.startswith("internal/models/")
         ):
-            score += WEIGHT_ONBOARDING_SETTINGS
+            score += WEIGHT_ONBOARDING_SETTINGS + 1.0
             signals.append("go_gorm_model")
     elif _is_security_onboarding_page(page):
         if "authentication.py" in path or path.endswith("/authentication.py"):
@@ -457,6 +473,18 @@ def score_evidence_for_page(
     if onboarding_score > 0:
         score += onboarding_score
         signals.extend(onboarding_signals)
+
+    path = _normalized_span_path(span)
+    name = Path(path).name.lower()
+    if path.startswith("internal/") or "/internal/" in path:
+        score += 2.0
+        signals.append("internal_product_source")
+    if name.endswith(".pb.go") or name.endswith("_grpc.pb.go"):
+        score -= 3.0
+        signals.append("generated_pb_go")
+    if name.endswith("_test.go") or name.startswith("test_") or name.endswith("_test.py"):
+        score -= 2.0
+        signals.append("test_source")
 
     return score, signals
 

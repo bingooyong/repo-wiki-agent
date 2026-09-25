@@ -10,8 +10,18 @@ from repo_wiki.core.contracts import (
     RepositoryInfo,
     RepositorySnapshot,
 )
-from repo_wiki.evidence.citation_renderer import normalize_citation_markup
+from repo_wiki.evidence.citation_renderer import (
+    normalize_citation_markup,
+    sanitize_citation_payloads,
+)
+from repo_wiki.generator.mermaid_planner import (
+    MermaidDiagramType,
+    create_planner,
+    create_renderer,
+    validate_mermaid_syntax,
+)
 from repo_wiki.orchestration.service import RepoWikiService, _is_filename_like_handbook_title
+from repo_wiki.verifier.api_claim_inventory import api_claim_in_inventory
 from repo_wiki.planner.identity import resolve_repository_identity
 from repo_wiki.planner.rule_first import RuleFirstPlanner, _is_filename_like_module_name
 from repo_wiki.planner.schema import (
@@ -41,7 +51,12 @@ from repo_wiki.verifier.handbook import (
     install_run_clue_count,
     repo_run_clue_names,
 )
-from repo_wiki.verifier.qoder_strict_verifier import QoderLikeVerifierService
+from repo_wiki.verifier.qoder_strict_verifier import (
+    QoderLikeVerifierService,
+    is_qoder_page_dump,
+    page_has_prompt_leakage,
+    page_has_repeated_filler,
+)
 from repo_wiki.verifier.source_evidence import (
     PRODUCT_SOURCE_EXTS,
     handbook_source_citation_stats,
@@ -570,3 +585,192 @@ def test_source_evidence_uses_eval_parent_when_target_repo_stale(tmp_path: Path)
     result = QoderLikeVerifierService(run, strict=True)._check_qoder_source_evidence()
     assert result.status == "FAIL"
     assert result.reason_code == "QODER_SOURCE_EVIDENCE_LOW"
+
+
+def test_any_method_stays_any_and_matches_concrete_claim() -> None:
+    files = [
+        (
+            "serv.go",
+            'package ccagent\nfunc init() { RegisterService("/probe/blackbox", NewSvc()) }\n'
+            "type Svc struct{}\nfunc NewSvc() *Svc { return &Svc{} }\n"
+            "func (s *Svc) ServeCreate(req *ServeCreateRequest) error { return nil }\n"
+            "type ServeCreateRequest struct{}\n",
+        )
+    ]
+    endpoints = extract_go_endpoints(files)
+    assert any(item.method == "ANY" and item.path.endswith("/create") for item in endpoints)
+    inventory = {(item.method, item.path) for item in endpoints}
+    path = next(item.path for item in endpoints if item.method == "ANY")
+    assert api_claim_in_inventory("POST", path, inventory) is True
+    assert api_claim_in_inventory("GET", path, inventory) is True
+    assert api_claim_in_inventory("GET", "/ghost", inventory) is False
+
+
+def test_go122_mux_and_pprof_table_are_not_malformed() -> None:
+    text = """
+package pprof
+func Register(mux *http.ServeMux) {
+    mux.HandleFunc("GET /debug/pprof/", Index)
+    mux.Handle("GET /debug/pprof/cmdline", http.HandlerFunc(Cmdline))
+    routes := []struct{ Method, Path string }{
+        {"GET", "/debug/pprof/profile"},
+        {"GET", "/debug/pprof/symbol"},
+        {"GET", "/debug/pprof/trace"},
+        {"GET", "/debug/pprof/heap"},
+        {"GET", "/debug/pprof/goroutine"},
+        {"GET", "/debug/pprof/allocs"},
+        {"GET", "/debug/pprof/block"},
+    }
+    _ = routes
+}
+"""
+    endpoints = extract_go_endpoints([("internal/debug/pprof.go", text)])
+    paths = {item.path for item in endpoints}
+    assert "/GET /debug/pprof/" not in paths
+    assert "/debug/pprof/" in paths
+    assert "/debug/pprof/cmdline" in paths
+    assert "/debug/pprof/profile" in paths
+    assert "/debug/pprof/heap" in paths
+    assert all(item.file_path == "internal/debug/pprof.go" for item in endpoints)
+
+
+def test_api_pages_group_by_resource_and_cite_handler(tmp_path: Path) -> None:
+    cfg = RepoWikiConfig()
+    cfg.project.root = str(tmp_path)
+    service = RepoWikiService(cfg)
+    endpoints = [
+        {
+            "method": "GET",
+            "path": "/hello/ping",
+            "handler": "ServiceHello.ServePing",
+            "file_path": "serv_hello.go",
+            "line_number": 3,
+        },
+        {
+            "method": "POST",
+            "path": "/probe/endpoint/create",
+            "handler": "ServiceProbeEndpoint.ServeCreate",
+            "file_path": "internal/services/serv_probe_endpoint.go",
+            "line_number": 12,
+        },
+        {
+            "method": "GET",
+            "path": "/probe/endpoint/list",
+            "handler": "ServiceProbeEndpoint.ServeList",
+            "file_path": "internal/services/serv_probe_endpoint.go",
+            "line_number": 18,
+        },
+        {
+            "method": "GET",
+            "path": "/tag/list",
+            "handler": "ServiceTag.ServeList",
+            "file_path": "internal/services/serv_tag.go",
+            "line_number": 8,
+        },
+    ]
+    section = service._build_truthful_api_group_section(endpoints)
+    assert section.index("### probe/endpoint") < section.index("### hello")
+    assert "<cite>internal/services/serv_probe_endpoint.go:12</cite>" in section
+    assert section.count("/hello/ping") == 1
+
+
+def test_generated_pb_and_tests_are_not_source_evidence(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    (tmp_path / "api" / "proto").mkdir(parents=True)
+    (tmp_path / "api" / "proto" / "control.pb.go").write_text("package proto\n", encoding="utf-8")
+    content = tmp_path / "repowiki" / "zh" / "content"
+    content.mkdir(parents=True)
+    lines = ["生成代码。 <cite>api/proto/control.pb.go:1-1</cite>" for _ in range(10)]
+    lines += ["测试。 <cite>apiauth_test.go:1-1</cite>" for _ in range(10)]
+    (content / "API参考.md").write_text("# API\n\n" + "\n".join(lines) + "\n", encoding="utf-8")
+    stats = handbook_source_citation_stats(content, tmp_path)
+    assert stats.total_citations == 20
+    assert stats.source_citations == 0
+
+
+def test_out_of_range_citation_dropped_at_generate_time(tmp_path: Path) -> None:
+    readme = tmp_path / "README.md"
+    readme.write_text("\n".join(f"line {i}" for i in range(1, 6)), encoding="utf-8")
+    kept = sanitize_citation_payloads("README.md:821-824", workspace_root=tmp_path)
+    assert kept == []
+    kept = sanitize_citation_payloads("README.md:1-3", workspace_root=tmp_path)
+    assert kept == ["README.md:1-3"]
+
+
+def test_go_install_commands_come_from_makefile_and_cmd(tmp_path: Path) -> None:
+    _write_synthetic_go_repo(tmp_path)
+    cfg = RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}})
+    snapshot = RepositoryScanner(cfg).scan()
+    assert "go build -o bin/ccagent ./cmd/ccagent/main.go" in snapshot.commands.values() or (
+        snapshot.commands.get("build") == "go build -o bin/ccagent ./cmd/ccagent/main.go"
+    )
+    assert "go run ." not in snapshot.commands.values()
+    assert "go build ./..." not in snapshot.commands.values()
+    service = RepoWikiService(cfg)
+    commands = service._install_commands_from_repo_files()
+    assert any("cmd/ccagent/main.go" in item for item in commands)
+    assert not any(item.strip() in {"go run .", "go build -o probe_exporter ."} for item in commands)
+
+
+def test_mermaid_er_rejects_brace_attribute_names() -> None:
+    planner = create_planner()
+    renderer = create_renderer()
+    diagrams = planner.plan_diagram_for_page(
+        "data-model",
+        "data",
+        None,
+        {
+            "data_models": [
+                {
+                    "name": "ProbeEndpoint",
+                    "file_path": "internal/models/endpoint.go",
+                    "primary_key": "{id}",
+                    "attributes": ["{id}", "name"],
+                },
+                {
+                    "name": "ProbeResult",
+                    "file_path": "internal/models/result.go",
+                    "primary_key": "id",
+                },
+            ]
+        },
+    )
+    rendered, is_valid, _error = renderer.render_diagram_with_validation(diagrams[0])
+    assert is_valid is True
+    assert rendered is not None
+    assert "{id}" not in rendered
+    assert "ProbeEndpoint" in rendered
+    assert validate_mermaid_syntax("erDiagram\n    X {{id}}\n", MermaidDiagramType.ER_DIAGRAM)[0] is False
+
+
+def test_architecture_mermaid_prefers_internal_packages() -> None:
+    planner = create_planner()
+    renderer = create_renderer()
+    diagrams = planner.plan_diagram_for_page(
+        "architecture",
+        "architecture",
+        None,
+        {
+            "modules": [
+                {"name": "control", "path": "internal/control"},
+                {"name": "probe", "path": "internal/probe"},
+                {"name": "services", "path": "internal/services"},
+                {"name": "models", "path": "internal/models"},
+                {"name": "agent", "path": "internal/agent"},
+            ]
+        },
+    )
+    rendered = renderer.render_diagram(diagrams[0])
+    assert "internal/control" in rendered
+    assert "internal/services" in rendered
+    assert "仓库扫描" not in rendered
+    assert "LLM生成" not in rendered
+
+
+def test_repeated_filler_and_prompt_leak_are_page_dumps() -> None:
+    pad = "当前证据需要把源码证据、模块职责和调用边界写清楚，读者应对照文中的源码引用核对实现。"
+    page = "\n\n".join([pad] * 4)
+    assert page_has_repeated_filler(page) is True
+    assert page_has_prompt_leakage("端点由用户在请求中提供") is True
+    assert is_qoder_page_dump("Tests 21/25 / Coverage 84%\n\n" + "一句说明。\n") is True
+    assert is_qoder_page_dump("# 正常页\n\n这是一段足够说明的散文。\n") is False

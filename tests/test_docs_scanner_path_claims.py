@@ -120,6 +120,9 @@ def test_source_file_claim_rejects_slugs_git_refs_and_dotted_paths() -> None:
     assert not ds._is_source_file_claim("/docs")
     assert not ds._is_source_file_claim("/redoc")
     assert not ds._is_source_file_claim("workflows/Tests/badge.svg")
+    assert not ds._is_source_file_claim("app/logs/ccagent.log")
+    assert not ds._is_source_file_claim("docs/xxx")
+    assert not ds._is_source_file_claim(".env.local")
 
 
 def test_extract_claims_skips_library_tokens_and_non_source_refs() -> None:

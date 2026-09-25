@@ -122,7 +122,9 @@ def sanitize_citation_payloads(raw: str, workspace_root: str | Path | None = Non
     valid: list[str] = []
     for part in parts:
         coerced = _coerce_path_line_cite(part, workspace_root)
-        if coerced and _citation_file_exists(coerced, workspace_root):
+        if coerced and _citation_file_exists(coerced, workspace_root) and _citation_range_in_file(
+            coerced, workspace_root
+        ):
             valid.append(coerced)
     return valid
 
@@ -148,6 +150,32 @@ def _citation_file_exists(value: str, workspace_root: str | Path | None) -> bool
         return target.is_file()
     except OSError:
         return False
+
+
+def _citation_range_in_file(value: str, workspace_root: str | Path | None) -> bool:
+    """Drop cites whose line range is past the end of the file."""
+    if workspace_root is None:
+        return True
+    root = Path(workspace_root)
+    if not root.exists():
+        return True
+    body = value
+    if body.lower().startswith("source:"):
+        body = body[len("source:") :].lstrip()
+    match = _VALID_CITE_BODY_RE.fullmatch(body)
+    if not match:
+        return False
+    path_text = match.group("path").strip().replace("\\", "/")
+    start = int(match.group("start"))
+    end = int(match.group("end") or match.group("start"))
+    target = root / path_text
+    try:
+        if not target.is_file():
+            return False
+        line_count = sum(1 for _ in target.open(encoding="utf-8", errors="ignore"))
+    except OSError:
+        return False
+    return 1 <= start <= end <= line_count
 
 
 def is_placeholder_citation_ref(raw: str) -> bool:

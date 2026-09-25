@@ -92,14 +92,9 @@ def generate_command(
 
     # Override output root if specified
     if output:
-        from repo_wiki.orchestration.eval_layout import EvalOutputProfile
+        from repo_wiki.orchestration.eval_layout import override_eval_profile_root
 
-        eval_profile = EvalOutputProfile(
-            name=profile,
-            root=output,
-            create_subdirs=eval_profile.create_subdirs,
-            content_subdir=eval_profile.content_subdir,
-        )
+        eval_profile = override_eval_profile_root(eval_profile, output)
         # Validate unsafe output roots
         reject_unsafe_output_root(output)
 
@@ -161,16 +156,11 @@ def improve_command(
     from repo_wiki.orchestration.eval_layout import (
         EvalOutputProfile,
         get_eval_profile,
+        override_eval_profile_root,
         reject_unsafe_output_root,
     )
 
-    eval_profile = get_eval_profile(profile)
-    eval_profile = EvalOutputProfile(
-        name=profile,
-        root=output,
-        create_subdirs=eval_profile.create_subdirs,
-        content_subdir=eval_profile.content_subdir,
-    )
+    eval_profile = override_eval_profile_root(get_eval_profile(profile), output)
     reject_unsafe_output_root(output)
     run_id, existing_run_dir = _resolve_improve_run_target(Path(output), run_id)
     in_place = existing_run_dir is not None
