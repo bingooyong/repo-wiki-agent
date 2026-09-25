@@ -254,6 +254,7 @@ def _packaged_template_root() -> Path:
 class RepoWikiService:
     _LOCAL_LINK_PATTERN = re.compile(r"\[[^\]\n]+\]\(([^)\n]+)\)")
     _CITE_PATTERN = re.compile(r"<cite>[^<]+</cite>")
+    _CITE_TAG_RE = re.compile(r"<cite>[^<]+</cite>", re.IGNORECASE)
     _HEADING_L2_PATTERN = re.compile(r"^##\s+(.+)$", re.MULTILINE)
     _QODER_TOC_HEADING_NAMES = frozenset({"目录", "table of contents", "contents", "toc"})
 
@@ -3118,11 +3119,20 @@ class RepoWikiService:
                 out.append(line)
         return "\n".join(out)
 
+    def _line_is_citation_tags_only(self, line: str) -> bool:
+        """True when a line is only cite tags plus whitespace (linear, no nested \\s*)."""
+        stripped = line.strip()
+        if not stripped:
+            return False
+        parts = self._CITE_TAG_RE.split(stripped)
+        if len(parts) < 2:
+            return False
+        return all(not part.strip() for part in parts)
+
     def _fold_citation_only_lines(self, content: str) -> str:
-        cite_only = re.compile(r"^(?:\s*<cite>[^<]+</cite>\s*)+$", re.IGNORECASE)
         out: list[str] = []
         for line in content.splitlines():
-            if cite_only.match(line.strip()) and out:
+            if self._line_is_citation_tags_only(line) and out:
                 prev = out[-1].rstrip()
                 if prev and not prev.startswith("#") and not prev.startswith("```"):
                     out[-1] = prev + " " + line.strip()

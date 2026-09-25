@@ -270,3 +270,24 @@ GET /wrong_path/asd 被测试当成 404 夹具。
         if not verifier._api_claim_in_inventory(method.upper(), api_path, apis):
             leftover.append(f"{method.upper()} {api_path}")
     assert leftover == []
+
+
+def test_fold_citation_only_line_appends_to_previous_prose(tmp_path):
+    service = _service(tmp_path)
+    folded = service._fold_citation_only_lines(
+        "产品接口返回文章列表。\n<cite>app/api/routes/articles.py:18</cite>\n"
+    )
+    assert folded == "产品接口返回文章列表。 <cite>app/api/routes/articles.py:18</cite>"
+
+
+def test_fold_citation_only_line_keeps_mixed_prose(tmp_path):
+    service = _service(tmp_path)
+    content = "说明\n正文 <cite>app/main.py:1</cite> 继续\n"
+    assert service._fold_citation_only_lines(content) == content.rstrip()
+
+
+def test_fold_citation_only_line_is_linear_on_repeated_cite_tabs(tmp_path):
+    service = _service(tmp_path)
+    line = "<cite>;</cite>\t" * 80
+    folded = service._fold_citation_only_lines("前文。\n" + line + "\n")
+    assert folded.startswith("前文。")
