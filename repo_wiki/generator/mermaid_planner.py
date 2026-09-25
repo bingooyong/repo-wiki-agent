@@ -190,7 +190,9 @@ def _endpoint_is_anonymous(endpoint: dict[str, Any]) -> bool:
     file_path = str(endpoint.get("file_path") or "").replace("\\", "/")
     if auth in {"none", "anonymous", "public"}:
         return True
-    if "custom-probe" in file_path:
+    from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+
+    if path_looks_like_example_cmd(file_path):
         return True
     if path in {"/healthz", "/health", "/readyz", "/ready", "/live"}:
         return True
@@ -250,7 +252,9 @@ def _auth_hop(
     if _endpoint_is_anonymous(endpoint):
         return None, None
     file_path = str(endpoint.get("file_path") or "").replace("\\", "/")
-    if "custom-probe" in file_path:
+    from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+
+    if path_looks_like_example_cmd(file_path):
         return None, None
     if go_auth:
         if "internal/agent" in file_path or "probe-agent" in file_path:
@@ -295,7 +299,9 @@ def _request_flow_score(endpoint: dict[str, Any], page_id: str, tokens: set[str]
             score += 6
         if any(path.startswith(prefix) for prefix in _FRONTEND_ROUTE_PREFIXES):
             score += 8
-        if "custom-probe" in file_path or path.rstrip("/") == "/probe":
+        from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+
+        if path_looks_like_example_cmd(file_path) or path.rstrip("/") == "/probe":
             score -= 12
         if "agent/list" in path:
             score -= 8
@@ -394,9 +400,12 @@ def _endpoint_actor(endpoint: dict[str, Any]) -> str:
         if handler and handler not in _GENERIC_GO_HANDLERS and "NewHTTPHandler" not in handler:
             return handler
         return "runGRPCServe"
-    if "custom-probe" in file_path:
+    from repo_wiki.generator.process_roles import cmd_dir_name, path_looks_like_example_cmd
+
+    example_name = cmd_dir_name(file_path)
+    if path_looks_like_example_cmd(file_path):
         if path.rstrip("/") in {"", "/"}:
-            return "custom-probe"
+            return example_name or "example"
         if path.rstrip("/") in {"/health", "/healthz"}:
             return "HealthHandler"
         if path.rstrip("/") == "/probe":
@@ -404,7 +413,7 @@ def _endpoint_actor(endpoint: dict[str, Any]) -> str:
         leaf = handler.split(".")[-1] if handler else ""
         if leaf in {"ProbeHandler", "HealthHandler"}:
             return leaf
-        return "custom-probe"
+        return example_name or "example"
     if "internal/agent" in file_path or "probe-agent" in file_path:
         if handler and handler not in _GENERIC_GO_HANDLERS:
             return handler
@@ -754,7 +763,7 @@ def _is_full_architecture_page(page_id: str) -> bool:
 def _architecture_prefer_tokens(page_id: str) -> tuple[str, ...] | None:
     pid = (page_id or "").lower()
     if any(token in pid for token in ("event", "事件")):
-        return ("control", "agent", "probe-agent", "cmd/probe-agent", "cmd/ccprobe-control")
+        return ("control", "agent", "probe-agent", "cmd/probe-agent", "cmd/")
     if any(token in pid for token in ("data-flow", "数据流", "调用链")):
         return ("services", "repository", "exporter", "app/services", "app/db")
     if any(token in pid for token in ("module", "模块")):
@@ -2206,6 +2215,8 @@ class MermaidPlanner:
         context: dict[str, Any],
     ) -> DiagramPlan | None:
         """Derive Client → middleware → handler → service from this page's routes."""
+        from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+
         endpoints = [item for item in context.get("endpoints") or [] if isinstance(item, dict)]
         tokens = _specific_page_scope_needles(page_id)
         selected = [item for item in endpoints if _endpoint_matches_page(item, tokens)]
@@ -2216,7 +2227,7 @@ class MermaidPlanner:
             fetch_eps = [
                 item
                 for item in endpoints
-                if "custom-probe" not in str(item.get("file_path") or "")
+                if not path_looks_like_example_cmd(str(item.get("file_path") or ""))
                 and (
                     any(
                         str(item.get("path") or "").startswith(prefix)

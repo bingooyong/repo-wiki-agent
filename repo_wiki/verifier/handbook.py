@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -838,7 +839,9 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
                 docs = candidate.read_text(encoding="utf-8", errors="ignore")
                 break
         hint = f"{main.parent.name}\n{docs[:400]}"
-        if _EXAMPLE_CMD_HINT_RE.search(hint):
+        from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+
+        if path_looks_like_example_cmd(main.as_posix()) or _EXAMPLE_CMD_HINT_RE.search(hint):
             demo_mains.append(main)
         else:
             core_mains.append(main)
@@ -1231,7 +1234,7 @@ def _iter_page_code_units(markdown: str) -> list[str]:
     units: list[str] = []
     for match in re.finditer(r"```([^\n]*)\n(.*?)```", markdown or "", flags=re.S):
         lang = (match.group(1) or "").strip().split()[0].lower() if match.group(1) else ""
-        if lang in {"mermaid", "plantuml", "graphviz", "bash", "sh", "shell"}:
+        if lang in {"mermaid", "plantuml", "graphviz", "bash", "sh", "shell", "markdown", "md"}:
             continue
         body = match.group(2).strip()
         if body:
@@ -1255,9 +1258,15 @@ def _code_unit_is_doc_ref(body: str) -> bool:
         return True
     if re.search(r"[A-Za-z0-9]\.[A-Za-z][A-Za-z0-9]+[A-Z]", body):
         return True
-    if "..." in body or body.startswith("folder") or " " in body and not re.search(r"\w+\(", body):
+    if "..." in body or "*" in body or body.startswith("folder"):
+        return True
+    if " " in body and not re.search(r"\w+\(", body):
         return True
     if re.fullmatch(r"[A-Z][A-Za-z0-9]+(?:\.[A-Z][A-Za-z0-9]+)+", body):
+        return True
+    if re.fullmatch(r"[\u4e00-\u9fff，。；：、\s]+", body):
+        return True
+    if re.fullmatch(r"\d+", body):
         return True
     return len(body) < 3
 
@@ -1272,6 +1281,9 @@ def handbook_code_integrity_offenders(
         return {}
     source_blob = _repo_source_blob(repo_root)
     raw_replies = raw_replies or _load_raw_replies(content_dir)
+    all_raw = "\n".join((raw_replies or {}).values())
+    source_norm = _norm_code_blob(source_blob)
+    raw_norm = _norm_code_blob(all_raw)
     found: dict[str, list[str]] = {}
     for path in iter_markdown_pages(content_dir):
         rel = path.relative_to(content_dir).as_posix()
@@ -1279,7 +1291,13 @@ def handbook_code_integrity_offenders(
         raw = (raw_replies or {}).get(rel) or (raw_replies or {}).get(path.stem) or ""
         missing: list[str] = []
         for unit in _iter_page_code_units(text):
-            if unit in raw or unit in source_blob:
+            if (
+                unit in raw
+                or unit in all_raw
+                or unit in source_blob
+                or _norm_code_blob(unit) in raw_norm
+                or _norm_code_blob(unit) in source_norm
+            ):
                 continue
             missing.append(unit[:160])
         if missing:
@@ -1324,16 +1342,35 @@ def _raw_reply_dir(content_dir: Path) -> Path:
     return content_dir.parent / "meta" / "raw-replies"
 
 
+def _norm_code_blob(text: str) -> str:
+    return re.sub(r"\s+", "", text or "")
+
+
 def _load_raw_replies(content_dir: Path) -> dict[str, str]:
     folder = _raw_reply_dir(content_dir)
     if not folder.is_dir():
         return {}
     loaded: dict[str, str] = {}
     for path in folder.rglob("*.md"):
-        loaded[path.relative_to(folder).as_posix()] = path.read_text(
-            encoding="utf-8", errors="ignore"
-        )
-        loaded[path.stem] = path.read_text(encoding="utf-8", errors="ignore")
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        loaded[path.relative_to(folder).as_posix()] = text
+        loaded[path.stem] = text
+        loaded[path.name] = text
+    registry = content_dir.parent / "page-registry.json"
+    if not registry.is_file():
+        registry = content_dir.parent / "meta" / "page-registry.json"
+    if registry.is_file():
+        try:
+            payload = json.loads(registry.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+        for page in payload.get("pages") or []:
+            if not isinstance(page, dict):
+                continue
+            rel = str(page.get("relative_path") or page.get("path") or "")
+            page_id = str(page.get("page_id") or "")
+            if rel and page_id and page_id in loaded:
+                loaded[rel] = loaded[page_id]
     return loaded
 
 

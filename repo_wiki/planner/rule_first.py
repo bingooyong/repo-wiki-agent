@@ -355,7 +355,7 @@ class RuleFirstPlanner:
             source_requirements=SourceRequirement(
                 modules=[m.name for m in self.snapshot.modules],
                 commands=["start", "build", "test"],
-                files=self._existing_source_files("README.md", "cmd/ccagent/main.go"),
+                files=self._existing_source_files("README.md", *self._cmd_main_files()),
             ),
             sort_order=0,
             tags=["overview", "index"],
@@ -434,8 +434,8 @@ class RuleFirstPlanner:
                 files=[
                     path
                     for path in (
-                        "cmd/ccagent/main.go",
-                        "cmd/ccprobe-control",
+                        *self._cmd_main_files(),
+                        *self._cmd_dir_names(),
                         "internal/control",
                         "internal/services",
                         "internal/repository",
@@ -802,13 +802,14 @@ class RuleFirstPlanner:
         )
 
         _SKIP_THIN_API_LEAVES = frozenset(
-            {"custom-probe", "example", "demo", "scaffold", "hello", "agent"}
+            {"example", "demo", "scaffold", "hello", "agent", "sample"}
         )
         # Per-service API articles are useful, but individual endpoint pages are not.
         for idx, (module_name, endpoints) in enumerate(sorted(by_module.items())):
             if not endpoints or not self._is_service_like_module_name(module_name):
                 continue
-            if _module_leaf_name(module_name).lower() in _SKIP_THIN_API_LEAVES:
+            leaf = _module_leaf_name(module_name).lower()
+            if leaf in _SKIP_THIN_API_LEAVES or leaf.startswith("custom"):
                 continue
             self._add_page(
                 page_id=self._make_page_id(
@@ -855,6 +856,15 @@ class RuleFirstPlanner:
             paths.append(endpoint.file_path)
         paths.extend(self.snapshot.repository.key_directories)
         return [path for path in paths if path]
+
+    def _cmd_dir_names(self) -> tuple[str, ...]:
+        cmd = Path(self.identity.root_path) / "cmd"
+        if not cmd.is_dir():
+            return ()
+        return tuple(f"cmd/{child.name}" for child in sorted(cmd.iterdir()) if child.is_dir())
+
+    def _cmd_main_files(self) -> tuple[str, ...]:
+        return tuple(f"{rel}/main.go" for rel in self._cmd_dir_names())
 
     def _existing_source_files(self, *candidates: str) -> list[str]:
         found: list[str] = []

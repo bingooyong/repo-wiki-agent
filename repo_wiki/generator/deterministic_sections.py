@@ -837,9 +837,7 @@ def strip_meta_instructions(content: str) -> str:
         if _OPERATIONAL_ADVICE_RE.search(line):
             kept.append(line)
             continue
-        if _META_IMPERATIVE_RE.search(line) and (
-            "package main" in line or "custom-probe" in line or "测试 settings" in line
-        ):
+        if _META_IMPERATIVE_RE.search(line) and ("package main" in line or "测试 settings" in line):
             continue
         if _PLANNING_LEAK_RE.search(line):
             continue
@@ -873,12 +871,32 @@ def _go_local_db_start_lines(root: Path) -> list[str]:
     return lines
 
 
+def _primary_go_binary(root: Path) -> str:
+    from repo_wiki.generator.process_roles import derive_process_roles
+
+    roles = derive_process_roles(root)
+    rest = next((item for item in roles if "rest_entry" in item.kinds), None)
+    if rest is not None:
+        return rest.name
+    if roles:
+        return roles[0].name
+    cmd = root / "cmd"
+    if cmd.is_dir():
+        for child in sorted(cmd.iterdir()):
+            if child.is_dir() and (child / "main.go").is_file():
+                return child.name
+    return "app"
+
+
 def build_go_install_section(root: Path) -> str:
     port = preferred_source_listen_port(root) or 1900
+    binary = _primary_go_binary(root)
     compose = cite_readme_line(root, "podman-compose up")
     schema = cite_readme_line(root, "schema.sql")
-    build = cite_readme_line(root, "go build -o bin/ccagent")
-    run = cite_readme_line(root, "./bin/ccagent")
+    build = cite_readme_line(root, f"go build -o bin/{binary}") or cite_readme_line(
+        root, "go build -o bin/"
+    )
+    run = cite_readme_line(root, f"./bin/{binary}") or cite_readme_line(root, "./bin/")
     health = cite_readme_line(root, "/health")
     schema_cmd = "podman exec mysql-db mysql -uroot -prootpassword probe_exporter < db/schema.sql"
     if (root / "db" / "schema.sql").is_file() is False:
@@ -928,13 +946,13 @@ def build_go_install_section(root: Path) -> str:
             f"3. 编译主 REST/Web 服务。 {build}",
             "",
             "```bash",
-            "go build -o bin/ccagent ./cmd/ccagent",
+            f"go build -o bin/{binary} ./cmd/{binary}",
             "```",
             "",
             f"4. 启动本地进程并检查健康状态。 {run} {health}",
             "",
             "```bash",
-            "./bin/ccagent",
+            f"./bin/{binary}",
             f"curl http://localhost:{port}/health",
             "```",
             "",
@@ -1025,35 +1043,33 @@ def build_install_section(root: Path) -> str:
 
 
 def build_go_role_section(root: Path) -> str:
-    ccagent = (
-        cite_first_match(root, "controller.go", r"return server\.ListenAndServe\(\)")
-        or cite_first_match(root, "controller.go", r"ListenAndServe")
-        or cite_first_match(
-            root, "cmd/ccagent/main.go", r"NewController|ListenAndServe|http\.Server"
-        )
-        or cite_first_match(root, "cmd/ccagent/main.go", r"func\s+main\b")
-    )
-    probe = (
-        cite_first_match(root, "internal/agent/grpc_transport.go", r"grpc\.DialContext")
-        or cite_first_match(root, "cmd/probe-agent/main.go", r"grpcTransport\.Connect|DialContext")
-        or cite_first_match(root, "cmd/probe-agent/main.go", r"func\s+main\b")
-    )
-    control = ""
-    for rel in ("cmd/ccprobe-control/serve.go", "cmd/ccprobe-control/main.go"):
-        control = cite_first_match(
-            root, rel, r"func runGRPCServe|ListenAndServeGRPC|transport grpc|-serve|-transport"
-        )
-        if control:
-            break
-    if not (ccagent or probe or control):
+    from repo_wiki.generator.process_roles import derive_process_role_facts, derive_process_roles
+
+    roles = derive_process_roles(root)
+    if not roles:
         return ""
+    facts = derive_process_role_facts(root)
+    if not facts:
+        return ""
+    cites: list[str] = []
+    for item in roles:
+        cite = cite_first_match(
+            root,
+            item.rel_main,
+            r"ListenAndServe|NewController|grpc\.Dial|func\s+main\b|-serve|-transport",
+        )
+        if cite:
+            cites.append(cite)
+    extra = ""
+    control = next((item for item in roles if "control_plane" in item.kinds), None)
+    if control is not None:
+        extra = f"{control.name} 不承担面向前端的 REST/管理入口。"
     return (
         "## 进程角色\n\n"
-        f"ccagent 是主 REST/Web 服务与管理入口，监听 HTTP 并挂载 `/probe`、`/tag`、`/api/v1` 业务路由；"
-        f"其 `init` 里的 DNS 设置只用于 Alpine musl 兼容，不是主职责。 {ccagent}\n\n"
-        f"probe-agent 是隧道客户端，向控制面拨号并维持心跳。 {probe}\n\n"
-        f"ccprobe-control 是 gRPC 控制面服务（`-serve -transport grpc`），负责 TunnelHub，"
-        f"不承担面向前端的 REST/管理入口。 {control}\n"
+        + facts
+        + (" " + extra if extra else "")
+        + (" " + " ".join(cites) if cites else "")
+        + "\n"
     )
 
 
@@ -1350,7 +1366,7 @@ def page_has_meta_instruction(content: str) -> bool:
             continue
         if _PLANNING_LEAK_RE.search(line):
             return True
-        if _META_IMPERATIVE_RE.search(line) and ("package main" in line or "custom-probe" in line):
+        if _META_IMPERATIVE_RE.search(line) and "package main" in line:
             return True
     return False
 
@@ -1388,7 +1404,7 @@ def strip_empty_sections_and_footnotes(content: str) -> str:
 
 
 ARCHITECTURE_ROLE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
-    (r"边缘 Agent\s*`?cmd/ccagent", "主 REST/Web 服务 `cmd/ccagent"),
+    (r"边缘 Agent\s*`?(?:cmd/)?ccagent", "主 REST/Web 服务 ccagent"),
     (r"边缘 Agent\s*`?ccagent`?", "主 REST/Web 服务 ccagent"),
     (r"边缘 Agent ccagent", "主 REST/Web 服务 ccagent"),
     (r"`ccagent`\s*作为隧道客户端", "`ccagent` 作为主 REST/Web 服务"),
@@ -1399,8 +1415,6 @@ ARCHITECTURE_ROLE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     (r"single Go backend process", "four Go binaries under cmd/"),
     (r"单一 Go 后端进程", "cmd/ 下多个独立二进制"),
     (r"未提供显式迁移脚本", "db/migrations 提供 SQL 迁移"),
-    (r"核心表包括 `users`、`profiles`", "核心表包括 `users`"),
-    (r"、`profiles`", ""),
     (r"不存在 ORM 映射实体", "Pydantic 领域模型不是 ORM"),
     (
         r"`?internal/control`?\s*依赖\s*`?internal/services`?\s*与\s*`?internal/repository`?",
@@ -1412,10 +1426,13 @@ ARCHITECTURE_ROLE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ),
     (r"via services/repository/exporter", "不经过 services/repository/exporter"),
     (
-        r"`cmd/ccagent`（探针 Agent，作为隧道客户端连接到控制面）",
-        "`cmd/ccagent`（主 REST/Web 服务）",
+        r"`(?:cmd/)?ccagent`（探针 Agent，作为隧道客户端连接到控制面）",
+        "`ccagent`（主 REST/Web 服务）",
     ),
-    (r"cmd/ccagent`?（探针 Agent，作为隧道客户端[^）]*）", "`cmd/ccagent`（主 REST/Web 服务）"),
+    (
+        r"(?:cmd/)?ccagent`?（探针 Agent，作为隧道客户端[^）]*）",
+        "`ccagent`（主 REST/Web 服务）",
+    ),
     (r"\*\*ccagent 隧道客户端\*\*", "**ccagent 主 REST/Web 服务**"),
     (r"ccagent 隧道客户端", "ccagent 主 REST/Web 服务"),
     (
@@ -1433,10 +1450,10 @@ ARCHITECTURE_ROLE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     (r"作为隧道客户端入口", "作为主 REST/Web 入口"),
     (r"带隧道能力的主 REST/Web 服务", "gRPC 控制面"),
     (r"作为隧道客户端连向", "作为主 REST/Web 服务对外提供"),
-    (r"`cmd/ccagent` 是与采集端配套的客户端入口", "`cmd/ccagent` 是主 REST/Web 入口"),
+    (r"`(?:cmd/)?ccagent` 是与采集端配套的客户端入口", "`ccagent` 是主 REST/Web 入口"),
     (r"是与采集端配套的客户端入口", "是主 REST/Web 入口"),
-    (r"\*\*客户端入口 `cmd/ccagent`\*\*", "**主 REST/Web 入口 `cmd/ccagent`**"),
-    (r"客户端入口 `cmd/ccagent`", "主 REST/Web 入口 `cmd/ccagent`"),
+    (r"\*\*客户端入口 `(?:cmd/)?ccagent`\*\*", "**主 REST/Web 入口 `ccagent`**"),
+    (r"客户端入口 `(?:cmd/)?ccagent`", "主 REST/Web 入口 `ccagent`"),
     (
         r"隧道客户端\s*\(`?probe-agent`?\)\s*不在仓库范围内",
         "隧道客户端 `probe-agent` 位于 `cmd/probe-agent`",
@@ -1646,26 +1663,20 @@ def build_verify_section(root: Path) -> str:
 
 
 def build_core_service_section(root: Path, *, page_id: str = "", title: str = "") -> str:
+    from repo_wiki.generator.process_roles import _fact_for, derive_process_roles
+
     blob = f"{page_id} {title}".lower()
-    if "ccprobe-control" in blob or title.strip() in {"Ccprobe Control", "ccprobe-control"}:
-        serve = cite_existing_meaningful(root, "cmd/ccprobe-control/serve.go")
-        main = cite_existing_meaningful(root, "cmd/ccprobe-control/main.go")
-        hub = cite_existing_meaningful(root, "internal/control")
-        return (
-            "## 服务概述\n\n"
-            f"`ccprobe-control` 是 gRPC 控制面，通过 `-serve -transport grpc` 启动 TunnelHub，"
-            f"不把探测执行委托给 `cmd/custom-probe` 子进程。 {serve} {main}\n\n"
-            f"会话与心跳由 `internal/control` 维护。 {hub}\n"
-        )
-    if "probe-agent" in blob or title.strip() in {"Probe Agent", "probe-agent"}:
-        agent = cite_existing_meaningful(root, "cmd/probe-agent/main.go")
-        transport = cite_existing_meaningful(root, "internal/agent")
-        return (
-            "## 服务概述\n\n"
-            f"`probe-agent` 是隧道客户端，从 `cmd/probe-agent` 启动并向控制面拨号。"
-            f" 本页不描述 `cmd/custom-probe`。 {agent}\n\n"
-            f"传输与心跳实现见 `internal/agent`。 {transport}\n"
-        )
+    roles = derive_process_roles(root)
+    control = next((item for item in roles if "control_plane" in item.kinds), None)
+    for item in roles:
+        aliases = {item.name.lower(), item.name.replace("-", " ").lower()}
+        if not any(alias in blob for alias in aliases):
+            continue
+        cite = cite_existing_meaningful(root, item.rel_main)
+        fact = _fact_for(item, control)
+        if not fact:
+            continue
+        return f"## 服务概述\n\n{fact}。 {cite}\n"
     return ""
 
 

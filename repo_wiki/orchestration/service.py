@@ -1589,6 +1589,35 @@ class RepoWikiService:
                 # timeouts, are page-local fallbacks, not provider outages.
                 if not is_page_local_quality_rejection(output.rejection_reason):
                     note_provider_failure()
+                markdown = (output.markdown or "").strip()
+                if markdown:
+                    enriched = self._enforce_qoder_page_contract(
+                        page=page,
+                        markdown=output.markdown,
+                        binding=binding,
+                        add_mermaid=_should_add_mermaid(page_idx, page),
+                        composition_context=context,
+                        inject_planner_mermaid=False,
+                    )
+                    self._write_raw_reply(
+                        page, getattr(output, "raw_markdown", "") or output.markdown
+                    )
+                    from repo_wiki.verifier.handbook import (
+                        MIN_HANDBOOK_BODY_CHARS,
+                        handbook_page_body_len,
+                    )
+
+                    page_results[page_idx] = (page.output_path, enriched)
+                    tiny = handbook_page_body_len(enriched) < MIN_HANDBOOK_BODY_CHARS
+                    page_metadata_by_idx[page_idx] = {
+                        "page_id": page.page_id,
+                        "source_path": page.output_path,
+                        "generation_mode": "llm" if not tiny else "fallback",
+                        "quality_state": "DEGRADED" if tiny else "READY",
+                        "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                        "reasons": [output.rejection_reason or "llm_output_rejected"],
+                    }
+                    return
                 write_fallback(
                     page,
                     binding,
@@ -1619,7 +1648,15 @@ class RepoWikiService:
             from repo_wiki.verifier.handbook import MIN_HANDBOOK_BODY_CHARS, handbook_page_body_len
 
             if handbook_page_body_len(enriched) < MIN_HANDBOOK_BODY_CHARS:
-                write_fallback(page, binding, page_idx, "tiny_or_stub_page")
+                page_results[page_idx] = (page.output_path, enriched)
+                page_metadata_by_idx[page_idx] = {
+                    "page_id": page.page_id,
+                    "source_path": page.output_path,
+                    "generation_mode": "fallback",
+                    "quality_state": "DEGRADED",
+                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                    "reasons": ["tiny_or_stub_page"],
+                }
                 return
             self._store_composer_cache_page(
                 cache,
@@ -2648,18 +2685,30 @@ class RepoWikiService:
         return content.strip() + "\n"
 
     def _write_raw_reply(self, page: Any, raw_markdown: str) -> None:
-        rel = str(getattr(page, "output_path", "") or getattr(page, "page_id", "page") or "page")
-        run_meta = getattr(self, "_current_run_raw_dir", None)
-        target = (
-            run_meta / rel
-            if isinstance(run_meta, Path)
-            else self.root / ".repo-agent-eval" / "raw-replies" / rel
-        )
+        rels = [str(getattr(page, "output_path", "") or getattr(page, "page_id", "page") or "page")]
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(raw_markdown or "", encoding="utf-8")
-        except OSError:
-            return
+            from repo_wiki.orchestration.content_layout_writer import _qoder_like_relative_path
+
+            zh = _qoder_like_relative_path(
+                rels[0],
+                raw_markdown,
+                planner_title=str(getattr(page, "title", "") or "") or None,
+            )
+            rels.append(zh.as_posix())
+        except Exception:
+            pass
+        run_meta = getattr(self, "_current_run_raw_dir", None)
+        for rel in rels:
+            target = (
+                run_meta / rel
+                if isinstance(run_meta, Path)
+                else self.root / ".repo-agent-eval" / "raw-replies" / rel
+            )
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(raw_markdown or "", encoding="utf-8")
+            except OSError:
+                continue
 
     def _cite_existing_path(self, rel: str, hint_lines: int = 8) -> str:  # noqa: ARG002
         from repo_wiki.generator.deterministic_sections import cite_existing_meaningful

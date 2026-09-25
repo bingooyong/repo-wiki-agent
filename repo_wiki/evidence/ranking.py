@@ -380,21 +380,23 @@ def _score_onboarding_evidence(
         return score, signals
 
     if page.category == WikiTaxonomyCategory.CORE_SERVICES:
+        from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+
         blob = f"{page.page_id} {page.title}".lower()
         if "ccprobe-control" in blob or "ccprobe control" in blob:
             if "ccprobe-control" in path or "/control/" in path:
                 score += WEIGHT_ONBOARDING_ENTRY + 3.0
                 signals.append("core_ccprobe_control")
-            if "custom-probe" in path:
+            if path_looks_like_example_cmd(path):
                 score -= 8.0
-                signals.append("core_demote_custom_probe")
+                signals.append("core_demote_example_cmd")
         if "probe-agent" in blob or "probe agent" in blob:
             if "probe-agent" in path or "/agent/" in path:
                 score += WEIGHT_ONBOARDING_ENTRY + 3.0
                 signals.append("core_probe_agent")
-            if "custom-probe" in path:
+            if path_looks_like_example_cmd(path):
                 score -= 8.0
-                signals.append("core_demote_custom_probe")
+                signals.append("core_demote_example_cmd")
         return score, signals
 
     if _is_overview_or_install_page(page):
@@ -445,7 +447,11 @@ def _score_onboarding_evidence(
                 score += 2.0
                 signals.append("arch_go_core")
         if path.startswith("cmd/") and name == "main.go":
-            if any(token in path for token in ("custom-probe", "example", "demo", "scaffold")):
+            from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+
+            if path_looks_like_example_cmd(path) or any(
+                token in path for token in ("example", "demo", "scaffold")
+            ):
                 score -= 4.0
                 signals.append("arch_demo_cmd")
             elif "ccagent" in path or "probe-agent" in path or "ccprobe-control" in path:

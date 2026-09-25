@@ -388,21 +388,24 @@ def rewrite_fastapi_intro_cites(
                 ):
                     _replace_adjacent_cite(lines, index, mig_cite)
                     changed = True
-    if not changed:
-        return markdown
     rewritten = "\n".join(lines)
-    rewritten = re.sub(r"（\s*）", "", rewritten)
+    from repo_wiki.evidence.citation_renderer import strip_empty_cite_parens
+
+    rewritten = strip_empty_cite_parens(rewritten)
     if markdown.endswith("\n") and not rewritten.endswith("\n"):
         rewritten += "\n"
+    if rewritten == markdown:
+        return markdown
     return rewritten
 
 
 def _is_identity_intro_line(line: str) -> bool:
-    """True only for maintenance-status prose or a leftover ``README.rst`` token."""
+    """True for maintenance-status prose or a leftover README header-range cite."""
     if _PRODUCT_IDENTITY_RE.search(line) or _DANGLING_README_RE.search(line):
         return True
     return bool(
-        _README_HEADER_CITE_RE.search(line) and re.search(r"不再|维护|产品身份|参考实现", line)
+        _README_HEADER_CITE_RE.search(line)
+        and re.search(r"不再|维护|产品身份|参考实现|停止主动", line)
     )
 
 

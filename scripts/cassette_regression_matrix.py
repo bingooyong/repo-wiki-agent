@@ -97,21 +97,9 @@ def _text_gaps(pages: dict[str, str]) -> int:
 
 
 def _code_units(markdown: str) -> list[str]:
-    units: list[str] = []
-    for match in _FENCE_RE.finditer(markdown or ""):
-        lang = (match.group(1) or "").strip().split()[0].lower() if match.group(1) else ""
-        if lang in {"mermaid", "plantuml", "graphviz"}:
-            continue
-        body = match.group(2).strip()
-        if body:
-            units.append(body)
-    stripped = _FENCE_RE.sub("", markdown or "")
-    stripped = _CITE_RE.sub("", stripped)
-    for match in _INLINE_RE.finditer(stripped):
-        body = match.group(1).strip()
-        if body and ":" not in body.split("/")[-1]:
-            units.append(body)
-    return units
+    from repo_wiki.verifier.handbook import _iter_page_code_units
+
+    return _iter_page_code_units(markdown)
 
 
 def _cassette_raw_blob(cassette_dir: Path) -> str:

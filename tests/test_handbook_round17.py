@@ -32,13 +32,6 @@ from tests.test_handbook_round15 import _auth_page
 from tests.test_handbook_round16 import _pad, _write_probe_mains
 from tests.test_llm_compose_retry import SequenceLLMProvider
 
-_FORBIDDEN_SOURCE = (
-    "repo_wiki/generator/process_roles.py",
-    "repo_wiki/generator/adjacent_cites.py",
-    "repo_wiki/verifier/handbook.py",
-    "repo_wiki/generator/compose_evidence.py",
-    "repo_wiki/orchestration/service.py",
-)
 _FORBIDDEN_LITERALS = (
     "conduit",
     "realworld",
@@ -225,11 +218,63 @@ def test_route_cite_realigns_to_registration(tmp_path: Path) -> None:
     assert "<cite>controller.go:55-55</cite>" in out
 
 
+def test_unknown_process_ignores_volume_and_generic_server_names() -> None:
+    text = (
+        "命名卷 `ha-agent-a1-data`、`ha-agent-*-data` 只是持久化锚点。"
+        '说明优先于通用包名 slug 或 "api-server" 这类泛称。'
+        "UsersRepository 负责读用户。PostgreSQL 是主数据库。\n"
+    )
+    assert unknown_process_mentions(text, {"probe-agent"}) == []
+
+
+def test_code_integrity_matches_raw_replies_by_any_path(tmp_path: Path) -> None:
+    from repo_wiki.verifier.handbook import handbook_code_integrity_offenders
+
+    content = tmp_path / "zh" / "content"
+    content.mkdir(parents=True)
+    (content / "开发指南").mkdir()
+    (content / "开发指南" / "数据库迁移.md").write_text(
+        "# 迁移\n\n调用 `FastAPI()` 与 `pool.close()`。\n",
+        encoding="utf-8",
+    )
+    raw_dir = tmp_path / "zh" / "meta" / "raw-replies" / "docs" / "pages" / "development"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "database-migration.md").write_text(
+        "调用 `FastAPI()` 与 `pool.close()`。\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    offenders = handbook_code_integrity_offenders(content, tmp_path)
+    flat = [unit for units in offenders.values() for unit in units]
+    assert "FastAPI()" not in flat
+    assert "pool.close()" not in flat
+
+
+def test_readme_header_range_cite_is_rewritten(tmp_path: Path) -> None:
+    from repo_wiki.generator.adjacent_cites import rewrite_fastapi_intro_cites
+
+    (tmp_path / "README.rst").write_text(
+        "Logo\n====\n\n**NOTE**: This repository is complete.\n\nQuickstart\n----------\n",
+        encoding="utf-8",
+    )
+    page = _page(
+        "development-guide",
+        "开发指南",
+        WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
+        "开发指南/开发指南.md",
+    )
+    markdown = "仓库已停止主动维护。<cite>README.rst:1-10</cite>\n"
+    out = rewrite_fastapi_intro_cites(markdown, page, tmp_path)
+    assert "README.rst:1-10" not in out
+    assert "README.rst:" in out
+
+
 def test_no_repo_specific_literals_in_audited_source() -> None:
     repo = Path(__file__).resolve().parents[1]
     hits: list[str] = []
-    for rel in _FORBIDDEN_SOURCE:
-        text = (repo / rel).read_text(encoding="utf-8")
+    for path in sorted((repo / "repo_wiki").rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(repo).as_posix()
         for token in _FORBIDDEN_LITERALS:
             if token in text:
                 hits.append(f"{rel}:{token}")

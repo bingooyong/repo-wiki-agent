@@ -383,8 +383,33 @@ def derive_process_role_facts(root: Path | str | None) -> str:
     return "；".join(facts) + "。" if facts else ""
 
 
+def cmd_dir_name(file_path: str) -> str:
+    """Return the cmd/<name> directory leaf from a repository-relative path."""
+    parts = Path(str(file_path or "")).parts
+    if "cmd" not in parts:
+        return ""
+    index = parts.index("cmd")
+    if index + 1 >= len(parts):
+        return ""
+    return parts[index + 1]
+
+
+def path_looks_like_example_cmd(file_path: str) -> bool:
+    """True when a cmd/* path is an example/demo/scaffold tool."""
+    name = cmd_dir_name(file_path)
+    if not name:
+        return bool(_EXAMPLE_HINT_RE.search(str(file_path or "")))
+    return bool(_EXAMPLE_HINT_RE.search(name) or name.startswith("custom"))
+
+
 def unknown_process_mentions(markdown: str, allowed: set[str]) -> list[str]:
-    """Process/binary names claimed in prose that are not in the documented repo."""
+    """Process/binary names claimed in prose that are not in the documented repo.
+
+    Standalone kebab tokens such as volume names (``ha-agent-a1-data``) or
+    generic slugs (``api-server``) are ignored. Only ``cmd/X``,
+    ``X 进程/二进制/服务``, and explicit REST/data-plane/control-plane role
+    claims are considered.
+    """
     text = _FENCE_STRIP_RE.sub("", markdown or "")
     found: set[str] = set()
     allowed_l = {item.lower() for item in allowed}
@@ -396,13 +421,12 @@ def unknown_process_mentions(markdown: str, allowed: set[str]) -> list[str]:
             return
         if name in allowed or name.lower() in allowed_l:
             return
+        lowered = name.lower()
+        if any(lowered == item.lower() or item.lower().endswith(f"-{lowered}") for item in allowed):
+            return
         found.add(name)
 
     for match in _CMD_PATH_RE.finditer(text):
-        _consider(match.group(1))
-    for match in _KEBAB_NAME_RE.finditer(text):
-        _consider(match.group(0))
-    for match in _PROCESS_TOKEN_RE.finditer(text):
         _consider(match.group(1))
     for match in _PROCESS_NOUN_RE.finditer(text):
         _consider(match.group(1))

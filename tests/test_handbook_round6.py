@@ -365,8 +365,8 @@ def test_reserved_and_duplicate_schema_fail_placeholder(tmp_path: Path) -> None:
 def test_page_contract_strips_english_note_and_empty_blockquote(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text("# x\n", encoding="utf-8")
     service = RepoWikiService(RepoWikiConfig.model_validate({"project": {"root": str(tmp_path)}}))
-    raw = "# 安装\n\nThis repository is not actively maintained.\n\n> \n\n下一步见文档。\n"
+    raw = "# 安装\n\n**NOTE**: This repository is complete.\n\n> \n\n下一步见文档。\n"
     cleaned = service._strip_readme_english_note(raw)
     cleaned = service._strip_empty_blockquotes(cleaned)
-    assert "not actively maintained" not in cleaned.lower()
+    assert "**NOTE**" not in cleaned
     assert not any(line.strip() == ">" for line in cleaned.splitlines())
