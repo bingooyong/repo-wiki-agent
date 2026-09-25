@@ -94,6 +94,14 @@ def test_unknown_process_skips_types_and_databases(tmp_path: Path) -> None:
     assert "PostgreSQL" not in flat
     assert "Controller" not in flat
     assert "ApplyAuth" not in flat
+    (content / "部署问题.md").write_text(
+        "# 部署问题\n\nASGI 服务由 uvicorn 拉起。Postgres 服务提供主库。\n",
+        encoding="utf-8",
+    )
+    more = handbook_unknown_process_offenders(content, root)
+    flat = [name for names in more.values() for name in names]
+    assert "ASGI" not in flat
+    assert "Postgres" not in flat
 
 
 def test_example_binary_is_not_main_entry(tmp_path: Path) -> None:

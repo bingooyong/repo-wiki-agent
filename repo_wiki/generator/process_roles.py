@@ -32,13 +32,20 @@ _KEBAB_NAME_RE = re.compile(
     r"(?:-[a-z0-9]+)*\b"
 )
 _PROCESS_TOKEN_RE = re.compile(
-    r"(?<![A-Za-z0-9_/])([A-Za-z][A-Za-z0-9_-]*"
-    r"(?:agent|control|probe|server|daemon|exporter|worker))"
-    r"(?![A-Za-z0-9_])"
+    r"(?<![A-Za-z0-9_/])([A-Za-z][A-Za-z0-9]*-(?:agent|control|probe|server|daemon|exporter|worker)"
+    r"(?:-[A-Za-z0-9]+)*)(?![A-Za-z0-9_])"
 )
 _PROCESS_NOUN_RE = re.compile(
-    r"(?<![A-Za-z0-9_/])([A-Za-z][A-Za-z0-9_-]{2,})\s*(?:进程|二进制|服务)\b"
+    r"(?<![A-Za-z0-9_/])([A-Za-z][A-Za-z0-9]*-(?:agent|control|probe|server|daemon|exporter|worker)"
+    r"(?:-[A-Za-z0-9]+)*|[A-Za-z][A-Za-z0-9_-]*(?:agent|control|probe|server|daemon|exporter|worker))"
+    r"\s*(?:进程|二进制|服务)\b"
 )
+_ROLE_PROCESS_CLAIM_RE = re.compile(
+    r"(?<![A-Za-z0-9_/])([A-Za-z][A-Za-z0-9_-]{2,})"
+    r"(?:\s*(?:是|承担|负责|作为))"
+    r"(?:\s*(?:主\s*)?(?:REST|数据面|控制面|隧道|gRPC))"
+)
+_FENCE_STRIP_RE = re.compile(r"```.*?```", re.S)
 _CMD_PATH_RE = re.compile(r"cmd/([A-Za-z][A-Za-z0-9_-]+)")
 _EXAMPLE_HINT_RE = re.compile(r"example|示例|demo|scaffold|sample", re.IGNORECASE)
 _GENERIC_ROLE_SUBJECTS = frozenset(
@@ -378,12 +385,14 @@ def derive_process_role_facts(root: Path | str | None) -> str:
 
 def unknown_process_mentions(markdown: str, allowed: set[str]) -> list[str]:
     """Process/binary names claimed in prose that are not in the documented repo."""
-    text = markdown or ""
+    text = _FENCE_STRIP_RE.sub("", markdown or "")
     found: set[str] = set()
     allowed_l = {item.lower() for item in allowed}
 
     def _consider(name: str) -> None:
         if not name or name.lower() in _GENERIC_ROLE_SUBJECTS:
+            return
+        if "_" in name:
             return
         if name in allowed or name.lower() in allowed_l:
             return
@@ -396,6 +405,8 @@ def unknown_process_mentions(markdown: str, allowed: set[str]) -> list[str]:
     for match in _PROCESS_TOKEN_RE.finditer(text):
         _consider(match.group(1))
     for match in _PROCESS_NOUN_RE.finditer(text):
+        _consider(match.group(1))
+    for match in _ROLE_PROCESS_CLAIM_RE.finditer(text):
         _consider(match.group(1))
     return sorted(found)
 

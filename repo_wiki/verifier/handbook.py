@@ -1231,7 +1231,7 @@ def _iter_page_code_units(markdown: str) -> list[str]:
     units: list[str] = []
     for match in re.finditer(r"```([^\n]*)\n(.*?)```", markdown or "", flags=re.S):
         lang = (match.group(1) or "").strip().split()[0].lower() if match.group(1) else ""
-        if lang in {"mermaid", "plantuml", "graphviz"}:
+        if lang in {"mermaid", "plantuml", "graphviz", "bash", "sh", "shell"}:
             continue
         body = match.group(2).strip()
         if body:
@@ -1240,9 +1240,26 @@ def _iter_page_code_units(markdown: str) -> list[str]:
     stripped = _CITE_RE.sub("", stripped)
     for match in _INLINE_BODY_RE.finditer(stripped):
         body = match.group(1).strip()
-        if body and not re.fullmatch(r"[\w./-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?", body):
-            units.append(body)
+        if not body or _code_unit_is_doc_ref(body):
+            continue
+        units.append(body)
     return units
+
+
+def _code_unit_is_doc_ref(body: str) -> bool:
+    if "/" in body or body.startswith("-"):
+        return True
+    if re.search(r"\.(py|go|rst|md|yml|yaml|toml|sql|json)$", body):
+        return True
+    if re.fullmatch(r"[\w./-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?", body):
+        return True
+    if re.search(r"[A-Za-z0-9]\.[A-Za-z][A-Za-z0-9]+[A-Z]", body):
+        return True
+    if "..." in body or body.startswith("folder") or " " in body and not re.search(r"\w+\(", body):
+        return True
+    if re.fullmatch(r"[A-Z][A-Za-z0-9]+(?:\.[A-Z][A-Za-z0-9]+)+", body):
+        return True
+    return len(body) < 3
 
 
 def handbook_code_integrity_offenders(
