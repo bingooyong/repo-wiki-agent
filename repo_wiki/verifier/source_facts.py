@@ -8,13 +8,12 @@ from pathlib import Path
 from repo_wiki.generator.compose_evidence import parse_compose_topology
 from repo_wiki.verifier.handbook import _CITE_RE, iter_markdown_pages, read_readme_text
 
-_COMPOSE_FILES = (
-    "compose.yaml",
-    "compose.yml",
-    "docker-compose.yml",
-    "docker-compose.yaml",
-    "podman-compose.yml",
-    "podman-compose.yaml",
+_COMPOSE_NAME_RE = re.compile(
+    r"^(?:docker-compose|podman-compose|compose)(?:\.[A-Za-z0-9_-]+)*\.ya?ml$",
+    re.IGNORECASE,
+)
+_SKIP_DIRS = frozenset(
+    {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__", "testdata"}
 )
 _KEBAB_RE = re.compile(r"\b([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b")
 _TABLE_RE = re.compile(
@@ -93,15 +92,22 @@ _SAMPLE_QUALIFIER_RE = re.compile(r"示例|README|文档样例|仅出现在")
 _API_PRESENTATION_RE = re.compile(r"接口|类型|依赖|触发|handler|工厂|合同")
 
 
+def iter_compose_files(root: Path) -> list[Path]:
+    found: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        if _COMPOSE_NAME_RE.match(path.name):
+            found.append(path)
+    return found
+
+
 def load_compose_services_by_file(root: Path) -> dict[str, set[str]]:
     """Service names keyed by the compose filename that declares them."""
     found: dict[str, set[str]] = {}
-    for rel in _COMPOSE_FILES:
-        path = root / rel
-        if not path.is_file():
-            continue
+    for path in iter_compose_files(root):
         parsed, _edges = parse_compose_topology(path.read_text(encoding="utf-8", errors="ignore"))
-        found[rel] = set(parsed)
+        found[path.name] = set(parsed) | found.get(path.name, set())
     return found
 
 
@@ -114,13 +120,12 @@ def load_compose_service_names(root: Path) -> set[str]:
 
 def load_compose_healthcheck_services(root: Path) -> set[str]:
     names: set[str] = set()
-    for rel in _COMPOSE_FILES:
-        path = root / rel
-        if not path.is_file():
-            continue
+    for path in iter_compose_files(root):
         current = ""
         in_health = False
         for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if raw.lstrip().startswith("#"):
+                continue
             service = re.match(r"^  ([A-Za-z][A-Za-z0-9_-]*):\s*$", raw)
             if service:
                 current = service.group(1)
@@ -135,31 +140,42 @@ def load_compose_healthcheck_services(root: Path) -> set[str]:
     return names
 
 
+_HEALTHCHECK_URL_RE = re.compile(r"(https?://[^\s\"']+|:\d+/(?:healthz?|readyz|livez)[^\s\"']*)")
+
+
+def load_compose_healthcheck_urls(root: Path) -> list[str]:
+    """Healthcheck test URLs copied from compose files, never invented."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for path in iter_compose_files(root):
+        for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if raw.lstrip().startswith("#"):
+                continue
+            if "health" not in raw.lower() and "curl" not in raw.lower():
+                continue
+            for match in _HEALTHCHECK_URL_RE.finditer(raw):
+                item = match.group(1).rstrip('",]')
+                if item not in seen:
+                    seen.add(item)
+                    found.append(item)
+    return found
+
+
 def load_database_tables(root: Path) -> set[str]:
     tables: set[str] = set()
-    for folder in (
-        root / "app" / "db" / "migrations",
-        root / "alembic" / "versions",
-        root / "db" / "migrations",
-        root / "db",
-    ):
-        if not folder.exists():
+    for path in root.rglob("*"):
+        if not path.is_file() or any(part in _SKIP_DIRS for part in path.parts):
             continue
-        for path in folder.rglob("*"):
-            if not path.is_file() or path.suffix.lower() not in {".py", ".sql"}:
-                continue
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            tables.update(match.group(1) for match in _TABLE_RE.finditer(text))
-    for schema in (
-        root / "db" / "schema.sql",
-        *sorted(root.glob("*.sql")),
-    ):
-        if not schema.is_file():
+        if path.suffix.lower() not in {".py", ".sql"}:
             continue
-        tables.update(
-            match.group(1)
-            for match in _TABLE_RE.finditer(schema.read_text(encoding="utf-8", errors="ignore"))
-        )
+        if (
+            path.suffix.lower() == ".py"
+            and "alembic" not in path.as_posix()
+            and "migration" not in path.as_posix()
+        ):
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        tables.update(match.group(1) for match in _TABLE_RE.finditer(text))
     return {name for name in tables if name.lower() not in {"if", "table", "exists"}}
 
 
@@ -191,9 +207,10 @@ def load_cli_flag_help(root: Path) -> dict[str, str]:
 
 def load_source_identifiers(root: Path) -> set[str]:
     names: set[str] = set()
-    skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
+    skip = _SKIP_DIRS
     simple = re.compile(r"\b(?:type|class|def|func)\s+([A-Za-z_][A-Za-z0-9_]+)")
     method = re.compile(r"\bfunc\s+\([^)]+\)\s+([A-Za-z_][A-Za-z0-9_]+)")
+    token = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]{2,})\b")
     for path in root.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
             continue
@@ -202,6 +219,7 @@ def load_source_identifiers(root: Path) -> set[str]:
         text = path.read_text(encoding="utf-8", errors="ignore")
         names.update(simple.findall(text))
         names.update(method.findall(text))
+        names.update(token.findall(text))
     return names
 
 
@@ -245,7 +263,7 @@ def alembic_uses_model_metadata(root: Path) -> bool:
 
 
 _COMPOSE_FILE_RE = re.compile(
-    r"`?((?:docker-|podman-)?compose\.ya?ml)`?",
+    r"`?((?:docker-|podman-)?compose(?:\.[A-Za-z0-9_-]+)*\.ya?ml)`?",
     re.IGNORECASE,
 )
 _SERVICE_CONTEXT_RE = re.compile(
@@ -277,14 +295,7 @@ def _mentioned_compose_filenames(text: str) -> list[str]:
     found: list[str] = []
     for match in _COMPOSE_FILE_RE.finditer(text or ""):
         name = match.group(1)
-        if name.lower() in {
-            "compose.yaml",
-            "compose.yml",
-            "docker-compose.yml",
-            "docker-compose.yaml",
-            "podman-compose.yml",
-            "podman-compose.yaml",
-        }:
+        if _COMPOSE_NAME_RE.match(name):
             found.append(name)
     return found
 
@@ -319,13 +330,36 @@ def _mentioned_compose_services(text: str) -> set[str]:
     return names
 
 
+_TABLE_CLAIM_RE = re.compile(
+    r"(?:数据表|业务表|张表|表名|create_table|CREATE TABLE)[^。\n]{0,120}"
+    r"|`([a-z][a-z0-9_]+)`\s*(?:表|table)\b",
+    re.IGNORECASE,
+)
+
+
+def _healthcheck_url_mentioned(text: str, url: str) -> bool:
+    blob = text or ""
+    if url in blob:
+        return True
+    port_path = re.search(r":\d+/[A-Za-z0-9_/?&=-]+", url)
+    if port_path and port_path.group(0) in blob:
+        return True
+    path = re.search(r"/(?:healthz?|readyz|livez)[A-Za-z0-9_/?&=-]*", url)
+    return bool(path and path.group(0) in blob)
+
+
 def _mentioned_tables(text: str) -> set[str]:
     names: set[str] = set()
-    for token in re.findall(r"`([a-z][a-z0-9_]{2,})`", text or ""):
-        if token in _GENERIC_TABLES:
+    for sentence in re.split(r"[。\n]", text or ""):
+        if re.search(r"不是表|not a table|列 `|column `", sentence, flags=re.I):
             continue
-        if "_" in token or (token.endswith("s") and len(token) >= 5):
-            names.add(token)
+        for match in _TABLE_CLAIM_RE.finditer(sentence):
+            window = match.group(0)
+            tokens = [group for group in match.groups() if group]
+            tokens.extend(re.findall(r"`([a-z][a-z0-9_]+)`", window))
+            for token in tokens:
+                if token and token not in _GENERIC_TABLES:
+                    names.add(token)
     return names
 
 
@@ -474,9 +508,13 @@ def handbook_source_fact_offenders(
         hits.extend(_flag_target_mismatches(text, flags, cmd_names)[:4])
         hits.extend(_ident_offenders(text, idents, readme)[:6])
         hits.extend(_route_cite_offenders(text, endpoints)[:8])
-        if "健康检查" in path.name and health_routes:
-            if not any(route in text for route in health_routes):
+        if "健康检查" in path.name:
+            if health_routes and not any(route in text for route in health_routes):
                 hits.append("health:missing-source-routes")
+            urls = load_compose_healthcheck_urls(repo_root)
+            missing_urls = [url for url in urls if not _healthcheck_url_mentioned(text, url)]
+            if missing_urls:
+                hits.append("health:missing-compose-urls")
         if hits:
             found[path.as_posix()] = hits[:12]
     return found
@@ -490,6 +528,9 @@ def source_fact_prompt_block(root: Path, *, page_id: str = "", title: str = "") 
         health = load_health_routes(root)
         if health:
             lines.append("本页健康检查路由：" + "、".join(f"`{item}`" for item in health[:6]))
+        urls = load_compose_healthcheck_urls(root)
+        if urls:
+            lines.append("本页编排 healthcheck：" + "、".join(f"`{item}`" for item in urls[:8]))
         checks = sorted(load_compose_healthcheck_services(root))
         if checks:
             lines.append(

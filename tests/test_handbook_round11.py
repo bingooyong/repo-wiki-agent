@@ -448,9 +448,16 @@ ccagent 是主 REST/Web 服务。
 
 def test_fastapi_verify_uses_curl_not_uvicorn_repeat(tmp_path: Path) -> None:
     root = _fastapi_repo(tmp_path)
+    assert "uvicorn" not in build_verify_section(root)
+    (root / "docker-compose.yml").write_text(
+        "services:\n  api:\n    image: app\n    healthcheck:\n"
+        '      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]\n',
+        encoding="utf-8",
+    )
     section = build_verify_section(root)
-    assert "uvicorn" not in section.split("2.", 1)[1]
+    assert "uvicorn" not in section
     assert "curl" in section
+    assert ":8000/health" in section
     out = _render(
         _service(root),
         _page(

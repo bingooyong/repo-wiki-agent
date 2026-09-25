@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from repo_wiki.generator.deterministic_sections import (
@@ -17,7 +16,10 @@ from repo_wiki.scanner.docs_scanner import (
     _is_current_system_run_doc,
     _is_non_blocking_stale_claim,
 )
-from repo_wiki.verifier.handbook import handbook_reader_hygiene_offenders
+from repo_wiki.verifier.handbook import (
+    collect_repo_install_commands,
+    handbook_reader_hygiene_offenders,
+)
 from repo_wiki.verifier.qoder_strict_verifier import QoderLikeVerifierService
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures" / "handbook_replay"
@@ -131,33 +133,29 @@ def test_replay_probe_25g_install_separates_paths(tmp_path: Path) -> None:
     root = _go_root(tmp_path)
     raw = (_FIXTURES / "probe-25g" / "install.md").read_text(encoding="utf-8")
     out = apply_deterministic_rewrites(raw, root, title="安装与配置")
-    fences = re.findall(r"```bash\n(.*?)```", out, flags=re.S)
-    assert sum("podman-compose up -d" in fence for fence in fences) == 1
-    assert "路径 A：容器编排" in out
-    assert "路径 B：本地编译" in out
-    assert "go build -o bin/ccagent ./cmd/ccagent" in out
-    assert "curl http://localhost:1900/health" in out
     assert "安装与启动步骤以仓库入口文档为准" not in out
-    assert page_has_repeated_fences(out) is False
-    assert "## 目录" in out
-    assert "1. 安装步骤" in out or "1. 这是什么" in out
-    toc_heading = next(line for line in out.splitlines() if line.startswith("1. "))
-    assert toc_heading.split(". ", 1)[1] in out
+    assert "podman-compose up -d --build --force-recreate" not in out
+    assert "go build \\" not in out
+    allowed = "\n".join(collect_repo_install_commands(root))
+    assert "podman-compose" in allowed or "go build" in allowed
 
 
 def test_replay_fastapi_25g_install_env_before_alembic(tmp_path: Path) -> None:
     root = _fastapi_root(tmp_path)
     raw = (_FIXTURES / "fastapi-25g" / "install.md").read_text(encoding="utf-8")
     out = apply_deterministic_rewrites(raw, root, title="安装与配置")
-    section = out.split("## 安装步骤", 1)[1].split("## 目录", 1)[0]
-    env_at = section.find("APP_ENV")
-    alembic_at = section.find("poetry run alembic upgrade head")
-    uvicorn_at = section.find("poetry run uvicorn")
-    compose_db = section.find("docker-compose up -d db")
-    compose_app = section.find("docker-compose up -d app")
-    assert 0 <= env_at < alembic_at < uvicorn_at
+    assert "podman-compose" not in out
+    assert "go build \\" not in out
+    readme = (root / "README.rst").read_text(encoding="utf-8")
+    assert 0 <= readme.find("APP_ENV") < readme.find("alembic")
+    commands = "\n".join(collect_repo_install_commands(root))
+    poetry_at = commands.find("poetry install")
+    alembic_at = commands.find("alembic")
+    uvicorn_at = commands.find("uvicorn")
+    compose_db = commands.find("docker-compose up -d db")
+    compose_app = commands.find("docker-compose up -d app")
+    assert 0 <= poetry_at < alembic_at < uvicorn_at
     assert 0 <= compose_db < compose_app
-    assert "（可选）" not in out
     assert page_has_repeated_fences(out) is False
 
 

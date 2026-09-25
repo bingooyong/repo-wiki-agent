@@ -237,11 +237,13 @@ def test_identity_does_not_truncate_readme_mid_word() -> None:
         "**NOTE**: This repository is not actively maintained because this example "
         "is quite complete and does its primary goal - passing Conduit testsuite.\n\n"
         "More modern and relevant examples can be found in other repositories with "
-        "``fastapi`` tag on GitHub.\n"
+        "``fastapi`` tag on GitHub.\n\n"
+        "Conduit is a RealWorld example API for users, articles, comments, and tags.\n"
     )
     assert description
     assert "in oth" not in description
     assert "other repositories" not in description
+    assert "NOTE" not in description
     assert "Conduit" in description
 
 
@@ -438,7 +440,7 @@ def test_no_repo_specific_literals_in_audited_source() -> None:
 
 
 def test_generator_version_is_r17() -> None:
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r20-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r21-")
 
 
 def test_hedged_current_evidence_is_meta_talk() -> None:

@@ -21,6 +21,12 @@ from repo_wiki.verifier.qoder_strict_verifier import (
     QoderLikeVerifierService,
 )
 from repo_wiki.verifier.source_evidence import MIN_HANDBOOK_CITATIONS
+from repo_wiki.verifier.source_facts import (
+    _GENERIC_COMPOSE,
+    _GENERIC_TABLES,
+    _GENERIC_TYPES,
+    _NOT_SERVICE_TOKENS,
+)
 
 
 def test_pinned_verifier_gate_thresholds() -> None:
@@ -95,6 +101,7 @@ def test_pinned_verifier_gate_thresholds() -> None:
         "QODER_HANDBOOK_IMPORT_CONSISTENCY",
         "QODER_HANDBOOK_ROLE_CONSISTENCY",
         "QODER_HANDBOOK_SOURCE_FACTS",
+        "QODER_HANDBOOK_ROUTE_CROSSCHECK",
         "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -127,6 +134,11 @@ def test_pinned_verifier_gate_thresholds() -> None:
         )
         == _DOC_MISMATCH_SKIP
     )
+    assert "Depends" in _GENERIC_TYPES
+    assert "Handle" in _GENERIC_TYPES
+    assert "schema" in _GENERIC_TABLES
+    assert "healthcheck" in _GENERIC_COMPOSE
+    assert "depends" in _NOT_SERVICE_TOKENS
 
 
 def test_meta_talk_must_and_must_not_match() -> None:

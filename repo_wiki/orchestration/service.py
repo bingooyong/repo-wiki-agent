@@ -727,6 +727,7 @@ class RepoWikiService:
             meta_dir = output_dir / "repowiki" / "zh" / "meta"
             previous_quality = _read_json_object(meta_dir / "quality-report.json")
             previous_registry = _read_json_object(meta_dir / "page-registry.json")
+        content_dir.mkdir(parents=True, exist_ok=True)
         written_content, content_stats = writer.write_markdown_pages(
             composition["pages"],
             selected_source_paths=selected_paths,
@@ -1492,24 +1493,23 @@ class RepoWikiService:
         def write_fallback(page: Any, binding: Any, page_idx: int, reason: str) -> None:
             nonlocal fallback_page_count
             fallback_page_count += 1
-            failed_pages.append({"page_id": page.page_id, "title": page.title, "reason": reason})
-            fallback = self._fallback_markdown_for_failed_page(page, binding)
-            enriched = self._enforce_qoder_page_contract(
-                page=page,
-                markdown=fallback,
-                binding=binding,
-                add_mermaid=_should_add_mermaid(page_idx, page),
-                composition_context=context,
-                inject_planner_mermaid=False,
+            failed_pages.append(
+                {
+                    "page_id": page.page_id,
+                    "title": page.title,
+                    "reason": reason,
+                    "dropped": True,
+                }
             )
-            page_results[page_idx] = (page.output_path, enriched)
+            page_results.pop(page_idx, None)
             page_metadata_by_idx[page_idx] = {
                 "page_id": page.page_id,
                 "source_path": page.output_path,
-                "generation_mode": "fallback",
-                "quality_state": "DEGRADED",
+                "generation_mode": "dropped",
+                "quality_state": "DROPPED",
                 "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
                 "reasons": [reason],
+                "dropped": True,
             }
 
         def note_provider_failure() -> None:
@@ -1809,6 +1809,8 @@ class RepoWikiService:
                 "attempted_page_ids": attempted_page_ids,
                 "provider_failure_count": provider_failure_count,
                 "fallback_page_count": fallback_page_count,
+                "dropped_page_count": fallback_page_count,
+                "dropped_page_ids": [item.get("page_id") for item in failed_pages],
                 "provider_disabled_after_failures": provider_disabled_after_failures,
                 "page_timeout_seconds": page_timeout_seconds,
                 "max_provider_failures": max_provider_failures,
@@ -1889,15 +1891,10 @@ class RepoWikiService:
         )
         cache.record_regenerated_page()
 
-    def _fallback_cite(self, item: dict[str, Any]) -> str:
-        path = str(item.get("path") or "").strip()
-        if not path:
-            return ""
-        start = int(item.get("line_start") or 1)
-        end = int(item.get("line_end") or start)
-        if end != start:
-            return f"<cite>{path}:{start}-{end}</cite>"
-        return f"<cite>{path}:{start}</cite>"
+    def _should_drop_unclean_page(self, page: Any, reason: str) -> bool:
+        """Unclean pages are dropped from the handbook, never rendered as placeholders."""
+        del page
+        return bool(reason)
 
     def _fallback_is_onboarding_page(self, page: Any) -> bool:
         from repo_wiki.generator.composer import is_handbook_overview_page
@@ -1908,449 +1905,6 @@ class RepoWikiService:
         from repo_wiki.generator.composer import is_handbook_install_page
 
         return is_handbook_install_page(page)
-
-    def _fallback_empty_notice(self, title: str) -> list[str]:
-        return [
-            f"本页目前无法根据仓库内容写成可用的「{title}」说明。",
-            "",
-            "当前没有匹配到与本主题相关的文档或源码片段，因此这里不能描述项目是什么、怎样安装，"
-            "或怎样做访问控制。本页也不会列出并不存在于仓库证据中的文件路径。",
-            "",
-            "接手仓库的人需要先在仓库根目录自行查看现有文档、启动配置和源码。"
-            "在找到可核对的文件之前，请不要把本页当成安装、运行或安全方面的事实来源。",
-            "",
-            "这里留空是为了避免用其他项目的安装步骤或合规套话充数，而不是因为主题不重要。",
-        ]
-
-    def _fallback_snippet_paragraphs(
-        self, evidence: dict[str, Any], *, limit: int = 4
-    ) -> list[str]:
-        lines: list[str] = []
-        for item in (evidence.get("snippets") or [])[:limit]:
-            path = str(item.get("path") or "").strip()
-            summary = re.sub(
-                r"``([^`\n]+)``",
-                r"`\1`",
-                str(item.get("summary") or "").strip(),
-            )
-            if not path or not summary:
-                continue
-            cite = self._fallback_cite(item)
-            symbol = str(item.get("symbol") or "").strip()
-            if symbol:
-                intro = f"仓库文件 `{path}` 中与 `{symbol}` 相关的原文如下。"
-            else:
-                intro = f"仓库文件 `{path}` 中的相关说明如下。"
-            if cite:
-                intro = f"{intro} {cite}"
-            lines.extend([intro, "", summary, ""])
-        return lines
-
-    def _fallback_related_files_section(self, evidence: dict[str, Any]) -> list[str]:
-        files = evidence.get("files") or []
-        if not files:
-            return []
-        lines = [
-            "## 可核对的文件",
-            "",
-            "下面这些路径来自本页已经绑定到的仓库文件，打开即可看到完整上下文。",
-            "",
-        ]
-        for item in files[:6]:
-            cite = self._fallback_cite(item)
-            symbol = str(item.get("symbol") or "").strip()
-            if not cite:
-                continue
-            if symbol:
-                lines.append(f"- {cite}（`{symbol}`）")
-            else:
-                lines.append(f"- {cite}")
-        lines.extend(
-            [
-                "",
-                "这些引用只用于跳转到仓库内的真实位置，并不表示本页对未摘录的内容做了额外推断。",
-                "",
-            ]
-        )
-        return lines
-
-    def _fallback_onboarding_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:
-        snippets = self._fallback_snippet_paragraphs(evidence)
-        lines = [
-            "## 这是什么",
-            "",
-            f"「{title}」说明这个仓库是什么产品、给谁用，而不是一份安装步骤清单。",
-            "下面只复述仓库文档和源码里已经出现的内容，不补充仓库之外的通用安装或架构说法。",
-            "",
-        ]
-        if snippets:
-            lines.extend(
-                [
-                    "根据仓库入口文档，产品身份与用途如下。",
-                    "",
-                    *snippets,
-                    "如果摘录是英文，含义仍以原文为准；中文段落只帮助定位该看哪一段。",
-                    "",
-                ]
-            )
-        else:
-            lines.extend(self._fallback_empty_notice(title))
-            lines.append("")
-        lines.extend(
-            [
-                "## 能做什么",
-                "",
-                "本页只概括仓库文档里已经写到的能力与边界，不把安装命令或启动步骤当成概述正文。",
-                "",
-                "## 仓库怎么组织",
-                "",
-                "目录和模块以入口文档与下方可核对文件为准，本页不另画一套未出现在仓库里的架构。",
-                "",
-            ]
-        )
-        lines.extend(self._fallback_related_files_section(evidence))
-        lines.extend(
-            [
-                "## 建议阅读顺序",
-                "",
-                "先读本页确认产品身份，再打开安装与配置或快速开始指南动手；细节以引用文件为准。",
-                "",
-                "## 常见误解",
-                "",
-                "不要把项目概述当成安装步骤清单。环境、命令和验证步骤在安装或快速开始页，不在本页重复写成操作手册。",
-                "",
-            ]
-        )
-        return lines
-
-    def _fallback_security_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:
-        snippets = self._fallback_snippet_paragraphs(evidence)
-        lines = [
-            "## 当前仓库里能看到的控制",
-            "",
-            f"「{title}」只描述源码或配置里实际出现的认证、授权或访问控制，"
-            "不套用通用合规清单，也不对未出现的审计、加密或认证框架下结论。",
-            "",
-        ]
-        if snippets:
-            lines.extend(
-                [
-                    "与本页相关的实现摘录如下。请按原文理解请求头、令牌或权限检查，不要把未出现的合规要求写进本页。",
-                    "",
-                    *snippets,
-                    "阅读时以引用文件中的实现为准。本页没有额外的安全承诺。",
-                    "",
-                ]
-            )
-        else:
-            lines.extend(self._fallback_empty_notice(title))
-            lines.append("")
-        lines.extend(self._fallback_related_files_section(evidence))
-        return lines
-
-    def _fallback_topic_markdown(self, title: str, evidence: dict[str, Any]) -> list[str]:
-        snippets = self._fallback_snippet_paragraphs(evidence)
-        lines = [
-            "## 这是什么",
-            "",
-            f"「{title}」面向接手仓库的人，用来定位这个主题在仓库里的实现。",
-            "下面列出可核对位置，并摘录片段中的原话。本页不解释文档是如何生成的。",
-            "",
-        ]
-        if snippets:
-            lines.extend(snippets)
-        else:
-            lines.extend(self._fallback_empty_notice(title))
-            lines.append("")
-        lines.extend(self._fallback_related_files_section(evidence))
-        return lines
-
-    def _fallback_markdown_for_failed_page(self, page: Any, binding: Any | None) -> str:
-        from repo_wiki.planner.schema import WikiTaxonomyCategory
-
-        evidence = self._summarize_evidence_for_fallback(binding)
-        title = str(getattr(page, "title", "") or "仓库说明")
-        if self._fallback_is_install_page(page):
-            body = self._fallback_install_markdown(title, evidence, binding)
-        elif self._fallback_is_onboarding_page(page):
-            body = self._fallback_onboarding_markdown(title, evidence)
-        elif getattr(page, "category", None) == WikiTaxonomyCategory.SECURITY_COMPLIANCE:
-            body = self._fallback_security_markdown(title, evidence)
-        else:
-            body = self._fallback_topic_markdown(title, evidence)
-        return "\n".join([f"# {title}", "", *body]).strip() + "\n"
-
-    def _fallback_readme_citation(self, evidence: dict[str, Any]) -> str:
-        run_cite = self._readme_run_section_cite()
-        if run_cite:
-            return run_cite
-        from repo_wiki.verifier.handbook import _README_NAMES
-
-        for item in evidence.get("files") or []:
-            path = str(item.get("path") or "").strip()
-            if Path(path).name.lower() in {name.lower() for name in _README_NAMES}:
-                cite = self._fallback_cite(item)
-                if cite:
-                    return cite
-        for name in _README_NAMES:
-            if (self.root / name).is_file():
-                return f"<cite>{name}:1</cite>"
-        return ""
-
-    def _readme_run_section_cite(self) -> str:
-        from repo_wiki.verifier.handbook import (
-            _text_has_install_command_line,
-            existing_readme_names,
-            read_readme_text,
-            readme_run_section_ranges,
-        )
-
-        names = existing_readme_names(self.root)
-        name = next((item for item in names if (self.root / item).is_file()), "")
-        if not name:
-            return ""
-        readme = read_readme_text(self.root)
-        ranges = readme_run_section_ranges(readme)
-        if not ranges:
-            return ""
-        lines = readme.splitlines()
-        for start, end in ranges:
-            clue_lines = [
-                index
-                for index in range(start, end + 1)
-                if 1 <= index <= len(lines) and _text_has_install_command_line(lines[index - 1])
-            ]
-            if clue_lines:
-                return f"<cite>{name}:{clue_lines[0]}-{clue_lines[-1]}</cite>"
-        start, end = ranges[0]
-        return f"<cite>{name}:{start}-{end}</cite>"
-
-    def _fallback_install_source_texts(
-        self, evidence: dict[str, Any], binding: Any | None, *, include_root_readme: bool
-    ) -> list[str]:
-        from repo_wiki.verifier.handbook import read_readme_text
-
-        texts: list[str] = []
-        if binding and getattr(binding, "candidates", None):
-            for candidate in binding.candidates[:12]:
-                span = getattr(candidate, "span", None)
-                text = str(getattr(span, "span_text", "") or "")
-                if text.strip():
-                    texts.append(text)
-        for item in evidence.get("snippets") or []:
-            summary = str(item.get("summary") or "").strip()
-            if summary:
-                texts.append(summary)
-        if include_root_readme:
-            readme = read_readme_text(self.root)
-            if readme.strip():
-                texts.append(readme)
-        return texts
-
-    def _fallback_collect_install_commands(self, texts: list[str]) -> list[str]:
-        commands: list[str] = []
-        seen: set[str] = set()
-        for text in texts:
-            for raw_line in text.splitlines() or [text]:
-                line = raw_line.strip().lstrip("$").strip()
-                if not line or line.startswith("#") or line.startswith(".."):
-                    continue
-                for pattern in _INSTALL_FENCE_COMMAND_PATTERNS:
-                    match = pattern.search(line)
-                    if not match:
-                        continue
-                    command = " ".join(match.group(0).split()).rstrip(".,;:)")
-                    if not command or len(command) > 120:
-                        continue
-                    key = command.casefold()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    commands.append(command)
-                    if len(commands) >= 12:
-                        return commands
-        return commands
-
-    def _fallback_install_run_commands(
-        self, evidence: dict[str, Any], binding: Any | None
-    ) -> list[str]:
-        from repo_wiki.verifier.handbook import collect_repo_install_commands
-
-        repo = collect_repo_install_commands(self.root)
-        if repo:
-            return repo
-        documented = self._fallback_collect_install_commands(
-            self._fallback_install_source_texts(evidence, binding, include_root_readme=True)
-        )
-        documented = [cmd for cmd in documented if not _GENERIC_GO_INSTALL.search(cmd)]
-        if documented:
-            return documented
-        bound = self._fallback_collect_install_commands(
-            self._fallback_install_source_texts(evidence, binding, include_root_readme=False)
-        )
-        return [cmd for cmd in bound if not _GENERIC_GO_INSTALL.search(cmd)]
-
-    def _install_commands_from_repo_files(self) -> list[str]:
-        """Seed install pages from Makefile / README / cmd mains that actually exist."""
-        from repo_wiki.verifier.handbook import collect_repo_install_commands
-
-        return collect_repo_install_commands(self.root)
-
-    def _fallback_install_markdown(
-        self, title: str, evidence: dict[str, Any], binding: Any | None
-    ) -> list[str]:
-        snippets = self._fallback_snippet_paragraphs(evidence)
-        commands = self._fallback_install_run_commands(evidence, binding)
-        readme_cite = self._fallback_readme_citation(evidence)
-        cite_bit = f" {readme_cite}" if readme_cite else ""
-        env_clues = _fallback_install_env_clues(snippets, commands, evidence, binding)
-        lines = [
-            "## 这是什么",
-            "",
-            f"「{title}」面向刚接手本仓库的读者，按本页把项目安装并在本地跑起来。",
-            "下面只复述仓库文档里已经出现的依赖、命令和环境变量，不另写一套未出现在仓库里的步骤。",
-            f"核对原文时以入口文档为准。{cite_bit}".rstrip(),
-            "",
-        ]
-        if snippets:
-            lines.extend(
-                [
-                    "根据仓库文档，项目说明与启动方式如下。",
-                    "",
-                    *snippets,
-                ]
-            )
-        else:
-            lines.extend(self._fallback_empty_notice(title))
-            lines.append("")
-        lines.extend(
-            [
-                "## 环境要求",
-                "",
-                "动手前先对照仓库文档里写到的运行时、包管理器和外部依赖。"
-                "本页不补充文档没有出现的版本号或服务。",
-                "",
-            ]
-        )
-        if env_clues:
-            lines.extend([f"仓库文档里出现的环境线索：{env_clues}。", ""])
-        else:
-            lines.extend(
-                [
-                    "仓库文档没有单独列出环境版本；请打开根目录 README 核对语言、数据库和依赖。",
-                    "",
-                ]
-            )
-        lines.extend(["## 安装步骤", ""])
-        if commands:
-            lines.extend(
-                [
-                    "按仓库文档中的命令安装依赖并准备运行环境：",
-                    "",
-                    "```bash",
-                    *commands,
-                    "```",
-                    "",
-                ]
-            )
-        else:
-            lines.extend(
-                [
-                    "仓库文档没有列出可复制的安装命令。请先打开根目录 README，"
-                    "按原文中的包管理器或容器步骤执行，不要用其他项目的安装命令充数。",
-                    "",
-                ]
-            )
-        lines.extend(["## 启动与验证", ""])
-        if commands:
-            lines.extend(
-                [
-                    "安装完成后用同一组仓库文档命令启动，并按原文检查服务是否起来。",
-                    "",
-                    "```bash",
-                    commands[0],
-                    "```",
-                    "",
-                ]
-            )
-        else:
-            lines.extend(
-                [
-                    "当前没有可复制的启动命令。启动方式以入口文档为准，本页不编造端口或健康检查。",
-                    "",
-                ]
-            )
-        lines.extend(
-            [
-                "## 常见问题",
-                "",
-                "如果命令失败，先核对接线文档里的环境变量和依赖是否与当前机器一致，"
-                "再回到引用文件查看完整上下文。本页不把其他仓库的排错步骤写进来。",
-                "",
-            ]
-        )
-        lines.extend(self._fallback_related_files_section(evidence))
-        return lines
-
-    def _summarize_evidence_for_fallback(self, binding: Any | None) -> dict[str, Any]:
-        summary: dict[str, Any] = {
-            "modules": [],
-            "symbols": [],
-            "files": [],
-            "snippets": [],
-        }
-        if not binding or not getattr(binding, "candidates", None):
-            return summary
-
-        seen_modules: set[str] = set()
-        seen_symbols: set[str] = set()
-        seen_files: set[str] = set()
-        for candidate in binding.candidates[:10]:
-            span = candidate.span
-            path = str(getattr(span, "file_path", "") or "")
-            symbol = str(getattr(span, "symbol", "") or Path(path).stem or "source")
-            parts = Path(path).parts
-            module = parts[0] if parts else "root"
-
-            if module not in seen_modules:
-                summary["modules"].append(module)
-                seen_modules.add(module)
-            if symbol not in seen_symbols:
-                summary["symbols"].append(symbol)
-                seen_symbols.add(symbol)
-            if path and path not in seen_files:
-                summary["files"].append(
-                    {
-                        "path": path,
-                        "symbol": symbol,
-                        "line_start": getattr(span, "line_start", 1),
-                        "line_end": getattr(span, "line_end", 1),
-                    }
-                )
-                seen_files.add(path)
-
-            text = self._summarize_span_text(str(getattr(span, "span_text", "") or ""))
-            if text:
-                summary["snippets"].append(
-                    {
-                        "path": path,
-                        "symbol": symbol,
-                        "summary": text,
-                        "line_start": getattr(span, "line_start", 1),
-                        "line_end": getattr(span, "line_end", 1),
-                    }
-                )
-
-        return summary
-
-    def _summarize_span_text(self, text: str) -> str:
-        cleaned = " ".join(line.strip() for line in text.splitlines() if line.strip())
-        cleaned = re.sub(r"\s+", " ", cleaned)
-        if not cleaned:
-            return ""
-        if len(cleaned) > 360:
-            return cleaned[:357].rstrip() + "..."
-        return cleaned
 
     def _page_requires_hard_mermaid(self, page: Any) -> bool:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
@@ -2730,23 +2284,14 @@ class RepoWikiService:
         return cite_existing_meaningful(self.root, rel)
 
     def _rewrite_install_page_contract(self, page: Any, content: str) -> str:
-        from repo_wiki.generator.deterministic_sections import (
-            build_install_section,
-            replace_h2_section,
-        )
-
-        title = str(getattr(page, "title", "") or "")
-        page_id = str(getattr(page, "page_id", "") or "")
-        from repo_wiki.generator.deterministic_sections import is_install_owner_page
-
-        if "IDE" in title or "ide" in page_id.lower():
-            return content
-        if is_install_owner_page(page_id=page_id, title=title):
-            section = build_install_section(self.root)
-            if section:
-                content = replace_h2_section(content, ("安装步骤",), section)
-            return content
+        """Install steps stay as the model wrote them from this repo's docs."""
+        del page
         return content
+
+    def _install_commands_from_repo_files(self) -> list[str]:
+        from repo_wiki.verifier.handbook import collect_repo_install_commands
+
+        return collect_repo_install_commands(self.root)
 
     def _ensure_architecture_core_cites(self, page: Any, content: str) -> str:
         from repo_wiki.generator.deterministic_sections import (

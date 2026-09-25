@@ -238,47 +238,24 @@ def _process_from_main(
 
 
 def discover_cmd_processes(root: Path | str | None) -> list[RepoProcess]:
-    """Return Go entry binaries from cmd/*/main.go or app/main.go."""
+    """Return Go entry binaries from any product ``main.go``."""
     if root is None:
         return []
     base = Path(root)
     compose_names = _compose_service_names(base)
     readme_run = _readme_run_blob(base).lower()
     found: list[RepoProcess] = []
-    cmd = base / "cmd"
-    if cmd.is_dir():
-        for child in sorted(cmd.iterdir()):
-            if not child.is_dir():
-                continue
-            rel_main, text, docs = _cmd_package_text(base, child)
-            if not text:
-                continue
-            combined = "\n".join([text, docs, _imported_route_text(base, text)])
-            kinds: set[str] = set()
-            if _DATA_PLANE_RE.search(combined):
-                kinds.add("data_plane")
-            if _CONTROL_PLANE_RE.search(combined):
-                kinds.add("control_plane")
-            if _TUNNEL_CLIENT_RE.search(combined):
-                kinds.add("tunnel_client")
-            if _HTTP_SERVER_RE.search(combined):
-                kinds.add("http_server")
-            found.append(
-                RepoProcess(
-                    name=child.name,
-                    rel_main=rel_main,
-                    text=combined,
-                    docs=docs,
-                    route_count=_route_count(combined),
-                    example=_is_example_text(docs, text[:800]),
-                    in_compose=child.name.lower() in {item.lower() for item in compose_names},
-                    in_readme_run=child.name.lower() in readme_run,
-                    kinds=frozenset(kinds),
-                )
-            )
-    app_main = base / "app" / "main.go"
-    if app_main.is_file() and not any(item.rel_main == "app/main.go" for item in found):
-        item = _process_from_main(base, app_main, "app", compose_names, readme_run)
+    skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "testdata"}
+    seen: set[str] = set()
+    for main in sorted(base.rglob("main.go")):
+        if any(part in skip for part in main.parts) or main.name.endswith("_test.go"):
+            continue
+        rel = main.relative_to(base).as_posix()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        name = main.parent.name or "main"
+        item = _process_from_main(base, main, name, compose_names, readme_run)
         if item is not None:
             found.append(item)
     return found

@@ -63,7 +63,7 @@ _GO_FIELD_RE = re.compile(
     re.MULTILINE,
 )
 _NON_MODEL_NAME_RE = re.compile(r"(Config|Options|Settings|Writer|Reader|Logger|Client|Conn)$")
-_PRODUCT_PKG_ROOTS = frozenset({"internal", "pkg", "cmd"})
+_PRODUCT_PKG_ROOTS = frozenset({"internal", "pkg", "cmd", "app", "domain", "src"})
 
 
 @dataclass(frozen=True)

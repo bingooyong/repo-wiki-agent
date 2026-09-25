@@ -45,13 +45,23 @@ class _RouterDef:
 
 
 def join_http_paths(*parts: str) -> str:
-    """Join mount prefixes and a handler path into a single HTTP path."""
+    """Join mount prefixes and a handler path into a single HTTP path.
+
+    Leading overlap is dropped so ``/api`` + ``/api`` stays ``/api`` and
+    ``/api`` + constructor ``/api`` + include ``/v1`` does not become
+    ``/api/api/v1``.
+    """
     segments: list[str] = []
     for part in parts:
-        text = str(part).strip()
-        if not text or text == "/":
+        incoming = [segment for segment in str(part).strip().split("/") if segment]
+        if not incoming:
             continue
-        segments.extend(segment for segment in text.split("/") if segment)
+        overlap = 0
+        for size in range(min(len(segments), len(incoming)), 0, -1):
+            if segments[-size:] == incoming[:size]:
+                overlap = size
+                break
+        segments.extend(incoming[overlap:])
     return "/" + "/".join(segments) if segments else "/"
 
 
@@ -144,7 +154,7 @@ def extract_fastapi_endpoints(files: Sequence[tuple[str, str]]) -> list[FastAPIE
         if node_id in mounted or router.is_app:
             continue
         if router.mounts:
-            walk(node_id, router.constructor_prefix)
+            walk(node_id, "")
             continue
         local_prefix = router.constructor_prefix
         for method, path, handler, lineno in router.routes:
@@ -163,6 +173,121 @@ def extract_fastapi_endpoints(files: Sequence[tuple[str, str]]) -> list[FastAPIE
         key = (endpoint.method, endpoint.path, endpoint.handler, endpoint.file_path)
         dedup[key] = endpoint
     return list(dedup.values())
+
+
+def extract_fastapi_endpoints_simple(files: Sequence[tuple[str, str]]) -> list[FastAPIEndpoint]:
+    """Independent BFS walk over the same include graph. Used as a cross-check."""
+    from collections import deque
+
+    routers: dict[tuple[str, str], _RouterDef] = {}
+    imports_by_file: dict[str, dict[str, str]] = {}
+    aliases_by_file: dict[str, dict[str, tuple[str, str]]] = {}
+    facts_by_file: dict[str, _FileFacts] = {}
+    file_set = {path for path, _text in files}
+    for path, text in files:
+        parsed_file = _parse_file(path, text)
+        if parsed_file is None:
+            continue
+        routers_in_file, imported_modules, imported_symbols, facts = parsed_file
+        imports_by_file[path] = imported_modules
+        aliases_by_file[path] = imported_symbols
+        facts_by_file[path] = facts
+        for router in routers_in_file:
+            routers[(router.file_path, router.var_name)] = router
+
+    def resolve_child(parent_file: str, child_ref: str) -> tuple[str, str] | None:
+        return _resolve_router_ref(
+            parent_file,
+            child_ref,
+            routers,
+            imports_by_file.get(parent_file, {}),
+            aliases_by_file.get(parent_file, {}),
+            file_set,
+        )
+
+    def resolve_mount_prefix(parent_file: str, mount: _Mount) -> str:
+        if mount.prefix:
+            return mount.prefix
+        if not mount.prefix_ref:
+            return ""
+        return (
+            _resolve_prefix_ref(
+                parent_file,
+                mount.prefix_ref,
+                facts_by_file,
+                aliases_by_file,
+                file_set,
+            )
+            or ""
+        )
+
+    endpoints: list[FastAPIEndpoint] = []
+    seen: set[tuple[tuple[str, str], str]] = set()
+    queue: deque[tuple[tuple[str, str], str]] = deque()
+    for node_id, router in routers.items():
+        if router.is_app:
+            queue.append((node_id, ""))
+    if not queue:
+        for node_id, router in routers.items():
+            if router.mounts:
+                queue.append((node_id, ""))
+    while queue:
+        node_id, prefix = queue.popleft()
+        key = (node_id, prefix)
+        if key in seen:
+            continue
+        seen.add(key)
+        router = routers.get(node_id)
+        if router is None:
+            continue
+        local_prefix = join_http_paths(prefix, router.constructor_prefix)
+        for method, path, handler, lineno in router.routes:
+            endpoints.append(
+                FastAPIEndpoint(
+                    method=method,
+                    path=join_http_paths(local_prefix, path),
+                    handler=handler,
+                    file_path=router.file_path,
+                    lineno=lineno,
+                )
+            )
+        for mount in router.mounts:
+            child = resolve_child(router.file_path, mount.child_ref)
+            if child is None:
+                continue
+            queue.append(
+                (
+                    child,
+                    join_http_paths(local_prefix, resolve_mount_prefix(router.file_path, mount)),
+                )
+            )
+    if not endpoints:
+        for router in routers.values():
+            if router.is_app or router.mounts:
+                continue
+            for method, path, handler, lineno in router.routes:
+                endpoints.append(
+                    FastAPIEndpoint(
+                        method=method,
+                        path=join_http_paths(router.constructor_prefix, path),
+                        handler=handler,
+                        file_path=router.file_path,
+                        lineno=lineno,
+                    )
+                )
+    return endpoints
+
+
+def fastapi_route_inventory_mismatch(files: Sequence[tuple[str, str]]) -> list[str]:
+    """Return method/path/handler triples that the two walkers do not agree on."""
+    primary = {(item.method, item.path, item.handler) for item in extract_fastapi_endpoints(files)}
+    simple = {
+        (item.method, item.path, item.handler) for item in extract_fastapi_endpoints_simple(files)
+    }
+    return sorted(
+        f"{method} {path} {handler}"
+        for method, path, handler in primary.symmetric_difference(simple)
+    )
 
 
 def _parse_file(

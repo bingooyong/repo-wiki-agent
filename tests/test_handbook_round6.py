@@ -239,7 +239,7 @@ def test_data_model_citation_requires_struct_range(tmp_path: Path) -> None:
     )
     header_only = "# 数据模型\n<cite>internal/models/agent_ops_sample.go:1-8</cite>\n"
     assert has_data_model_source_citation(header_only, tmp_path) is False
-    struct_cite = "# 数据模型\n<cite>internal/models/endpoint.go:3-6</cite>\n"
+    struct_cite = "# 数据模型\nProbeEndpoint <cite>internal/models/endpoint.go:3-6</cite>\n"
     assert has_data_model_source_citation(struct_cite, tmp_path) is True
 
 

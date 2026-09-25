@@ -1233,9 +1233,10 @@ class LLMPageComposer:
 - 不要评论材料齐不齐或提示词有没有点名模块，缺了的细节整段跳过，也不要复述写作要求原文。
 - 必须以 `# {page.title}` 开头。
 - 正文控制在 900 到 1400 个中文字符之间；Git 工作流、调试指南、性能、健康检查、核心服务等专题也必须写满可核对段落，不要短页或回退成「这是什么」摘录页。
-- 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
+- 不允许编造不存在的模块、API 或版本。
 - 每个可核对事实句都要带 `<cite>`；能引用实现文件时不要只引用说明文档或 scaffold。
 - 至少保留 3 个 `<cite>` 引用，格式为仓库相对路径加行号范围，例如 `<cite>src/app.py:1-10</cite>`。
+- 写仓库里实际发生的调用和配置。不要写「证据表明」「材料是否充分」或「待确认」。
 {self._root_readme_cite_rule()}
 {handbook_cite_rules}{list_rule}
 - 只写能在源码里对上的事实；对不上的细节整段跳过，改用空话补齐没有意义。
@@ -1267,29 +1268,6 @@ class LLMPageComposer:
         When evidence is insufficient, inject explicit uncertainty guidance
         to prevent fabrication of implementation details.
         """
-        if not input.evidence_binding:
-            return (
-                "\n\n[待确认] 证据状态：无可用源码证据。\n"
-                "生成时必须：\n"
-                "- 明确标注「待确认」段落\n"
-                "- 避免声称任何具体实现细节\n"
-                "- 仅描述可以从不完整推断中确认的事实\n"
-            )
-
-        candidate_count = len(input.evidence_binding.candidates)
-        insufficient = input.evidence_binding.insufficient_evidence
-
-        if insufficient or candidate_count < 3:
-            return (
-                f"\n\n[待确认] 证据状态：证据不足（仅 {candidate_count} 条候选）"
-                f"{'（标记为insufficient_evidence）' if insufficient else ''}。\n"
-                "生成时必须：\n"
-                "- 对每一个依赖推断的结论标注「待确认」\n"
-                "- 不允许编造模块名、API 端点、版本号或配置\n"
-                "- 只写能从证据核对的事实，不要用套话填空\n"
-                "- 保留所有 `<cite>` 引用，即使推断不确定\n"
-            )
-
         if input.page_plan.page_id == INVENTORY_SERVICE_API_PAGE_ID:
             return (
                 "\n\n[硬约束] API台账服务 API 页面证据要求：\n"

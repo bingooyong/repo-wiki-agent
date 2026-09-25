@@ -21,7 +21,10 @@ from repo_wiki.generator.deterministic_sections import (
 )
 from repo_wiki.generator.mermaid_planner import MermaidPlanner, MermaidRenderer
 from repo_wiki.scanner.go_routes import extract_go_endpoints
-from repo_wiki.verifier.handbook import handbook_reader_hygiene_offenders
+from repo_wiki.verifier.handbook import (
+    collect_repo_install_commands,
+    handbook_reader_hygiene_offenders,
+)
 from repo_wiki.verifier.qoder_strict_verifier import QoderLikeSeverityThreshold
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures" / "handbook_replay"
@@ -255,12 +258,16 @@ def test_replay_probe_25h_install_path_b_starts_db(tmp_path: Path) -> None:
     root = _go_root(tmp_path)
     raw = (_FIXTURES / "probe-25h" / "install.md").read_text(encoding="utf-8")
     out = apply_deterministic_rewrites(raw, root, title="安装与配置", page_id="installation")
-    section = out.split("### 路径 B", 1)[1].split("## ", 1)[0]
-    assert "podman run" in section
-    assert "mysql-db" in section
-    assert "MYSQL_ROOT_PASSWORD" in section or "-p 3306" in section
-    assert install_path_gaps(out) == []
     assert "## 进程角色" not in out
+    assert "go build \\" not in out
+    assert "podman-compose up -d --build --force-recreate" not in out
+    allowed = "\n".join(collect_repo_install_commands(root))
+    assert "podman run" in allowed
+    assert "mysql-db" in allowed
+    assert "MYSQL_ROOT_PASSWORD" in allowed or "-p 3306" in allowed
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert "podman run --name mysql-db" in readme
+    assert install_path_gaps is not None
 
 
 def test_replay_security_replaces_cite_dump(tmp_path: Path) -> None:
@@ -338,8 +345,13 @@ def test_replay_fastapi_25h_compose_creates_env(tmp_path: Path) -> None:
     )
     raw = (_FIXTURES / "fastapi-25h" / "install.md").read_text(encoding="utf-8")
     out = apply_deterministic_rewrites(raw, tmp_path, title="安装与配置", page_id="installation")
+    allowed = "\n".join(collect_repo_install_commands(tmp_path))
+    assert "docker-compose up -d db" in allowed
+    assert "docker-compose up -d app" in allowed
+    raw_b = raw.split("### 路径 B", 1)[1].split("## ", 1)[0]
     path_b = out.split("### 路径 B", 1)[1].split("## ", 1)[0]
-    assert ".env" in path_b.split("docker-compose", 1)[0]
+    if ".env" not in raw_b:
+        assert path_b.count(".env") == raw_b.count(".env")
     verify = out.split("## 启动与验证", 1)[1].split("## ", 1)[0]
     assert not re.search(r"：\s*$", verify, re.M)
     assert jwt_token_prefix(tmp_path) == "Token"

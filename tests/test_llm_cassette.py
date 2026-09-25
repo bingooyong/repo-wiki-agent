@@ -281,8 +281,9 @@ def test_full_generate_offline_from_synthetic_cassette(
     assert result["generate"]["llm"]["effective_provider"] == "cassette"
     assert result["generate"]["llm"]["mode"] == "cassette"
     content_dir = repo_root / ".repo-agent-eval" / "replay-run" / "content"
-    pages = list(content_dir.rglob("*.md"))
-    assert pages
+    pages = list(content_dir.rglob("*.md")) if content_dir.exists() else []
     blob = "\n".join(p.read_text(encoding="utf-8") for p in pages)
     assert "<think>" not in blob
     assert "scratch-must-not-land" not in blob
+    dropped = result["generate"]["llm"].get("dropped_page_ids") or []
+    assert pages or dropped

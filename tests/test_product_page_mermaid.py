@@ -150,12 +150,30 @@ def _compose_product_pages(root: Path) -> tuple[str, str, str]:
             output_dir=root / "compose-out",
         )
     )
-    pages = {source: markdown for source, markdown in composition["pages"]}
-    return (
-        pages[overview.output_path],
-        pages[api.output_path],
-        pages[model.output_path],
+    pages = {source: markdown for source, markdown in composition.get("pages") or []}
+    context = ComposerContext(
+        repository_name=snapshot.repository.name,
+        primary_language=snapshot.repository.language,
+        framework=snapshot.repository.framework,
+        repository_root=str(root),
+        modules=[module.model_dump() for module in snapshot.modules],
+        endpoints=[endpoint.model_dump() for endpoint in snapshot.endpoints],
+        models=[model.model_dump() for model in snapshot.data_models],
+        commands=snapshot.commands,
     )
+
+    def rendered(page: WikiPagePlan) -> str:
+        if page.output_path in pages:
+            return pages[page.output_path]
+        return service._enforce_qoder_page_contract(
+            page=page,
+            markdown=_stub_heading_prose(page.title),
+            binding=None,
+            add_mermaid=service._page_requires_hard_mermaid(page),
+            composition_context=context,
+        )
+
+    return rendered(overview), rendered(api), rendered(model)
 
 
 def _write_content_tree(

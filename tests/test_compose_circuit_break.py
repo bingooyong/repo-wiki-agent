@@ -591,7 +591,7 @@ async def test_circuit_break_skips_remaining_pages_without_timeout_wait(
     assert llm["llm_call_count"] == provider.call_count
     assert llm["llm_call_count"] < PAGE_COUNT
     fallback_modes = {meta["generation_mode"] for meta in result["page_metadata"]}
-    assert fallback_modes == {"fallback"}
+    assert fallback_modes == {"dropped"}
     disabled_reasons = [
         reason
         for meta in result["page_metadata"]
@@ -747,7 +747,7 @@ async def test_insufficient_prose_rejects_do_not_trip_circuit_breaker(
     assert llm["fallback_page_count"] == 3
     assert len(prose_rejects) == 3
     assert not disabled_reasons
-    assert modes.count("fallback") == 3
+    assert modes.count("dropped") == 3
     assert modes.count("llm") == PAGE_COUNT - 3
 
 
@@ -756,7 +756,7 @@ async def test_page_529_twice_stays_degraded_without_circuit_break(
     compose_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two 529s on a page stay DEGRADED and must not disable sibling LLM pages."""
+    """Two 529s on a page are DROPPED and must not disable sibling LLM pages."""
     monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
     root = compose_env / "repo"
     root.mkdir()
@@ -786,7 +786,7 @@ async def test_page_529_twice_stays_degraded_without_circuit_break(
     assert provider.call_count == PAGE_COUNT * 2
     assert llm["llm_call_count"] == PAGE_COUNT
     assert llm["fallback_page_count"] == PAGE_COUNT
-    assert states == ["DEGRADED"] * PAGE_COUNT
+    assert states == ["DROPPED"] * PAGE_COUNT
     assert not disabled_reasons
 
 
@@ -916,7 +916,7 @@ async def test_page_timeout_twice_stays_degraded_without_circuit_break(
     compose_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two timeouts on a page stay DEGRADED and must not disable sibling LLM pages."""
+    """Two timeouts on a page are DROPPED and must not disable sibling LLM pages."""
     monkeypatch.setenv("REPO_WIKI_LLM_MAX_FAILURES", "3")
     root = compose_env / "repo"
     root.mkdir()
@@ -951,7 +951,7 @@ async def test_page_timeout_twice_stays_degraded_without_circuit_break(
     assert llm["provider_disabled_after_failures"] is False
     assert provider.call_count == PAGE_COUNT * 2
     assert llm["fallback_page_count"] == PAGE_COUNT
-    assert states == ["DEGRADED"] * PAGE_COUNT
+    assert states == ["DROPPED"] * PAGE_COUNT
     assert timeout_reasons
     assert not disabled_reasons
 
@@ -1010,7 +1010,7 @@ async def test_real_max_calls_budget_is_spent_on_queued_pages(
     assert llm["llm_call_count"] == 2
     assert attempted[:2] == ["page-00", "page-01"]
     assert modes.count("llm") == 2
-    assert modes.count("fallback") == PAGE_COUNT - 2
+    assert modes.count("dropped") == PAGE_COUNT - 2
     assert llm["fallback_page_count"] == PAGE_COUNT - 2
     assert llm["provider_disabled_after_failures"] is False
     assert not disabled_reasons

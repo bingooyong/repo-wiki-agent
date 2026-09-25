@@ -38,7 +38,7 @@ DEFAULT_FASTAPI_SRC = Path(
 )
 DEFAULT_ACC25R = Path(os.environ.get("REPO_WIKI_ACC25R_DIR", "/tmp/acc-25r"))
 DEFAULT_ACCEPTANCE_KIT = Path(os.environ.get("REPO_WIKI_ACCEPTANCE_KIT", "/tmp/acceptance-kit"))
-WAVES = ("25m", "25n", "25o", "25p", "25q", "25r", "25s")
+WAVES = ("25m", "25n", "25o", "25p", "25q", "25r", "25s", "25t", "26u")
 REPOS = ("probe", "fastapi")
 
 _FENCE_RE = re.compile(r"```([^\n]*)\n(.*?)```", re.S)

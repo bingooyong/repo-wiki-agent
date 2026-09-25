@@ -792,9 +792,27 @@ _STUB_MAIN_RE = re.compile(
     r"^\s*package\s+main\s*(?:import\s+\([^)]*\)\s*)?func\s+main\s*\(\s*\)\s*\{\s*\}\s*$",
     re.S,
 )
+_SKIP_DISCOVERY_DIRS = frozenset(
+    {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__", "testdata"}
+)
+
+
+def _iter_entry_mains(root: Path) -> list[Path]:
+    found: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.name not in {"main.go", "main.py"}:
+            continue
+        if any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
+            continue
+        found.append(path)
+    return found
+
+
 _REPO_INSTALL_LINE_PATTERNS = (
     re.compile(r"docker(?:-|\s+)compose(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
     re.compile(r"\bpodman-compose(?:\s+[A-Za-z0-9_-]+){0,6}", re.I),
+    re.compile(r"\bpodman\s+run\b[^\n]{0,200}", re.I),
+    re.compile(r"\bdocker\s+run\b[^\n]{0,200}", re.I),
     re.compile(r"\bmake(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
     re.compile(r"\bgo\s+build(?:\s+[A-Za-z0-9_./-]+){0,8}", re.I),
     re.compile(r"podman exec[^\n]{0,80}schema\.sql", re.I),
@@ -812,34 +830,8 @@ _REPO_INSTALL_LINE_PATTERNS = (
 )
 
 
-def _install_command_priority(command: str) -> tuple[int, str]:
-    low = command.lower()
-    score = 50
-    if "podman-compose" in low or "docker compose" in low or "docker-compose" in low:
-        score = 0
-    elif "poetry install" in low or "pip install" in low or "uv sync" in low:
-        score = 1
-    elif "go build" in low:
-        score = 2
-    elif "alembic" in low:
-        score = 3
-    elif "schema.sql" in low:
-        score = 4
-    elif "uvicorn" in low or low.startswith("./bin/"):
-        score = 5
-    elif re.search(r"\./bin/", low):
-        score = 6
-    elif "curl" in low and "health" in low:
-        score = 7
-    elif low.startswith("make "):
-        score = 8
-    if _EXAMPLE_CMD_HINT_RE.search(low):
-        score += 40
-    return (score, command)
-
-
 def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
-    """Collect install/run commands from Makefile, README, and real cmd mains."""
+    """Collect install/run commands from this repo's Makefile and README, in source order."""
     commands: list[str] = []
     seen: set[str] = set()
 
@@ -869,7 +861,7 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
             _add("make up")
     core_mains: list[Path] = []
     demo_mains: list[Path] = []
-    for main in sorted([*root.glob("cmd/*/main.go"), *root.glob("app/main.go")]):
+    for main in sorted(_iter_entry_mains(root)):
         docs = ""
         for readme in ("README.md", "README.rst", "README.txt"):
             candidate = main.parent / readme
@@ -892,19 +884,6 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
             demo_mains.append(main)
         else:
             core_mains.append(main)
-    for main in core_mains or demo_mains:
-        pkg = main.parent.relative_to(root).as_posix()
-        _add(f"go build -o bin/{main.parent.name} ./{pkg}")
-    if (root / "db" / "schema.sql").is_file():
-        _add("mysql < db/schema.sql")
-    if (root / "pyproject.toml").is_file():
-        pyproject = (root / "pyproject.toml").read_text(encoding="utf-8", errors="ignore")
-        if "[tool.poetry]" in pyproject or "poetry" in pyproject.lower():
-            _add("poetry install")
-    if (root / "alembic.ini").is_file() or (root / "alembic").is_dir():
-        _add("alembic upgrade head")
-    if (root / "app" / "main.py").is_file():
-        _add("uvicorn app.main:app --reload")
     for name in ("README.md", "README.rst", "QUICKSTART.md"):
         path = root / name
         if not path.is_file():
@@ -937,8 +916,6 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
                     if _EXAMPLE_CMD_HINT_RE.search(command) and core_mains:
                         continue
                     _add(normalize_go_build_command(command, root))
-    if (root / "example.env").is_file():
-        _add("cp example.env .env")
     has_compose = any(
         token in item.lower()
         for item in commands
@@ -954,30 +931,52 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
         commands.append(preferred_schema)
     if has_compose:
         commands = [item for item in commands if "./bin/" not in item]
-    commands = [f"poetry run {item}" if item.startswith("uvicorn ") else item for item in commands]
-    commands.sort(key=_install_command_priority)
     return commands[:limit]
 
 
 def architecture_core_packages(repo_root: Path) -> list[str]:
     """Entry-point packages plus import-graph neighbors they own.
 
-    Discovers cmd/*/main.go, app/main.go, domain/, and service packages.
+    Discovers entry mains, import-graph neighbors, and package roots.
     Empty means the architecture gate must fail closed.
     """
     from repo_wiki.generator.process_roles import derive_process_roles, path_looks_like_example_cmd
 
     cores: list[str] = []
     entry_rels: list[str] = []
+    example_rels: set[str] = set()
     for item in derive_process_roles(repo_root):
+        rel = str(Path(item.rel_main).parent.as_posix())
         if item.example or path_looks_like_example_cmd(item.rel_main):
+            if rel:
+                example_rels.add(rel)
             continue
         if not ({"rest_entry", "data_plane", "http_server"} & set(item.kinds)):
             continue
-        rel = str(Path(item.rel_main).parent.as_posix())
         if rel and rel not in cores:
             cores.append(rel)
             entry_rels.append(rel)
+
+    for main in _iter_entry_mains(repo_root):
+        if path_looks_like_example_cmd(main.as_posix()):
+            continue
+        rel = main.parent.relative_to(repo_root).as_posix()
+        if rel in example_rels:
+            continue
+        if rel and rel not in cores:
+            cores.append(rel)
+            entry_rels.append(rel)
+    domain = repo_root / "domain"
+    if domain.is_dir() and "domain" not in cores:
+        cores.append("domain")
+    for candidate in (
+        repo_root / "app" / "api" / "routes",
+        repo_root / "src" / "app" / "api" / "routes",
+    ):
+        if candidate.is_dir():
+            rel = candidate.relative_to(repo_root).as_posix()
+            if rel not in cores:
+                cores.append(rel)
 
     try:
         from repo_wiki.generator.compose_evidence import load_repo_import_edges
@@ -985,30 +984,29 @@ def architecture_core_packages(repo_root: Path) -> list[str]:
         edges = load_repo_import_edges(repo_root)
     except Exception:
         edges = set()
-    for src, dest in edges:
-        src_s = str(src).replace("\\", "/")
-        dest_s = str(dest).replace("\\", "/")
-        if not any(src_s == rel or src_s.startswith(rel + "/") for rel in entry_rels):
-            continue
-        pack = _owned_implementation_package(dest_s)
-        if pack and pack not in cores:
-            cores.append(pack)
-
-    if (repo_root / "app" / "main.go").is_file() and "app" not in cores:
-        cores.append("app")
-    if (repo_root / "domain").is_dir() and "domain" not in cores:
-        cores.append("domain")
-    for rel in ("app/api/routes", "app/services"):
-        if (repo_root / rel).exists() and rel not in cores:
-            if rel != "app/services" or (repo_root / "app" / "api" / "routes").exists():
-                cores.append(rel)
+    seeds = list(dict.fromkeys([*entry_rels, *cores]))
+    reachable = set(seeds)
+    changed = True
+    while changed:
+        changed = False
+        for src, dest in edges:
+            src_s = str(src).replace("\\", "/")
+            dest_s = str(dest).replace("\\", "/")
+            if not any(src_s == rel or src_s.startswith(rel + "/") for rel in reachable):
+                continue
+            pack = _owned_implementation_package(dest_s) or dest_s
+            if pack and pack not in reachable:
+                reachable.add(pack)
+                changed = True
+                if pack not in cores:
+                    cores.append(pack)
     return cores
 
 
 def _owned_implementation_package(spec: str) -> str:
     parts = [part for part in spec.replace("\\", "/").split("/") if part]
     for index, part in enumerate(parts):
-        if part in {"internal", "pkg", "app", "domain"} and index + 1 < len(parts):
+        if part in {"internal", "pkg", "app", "domain", "src"} and index + 1 < len(parts):
             return "/".join(parts[index : index + 2])
     return ""
 
@@ -1033,34 +1031,111 @@ def has_architecture_core_citation(markdown: str, repo_root: Path) -> bool:
     return all(rel.lower() in cited for rel in cores)
 
 
+def discover_model_classes(repo_root: Path) -> list[tuple[str, str]]:
+    """SQLModel / SQLAlchemy / GORM model classes anywhere under the repo."""
+    found: list[tuple[str, str]] = []
+    class_re = re.compile(r"^class\s+([A-Z][A-Za-z0-9_]+)\s*\(([^)]*)\)", re.M)
+    table_true = re.compile(r"\btable\s*=\s*True\b")
+    tablename = re.compile(r"__tablename__\s*=")
+    gorm = re.compile(r"type\s+([A-Z][A-Za-z0-9_]+)\s+struct\b")
+    for path in repo_root.rglob("*"):
+        if not path.is_file() or any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        if path.suffix == ".py":
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for match in class_re.finditer(text):
+                name, bases = match.group(1), match.group(2)
+                window = text[match.start() : match.start() + 400]
+                if (
+                    table_true.search(window)
+                    or tablename.search(window)
+                    or re.search(r"SQLModel|DeclarativeBase|declarative_base", bases)
+                ):
+                    found.append((name, rel))
+        elif path.suffix == ".go" and not path.name.endswith("_test.go"):
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if 'gorm:"' not in text and "gorm.Model" not in text:
+                continue
+            for match in gorm.finditer(text):
+                found.append((match.group(1), rel))
+    return found
+
+
+def repo_has_routes_or_db(repo_root: Path) -> bool:
+    if any(path.suffix == ".sql" for path in repo_root.rglob("*.sql") if path.is_file()):
+        return True
+    for path in repo_root.rglob("*"):
+        if not path.is_file() or any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
+            continue
+        name = path.name.lower()
+        if name in {"alembic.ini"} or "migration" in path.as_posix().lower():
+            return True
+        if path.suffix.lower() not in {".py", ".go"}:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if re.search(r"@(?:app|router)\.(get|post|put|delete)|HandleFunc|gin\.|chi\.", text):
+            return True
+        if re.search(r"sqlmodel|sqlalchemy|gorm\.|psycopg|asyncpg", text, flags=re.I):
+            return True
+    return False
+
+
 def data_model_required_sources(repo_root: Path) -> list[str]:
     """Model packages that a data-model page must cite when they exist.
 
     ``schema.sql`` alone is not enough when GORM/SQLAlchemy model sources exist.
     """
     required: list[str] = []
-    if (repo_root / "internal" / "models").is_dir():
-        required.append("internal/models")
-    if (repo_root / "domain").is_dir():
-        required.append("domain")
-    if (repo_root / "app" / "models" / "domain").is_dir():
-        required.append("app/models/domain")
-    elif (repo_root / "app" / "models").is_dir():
-        required.append("app/models")
+    for name, rel in discover_model_classes(repo_root):
+        del name
+        pack = str(Path(rel).parent.as_posix())
+        if pack not in required:
+            required.append(pack if pack != "." else rel)
     for pack in _gorm_struct_packages(repo_root):
         if pack not in required:
             required.append(pack)
-    for sql in sorted(repo_root.glob("*.sql")):
-        required.append(sql.name)
-    if (repo_root / "db" / "schema.sql").is_file() and "db/schema.sql" not in required:
-        required.append("db/schema.sql")
-    migrations = repo_root / "app" / "db" / "migrations"
-    alembic = repo_root / "alembic"
-    if migrations.exists() and any(migrations.rglob("*")):
-        required.append("app/db/migrations")
-    elif alembic.is_dir() and any(alembic.rglob("*.py")):
-        required.append("alembic")
+    classes_found = bool(discover_model_classes(repo_root) or _gorm_struct_packages(repo_root))
+    if not classes_found:
+        for sql in repo_root.rglob("*.sql"):
+            if sql.is_file() and not any(part in _SKIP_DISCOVERY_DIRS for part in sql.parts):
+                rel = sql.relative_to(repo_root).as_posix()
+                if rel not in required:
+                    required.append(rel)
+        for pack in _model_package_dirs(repo_root):
+            if pack not in required:
+                required.append(pack)
+        for pack in _migration_source_dirs(repo_root):
+            if pack not in required:
+                required.append(pack)
     return required
+
+
+def _model_package_dirs(repo_root: Path) -> list[str]:
+    found: list[str] = []
+    for path in repo_root.rglob("*"):
+        if not path.is_dir() or any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
+            continue
+        if path.name != "models":
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        if rel not in found:
+            found.append(rel)
+    return found
+
+
+def _migration_source_dirs(repo_root: Path) -> list[str]:
+    found: list[str] = []
+    for path in repo_root.rglob("*"):
+        if not path.is_dir() or any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        if path.name == "versions" and any(
+            part in {"alembic", "migrations"} for part in path.parts
+        ):
+            if rel not in found:
+                found.append(rel)
+    return found
 
 
 def _gorm_struct_packages(repo_root: Path) -> list[str]:
@@ -1092,11 +1167,15 @@ def has_data_model_source_citation(markdown: str, repo_root: Path) -> bool:
     """True when a data-model page cites every existing model package."""
     required = data_model_required_sources(repo_root)
     optional = data_model_optional_sources(repo_root)
-    if not required and not optional:
-        return True
+    classes = discover_model_classes(repo_root)
+    if not required and not optional and not classes:
+        return not repo_has_routes_or_db(repo_root)
     cited = " ".join(
         match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")
     ).lower()
+    blob = markdown or ""
+    if classes and not all(name in blob for name, _rel in classes):
+        return False
     if required and not all(need.lower() in cited for need in required):
         return False
     if (repo_root / "internal" / "models").is_dir() and not _has_go_struct_definition_cite(

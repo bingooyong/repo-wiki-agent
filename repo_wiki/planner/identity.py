@@ -148,6 +148,10 @@ def _is_product_sentence(text: str | None) -> bool:
 def _looks_like_heading(line: str) -> bool:
     if line.lower() in _GENERIC_README_TITLES:
         return False
+    if _is_rst_noise_line(line) or _RST_SUBSTITUTION_LINE_RE.fullmatch(line):
+        return False
+    if line.startswith("|") and line.endswith("|"):
+        return False
     if len(line) > 80 or line.endswith("."):
         return False
     return True
@@ -181,33 +185,68 @@ def _trim_identity_description(text: str, limit: int = 200) -> str:
     return cut.rstrip()
 
 
-def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
-    substantial: list[str] = []
-    for line in content.splitlines():
-        stripped = line.strip()
-        if (
-            _is_rst_noise_line(stripped)
-            or _README_NOTE_RE.search(stripped)
-            or _README_COMMAND_RE.match(stripped)
+_HTML_H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+_HTML_ALIGN_P_RE = re.compile(r"<p[^>]*align[^>]*>.*?</p>", re.IGNORECASE | re.DOTALL)
+_HTML_TAG_RE = re.compile(r"</?[^>]+>")
+_NOTE_LINE_RE = re.compile(
+    r"^(?:\*\*)?(?:NOTE|WARNING|IMPORTANT|CAUTION)\b",
+    re.IGNORECASE,
+)
+_CHANGELOG_BULLET_RE = re.compile(r"^[-*]\s+v?\d+")
+_ARCHIVED_LINE_RE = re.compile(r"\barchiv|\bunmaintained|no longer maintained", re.I)
+_MASTER_VERSION_RE = re.compile(
+    r"(?:master|main|current(?:\s+branch)?)\s+is\s+v?(\d+(?:\.\d+){0,2})",
+    re.IGNORECASE,
+)
+
+
+def _readme_visible_lines(content: str) -> list[str]:
+    text = _HTML_ALIGN_P_RE.sub("", content or "")
+    text = _HTML_H1_RE.sub(lambda match: "# " + match.group(1), text)
+    text = _HTML_TAG_RE.sub(" ", text)
+    lines: list[str] = []
+    for raw in text.splitlines():
+        stripped = " ".join(raw.split()).strip()
+        if not stripped or re.fullmatch(r"#+", stripped):
+            continue
+        if _NOTE_LINE_RE.match(stripped) or _README_NOTE_RE.search(stripped):
+            continue
+        if _ARCHIVED_LINE_RE.search(stripped) or _CHANGELOG_BULLET_RE.match(stripped):
+            continue
+        heading = stripped.lstrip("#").strip()
+        if heading and (
+            _is_rst_noise_line(heading) or _RST_SUBSTITUTION_LINE_RE.fullmatch(heading)
         ):
             continue
-        if stripped.startswith("#"):
-            stripped = stripped.lstrip("#").strip()
-            if not stripped or _is_rst_noise_line(stripped) or _README_NOTE_RE.search(stripped):
+        if (
+            _is_rst_noise_line(stripped)
+            or _README_COMMAND_RE.match(stripped)
+            or _is_markdown_badge_line(stripped)
+        ):
+            continue
+        lines.append(stripped)
+    return lines
+
+
+def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
+    lines = _readme_visible_lines(content)
+    title: str | None = None
+    body: list[str] = []
+    for line in lines:
+        heading = line.lstrip("#").strip() if line.startswith("#") else ""
+        if heading:
+            if _is_rst_noise_line(heading) or not _looks_like_heading(heading):
                 continue
-        substantial.append(stripped)
-        if len(substantial) >= 8:
+            if title is None:
+                title = heading
+            continue
+        if _looks_like_heading(line) and title is None:
+            title = line
+            continue
+        if _is_product_sentence(line):
+            body.append(line)
             break
-    if not substantial:
-        return None, None
-    first = substantial[0]
-    title: str | None = first if _looks_like_heading(first) else None
-    body_parts = substantial[1:] if title else substantial
-    if not body_parts and title:
-        description: str | None = title
-    else:
-        joined = " ".join(body_parts).strip()
-        description = joined or title
+    description = body[0] if body else title
     if description:
         description = _trim_identity_description(description)
     if not _is_product_sentence(description):
@@ -375,26 +414,28 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
 
 
 def _latest_product_version(root: Path) -> str | None:
-    """README badge / latest changelog heading / latest git tag. Skip archived."""
-    readme_hits: list[str] = []
+    """README 'master is vN' / title, then latest changelog, then git tag.
+
+    Never read go.mod ``go`` / toolchain lines. Skip archived changelog sections.
+    """
     for name in _README_CANDIDATE_NAMES:
         path = root / name
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
-        if re.search(r"archiv|unmaintained|no longer maintained", text[:800], flags=re.I):
-            continue
-        for match in re.finditer(
-            r"(?:badge|shields|version)[^)\n]{0,80}(?:/v|v)?(\d+\.\d+(?:\.\d+)?)",
-            text[:1200],
-            flags=re.I,
-        ):
-            readme_hits.append(match.group(1))
-        title = re.search(r"^#\s+.+\bv(\d+\.\d+(?:\.\d+)?)\b", text, flags=re.M)
+        master = _MASTER_VERSION_RE.search(text)
+        if master:
+            return master.group(1)
+        title = re.search(r"^#\s+.+\bv(\d+(?:\.\d+){0,2})\b", text, flags=re.M)
         if title:
-            readme_hits.append(title.group(1))
-    if readme_hits:
-        return readme_hits[0]
+            return title.group(1)
+    go_mod = root / "go.mod"
+    go_toolchain = ""
+    if go_mod.is_file():
+        go_toolchain = go_mod.read_text(encoding="utf-8", errors="ignore")
+    toolchain_versions = set(
+        re.findall(r"(?m)^\s*(?:go|toolchain)\s+v?(\d+\.\d+(?:\.\d+)?)", go_toolchain)
+    )
     for name in ("CHANGELOG.md", "CHANGES.md", "HISTORY.md"):
         path = root / name
         if not path.is_file():
@@ -405,8 +446,10 @@ def _latest_product_version(root: Path) -> str | None:
             text,
             flags=re.M,
         ):
-            window = text[max(0, match.start() - 80) : match.start()]
+            window = text[max(0, match.start() - 80) : match.start() + 40]
             if re.search(r"archiv", window, flags=re.I):
+                continue
+            if match.group(1) in toolchain_versions:
                 continue
             return match.group(1)
     try:
@@ -418,7 +461,7 @@ def _latest_product_version(root: Path) -> str | None:
         )
         if tagged.returncode == 0:
             hit = re.search(r"v?(\d+\.\d+(?:\.\d+)?)", tagged.stdout.strip())
-            if hit:
+            if hit and hit.group(1) not in toolchain_versions:
                 return hit.group(1)
     except OSError:
         return None

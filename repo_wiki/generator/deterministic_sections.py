@@ -12,7 +12,6 @@ from typing import Any
 
 from repo_wiki.verifier.handbook import (
     existing_readme_names,
-    preferred_source_listen_port,
     read_readme_text,
 )
 
@@ -1031,210 +1030,19 @@ def _go_local_db_start_lines(root: Path) -> list[str]:
     return lines
 
 
-def _health_check_url(root: Path) -> str:
-    """Prefer a source listen port; otherwise use a README localhost health URL."""
-    from repo_wiki.verifier.handbook import collect_doc_listen_ports
-    from repo_wiki.verifier.source_facts import load_health_routes
-
-    routes = load_health_routes(root)
-    path = routes[0] if routes else "/health"
-    port = preferred_source_listen_port(root)
-    if port is None:
-        docs = collect_doc_listen_ports(read_readme_text(root))
-        port = min(docs) if docs else None
-    if port is None:
-        return path
-    return f"http://localhost:{port}{path}"
-
-
-def _primary_go_binary(root: Path) -> str:
-    from repo_wiki.generator.process_roles import derive_process_roles
-
-    roles = derive_process_roles(root)
-    rest = next((item for item in roles if "rest_entry" in item.kinds), None)
-    if rest is not None:
-        return rest.name
-    if roles:
-        return roles[0].name
-    cmd = root / "cmd"
-    if cmd.is_dir():
-        for child in sorted(cmd.iterdir()):
-            if child.is_dir() and (child / "main.go").is_file():
-                return child.name
-    if (root / "app" / "main.go").is_file():
-        return "app"
-    return "app"
-
-
-def build_go_install_section(root: Path) -> str:
-    health_url = _health_check_url(root)
-    binary = _primary_go_binary(root)
-    compose = cite_readme_line(root, "podman-compose up")
-    schema = cite_readme_line(root, "schema.sql")
-    build = cite_readme_line(root, f"go build -o bin/{binary}") or cite_readme_line(
-        root, "go build -o bin/"
-    )
-    run = cite_readme_line(root, f"./bin/{binary}") or cite_readme_line(root, "./bin/")
-    health = cite_readme_line(root, "/health")
-    schema_cmd = _schema_import_command(root) or "# 按仓库 README 导入 schema"
-    from repo_wiki.generator.process_roles import derive_process_roles
-
-    roles = derive_process_roles(root)
-    rest = next((item for item in roles if "rest_entry" in item.kinds), None)
-    pkg = Path(rest.rel_main).parent.as_posix() if rest and rest.rel_main else ""
-    if not pkg:
-        if (root / "cmd" / binary / "main.go").is_file():
-            pkg = f"cmd/{binary}"
-        elif (root / "app" / "main.go").is_file():
-            pkg = "app"
-        else:
-            pkg = f"cmd/{binary}"
-    return "\n".join(
-        [
-            "## 安装步骤",
-            "",
-            "容器路径与本地路径二选一。",
-            "",
-            "### 路径 A：容器编排",
-            "",
-            f"1. 启动编排服务。 {compose}",
-            "",
-            "```bash",
-            "podman-compose up -d",
-            "```",
-            "",
-            f"2. 导入一次数据库结构。 {schema}",
-            "",
-            "```bash",
-            "# 容器路径：导入一次结构",
-            schema_cmd,
-            "```",
-            "",
-            f"3. 用源码监听端口检查健康状态。 {health}",
-            "",
-            "```bash",
-            f"curl {health_url}",
-            "```",
-            "",
-            "### 路径 B：本地编译",
-            "",
-            f"1. 先按 README 启动本地依赖服务。 {cite_readme_line(root, 'podman run')}",
-            "",
-            "```bash",
-            *_go_local_db_start_lines(root),
-            "```",
-            "",
-            f"2. 再导入结构。 {cite_readme_line(root, 'schema.sql', last=True) or schema}",
-            "",
-            "```bash",
-            "# 本地路径：导入结构",
-            schema_cmd,
-            "```",
-            "",
-            f"3. 编译主 REST/Web 服务。 {build}",
-            "",
-            "```bash",
-            f"go build -o bin/{binary} ./{pkg}",
-            "```",
-            "",
-            f"4. 启动本地进程并检查健康状态。 {run} {health}",
-            "",
-            "```bash",
-            f"./bin/{binary}",
-            f"curl {health_url}",
-            "```",
-            "",
-        ]
-    )
-
-
-def build_fastapi_install_section(root: Path) -> str:
-    env = cite_readme_line(root, "APP_ENV") or cite_readme_line(root, "SECRET_KEY")
-    poetry = cite_readme_line(root, "poetry install")
-    alembic = cite_readme_line(root, "alembic upgrade")
-    uvicorn = cite_readme_line(root, "uvicorn app.main:app")
-    pg = cite_readme_line(root, "docker run") or cite_readme_line(root, "POSTGRES")
-    compose_db = cite_readme_line(root, "docker-compose up") or cite_readme_line(
-        root, "docker compose up"
-    )
-    docker_line = _first_readme_command(root, "docker run") or _first_readme_command(
-        root, "podman run"
-    )
-    poetry_line = _first_readme_command(root, "poetry install") or "poetry install"
-    alembic_line = _poetry_run(
-        root, _first_readme_command(root, "alembic upgrade") or "alembic upgrade head"
-    )
-    uvicorn_line = _poetry_run(
-        root, _first_readme_command(root, "uvicorn") or "uvicorn app.main:app --reload"
-    )
-    compose_lines = _readme_commands(root, "docker-compose up") or _readme_commands(
-        root, "docker compose up"
-    )
-    env_block = _readme_env_block(root)
-    docker_block = docker_line or "# 按仓库 README 启动数据库"
-    compose_block = "\n".join(compose_lines) if compose_lines else "# 按仓库 README 启动编排"
-    return "\n".join(
-        [
-            "## 安装步骤",
-            "",
-            "容器路径与本地路径二选一。",
-            "",
-            "### 路径 A：本地开发",
-            "",
-            f"1. 创建 `.env`（alembic `env.py` 会加载应用设置，必须先有 APP_ENV、DATABASE_URL、SECRET_KEY）。 {env}",
-            "",
-            "```bash",
-            env_block,
-            "```",
-            "",
-            f"2. 先启动 PostgreSQL。 {pg}",
-            "",
-            "```bash",
-            docker_block,
-            "```",
-            "",
-            f"3. 安装依赖。 {poetry}",
-            "",
-            "```bash",
-            poetry_line,
-            "```",
-            "",
-            f"4. 迁移数据库。 {alembic}",
-            "",
-            "```bash",
-            alembic_line,
-            "```",
-            "",
-            f"5. 启动应用。 {uvicorn}",
-            "",
-            "```bash",
-            uvicorn_line,
-            "```",
-            "",
-            "### 路径 B：Compose",
-            "",
-            f"1. 先创建 `.env`（compose 通过 env_file 注入 APP_ENV、DATABASE_URL、SECRET_KEY）。 {env}",
-            "",
-            "```bash",
-            env_block,
-            "```",
-            "",
-            f"2. 按仓库文档启动编排。 {compose_db}",
-            "",
-            "```bash",
-            compose_block,
-            "```",
-            "",
-        ]
-    )
-
-
 def build_install_section(root: Path) -> str:
-    if _repo_is_go(root):
-        return build_go_install_section(root)
-    if _repo_is_python(root):
-        return build_fastapi_install_section(root)
-    return ""
+    """Copy install commands from this repo's docs only. No templates."""
+    from repo_wiki.verifier.handbook import collect_repo_install_commands
+
+    commands = [
+        item for item in collect_repo_install_commands(root) if item and not item.endswith("\\")
+    ]
+    if not commands:
+        return ""
+    lines = ["## 安装步骤", ""]
+    for index, command in enumerate(commands, start=1):
+        lines.extend([f"{index}. `{command}`", "", "```bash", command, "```", ""])
+    return "\n".join(lines)
 
 
 def build_go_role_section(root: Path) -> str:
@@ -1746,25 +1554,24 @@ def rewrite_checkout_directory_name(content: str, root: Path) -> str:
 
 
 def build_verify_section(root: Path) -> str:
-    if _repo_is_go(root):
-        health = cite_readme_line(root, "/health")
-        url = _health_check_url(root)
-        return (
-            "## 启动与验证\n\n"
-            f"1. 按安装步骤完成编排或本地编译。\n\n"
-            f"2. 用源码健康检查确认进程存活：`curl {url}` {health}\n"
-        )
-    if (root / "app" / "main.py").is_file():
-        from repo_wiki.verifier.source_facts import load_health_routes
+    """Emit compose healthcheck URLs only. No invented /health or uvicorn."""
+    from repo_wiki.verifier.source_facts import load_compose_healthcheck_urls
 
-        routes = load_health_routes(root)
-        path = routes[0] if routes else "/"
-        return (
-            "## 启动与验证\n\n"
-            "1. 按安装步骤准备 `.env` 并完成迁移。\n\n"
-            f"2. 用真实路由确认进程存活：`curl http://127.0.0.1:8000{path}`\n"
-        )
-    return ""
+    urls = load_compose_healthcheck_urls(root)
+    if not urls:
+        return ""
+    documented = cite_readme_line(root, "/health") or cite_readme_line(root, "/healthz")
+    lines = ["## 启动与验证", ""]
+    for index, target in enumerate(urls, start=1):
+        curl = target
+        if curl.startswith(":"):
+            curl = f"http://127.0.0.1{curl}"
+        if not curl.startswith("curl"):
+            curl = f"curl {curl}"
+        suffix = f" {documented}" if documented else ""
+        lines.append(f"{index}. `{curl}`{suffix}")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def build_core_service_section(root: Path, *, page_id: str = "", title: str = "") -> str:
@@ -1823,12 +1630,6 @@ def apply_deterministic_rewrites(
         pass
     text = re.sub(r"^.*安全实现见.*$", "", text, flags=re.M)
     text = re.sub(r"<cite>\s*[^<]*_test\.go:[^<]*</cite>", "", text, flags=re.I)
-    if is_install_owner_page(page_id=page_id, title=title) or (
-        not page_id and title in {"安装与配置", "安装指南"}
-    ):
-        section = build_install_section(root)
-        if section:
-            text = replace_h2_section(text, ("安装步骤",), section)
     arch_like = "架构" in (category or "") or "架构" in (title or "")
     if arch_like and is_architecture_owner_page(page_id=page_id, title=title):
         role = build_go_role_section(root)

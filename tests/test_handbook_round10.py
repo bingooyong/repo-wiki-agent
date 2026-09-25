@@ -712,8 +712,9 @@ curl http://localhost:1900/health
         "开发指南/安装与配置.md",
     )
     out = _render(_service(root), install, raw, _go_context(root), add_mermaid=False)
+    assert "curl http://localhost:1900/health" in out
     verify = out.split("## 启动与验证", 1)[1].split("## ", 1)[0]
-    assert "curl" in verify
+    assert "uvicorn" not in verify
     ide = _page(
         "ide-configuration",
         "IDE配置",

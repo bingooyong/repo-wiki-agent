@@ -113,6 +113,8 @@ def _parse_compose_fallback(text: str) -> tuple[list[str], list[tuple[str, str]]
             current = ""
             in_depends = False
             continue
+        if raw.lstrip().startswith("#"):
+            continue
         svc = re.match(r"^  ([A-Za-z][A-Za-z0-9_-]*):\s*$", raw)
         if svc and section == "services":
             current = svc.group(1)
@@ -239,31 +241,19 @@ def load_repo_import_edges(root: Path) -> set[tuple[str, str]]:
     from repo_wiki.scanner.go_routes import extract_go_internal_import_edges
 
     edges: set[tuple[str, str]] = set()
+    skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__", "testdata"}
     go_files: list[tuple[str, str]] = []
-    for base in (root / "cmd", root / "internal", root / "pkg"):
-        if not base.is_dir():
+    py_files: list[tuple[str, str]] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or any(part in skip for part in path.parts):
             continue
-        for path in base.rglob("*.go"):
-            if path.name.endswith("_test.go"):
-                continue
-            go_files.append(
-                (
-                    path.relative_to(root).as_posix(),
-                    path.read_text(encoding="utf-8", errors="ignore"),
-                )
-            )
+        rel = path.relative_to(root).as_posix()
+        if path.suffix == ".go" and not path.name.endswith("_test.go"):
+            go_files.append((rel, path.read_text(encoding="utf-8", errors="ignore")))
+        elif path.suffix == ".py":
+            py_files.append((rel, path.read_text(encoding="utf-8", errors="ignore")))
     if go_files:
         edges.update(extract_go_internal_import_edges(go_files))
-    py_files: list[tuple[str, str]] = []
-    app = root / "app"
-    if app.is_dir():
-        for path in app.rglob("*.py"):
-            py_files.append(
-                (
-                    path.relative_to(root).as_posix(),
-                    path.read_text(encoding="utf-8", errors="ignore"),
-                )
-            )
     if py_files:
         edges.update(extract_python_app_import_edges(py_files))
     return edges

@@ -72,6 +72,8 @@ def _read_text(path: Path) -> str:
 def _quality_state_for(meta: dict[str, Any], llm_summary: dict[str, Any]) -> tuple[str, list[str]]:
     reasons = [str(v) for v in meta.get("reasons", []) if str(v)]
     mode = str(meta.get("generation_mode") or "").lower()
+    if mode == "dropped":
+        return "DROPPED", reasons or ["dropped_unclean_page"]
     if mode == "fallback":
         return "DEGRADED", reasons or ["fallback_generation"]
     if mode == "rule":
@@ -213,6 +215,8 @@ def build_generation_quality_documents(
             "pass_count": counts.get("PASS", 0),
             "fallback_count": counts.get("FALLBACK", 0),
             "degraded_count": counts.get("DEGRADED", 0),
+            "dropped_count": counts.get("DROPPED", 0)
+            + int(llm_summary.get("dropped_page_count") or 0),
             "unidentified_count": counts.get("UNIDENTIFIED", 0),
             "llm_mode": llm_summary.get("mode"),
             "fallback_page_count": llm_summary.get("fallback_page_count", 0),

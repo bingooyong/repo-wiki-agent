@@ -354,6 +354,7 @@ class QoderLikeSeverityThreshold(SeverityThreshold):
         "QODER_HANDBOOK_IMPORT_CONSISTENCY",
         "QODER_HANDBOOK_ROLE_CONSISTENCY",
         "QODER_HANDBOOK_SOURCE_FACTS",
+        "QODER_HANDBOOK_ROUTE_CROSSCHECK",
         "QODER_SOURCE_EVIDENCE_LOW",
         "SOURCE_DOC_MISMATCH",
         "STALE_DOC_REFERENCE",
@@ -524,6 +525,7 @@ class QoderLikeVerifierService(VerifierService):
             self._check_handbook_import_consistency(),
             self._check_handbook_role_consistency(),
             self._check_handbook_source_facts(),
+            self._check_handbook_route_crosscheck(),
             self._check_qoder_source_evidence(),
         ]
 
@@ -3158,6 +3160,36 @@ class QoderLikeVerifierService(VerifierService):
         return self._handbook_pass(
             "qoder-handbook-source-facts",
             "Handbook facts match parsed compose, tables, flags, types, and route files",
+        )
+
+    def _check_handbook_route_crosscheck(self) -> CheckResult:
+        from repo_wiki.scanner.fastapi_routes import fastapi_route_inventory_mismatch
+
+        repo_root = self._handbook_repo_root()
+        files: list[tuple[str, str]] = []
+        skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
+        for path in repo_root.rglob("*.py"):
+            if any(part in skip for part in path.parts):
+                continue
+            files.append(
+                (
+                    path.relative_to(repo_root).as_posix(),
+                    path.read_text(encoding="utf-8", errors="ignore"),
+                )
+            )
+        if not files:
+            return self._skip_check("qoder-handbook-route-crosscheck", "No Python sources")
+        mismatch = fastapi_route_inventory_mismatch(files)
+        if mismatch:
+            return self._handbook_fail(
+                "qoder-handbook-route-crosscheck",
+                "QODER_HANDBOOK_ROUTE_CROSSCHECK",
+                "FastAPI route inventory disagrees with the independent walker",
+                {"mismatch": mismatch[:20]},
+            )
+        return self._handbook_pass(
+            "qoder-handbook-route-crosscheck",
+            "FastAPI route inventory matches the independent walker",
         )
 
     def _handbook_backtick_cite_pages(self) -> list[str]:
