@@ -682,7 +682,8 @@ def test_drop_citations_to_missing_files(tmp_path: Path) -> None:
     text = "见 <cite>README.md:1-1</cite> 和 <cite>docs/DOCUMENTING_SUMMARY.md:545-618</cite>。"
     cleaned = normalize_citation_markup(text, tmp_path)
     assert "README.md:1-1" in cleaned
-    assert "DOCUMENTING_SUMMARY.md" not in cleaned
+    assert "<cite>docs/DOCUMENTING_SUMMARY.md:545-618</cite>" not in cleaned
+    assert "`docs/DOCUMENTING_SUMMARY.md`" in cleaned
 
 
 def test_source_evidence_fails_docs_only_handbook(tmp_path: Path) -> None:

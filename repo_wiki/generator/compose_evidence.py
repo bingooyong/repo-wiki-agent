@@ -326,6 +326,41 @@ def prose_role_contradictions(markdown: str) -> list[str]:
     return found
 
 
+_FORMER_LATTER_ROLE_SWAP_RE = re.compile(
+    r"ccprobe-control[^。\n]{0,80}ccagent[^。\n]{0,40}前者[^。\n]{0,80}"
+    r"(?:主 REST|REST/Web)[^。\n]{0,80}后者[^。\n]{0,80}隧道客户端",
+    re.IGNORECASE,
+)
+_PROBE_AGENT_SCHEDULED_BY_CCAGENT_RE = re.compile(
+    r"probe-agent[^。\n]{0,48}被\s*`?ccagent`?\s*调度",
+    re.IGNORECASE,
+)
+
+
+def generator_role_contradictions(markdown: str, page: object | None = None) -> list[str]:
+    """Composer-only role checks, including 前者/后者 swaps. Does not change the verifier."""
+    title = str(getattr(page, "title", "") or "")
+    page_id = str(getattr(page, "page_id", "") or "")
+    category = getattr(page, "category", None)
+    category_text = str(getattr(category, "value", category) or "")
+    output_path = str(getattr(page, "output_path", "") or "")
+    blob = f"{title} {page_id} {category_text} {output_path}"
+    architecture = "架构" in blob or "architecture" in blob.lower()
+    overview = page_id in {"project-overview"} or title in {
+        "项目概述",
+        "项目概览",
+        "project overview",
+    }
+    found: list[str] = []
+    if architecture:
+        found.extend(prose_role_contradictions(markdown))
+        if _FORMER_LATTER_ROLE_SWAP_RE.search(markdown or ""):
+            found.append("former-latter-role-swap")
+    if overview and _PROBE_AGENT_SCHEDULED_BY_CCAGENT_RE.search(markdown or ""):
+        found.append("probe-agent-scheduled-by-ccagent")
+    return found
+
+
 def derive_product_name(root: Path) -> str:
     """Name the product from README / go.mod / pyproject / remote, never the checkout dir."""
     readme_md = root / "README.md"

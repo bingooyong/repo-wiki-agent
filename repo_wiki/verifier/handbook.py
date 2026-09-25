@@ -15,6 +15,7 @@ HANDBOOK_META_PHRASES: tuple[str, ...] = (
 GENERATOR_META_REJECTION = "Handbook generator meta content"
 EMPTY_CONTENT_REJECTION = "Empty LLM assistant content"
 UNCLOSED_FENCE_REJECTION = "Unclosed fenced code block"
+ROLE_CONTRADICTION_REJECTION = "Architecture role contradiction"
 PAGE_TIMEOUT_REJECTION_PREFIX = "LLM page timeout after"
 PAGE_SERVER_ERROR_REJECTION_PREFIX = "LLM page server error"
 
@@ -24,12 +25,14 @@ _PAGE_LOCAL_QUALITY_REJECTIONS = frozenset(
         GENERATOR_META_REJECTION,
         EMPTY_CONTENT_REJECTION,
         UNCLOSED_FENCE_REJECTION,
+        ROLE_CONTRADICTION_REJECTION,
     }
 )
 
 _CITE_RE = re.compile(r"<cite>\s*([^<]+?)\s*</cite>", re.IGNORECASE)
 _INSTRUCTION_VOICE_RE = re.compile(
     r"不要只标|如果证据不足|不要在此凭空扩展|不要用套话填空|不要过度推断"
+    r"|引用时写|引用时使用"
 )
 _EVIDENCE_META_TALK_RE = re.compile(r"证据片段|当前证据|提供的证据")
 _README_NAMES = ("README.md", "README.rst", "README.txt", "README")

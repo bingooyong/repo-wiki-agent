@@ -242,38 +242,65 @@ def _looks_like_source_cite(value: str, workspace_root: str | Path | None = None
         return False
 
 
+def _cite_path_only(body: str) -> str | None:
+    raw = normalize_citation_ref(body).strip()
+    if raw.lower().startswith("source:"):
+        raw = raw[len("source:") :].lstrip()
+    match = _VALID_CITE_BODY_RE.fullmatch(raw)
+    if match:
+        path_text = match.group("path").strip()
+        return path_text or None
+    return None
+
+
+def collapse_citation_text_gaps(text: str) -> str:
+    """Remove empty slots left when a cite is dropped next to CJK prose."""
+    cleaned = re.sub(r"([\u4e00-\u9fff])[ \t]+([。，；：、])", r"\1\2", text)
+    return re.sub(r"([\u4e00-\u9fff])[ \t]{2,}([\u4e00-\u9fff])", r"\1\2", cleaned)
+
+
 def normalize_citation_markup(text: str, workspace_root: str | Path | None = None) -> str:
     """Rewrite cite blocks so verify sees only ``path:start-end`` targets.
 
     Strips parentheticals, splits comma-joined payloads, remaps README aliases
     onto the real root readme when unique, and drops unrepaired cite bodies.
+    A backticked ``file:line`` keeps the file name in the sentence. A dropped
+    cite keeps that file name instead of leaving an empty slot.
     """
 
     def _rewrite_blocks(match: re.Match[str]) -> str:
         payloads = sanitize_citation_payloads(match.group(2), workspace_root)
-        return "".join(f"<cite>{item}</cite>" for item in payloads)
+        if payloads:
+            return "".join(f"<cite>{item}</cite>" for item in payloads)
+        path_text = _cite_path_only(match.group(2))
+        return f"`{path_text}`" if path_text else ""
 
     def _rewrite_brackets(match: re.Match[str]) -> str:
         payloads = sanitize_citation_payloads(match.group(2), workspace_root)
-        return "".join(f"[cite: {item}]" for item in payloads)
+        if payloads:
+            return "".join(f"[cite: {item}]" for item in payloads)
+        path_text = _cite_path_only(match.group(2))
+        return f"`{path_text}`" if path_text else ""
 
     def _backtick_path_then_line(match: re.Match[str]) -> str:
         path_text = match.group(1)
         if not _looks_like_source_cite(f"{path_text}:{match.group(2)}", workspace_root):
             return match.group(0)
-        return f"<cite>{path_text}:{match.group(2)}</cite>"
+        return f"`{path_text}`<cite>{path_text}:{match.group(2)}</cite>"
 
     def _backtick_cite(match: re.Match[str]) -> str:
         body = match.group(1)
         if not _looks_like_source_cite(body, workspace_root):
             return match.group(0)
-        return f"<cite>{body}</cite>"
+        path_text = _cite_path_only(body) or body.split(":")[0]
+        return f"`{path_text}`<cite>{body}</cite>"
 
     unwrapped = _BACKTICK_WRAPPED_CITE_RE.sub(lambda match: match.group(1), text)
     unwrapped = _BACKTICK_PATH_THEN_LINE_RE.sub(_backtick_path_then_line, unwrapped)
     unwrapped = _BACKTICK_CITE_RE.sub(_backtick_cite, unwrapped)
     rewritten = _CITE_BLOCK_RE.sub(_rewrite_blocks, unwrapped)
-    return _BRACKET_CITE_RE.sub(_rewrite_brackets, rewritten)
+    rewritten = _BRACKET_CITE_RE.sub(_rewrite_brackets, rewritten)
+    return collapse_citation_text_gaps(rewritten)
 
 
 # ============================================================================

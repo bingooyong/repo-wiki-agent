@@ -812,7 +812,21 @@ def dedupe_identical_fences(content: str) -> str:
 
 def strip_header_only_cites(content: str, root: Path) -> str:
     def _keep(match: re.Match[str]) -> str:
-        return "" if is_header_only_cite(match.group(0), root) else match.group(0)
+        if not is_header_only_cite(match.group(0), root):
+            return match.group(0)
+        path = match.group(1).strip()
+        start, end = match.span()
+        line_start = content.rfind("\n", 0, start) + 1
+        line_end = content.find("\n", end)
+        if line_end < 0:
+            line_end = len(content)
+        prefix = content[line_start:start]
+        remainder = (prefix + content[end:line_end]).strip()
+        if prefix.rstrip().endswith(f"`{path}`"):
+            return ""
+        if not remainder:
+            return ""
+        return f"`{path}`"
 
     return _HEADER_CITE_RE.sub(_keep, content)
 

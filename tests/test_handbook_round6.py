@@ -171,10 +171,13 @@ def test_mermaid_ident_sanitizes_reserved_end() -> None:
 
 
 def test_normalize_unwraps_backtick_wrapped_cite() -> None:
+    import re
+
     text = "见 `<cite>app/api/routes/users.py:10-12</cite>` 与 `internal/models/tag.go:4-12`。"
     out = normalize_citation_markup(text)
-    assert "`<cite>" not in out
+    assert not re.search(r"`<cite>[^<]+</cite>`", out)
     assert "<cite>app/api/routes/users.py:10-12</cite>" in out
+    assert "`internal/models/tag.go`" in out
     verifier = QoderLikeVerifierService(Path("."), strict=True)
     assert verifier._handbook_backtick_cite_pages  # attribute exists after impl
 

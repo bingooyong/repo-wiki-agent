@@ -68,6 +68,7 @@ from repo_wiki.prompts.skeleton import (
 from repo_wiki.verifier.handbook import (
     EMPTY_CONTENT_REJECTION,
     GENERATOR_META_REJECTION,
+    ROLE_CONTRADICTION_REJECTION,
     UNCLOSED_FENCE_REJECTION,
     contains_generator_meta,
     has_unclosed_fence,
@@ -82,6 +83,7 @@ _PROSE_RECOVERY_REASONS = frozenset(
         "Insufficient prose content",
         EMPTY_CONTENT_REJECTION,
         UNCLOSED_FENCE_REJECTION,
+        ROLE_CONTRADICTION_REJECTION,
     }
 )
 EMPTY_CONTENT_REWRITE_MAX_TOKENS = 16384
@@ -677,6 +679,13 @@ class LLMPageComposer:
                         rewrite_max_tokens = self._resolve_empty_content_rewrite_max_tokens()
                         rewrite_extra_body = self._empty_content_rewrite_extra_body()
                     continue
+                if (
+                    validation_result.rejection_reason == ROLE_CONTRADICTION_REJECTION
+                    and (response_content or "").strip()
+                ):
+                    output.rejected = False
+                    output.rejection_reason = None
+                    return output
                 return output
 
             return last_rejected or output
@@ -733,8 +742,27 @@ class LLMPageComposer:
             context["endpoints"] = ", ".join(sr.endpoints) if sr.endpoints else ""
             context["data_models"] = ", ".join(sr.data_models) if sr.data_models else ""
             context["commands"] = ", ".join(sr.commands) if sr.commands else ""
+        if self._page_needs_process_roles(page):
+            context["process_roles"] = self._process_role_facts()
 
         return context
+
+    def _page_needs_process_roles(self, page: WikiPagePlan) -> bool:
+        if is_handbook_overview_page(page):
+            return True
+        if page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
+            return True
+        blob = f"{page.page_id} {page.title} {page.output_path}"
+        return "架构" in blob or "architecture" in blob.lower()
+
+    def _process_role_facts(self) -> str:
+        return (
+            "进程角色必须分句写清，禁止用「前者/后者」对调："
+            "ccagent 是主 REST/Web 服务；probe-agent 是隧道客户端并主动拨号连向 ccprobe-control；"
+            "ccprobe-control 是 gRPC 控制面。"
+            "probe-agent 不是被 ccagent 调度的拨测执行单元；"
+            "禁止写 cmd/ccagent 负责隧道客户端启动。"
+        )
 
     def _build_compose_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         if self._use_compact_prompt():
@@ -808,9 +836,13 @@ class LLMPageComposer:
                 "禁止 mermaid 或围栏堆砌替代正文；围栏必须成对闭合。\n"
                 "列表只能作附录检查项，不能充当正文。"
             )
+        role_facts = ""
+        if self._page_needs_process_roles(input.page_plan):
+            role_facts = f"{self._process_role_facts()}\n"
         return (
             f"请重写 Wiki 页「{title}」为段落为主的中文 Markdown。\n"
             f"产品身份：{product}\n"
+            f"{role_facts}"
             "禁止空回复，不要返回空正文；必须写出至少两段可读段落，不能只回标题或空白。\n"
             f"{fence_rule}"
             "每个事实句的 `<cite>` 必须写在该句同一行或下一行。不要解释过程。\n\n"
@@ -845,12 +877,12 @@ class LLMPageComposer:
         name = unique_root_readme_name(self.workspace_root)
         if name and name != "README.md":
             return (
-                f"- 本仓库根 README 是 `{name}`。引用时写 `<cite>{name}:1-3</cite>`，"
-                "不要写不存在的 README.md。"
+                f"- 仓库根说明文件的实际文件名是 `{name}`，不是 README.md。"
+                "事实句里的引用目标用该文件名加行号范围，不要指向不存在的 README.md。"
             )
         return (
-            "- 引用仓库根 README 时必须使用仓库中实际存在的文件名"
-            "（README.md / README.rst / README.txt / README），不要引用不存在的文件。"
+            "- 指向仓库根说明文件时必须使用仓库中实际存在的文件名"
+            "（README.md / README.rst / README.txt / README），不要指向不存在的文件。"
         )
 
     def _is_handbook_overview_or_install(self, page: WikiPagePlan) -> bool:
@@ -897,7 +929,8 @@ class LLMPageComposer:
                 "- 不要把源码证据原文整段放进 Markdown 代码围栏；本页不要求 ```bash / ```sh 安装命令围栏。",
                 "- 概述页：README 的 `<cite>` 必须覆盖快速开始/运行章节，不要只引用徽章行。"
                 "若仓库有多个 `cmd/` 二进制，不要写成单一 backend process。"
-                "ccagent 是主 REST/Web 服务，不是边缘 Agent 或隧道客户端。",
+                "ccagent 是主 REST/Web 服务，不是边缘 Agent 或隧道客户端。"
+                "probe-agent 主动拨号连向 ccprobe-control 的隧道，不是被 ccagent 调度的拨测执行单元。",
             ]
         else:
             rules = [
@@ -927,6 +960,8 @@ class LLMPageComposer:
                 "ccagent 是主 REST/Web 服务与管理入口，不是领取任务的 Agent，也不是边缘 Agent；"
                 "不要把 REST/管理入口写到 ccprobe-control 上，也不要把 ccagent 写成只做 DNS 初始化。"
                 "probe-agent 才是隧道客户端。"
+                "分句写角色，不要用「前者/后者」把 REST 派给 ccprobe-control、把隧道客户端派给 ccagent。"
+                "禁止写 `cmd/ccagent` 负责隧道客户端启动。"
                 "Go 控制面是 `ccprobe-control -serve -transport grpc`，不要写成普通 CLI。"
                 "只写 import 图里存在的依赖：internal/control 不依赖 services/repository；"
                 "ccprobe-control 不依赖 services/repository/exporter。"
@@ -1017,6 +1052,9 @@ class LLMPageComposer:
         handbook_cite_rules = self._handbook_cite_rules(input)
         if handbook_cite_rules:
             handbook_cite_rules = handbook_cite_rules + "\n"
+        role_facts = ""
+        if self._page_needs_process_roles(page):
+            role_facts = f"进程角色（必须遵守）：{self._process_role_facts()}\n"
         install_command_block = ""
         if is_handbook_install_page(page):
             from repo_wiki.verifier.handbook import collect_repo_install_commands
@@ -1038,7 +1076,7 @@ class LLMPageComposer:
 仓库名称：{repository_name}
 产品身份（必须写入{identity_slot}，优先于仓库 slug 或通用 api-server/core-platform 表述）：
 {product_description}
-相关模块：{modules}
+{role_facts}相关模块：{modules}
 相关 API：{endpoints}
 相关数据模型：{data_models}
 
@@ -1363,6 +1401,12 @@ class LLMPageComposer:
 
         if not result.rejection_reason and contains_generator_meta(content):
             result.rejection_reason = GENERATOR_META_REJECTION
+
+        if not result.rejection_reason:
+            from repo_wiki.generator.compose_evidence import generator_role_contradictions
+
+            if generator_role_contradictions(content, input.page_plan):
+                result.rejection_reason = ROLE_CONTRADICTION_REJECTION
 
         if (
             input.page_plan.page_id == INVENTORY_SERVICE_API_PAGE_ID

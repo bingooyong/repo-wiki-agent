@@ -89,6 +89,9 @@ _PROMPT_LEAK_PHRASES = (
     "UNRESOLVED_API_AUTH",
     "UNRESOLVED_API_SCHEMA",
     "UNRESOLVED_API_CALLING_CONVENTIONS",
+    "引用时写",
+    "引用时使用",
+    "本仓库根 README 是",
 )
 _QUALITY_METRIC_LEAK = re.compile(
     r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b|\b21\s*/\s*25\b",
@@ -2594,17 +2597,23 @@ class RepoWikiService:
         content = dedupe_identical_fences(content)
         content = self._fold_citation_only_lines(content)
         content = self._reduce_hedging_when_cited(content)
-        content = self._strip_broken_local_markdown_links(content)
+        content = self._strip_broken_local_markdown_links(content, page)
         content = self._strip_prompt_leakage(content)
         content = self._dedupe_repeated_blocks(content)
         content = self._ensure_minimum_prose_density(content, page)
-        if cites:
-            from repo_wiki.generator.adjacent_cites import attach_adjacent_cites
-            from repo_wiki.generator.deterministic_sections import is_header_only_cite
+        from repo_wiki.generator.adjacent_cites import (
+            attach_adjacent_cites,
+            is_cite_realign_page,
+            realign_irrelevant_cites,
+        )
+        from repo_wiki.generator.deterministic_sections import is_header_only_cite
 
+        if cites:
             cites = [item for item in cites if not is_header_only_cite(item, self.root)]
             if cites:
-                content = attach_adjacent_cites(content, cites)
+                content = attach_adjacent_cites(content, cites, workspace_root=self.root)
+        if is_cite_realign_page(page):
+            content = realign_irrelevant_cites(content, cites, self.root)
 
         content = self._drop_uninventoried_snapshot_api_claims(content, composition_context)
         content = self._rebuild_qoder_toc_from_real_h2s(page, content)
@@ -3375,7 +3384,10 @@ class RepoWikiService:
             prose_lines.append(stripped)
         return len(" ".join(prose_lines))
 
-    def _strip_broken_local_markdown_links(self, content: str) -> str:
+    def _strip_broken_local_markdown_links(self, content: str, page: Any | None = None) -> str:
+        page_rel = str(getattr(page, "output_path", "") or "").replace("\\", "/")
+        page_parent = Path(page_rel).parent if page_rel else Path(".")
+
         def replace(match: re.Match[str]) -> str:
             full = match.group(0)
             target = match.group(1).strip()
@@ -3388,7 +3400,7 @@ class RepoWikiService:
             if not self._is_safe_local_markdown_target(target):
                 return f"`{label}`"
             try:
-                if (self.root / target).exists():
+                if (self.root / page_parent / target).exists():
                     return full
             except OSError:
                 return f"`{label}`"
@@ -3408,6 +3420,7 @@ class RepoWikiService:
         for phrase in _PROMPT_LEAK_PHRASES:
             cleaned = cleaned.replace(phrase, "")
         cleaned = _QUALITY_METRIC_LEAK.sub("", cleaned)
+        cleaned = re.sub(r"^.*(?:引用时写|引用时使用).*$", "", cleaned, flags=re.M)
         return cleaned
 
     def _strip_readme_english_note(self, content: str) -> str:

@@ -200,7 +200,8 @@ def test_missing_citation_target_still_qoder_citation_invalid(tmp_path: Path) ->
         _overview_page("file:missing/nope.py:1"),
         "Project Overview",
     )
-    assert "missing/nope.py" not in normalized
+    assert "<cite>file:missing/nope.py:1</cite>" not in normalized
+    assert "<cite>missing/nope.py:1</cite>" not in normalized
     _write_release_candidate(tmp_path, _overview_page("file:missing/nope.py:1"))
     result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
     assert "QODER_CITATION_INVALID" in result.get("hard_gate_codes", [])
