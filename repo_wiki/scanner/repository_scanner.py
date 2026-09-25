@@ -693,9 +693,14 @@ class RepositoryScanner:
                 r"http\.HandleFunc\(\s*[\"']([^\"']+)[\"']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)", text
             ):
                 path_expr, handler = match.group(1), match.group(2)
+                method_lit = _HTTP_METHOD_LITERALS.get(
+                    handle_func_method(text, match.start(), path_expr)
+                )
+                if method_lit is None:
+                    continue
                 endpoints.append(
                     Endpoint(
-                        method=handle_func_method(text, match.start(), path_expr),
+                        method=method_lit,
                         path=path_expr,
                         module=module_name,
                         handler=handler,
