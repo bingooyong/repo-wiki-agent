@@ -146,19 +146,41 @@ def test_apply_deterministic_rewrites_keep_raw_spans(tmp_path: Path) -> None:
 
 
 def test_cassette_property_all_waves_when_present() -> None:
-    """Replay copies of 25m–25s when the cassette matrix dir is available."""
+    """Every 25m–25s cassette copy keeps code units under outside-code rewrites."""
+    import json
+
+    from repo_wiki.generator.code_safe import empty_inline_spans, map_outside_code
+
     root = Path(os.environ.get("REPO_WIKI_CASSETTE_MATRIX_DIR", "/tmp/cassettes-copy"))
     if not root.is_dir():
         return
     waves = ("25m", "25n", "25o", "25p", "25q", "25r", "25s")
-    seen = 0
+    folders: list[Path] = []
     for repo in ("probe", "fastapi"):
         for wave in waves:
             for name in (f"{repo}-{wave}-raw-cassette", f"{repo}-{wave}"):
                 folder = root / name
                 if folder.is_dir():
-                    seen += 1
+                    folders.append(folder)
                     break
-    if seen == 0:
+    if not folders:
         return
-    assert seen >= 1
+    assert len(folders) == 14, f"expected 14 cassette copies, found {len(folders)}"
+    checked = 0
+    for folder in folders:
+        jsonls = list(folder.rglob("*.jsonl"))
+        assert jsonls, f"missing jsonl in {folder}"
+        for jsonl in jsonls:
+            for line in jsonl.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                raw = str(record.get("raw_reply") or "")
+                if not raw.strip():
+                    continue
+                assert map_outside_code(raw, lambda text: text) == raw
+                smashed = map_outside_code(raw, lambda text: "\u3000".join(text.split(" ")))
+                assert sacred_code_offenders(smashed, raw) == []
+                assert empty_inline_spans(smashed) == empty_inline_spans(raw)
+                checked += 1
+    assert checked >= 14
