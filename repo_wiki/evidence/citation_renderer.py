@@ -24,9 +24,7 @@ _DROP_CITATION_SCHEMES = ("file:", "path:", "relpath:")
 _PLACEHOLDER_CITE_BODY = "start-end"
 _CITE_BLOCK_RE = re.compile(r"(<cite>\s*)([^<]+?)(\s*</cite>)")
 _BACKTICK_CITE_RE = re.compile(r"`((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?)`")
-_BACKTICK_PATH_THEN_LINE_RE = re.compile(
-    r"`((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+)`:(\d+(?:-\d+)?)"
-)
+_BACKTICK_PATH_THEN_LINE_RE = re.compile(r"`((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+)`:(\d+(?:-\d+)?)")
 _BRACKET_CITE_RE = re.compile(r"(\[cite:\s*)([^\]]+?)(\])")
 _CITE_PATH_SUFFIX_RE = re.compile(r"^(.+?)(:\d+(?:-\d+)?(?:\s*\([^)]+\))?)$")
 _CITE_PAREN_RE = re.compile(r"（[^）]*）|\([^)]*\)")

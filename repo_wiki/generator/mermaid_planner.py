@@ -1123,7 +1123,10 @@ class MermaidRenderer:
             if primary_key:
                 pk_type = "string"
                 for attr in attributes:
-                    if isinstance(attr, dict) and mermaid_er_field(str(attr.get("name") or "")) == primary_key:
+                    if (
+                        isinstance(attr, dict)
+                        and mermaid_er_field(str(attr.get("name") or "")) == primary_key
+                    ):
                         pk_type = _mermaid_scalar_type(str(attr.get("type") or "string"))
                         break
                 lines.append(f"        {pk_type} {primary_key} PK")

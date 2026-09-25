@@ -2746,9 +2746,7 @@ class QoderLikeVerifierService(VerifierService):
             ("architecture-overview", "整体架构概览", "architecture"),
         )
         if not pages:
-            return self._skip_check(
-                "qoder-handbook-architecture-core", "Architecture page absent"
-            )
+            return self._skip_check("qoder-handbook-architecture-core", "Architecture page absent")
         repo_root = self._handbook_repo_root()
         missing = [
             page.as_posix()
