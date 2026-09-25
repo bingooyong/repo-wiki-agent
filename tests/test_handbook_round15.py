@@ -83,6 +83,15 @@ def test_role_check_still_fails_genuine_former_latter_swap() -> None:
     assert "ccagent-as-tunnel-client" in prose_role_contradictions(_CCAGENT_STARTS_TUNNEL)
 
 
+def test_overview_negated_not_scheduled_does_not_flag() -> None:
+    ok = "需要注意 probe-agent 不是被 ccagent 调度的拨测执行单元，它独立拨号到 ccprobe-control 维持长连。"
+    treated = "不要把 probe-agent 当作被 ccagent 调度的拨测执行单元：probe-agent 是隧道客户端。"
+    assert generator_role_contradictions(ok, _overview_page()) == []
+    assert generator_role_contradictions(treated, _overview_page()) == []
+    wrong = "probe-agent 被 ccagent 调度执行拨测任务。"
+    assert "probe-agent-scheduled-by-ccagent" in generator_role_contradictions(wrong, _overview_page())
+
+
 def test_role_check_still_fails_rather_than_tunnel_client() -> None:
     text = "ccagent 不是边缘 Agent，而是隧道客户端并主动拨号。"
     assert "ccagent-as-tunnel-client" in prose_role_contradictions(text)

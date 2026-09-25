@@ -371,8 +371,12 @@ def generator_role_contradictions(markdown: str, page: object | None = None) -> 
         found.extend(prose_role_contradictions(markdown))
         if _FORMER_LATTER_ROLE_SWAP_RE.search(markdown or ""):
             found.append("former-latter-role-swap")
-    if overview and _PROBE_AGENT_SCHEDULED_BY_CCAGENT_RE.search(markdown or ""):
-        found.append("probe-agent-scheduled-by-ccagent")
+    if overview:
+        for match in _PROBE_AGENT_SCHEDULED_BY_CCAGENT_RE.finditer(markdown or ""):
+            if re.search(r"不是|并非|不要把|误认为|当作|而非", match.group(0)):
+                continue
+            found.append("probe-agent-scheduled-by-ccagent")
+            break
     return found
 
 

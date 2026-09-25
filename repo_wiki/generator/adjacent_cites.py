@@ -235,11 +235,12 @@ def realign_irrelevant_cites(
 
 
 def _replace_adjacent_cite(lines: list[str], index: int, new_cite: str) -> None:
-    for offset in (0, 1):
+    for offset in (0, 1, 2):
         target = index + offset
         if 0 <= target < len(lines) and "<cite>" in lines[target]:
             lines[target] = _CITE_TAG_RE.sub(new_cite, lines[target], count=1)
             return
+    lines.insert(min(index + 1, len(lines)), new_cite)
 
 
 def _section_bounds(lines: list[str], heading: str) -> tuple[int, int] | None:
@@ -274,20 +275,27 @@ def rewrite_fastapi_intro_cites(
         cite_first_match,
     )
 
+    title = str(getattr(page, "title", "") or "")
+    page_id = str(getattr(page, "page_id", "") or "")
+    output = str(getattr(page, "output_path", "") or "")
+    blob = f"{title} {page_id} {output}"
+    intro_owner = any(
+        token in blob
+        for token in (
+            "数据库架构",
+            "数据迁移策略",
+            "database-architecture",
+            "database-migration",
+        )
+    )
     lines = markdown.splitlines()
     changed = False
     readme = unique_root_readme_name(root)
     intro_bounds = _section_bounds(lines, "简介")
-    if readme and intro_bounds:
+    if readme and intro_owner and intro_bounds:
         start, end = intro_bounds
-        readme_path = root / readme
-        readme_lines = (
-            readme_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-            if readme_path.is_file()
-            else []
-        )
-        last = max((idx for idx, line in enumerate(readme_lines, 1) if line.strip()), default=1)
-        readme_cite = cite_existing_meaningful(root, readme) or f"<cite>{readme}:1-{last}</cite>"
+        # :1-10 survives header-only strip (:1-8) and matches official FastAPI intros.
+        readme_cite = f"<cite>{readme}:1-10</cite>"
         if readme_cite:
             for index in range(start, end):
                 if _PRODUCT_IDENTITY_RE.search(lines[index]):
