@@ -685,9 +685,7 @@ class LLMPageComposer:
                 )
                 score = self._attempt_structure_score(response_content)
                 worse_than_earlier = best_score[0] >= 0 and (
-                    score[0] < best_score[0]
-                    or score[1] < best_score[1]
-                    or score[2] < best_score[2]
+                    score[0] < best_score[0] or score[1] < best_score[1] or score[2] < best_score[2]
                 )
                 still_dirty = bool(output.rejected)
                 if still_dirty or worse_than_earlier:
@@ -701,9 +699,7 @@ class LLMPageComposer:
                         or is_page_timeout_rejection(validation_result.rejection_reason)
                     ) and (attempt == 0 or (attempt == 1 and extra_retry))
                     if still_dirty and can_retry and best_clean is None:
-                        prompt = self._build_prose_recovery_prompt(
-                            input, context, response_content
-                        )
+                        prompt = self._build_prose_recovery_prompt(input, context, response_content)
                         if validation_result.rejection_reason == EMPTY_CONTENT_REJECTION:
                             rewrite_max_tokens = self._resolve_empty_content_rewrite_max_tokens()
                             rewrite_extra_body = self._empty_content_rewrite_extra_body()
@@ -1047,9 +1043,12 @@ class LLMPageComposer:
             elif python_domain:
                 from repo_wiki.generator.deterministic_sections import load_alembic_migration_models
 
-                tables = "、".join(
-                    str(item.get("name")) for item in load_alembic_migration_models(root)[:12]
-                ) or "迁移里 create_table 的表"
+                tables = (
+                    "、".join(
+                        str(item.get("name")) for item in load_alembic_migration_models(root)[:12]
+                    )
+                    or "迁移里 create_table 的表"
+                )
                 rules.append(
                     "- 数据模型页：ER 以 `app/db/migrations/versions` 的表为准"
                     f"（{tables}），并引用该 versions 文件与 `app/models/domain`。"

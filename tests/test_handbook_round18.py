@@ -157,7 +157,10 @@ def test_fastapi_has_no_derived_go_roles(tmp_path: Path) -> None:
         "架构设计/整体架构概览.md",
     )
     out = _service(root)._enforce_qoder_page_contract(
-        page, _pad("# 整体架构概览\n\n## 简介\n\nFastAPI 路由与仓储协作。\n"), None, add_mermaid=False
+        page,
+        _pad("# 整体架构概览\n\n## 简介\n\nFastAPI 路由与仓储协作。\n"),
+        None,
+        add_mermaid=False,
     )
     assert "ccagent" not in out
     assert "probe-agent" not in out
@@ -172,7 +175,9 @@ def test_health_port_is_not_rewritten(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (root / "config.go").write_text('Listen: ":1900"\n', encoding="utf-8")
-    page = _page("health-check", "健康检查", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS, "健康检查.md")
+    page = _page(
+        "health-check", "健康检查", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS, "健康检查.md"
+    )
     markdown = _pad("# 健康检查\n\n探测 `http://localhost:8080/health`。\n")
     out = _service(root)._enforce_qoder_page_contract(page, markdown, None, add_mermaid=False)
     assert "`http://localhost:8080/health`" in out

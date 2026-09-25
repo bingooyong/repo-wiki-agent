@@ -37,9 +37,7 @@ DEFAULT_FASTAPI_SRC = Path(
     os.environ.get("REPO_WIKI_FASTAPI_SRC", "/workspace/fastapi-realworld-example-app")
 )
 DEFAULT_ACC25R = Path(os.environ.get("REPO_WIKI_ACC25R_DIR", "/tmp/acc-25r"))
-DEFAULT_ACCEPTANCE_KIT = Path(
-    os.environ.get("REPO_WIKI_ACCEPTANCE_KIT", "/tmp/acceptance-kit")
-)
+DEFAULT_ACCEPTANCE_KIT = Path(os.environ.get("REPO_WIKI_ACCEPTANCE_KIT", "/tmp/acceptance-kit"))
 WAVES = ("25m", "25n", "25o", "25p", "25q", "25r")
 REPOS = ("probe", "fastapi")
 
@@ -166,7 +164,9 @@ def _code_integrity_violations(
     return found
 
 
-def _acc25r_code_integrity(content: Path | None, cassette: Path, source: Path, acc25r: Path) -> dict:
+def _acc25r_code_integrity(
+    content: Path | None, cassette: Path, source: Path, acc25r: Path
+) -> dict:
     script = acc25r / "code_integrity.py"
     if content is None or not script.is_file():
         return {"violations": None, "empty_spans": None, "unclosed_fences": None}
