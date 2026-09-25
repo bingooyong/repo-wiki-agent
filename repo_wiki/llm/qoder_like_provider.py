@@ -75,18 +75,18 @@ def resolve_qoder_like_llm(
     if str(llm_config.provider or "").strip().lower() == "cassette":
         from repo_wiki.llm.cassette import CassetteLLMProvider
 
-        provider = CassetteLLMProvider.from_env(llm_config)
+        cassette = CassetteLLMProvider.from_env(llm_config)
         log_info(
             "Qoder-like LLM: using CASSETTE replay "
             f"(dir={os.environ.get('REPO_WIKI_LLM_CASSETTE_DIR', '') or '(unset)'}). "
             "No API key is required; cleanup/contract run on recorded raw replies."
         )
         return (
-            provider,
+            cassette,
             llm_config,
             {
                 **summary_base,
-                "effective_provider": getattr(provider, "name", "cassette"),
+                "effective_provider": getattr(cassette, "name", "cassette"),
                 "model": llm_config.model,
                 "mode": "cassette",
                 "mock_reason": None,
