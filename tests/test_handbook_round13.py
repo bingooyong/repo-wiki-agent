@@ -346,7 +346,10 @@ def test_data_model_pages_keep_required_er_after_emit_once(tmp_path: Path) -> No
     service = _service(root)
     context = _py_context(root)
     owner = _page(
-        "data-models-overview", "数据模型", WikiTaxonomyCategory.DATA_MODELS, "数据模型.md"
+        "database-architecture",
+        "数据库架构",
+        WikiTaxonomyCategory.DATA_MODELS,
+        "数据库架构.md",
     )
     satellite = _page(
         "database-migration-strategy",
@@ -409,6 +412,7 @@ def test_database_schema_er_includes_author_id_and_differs(tmp_path: Path) -> No
     schema_txt, ok2, _ = MermaidRenderer().render_diagram_with_validation(schema)
     assert ok1 and ok2
     assert "author_id" in schema_txt
+    assert "ix_articles_slug" in schema_txt or "ix_articles_author_id" in schema_txt
     assert "users" in schema_txt and "articles" in schema_txt
     assert "favorites" not in schema_txt
     assert "followers_to_followings" not in schema_txt

@@ -3177,8 +3177,7 @@ class RepoWikiService:
             mermaid_key = normalize_mermaid_block(rendered)
             is_er = "erDiagram" in rendered
             is_seq = "sequenceDiagram" in rendered and "->>" in rendered
-            page_needs_er = getattr(page, "category", None) == WikiTaxonomyCategory.DATA_MODELS
-            if mermaid_key in self._seen_mermaid_hashes and not (is_er and page_needs_er):
+            if mermaid_key in self._seen_mermaid_hashes:
                 continue
             if not is_er and not is_seq and mermaid_edge_count(rendered) < 2:
                 continue
