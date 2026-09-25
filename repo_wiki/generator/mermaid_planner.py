@@ -185,7 +185,10 @@ def _endpoint_is_anonymous(endpoint: dict[str, Any]) -> bool:
     path = str(endpoint.get("path") or "").rstrip("/")
     method = str(endpoint.get("method") or "").upper()
     auth = str(endpoint.get("auth_type") or endpoint.get("auth") or "").lower()
+    file_path = str(endpoint.get("file_path") or "").replace("\\", "/")
     if auth in {"none", "anonymous", "public"}:
+        return True
+    if "custom-probe" in file_path:
         return True
     if path in {"/healthz", "/health", "/readyz", "/ready", "/live"}:
         return True
@@ -244,7 +247,9 @@ def _auth_hop(
 ) -> tuple[str, str] | tuple[None, None]:
     if _endpoint_is_anonymous(endpoint):
         return None, None
-    file_path = str(endpoint.get("file_path") or "")
+    file_path = str(endpoint.get("file_path") or "").replace("\\", "/")
+    if "custom-probe" in file_path:
+        return None, None
     if go_auth:
         if "internal/agent" in file_path or "probe-agent" in file_path:
             return "APIAuth", "X-Agent-Token"
@@ -267,6 +272,12 @@ def _real_error_node(root: Path | None, endpoint: dict[str, Any]) -> str:
     return "HTTPException"
 
 
+_GENERIC_GO_HANDLERS = frozenset(
+    {"func", "anonymous", "Handle", "r_GET", "r.GET", "r_POST", "r.POST", "handler"}
+)
+_FRONTEND_ROUTE_PREFIXES = ("/probe/endpoint", "/tag", "/api/v1")
+
+
 def _request_flow_score(endpoint: dict[str, Any], page_id: str, tokens: set[str]) -> int:
     path = str(endpoint.get("path") or "").lower()
     file_path = str(endpoint.get("file_path") or "").lower()
@@ -280,6 +291,10 @@ def _request_flow_score(endpoint: dict[str, Any], page_id: str, tokens: set[str]
     if any(token in leaf for token in ("frontend", "前端", "web")):
         if "web" in path or "static" in hay:
             score += 6
+        if any(path.startswith(prefix) for prefix in _FRONTEND_ROUTE_PREFIXES):
+            score += 8
+        if "custom-probe" in file_path or path.rstrip("/") == "/probe":
+            score -= 12
         if "agent/list" in path:
             score -= 8
     if any(token in leaf for token in ("auth", "认证", "login")):
@@ -369,10 +384,31 @@ def _package_from_file(path: str) -> str:
 
 
 def _endpoint_actor(endpoint: dict[str, Any]) -> str:
-    handler = str(endpoint.get("handler") or endpoint.get("service") or "").strip()
-    if handler:
-        return handler
+    """Actor for this route, scoped to the owning binary/file — never another mux."""
     file_path = str(endpoint.get("file_path") or "").replace("\\", "/")
+    handler = str(endpoint.get("handler") or endpoint.get("service") or "").strip()
+    path = str(endpoint.get("path") or "")
+    if "ccprobe-control" in file_path:
+        if handler and handler not in _GENERIC_GO_HANDLERS and "NewHTTPHandler" not in handler:
+            return handler
+        return "runGRPCServe"
+    if "custom-probe" in file_path:
+        if path.rstrip("/") in {"", "/"}:
+            return "custom-probe"
+        if path.rstrip("/") in {"/health", "/healthz"}:
+            return "HealthHandler"
+        if path.rstrip("/") == "/probe":
+            return "ProbeHandler"
+        leaf = handler.split(".")[-1] if handler else ""
+        if leaf in {"ProbeHandler", "HealthHandler"}:
+            return leaf
+        return "custom-probe"
+    if "internal/agent" in file_path or "probe-agent" in file_path:
+        if handler and handler not in _GENERIC_GO_HANDLERS:
+            return handler
+        return "NewHTTPHandler"
+    if handler and handler not in _GENERIC_GO_HANDLERS:
+        return handler
     name = file_path.rsplit("/", 1)[-1]
     if "." in name:
         return name.rsplit(".", 1)[0]
@@ -1824,6 +1860,27 @@ class MermaidPlanner:
         edges: list[DiagramEdge] = []
         seen_nodes: set[str] = set()
         seen_edges: set[tuple[str, str]] = set()
+
+        def _add_edge(src_label: str, dest_label: str) -> None:
+            if not src_label or not dest_label:
+                return
+            if src_label in skip or dest_label in skip:
+                return
+            if src_label.endswith(".py") or dest_label.endswith(".py"):
+                return
+            src_id = mermaid_ident(src_label)
+            dest_id = mermaid_ident(dest_label)
+            if src_id not in seen_nodes:
+                seen_nodes.add(src_id)
+                nodes.append(DiagramNode(id=src_id, label=src_label, shape="rectangle"))
+            if dest_id not in seen_nodes:
+                seen_nodes.add(dest_id)
+                nodes.append(DiagramNode(id=dest_id, label=dest_label, shape="rectangle"))
+            pair = (src_id, dest_id)
+            if pair not in seen_edges and src_id != dest_id:
+                seen_edges.add(pair)
+                edges.append(DiagramEdge(from_node=src_id, to_node=dest_id))
+
         for index, module in enumerate(context.get("modules") or []):
             name, path = _module_name_and_path(module, index)
             label = name if not name.endswith(".py") else (path.strip("/").split("/")[0] or name)
@@ -1837,42 +1894,10 @@ class MermaidPlanner:
             if isinstance(module, dict):
                 depends = list(module.get("depends_on") or module.get("dependencies") or [])
             for dest in depends:
-                dest_label = str(dest).strip()
-                if not dest_label or dest_label in skip or dest_label.endswith(".py"):
-                    continue
-                dest_id = mermaid_ident(dest_label)
-                if dest_id not in seen_nodes:
-                    seen_nodes.add(dest_id)
-                    nodes.append(DiagramNode(id=dest_id, label=dest_label, shape="rectangle"))
-                pair = (ident, dest_id)
-                if pair not in seen_edges and ident != dest_id:
-                    seen_edges.add(pair)
-                    edges.append(DiagramEdge(from_node=ident, to_node=dest_id))
+                _add_edge(label, str(dest).strip())
         for src, dst in _import_edges_from_context(context):
-            src_label = str(src).strip()
-            dst_label = str(dst).strip()
-            if (
-                not src_label
-                or not dst_label
-                or src_label in skip
-                or dst_label in skip
-                or src_label.endswith(".py")
-                or dst_label.endswith(".py")
-            ):
-                continue
-            src_id = mermaid_ident(src_label)
-            dst_id = mermaid_ident(dst_label)
-            if src_id not in seen_nodes:
-                seen_nodes.add(src_id)
-                nodes.append(DiagramNode(id=src_id, label=src_label, shape="rectangle"))
-            if dst_id not in seen_nodes:
-                seen_nodes.add(dst_id)
-                nodes.append(DiagramNode(id=dst_id, label=dst_label, shape="rectangle"))
-            pair = (src_id, dst_id)
-            if pair not in seen_edges and src_id != dst_id:
-                seen_edges.add(pair)
-                edges.append(DiagramEdge(from_node=src_id, to_node=dst_id))
-        if len(edges) < 2:
+            _add_edge(str(src).strip(), str(dst).strip())
+        if not edges:
             return None
         used = {edge.from_node for edge in edges} | {edge.to_node for edge in edges}
         return DiagramPlan(
@@ -1974,20 +1999,16 @@ class MermaidPlanner:
             fetch_eps = [
                 item
                 for item in endpoints
-                if any(
-                    str(item.get("path") or "").startswith(prefix)
-                    for prefix in ("/probe", "/tag", "/api/v1")
+                if "custom-probe" not in str(item.get("file_path") or "")
+                and (
+                    any(
+                        str(item.get("path") or "").startswith(prefix)
+                        for prefix in _FRONTEND_ROUTE_PREFIXES
+                    )
+                    or any(str(item.get("path") or "") == fetch for fetch in fetches)
                 )
-                or any(str(item.get("path") or "") == fetch for fetch in fetches)
             ]
-            selected = fetch_eps or [
-                {
-                    "method": "GET",
-                    "path": fetches[0] if fetches else "/probe",
-                    "handler": "Frontend",
-                    "file_path": "web/",
-                }
-            ]
+            selected = fetch_eps
         elif not selected:
             if any(token in leaf for token in ("auth", "认证", "授权", "jwt")):
                 selected = (
@@ -2021,7 +2042,11 @@ class MermaidPlanner:
                 ]
             elif leaf in {"api-overview", "api-reference", "api", "api-ref"}:
                 selected = list(endpoints[:1])
-        if not selected and endpoints:
+        if (
+            not selected
+            and endpoints
+            and not any(token in leaf for token in ("frontend", "前端", "web"))
+        ):
             selected = [endpoints[sum(ord(c) for c in (page_id or "x")) % len(endpoints)]]
         if not selected:
             return None
@@ -2068,7 +2093,7 @@ class MermaidPlanner:
                 ("Handler", error_node, "map status"),
             ]
         else:
-            handler = mermaid_ident(str(sample.get("handler") or "Handler"), prefix="h")
+            handler = mermaid_ident(_endpoint_actor(sample), prefix="h")
             auth_name, auth_label = _auth_hop(sample, go_auth=go_auth, py_auth=py_auth)
             if auth_name and auth_label:
                 service = mermaid_ident(

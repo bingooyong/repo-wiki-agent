@@ -69,6 +69,7 @@ class DataModel(BaseModel):
     file_path: str
     attributes: list[str] = Field(default_factory=list)
     primary_key: str = ""
+    primary_keys: list[str] = Field(default_factory=list)
     relationships: list[str] = Field(default_factory=list)
     attribute_types: list[str] = Field(default_factory=list)
     table_name: str = ""

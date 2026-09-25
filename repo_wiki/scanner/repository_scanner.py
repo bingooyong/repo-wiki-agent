@@ -34,6 +34,7 @@ from repo_wiki.scanner.go_routes import (
     extract_go_endpoints,
     extract_sql_foreign_keys,
     go_quoted_imports,
+    handle_func_method,
     is_go_test_path,
 )
 
@@ -688,12 +689,13 @@ class RepositoryScanner:
                         )
                     )
 
-            for path_expr, handler in re.findall(
+            for match in re.finditer(
                 r"http\.HandleFunc\(\s*[\"']([^\"']+)[\"']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)", text
             ):
+                path_expr, handler = match.group(1), match.group(2)
                 endpoints.append(
                     Endpoint(
-                        method="GET",
+                        method=handle_func_method(text, match.start(), path_expr),
                         path=path_expr,
                         module=module_name,
                         handler=handler,
@@ -868,6 +870,9 @@ class RepositoryScanner:
                                 if isinstance(raw_types, list)
                                 else [],
                                 primary_key=str(table_spec.get("primary_key") or ""),
+                                primary_keys=[str(item) for item in raw_pks]
+                                if isinstance(raw_pks, list)
+                                else [],
                                 table_name=str(table_spec.get("table_name") or table_spec["name"]),
                             )
                         )
@@ -891,6 +896,7 @@ class RepositoryScanner:
                         file_path=item.file_path,
                         attributes=list(item.attributes),
                         primary_key=item.primary_key or "",
+                        primary_keys=list(item.primary_keys),
                         relationships=list(item.relations),
                         attribute_types=list(item.attribute_types),
                         table_name=item.table_name or "",

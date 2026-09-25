@@ -2708,8 +2708,20 @@ class RepoWikiService:
         ]
         extra = [(rel, cite_existing_meaningful(self.root, rel)) for rel in missing]
         extra = [(rel, item) for rel, item in extra if item]
-        if extra:
-            sentences = " ".join(f"`{rel}` 承担对应职责。 {cite}" for rel, cite in extra[:4])
+        duties = {
+            "internal/exporter": "把探测结果写出到配置的下游。",
+            "internal/services": "实现探测、标签与策略等业务用例。",
+            "internal/repository": "访问 GORM 模型与存储。",
+            "internal/control": "维护 TunnelHub 与会话。",
+            "internal/agent": "实现 probe-agent 的隧道传输。",
+            "internal/probe": "执行探测并解析结果。",
+            "cmd/ccagent": "作为主 REST/Web 入口。",
+            "cmd/ccprobe-control": "作为 gRPC 控制面入口。",
+            "app/api/routes": "注册 HTTP 路由。",
+            "app/models": "定义领域模型。",
+        }
+        sentences = " ".join(f"{duties[rel]} {cite}" for rel, cite in extra[:4] if rel in duties)
+        if sentences:
             content = content.rstrip() + f"\n\n{sentences}\n"
         return content
 
@@ -3440,13 +3452,25 @@ class RepoWikiService:
 
     def _fold_citation_only_lines(self, content: str) -> str:
         out: list[str] = []
+        pending_blanks: list[str] = []
         for line in content.splitlines():
-            if self._line_is_citation_tags_only(line) and out:
-                prev = out[-1].rstrip()
-                if prev and not prev.startswith("#") and not prev.startswith("```"):
-                    out[-1] = prev + " " + line.strip()
-                    continue
+            if not line.strip():
+                pending_blanks.append(line)
+                continue
+            if self._line_is_citation_tags_only(line):
+                idx = len(out) - 1
+                while idx >= 0 and not out[idx].strip():
+                    idx -= 1
+                if idx >= 0:
+                    prev = out[idx].rstrip()
+                    if prev and not prev.startswith("#") and not prev.startswith("```"):
+                        out[idx] = prev + " " + line.strip()
+                        pending_blanks.clear()
+                        continue
+            out.extend(pending_blanks)
+            pending_blanks.clear()
             out.append(line)
+        out.extend(pending_blanks)
         return "\n".join(out)
 
     def _reduce_hedging_when_cited(self, content: str) -> str:

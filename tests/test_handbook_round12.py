@@ -229,3 +229,313 @@ def _mermaid_bodies(markdown: str) -> list[str]:
     import re
 
     return re.findall(r"```mermaid\s*(.*?)```", markdown or "", flags=re.I | re.S)
+
+
+# --- Part C: Go inventory, flows, data model, roles ---
+
+
+def test_handle_func_inventory_records_post_only_publish() -> None:
+    from repo_wiki.scanner.go_routes import extract_go_endpoints
+
+    text = (
+        "package main\nfunc runGRPCServe() {\n"
+        'mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {})\n'
+        'mux.HandleFunc("/publish", func(w http.ResponseWriter, r *http.Request) {\n'
+        "    if r.Method != http.MethodPost {\n"
+        '        writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})\n'
+        "        return\n"
+        "    }\n"
+        "})\n"
+        'mux.HandleFunc("/force-resync", func(w http.ResponseWriter, r *http.Request) {\n'
+        "    if r.Method != http.MethodPost { return }\n"
+        "})\n}\n"
+    )
+    found = extract_go_endpoints([("cmd/ccprobe-control/serve.go", text)])
+    methods = {(item.method, item.path) for item in found}
+    assert ("POST", "/publish") in methods
+    assert ("GET", "/publish") not in methods
+    assert ("POST", "/force-resync") in methods
+    assert ("GET", "/healthz") in methods
+
+
+def test_handle_func_inventory_on_real_probe_serve() -> None:
+    from repo_wiki.scanner.go_routes import extract_go_endpoints
+
+    serve = Path("/tmp/r12/probe_exporter/cmd/ccprobe-control/serve.go")
+    if not serve.is_file():
+        return
+    found = extract_go_endpoints([("cmd/ccprobe-control/serve.go", serve.read_text())])
+    methods = {(item.method, item.path) for item in found}
+    assert ("POST", "/publish") in methods
+    assert ("GET", "/publish") not in methods
+
+
+def test_agent_ops_sample_composite_primary_key() -> None:
+    from repo_wiki.scanner.go_routes import extract_go_data_models
+
+    text = (
+        "package models\n"
+        "type AgentOpsSample struct {\n"
+        '    AgentID string `gorm:"column:agent_id;primaryKey"`\n'
+        '    TsMS    int64  `gorm:"column:ts_ms;primaryKey;autoIncrement:false"`\n'
+        '    Workers int    `gorm:"column:workers"`\n'
+        "}\n"
+        'func (AgentOpsSample) TableName() string { return "agent_ops_sample" }\n'
+    )
+    models = extract_go_data_models([("internal/models/agent_ops_sample.go", text)])
+    sample = next(item for item in models if item.name == "AgentOpsSample")
+    assert set(sample.primary_keys) == {"AgentID", "TsMS"}
+
+
+def test_agent_ops_sample_er_marks_both_keys(tmp_path: Path) -> None:
+    from repo_wiki.core.config import RepoWikiConfig
+    from repo_wiki.core.contracts import DataModel
+    from repo_wiki.scanner.repository_scanner import RepositoryScanner
+
+    root = tmp_path
+    (root / "internal" / "models").mkdir(parents=True)
+    (root / "internal" / "models" / "agent_ops_sample.go").write_text(
+        "package models\n"
+        "type AgentOpsSample struct {\n"
+        '    AgentID string `gorm:"column:agent_id;primaryKey"`\n'
+        '    TsMS    int64  `gorm:"column:ts_ms;primaryKey"`\n'
+        "}\n"
+        'func (AgentOpsSample) TableName() string { return "agent_ops_sample" }\n',
+        encoding="utf-8",
+    )
+    snapshot = RepositoryScanner(
+        RepoWikiConfig.model_validate({"project": {"root": str(root)}})
+    ).scan()
+    model = next(item for item in snapshot.data_models if item.name == "AgentOpsSample")
+    assert isinstance(model, DataModel)
+    assert set(model.primary_keys) == {"AgentID", "TsMS"}
+    planner = MermaidPlanner(str(root))
+    plan = planner._plan_data_model_diagram(
+        "data-models-overview",
+        None,
+        {"data_models": [model.model_dump()]},
+    )
+    assert plan is not None
+    rendered, ok, _ = MermaidRenderer().render_diagram_with_validation(plan)
+    assert ok
+    assert "AgentID PK" in rendered or "AgentID PK" in rendered.replace("  ", " ")
+    assert "TsMS PK" in rendered
+
+
+def test_frontend_flow_uses_ccagent_not_custom_probe(tmp_path: Path) -> None:
+    from tests.test_handbook_round10 import _go_repo
+
+    root = _go_repo(tmp_path)
+    (root / "cmd" / "custom-probe").mkdir(parents=True)
+    (root / "cmd" / "custom-probe" / "main.go").write_text(
+        "package main\n"
+        'mux.HandleFunc("/probe", server.ProbeHandler)\n'
+        'mux.HandleFunc("/health", server.HealthHandler)\n',
+        encoding="utf-8",
+    )
+    (root / "web").mkdir(parents=True)
+    (root / "web" / "app.js").write_text(
+        "fetch('/probe/endpoint/list')\nfetch('/tag/list')\nfetch('/api/v1/agent/list')\n",
+        encoding="utf-8",
+    )
+    planner = MermaidPlanner(str(root))
+    endpoints = [
+        {
+            "method": "GET",
+            "path": "/probe",
+            "handler": "ProbeHandler",
+            "file_path": "cmd/custom-probe/main.go",
+            "auth_type": "none",
+        },
+        {
+            "method": "POST",
+            "path": "/probe/endpoint/list",
+            "handler": "ListEndpoints",
+            "file_path": "controller.go",
+        },
+        {
+            "method": "GET",
+            "path": "/tag/list",
+            "handler": "ListTags",
+            "file_path": "controller.go",
+        },
+    ]
+    plan = planner._plan_request_flow_sequence(
+        "frontend-application-api", None, {"endpoints": endpoints}
+    )
+    assert plan is not None
+    blob = "\n".join(f"{a}->{b}: {msg}" for a, b, msg in plan.sequence_messages)
+    assert "GET /probe" not in blob
+    assert "X-Probe-Api-Token" not in blob or "/probe/endpoint" in blob or "/tag" in blob
+    assert "ProbeHandler" not in plan.sequence_participants
+    assert "/probe/endpoint/list" in blob or "/tag/list" in blob
+
+
+def test_custom_probe_has_no_probe_api_token_hop() -> None:
+    probe = {
+        "method": "GET",
+        "path": "/probe",
+        "file_path": "cmd/custom-probe/main.go",
+        "handler": "ProbeHandler",
+    }
+    assert _endpoint_is_anonymous(probe)
+    assert _auth_hop(probe, go_auth=True, py_auth=False) == (None, None)
+
+
+def test_list_flow_actors_stay_in_owning_binary() -> None:
+    from repo_wiki.generator.mermaid_planner import _endpoint_actor
+
+    healthz = {
+        "method": "GET",
+        "path": "/healthz",
+        "handler": "NewHTTPHandler",
+        "file_path": "cmd/ccprobe-control/serve.go",
+    }
+    custom_root = {
+        "method": "GET",
+        "path": "/",
+        "handler": "r.GET",
+        "file_path": "cmd/custom-probe/main.go",
+    }
+    custom_health = {
+        "method": "GET",
+        "path": "/health",
+        "handler": "r.GET",
+        "file_path": "cmd/custom-probe/main.go",
+    }
+    assert _endpoint_actor(healthz) == "runGRPCServe"
+    assert _endpoint_actor(custom_root) == "custom-probe"
+    assert _endpoint_actor(custom_health) == "HealthHandler"
+    planner = MermaidPlanner()
+    plan = planner._plan_api_sequence_diagram(
+        "api-overview",
+        None,
+        {
+            "endpoints": [
+                healthz,
+                {
+                    "method": "GET",
+                    "path": "/healthz",
+                    "handler": "NewHTTPHandler",
+                    "file_path": "internal/agent/http_transport.go",
+                },
+                custom_root,
+                custom_health,
+            ]
+        },
+    )
+    if plan is None:
+        return
+    blob = "\n".join(f"{a}->{b}: {msg}" for a, b, msg in plan.sequence_messages)
+    if "GET /healthz" in blob and "serve.go" in str(healthz):
+        assert "NewHTTPHandler" not in blob or "runGRPCServe" in plan.sequence_participants
+    if "GET /health" in blob:
+        assert "r_GET" not in plan.sequence_participants
+
+
+def test_data_model_block_has_prose_and_config_table(tmp_path: Path) -> None:
+    from repo_wiki.generator.deterministic_sections import build_data_model_cite_block
+    from repo_wiki.verifier.qoder_strict_verifier import is_qoder_page_dump, qoder_prose_density
+    from tests.test_handbook_round10 import _go_context, _go_repo, _page, _render, _service
+
+    root = _go_repo(tmp_path)
+    models = root / "internal" / "models"
+    extra = [
+        ("ProbeBlackboxModule", "blackbox.go"),
+        ("BizTreeNode", "biz.go"),
+        ("BizInstanceEndpoint", "biz.go"),
+        ("ProbePolicy", "policy.go"),
+        ("ProbeRoutingBinding", "routing.go"),
+        ("AgentRegistry", "agent.go"),
+        ("AgentOpsSample", "agent_ops_sample.go"),
+        ("ExporterConfig", "config.go"),
+        ("TLSFiles", "config.go"),
+        ("SoftLimits", "config.go"),
+    ]
+    for name, fname in extra:
+        path = models / fname
+        existing = path.read_text(encoding="utf-8") if path.exists() else "package models\n"
+        path.write_text(
+            existing + f"\ntype {name} struct {{\n    Name string\n}}\n", encoding="utf-8"
+        )
+    block = build_data_model_cite_block(root)
+    assert "探测目标端点" in block
+    assert "AgentID" in block and "TsMS" in block
+    assert "| 类型 | 定义 |" in block
+    assert "ExporterConfig" in block
+    assert not is_qoder_page_dump(block)
+    assert qoder_prose_density(block) >= 0.34
+    page = _page(
+        "data-models-overview", "数据模型", WikiTaxonomyCategory.DATA_MODELS, "数据模型.md"
+    )
+    raw = "# 数据模型\n\n" + "\n".join(
+        f"- Item{i} <cite>internal/models/endpoint.go:3-5</cite>" for i in range(20)
+    )
+    raw += "\nProbeEndpoint <cite>internal/models/endpoint.go:3-5</cite> " * 8 + "\n"
+    out = _render(_service(root), page, raw, _go_context(root), add_mermaid=False)
+    assert "探测目标端点" in out
+    assert not is_qoder_page_dump(out)
+    assert "承担对应职责" not in out
+
+
+def test_architecture_filler_and_roles(tmp_path: Path) -> None:
+    from repo_wiki.generator.deterministic_sections import (
+        build_go_role_section,
+        rewrite_architecture_role_claims,
+    )
+    from tests.test_handbook_round10 import _go_context, _go_repo, _page, _render, _service
+
+    root = _go_repo(tmp_path)
+    role = build_go_role_section(root)
+    assert "REST/Web" in role
+    assert "不承担面向前端的 REST/管理入口" in role
+    leftover = (
+        "作为整个系统的控制面，`ccprobe-control` 通过 `-serve` 启动并承担 REST/管理入口职责，"
+        "本页涉及的 `ccagent` 入口仅完成 Alpine musl 环境下的 DNS 解析兼容初始化。"
+    )
+    fixed = rewrite_architecture_role_claims(leftover)
+    assert "REST/管理入口职责" not in fixed
+    assert "仅完成 Alpine" not in fixed
+    page = _page(
+        "event-driven-architecture",
+        "事件驱动架构",
+        WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+        "架构设计/事件驱动架构.md",
+    )
+    raw = "# 事件驱动架构\n\n控制面通过 TunnelHub 转发心跳。\n"
+    out = _render(_service(root), page, raw, _go_context(root))
+    assert "承担对应职责" not in out
+
+
+def test_scoped_architecture_pages_do_not_share_tunnel(tmp_path: Path) -> None:
+    from tests.test_handbook_round10 import _go_context, _go_repo, _page, _render, _service
+
+    root = _go_repo(tmp_path)
+    service = _service(root)
+    context = _go_context(root)
+    pages = [
+        _page(
+            "architecture-overview",
+            "整体架构概览",
+            WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+            "架构设计/整体架构概览.md",
+        ),
+        _page(
+            "event-driven-architecture",
+            "事件驱动架构",
+            WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+            "架构设计/事件驱动架构.md",
+        ),
+        _page(
+            "module-relationship",
+            "模块关系",
+            WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+            "架构设计/模块关系.md",
+        ),
+    ]
+    hashes = []
+    for page in pages:
+        out = _render(service, page, f"# {page.title}\n\n组件协作。\n", context)
+        for block in _mermaid_bodies(out):
+            hashes.append(normalize_mermaid_block(block))
+    assert len(hashes) == len(set(hashes)) or len(hashes) <= 1

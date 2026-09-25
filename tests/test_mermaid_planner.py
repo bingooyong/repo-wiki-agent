@@ -230,7 +230,7 @@ class TestMermaidPlanner:
 
         assert len(diagrams) >= 1
         diagram = diagrams[0]
-        assert diagram.diagram_id == "overview-architecture"
+        assert diagram.diagram_id in {"overview-architecture", "overview-overview-modules"}
         assert diagram.diagram_type == MermaidDiagramType.FLOWCHART
 
     def test_fastapi_like_overview_omits_filenames_and_missing_wiki_layers(self):

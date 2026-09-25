@@ -924,7 +924,8 @@ class LLMPageComposer:
                 "- 架构页：必须引用核心包（Python 必引 `app/api/routes` 与 `app/models`；"
                 "Go 必引 `cmd/ccagent`、`internal/control`、`internal/services`、"
                 "`internal/repository`、`internal/exporter`）。"
-                "ccagent 是主 REST/Web 服务，不是领取任务的 Agent，也不是边缘 Agent；"
+                "ccagent 是主 REST/Web 服务与管理入口，不是领取任务的 Agent，也不是边缘 Agent；"
+                "不要把 REST/管理入口写到 ccprobe-control 上，也不要把 ccagent 写成只做 DNS 初始化。"
                 "probe-agent 才是隧道客户端。"
                 "Go 控制面是 `ccprobe-control -serve -transport grpc`，不要写成普通 CLI。"
                 "只写 import 图里存在的依赖：internal/control 不依赖 services/repository；"
@@ -940,8 +941,14 @@ class LLMPageComposer:
                 rules.append(
                     "- 数据模型页：必须引用 `internal/models` 里 GORM 结构体的定义行"
                     "（不要只引文件头），可选引用 `db/schema.sql`。"
+                    "核心 11 个实体（ProbeEndpoint、ProbeResult、ProbeTag、ProbeSecret、"
+                    "ProbeBlackboxModule、BizTreeNode、BizInstanceEndpoint、ProbePolicy、"
+                    "ProbeRoutingBinding、AgentRegistry、AgentOpsSample）各写一段说明；"
+                    "配置类型用表格，不要堆成无说明清单。"
+                    "AgentOpsSample 的主键是 AgentID+TsMS，不要只标 TsMS。"
                     "不要写 app/models 或 alembic。字段类型用源码真实类型，"
                     "关系按 `*_id` / gorm foreignKey / schema REFERENCES，不要猜测自环。"
+                    "不要单独成行只写 `<cite>`。"
                 )
             elif python_domain:
                 rules.append(
@@ -957,6 +964,12 @@ class LLMPageComposer:
                     "- 数据模型页：必须引用真实模型源码与迁移；`schema.sql` 不能代替模型源码。"
                     "不要整段粘贴 README 的英文 NOTE。"
                 )
+        if page.category == WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS:
+            rules.append(
+                "- 部署页：提到 mysql 监听端口时必须写出 compose 里的真实端口数字，"
+                "不要留下「在  暴露」这类空缺；句子末不要在「使用」和句号之间留空格。"
+                "不要单独成行只写 `<cite>`。"
+            )
         return "\n".join(rules)
 
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:

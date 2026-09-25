@@ -30,6 +30,22 @@ _PLANNING_LEAK_RE = re.compile(
     r"页面规划与证据绑定|页面基于仓库扫描|从提供的证据可见|证据中可确认的"
 )
 _REQUIRED_GO_STRUCTS = ("ProbeEndpoint", "ProbeResult", "ProbeTag", "ProbeSecret")
+_CORE_GO_STRUCTS: tuple[tuple[str, str], ...] = (
+    ("ProbeEndpoint", "探测目标端点，是拨测任务绑定的主实体，保存地址、模块与启用状态。"),
+    ("ProbeResult", "一次探测执行的结果记录，包含成功标志、状态码与耗时。"),
+    ("ProbeTag", "端点标签，用于分组检索与策略筛选。"),
+    ("ProbeSecret", "探测所需的密钥材料，不以明文写入配置文件。"),
+    ("ProbeBlackboxModule", "Blackbox Exporter 模块配置，描述 HTTP/ICMP 等探测方式。"),
+    ("BizTreeNode", "业务树节点，描述服务与实例的层级归属。"),
+    ("BizInstanceEndpoint", "业务实例与探测端点的绑定关系。"),
+    ("ProbePolicy", "探测策略，约束周期、超时与校验规则。"),
+    ("ProbeRoutingBinding", "探测路由绑定，把策略落到具体端点。"),
+    ("AgentRegistry", "已注册 probe-agent 的控制面记录。"),
+    (
+        "AgentOpsSample",
+        "按分钟聚合的 Agent 运维采样点，主键是 AgentID 与 TsMS 的复合键，而不是单独的 TsMS。",
+    ),
+)
 _INSTALL_OWNER_IDS = frozenset({"installation"})
 _INSTALL_SATELLITE_IDS = frozenset(
     {"quick-start", "quickstart", "getting-started", "local-setup", "environment-setup"}
@@ -366,7 +382,9 @@ def load_route_method_table(root: Path) -> dict[str, str]:
             continue
         for match in handle.finditer(text):
             route = match.group(1)
-            window = text[match.start() : match.start() + 480]
+            nxt = text.find("HandleFunc(", match.start() + 1)
+            end = match.start() + 480 if nxt < 0 else min(match.start() + 480, nxt)
+            window = text[match.start() : end]
             if (
                 "MethodPost" in window
                 or 'Method != "POST"' in window
@@ -911,9 +929,11 @@ def build_go_role_section(root: Path) -> str:
         return ""
     return (
         "## 进程角色\n\n"
-        f"ccagent 是主 REST/Web 服务，监听 HTTP 并挂载业务路由。 {ccagent}\n\n"
+        f"ccagent 是主 REST/Web 服务与管理入口，监听 HTTP 并挂载 `/probe`、`/tag`、`/api/v1` 业务路由；"
+        f"其 `init` 里的 DNS 设置只用于 Alpine musl 兼容，不是主职责。 {ccagent}\n\n"
         f"probe-agent 是隧道客户端，向控制面拨号并维持心跳。 {probe}\n\n"
-        f"ccprobe-control 是 gRPC 控制面服务（`-serve -transport grpc`），负责 TunnelHub。 {control}\n"
+        f"ccprobe-control 是 gRPC 控制面服务（`-serve -transport grpc`），负责 TunnelHub，"
+        f"不承担面向前端的 REST/管理入口。 {control}\n"
     )
 
 
@@ -1027,12 +1047,12 @@ def go_struct_cite(root: Path, name: str) -> str:
     return ""
 
 
-def all_go_model_struct_cites(root: Path) -> list[str]:
+def all_go_model_struct_cites(root: Path) -> list[tuple[str, str]]:
     models = root / "internal" / "models"
     if not models.is_dir():
         return []
     pattern = re.compile(r"^type\s+([A-Z][A-Za-z0-9_]*)\s+struct\s*\{")
-    cites: list[str] = []
+    cites: list[tuple[str, str]] = []
     seen: set[str] = set()
     for path in sorted(models.rglob("*.go")):
         if path.name.endswith("_test.go"):
@@ -1045,7 +1065,7 @@ def all_go_model_struct_cites(root: Path) -> list[str]:
                 continue
             seen.add(match.group(1))
             cites.append(
-                f"{match.group(1)} <cite>{rel}:{index}-{go_struct_end_line(lines, index)}</cite>"
+                (match.group(1), f"<cite>{rel}:{index}-{go_struct_end_line(lines, index)}</cite>")
             )
     return cites
 
@@ -1053,6 +1073,7 @@ def all_go_model_struct_cites(root: Path) -> list[str]:
 def build_data_model_cite_block(root: Path) -> str:
     if (root / "internal" / "models").is_dir():
         named = all_go_model_struct_cites(root)
+        by_name = {name: cite for name, cite in named}
         required = [go_struct_cite(root, name) for name in _REQUIRED_GO_STRUCTS]
         required = [item for item in required if item]
         if not named and not required:
@@ -1064,12 +1085,29 @@ def build_data_model_cite_block(root: Path) -> str:
             if sqls:
                 rel = sqls[0].relative_to(root).as_posix()
                 migrations = f" `db/migrations` 含 {len(sqls)} 个 SQL 迁移，例如 {cite_first_match(root, rel, r'CREATE TABLE|create table') or f'<cite>{rel}:1-1</cite>'}。"
-        items = named or required
-        listing = "\n".join(f"- {item}" for item in items)
+        core_names = {name for name, _desc in _CORE_GO_STRUCTS}
+        paragraphs: list[str] = []
+        for name, desc in _CORE_GO_STRUCTS:
+            cite = by_name.get(name) or go_struct_cite(root, name)
+            if not cite:
+                continue
+            paragraphs.append(f"{name} {desc} {cite}")
+        if not paragraphs and required:
+            paragraphs = [f"核心探测实体定义见 internal/models。 {item}" for item in required[:4]]
+        config_rows = [f"| {name} | {cite} |" for name, cite in named if name not in core_names]
+        table = ""
+        if config_rows:
+            table = (
+                "其余配置与辅助类型按定义行收录，不逐条展开：\n\n"
+                "| 类型 | 定义 |\n| --- | --- |\n" + "\n".join(config_rows) + "\n"
+            )
+        body = "\n\n".join(paragraphs)
         return (
             "## 实体定义\n\n"
-            "GORM 结构体定义在 internal/models：\n\n"
-            f"{listing}\n\n"
+            "GORM 结构体定义在 internal/models。核心实体各自描述探测目标、结果、策略与控制面状态，"
+            "配置类结构则集中在下表，避免把 50+ 个类型堆成无说明清单。\n\n"
+            f"{body}\n\n"
+            f"{table}\n"
             f"表结构见 db/schema.sql。{migrations}\n"
         )
     models = load_alembic_migration_models(root)
@@ -1285,6 +1323,19 @@ ARCHITECTURE_ROLE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ),
     (r"`?probe-agent`?[^。\n]{0,24}不在仓库范围内", "`probe-agent` 位于 `cmd/probe-agent`"),
     (r"不在仓库范围内，由 `ccprobe-control`", "位于 `cmd/probe-agent`，由 `ccprobe-control`"),
+    (r"承担 REST/管理入口职责", "承担 gRPC 控制面职责"),
+    (
+        r"`?ccprobe-control`?[^。\n]{0,80}承担 REST/管理入口",
+        "`ccprobe-control` 承担 gRPC 控制面",
+    ),
+    (
+        r"`?ccagent`? 入口仅完成 Alpine musl 环境下的 DNS 解析兼容初始化",
+        "`ccagent` 是主 REST/Web 服务，其 `init` 中的 DNS 设置仅用于 Alpine musl 兼容",
+    ),
+    (
+        r"本页涉及的 `ccagent` 入口仅完成 Alpine musl 环境下的 DNS 解析兼容初始化",
+        "`ccagent` 是主 REST/Web 服务；DNS 设置仅用于 Alpine musl 兼容",
+    ),
 )
 
 

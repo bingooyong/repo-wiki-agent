@@ -85,6 +85,7 @@ class GoDataModel:
     table_name: str | None = None
     attributes: tuple[str, ...] = ()
     primary_key: str | None = None
+    primary_keys: tuple[str, ...] = ()
     relations: tuple[str, ...] = ()
     attribute_types: tuple[str, ...] = ()
 
@@ -281,10 +282,10 @@ def _parse_gorm_fields(
     current_table: str | None = None,
     table_to_model: dict[str, str] | None = None,
     sql_fks: list[tuple[str, str, str]] | None = None,
-) -> tuple[tuple[str, ...], tuple[str, ...], str | None, tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...], str | None, tuple[str, ...], tuple[str, ...]]:
     attrs: list[str] = []
     types: list[str] = []
-    pk: str | None = None
+    pks: list[str] = []
     rels: list[str] = []
     seen_rel: set[str] = set()
     for name, indirection, typ, tag in _GO_FIELD_RE.findall(body):
@@ -296,7 +297,8 @@ def _parse_gorm_fields(
             attrs.append(name)
             types.append(type_name)
         if "primaryKey" in tag or "primary_key" in tag:
-            pk = name
+            if name not in pks:
+                pks.append(name)
         column_match = _GORM_COLUMN_RE.search(tag)
         column = column_match.group(1) if column_match else None
         related = _related_model_name(
@@ -319,9 +321,10 @@ def _parse_gorm_fields(
             rels.append(f"has_many:{related}")
         else:
             rels.append(f"belongs_to:{related}")
-    if pk is None and "ID" in attrs:
-        pk = "ID"
-    return tuple(attrs), tuple(types), pk, tuple(rels)
+    if not pks and "ID" in attrs:
+        pks.append("ID")
+    primary_key = pks[0] if pks else None
+    return tuple(attrs), tuple(types), primary_key, tuple(rels), tuple(pks)
 
 
 _SQL_CREATE_HEAD_RE = re.compile(
@@ -429,6 +432,29 @@ def _split_method_path(raw: str, default_method: str = "GET") -> tuple[str, str]
     return default_method, path
 
 
+def handle_func_method(text: str, match_start: int, raw_path: str) -> str:
+    """HTTP method for a HandleFunc: Go 1.22 prefix, else Method* guard in the body."""
+    method, _path = _split_method_path(raw_path)
+    if _METHOD_PATH_LITERAL_RE.match((raw_path or "").strip()):
+        return method
+    nxt = text.find("HandleFunc(", match_start + 1)
+    end = match_start + 480 if nxt < 0 else min(match_start + 480, nxt)
+    window = text[match_start:end]
+    for token, http_method in (
+        ("MethodDelete", "DELETE"),
+        ("MethodPatch", "PATCH"),
+        ("MethodPut", "PUT"),
+        ("MethodPost", "POST"),
+        ('Method != "DELETE"', "DELETE"),
+        ('Method != "PUT"', "PUT"),
+        ('Method != "POST"', "POST"),
+        ("MethodGet", "GET"),
+    ):
+        if token in window:
+            return http_method
+    return method
+
+
 def _resolve_http_method_expr(expr: str | None) -> str:
     if not expr:
         return "GET"
@@ -485,7 +511,8 @@ def extract_go_endpoints(files: Sequence[tuple[str, str]]) -> list[GoEndpoint]:
 
         for match in _HANDLE_FUNC_RE.finditer(text):
             lineno = text[: match.start()].count("\n") + 1
-            method, route_path = _split_method_path(match.group(1))
+            _method, route_path = _split_method_path(match.group(1))
+            method = handle_func_method(text, match.start(), match.group(1))
             handler = match.group(2)
             if handler == "func":
                 handler = _enclosing_func_name(text, match.start()) or path.rsplit("/", 1)[-1]
@@ -587,7 +614,7 @@ def extract_go_data_models(files: Sequence[tuple[str, str]]) -> list[GoDataModel
             sql_fks.extend(extract_sql_foreign_keys(text))
     models: list[GoDataModel] = []
     for name, path, body, lineno, kind in raw:
-        attributes, attribute_types, primary_key, relations = _parse_gorm_fields(
+        attributes, attribute_types, primary_key, relations, primary_keys = _parse_gorm_fields(
             body,
             known,
             current_model=name,
@@ -604,6 +631,7 @@ def extract_go_data_models(files: Sequence[tuple[str, str]]) -> list[GoDataModel
                 table_name=table_names.get(name),
                 attributes=attributes,
                 primary_key=primary_key,
+                primary_keys=primary_keys,
                 relations=relations,
                 attribute_types=attribute_types,
             )
