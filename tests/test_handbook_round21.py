@@ -358,13 +358,13 @@ def test_architecture_import_closure_includes_neighbor(tmp_path: Path) -> None:
         tmp_path / "cmd" / "web" / "main.go",
         """
         package main
-import "site.local/app/internal/control"
+import "site.local/svc/internal/control"
 func main() { http.ListenAndServe(":80", nil) }
 """,
     )
     _write(
         tmp_path / "internal" / "control" / "c.go",
-        'package control\nimport "site.local/app/internal/exporter"\n',
+        'package control\nimport "site.local/svc/internal/exporter"\n',
     )
     _write(tmp_path / "internal" / "exporter" / "e.go", "package exporter\n")
     cores = architecture_core_packages(tmp_path)
@@ -408,6 +408,8 @@ def test_prompt_does_not_invite_evidence_meta() -> None:
 def test_source_facts_skip_lists_are_pinned() -> None:
     assert "Depends" in _GENERIC_TYPES
     assert "Handle" in _GENERIC_TYPES
+    assert "Dockerfile" in _GENERIC_TYPES
+    assert "Caddyfile" in _GENERIC_TYPES
     assert "schema" in _GENERIC_TABLES
     assert "healthcheck" in _GENERIC_COMPOSE
     assert "depends" in _NOT_SERVICE_TOKENS

@@ -15,7 +15,6 @@ _COMPOSE_NAME_RE = re.compile(
 _SKIP_DIRS = frozenset(
     {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__", "testdata"}
 )
-_KEBAB_RE = re.compile(r"\b([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b")
 _TABLE_RE = re.compile(
     r"""(?:CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?|op\.create_table\(\s*|Table\(\s*)['\"`]?([A-Za-z_][A-Za-z0-9_]*)""",
     re.I,
@@ -86,6 +85,15 @@ _GENERIC_TYPES = frozenset(
         "HTTPException",
         "Depends",
         "Handle",
+        "Dockerfile",
+        "Caddyfile",
+        "AttributeError",
+        "REFERENCES",
+        "COMMIT",
+        "Session",
+        "Repository",
+        "Makefile",
+        "SessionLocal",
     }
 )
 _SAMPLE_QUALIFIER_RE = re.compile(r"示例|README|文档样例|仅出现在")
@@ -181,27 +189,31 @@ def load_database_tables(root: Path) -> set[str]:
 
 def load_cli_flag_help(root: Path) -> dict[str, str]:
     found: dict[str, str] = {}
-    search_roots = [root / "cmd", root / "app", root]
-    seen: set[Path] = set()
-    for folder in search_roots:
-        if not folder.exists():
+    for _cmd, flags in load_cli_flags_by_cmd(root).items():
+        for name, help_text in flags.items():
+            found.setdefault(name, help_text)
+    return found
+
+
+def load_cli_flags_by_cmd(root: Path) -> dict[str, dict[str, str]]:
+    found: dict[str, dict[str, str]] = {}
+    cmd_root = root / "cmd"
+    if not cmd_root.is_dir():
+        return found
+    for path in cmd_root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
             continue
-        pattern = "*.go" if folder.name == "cmd" else "*"
-        iterator = folder.rglob(pattern) if folder.is_dir() else []
-        for path in iterator:
-            resolved = path.resolve()
-            if resolved in seen or not path.is_file():
-                continue
-            if path.suffix.lower() not in {".go", ".py"}:
-                continue
-            if path.name.endswith("_test.go") or path.name.startswith("test_"):
-                continue
-            seen.add(resolved)
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            for match in _FLAG_DEF_RE.finditer(text):
-                found[match.group(1).lstrip("-")] = match.group(2)
-            for match in _ARGPARSE_RE.finditer(text):
-                found[match.group(1).lstrip("-")] = match.group(2)
+        if path.name.endswith("_test.go") or path.name.startswith("test_"):
+            continue
+        leaf = path.relative_to(cmd_root).parts[0] if path.relative_to(cmd_root).parts else ""
+        if not leaf:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        bucket = found.setdefault(leaf, {})
+        for match in _FLAG_DEF_RE.finditer(text):
+            bucket[match.group(1).lstrip("-")] = match.group(2)
+        for match in _ARGPARSE_RE.finditer(text):
+            bucket[match.group(1).lstrip("-")] = match.group(2)
     return found
 
 
@@ -212,9 +224,11 @@ def load_source_identifiers(root: Path) -> set[str]:
     method = re.compile(r"\bfunc\s+\([^)]+\)\s+([A-Za-z_][A-Za-z0-9_]+)")
     token = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]{2,})\b")
     for path in root.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in {".go", ".py"}:
+        if not path.is_file() or any(part in skip for part in path.parts):
             continue
-        if any(part in skip for part in path.parts) or path.name.endswith("_test.go"):
+        names.add(path.name)
+        names.add(path.stem)
+        if path.suffix.lower() not in {".go", ".py", ".sql"}:
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
         names.update(simple.findall(text))
@@ -309,30 +323,37 @@ def _mentioned_compose_services(text: str) -> set[str]:
         for match in _SERVICE_CONTEXT_RE.finditer(sentence):
             token = next((group for group in match.groups() if group), "")
             lowered = token.lower()
-            if lowered and lowered not in _GENERIC_COMPOSE and lowered not in _NOT_SERVICE_TOKENS:
+            if _looks_like_compose_service(lowered):
                 names.add(lowered)
         for match in re.finditer(
-            r"(?:服务|容器|编排)[^`\n]{0,80}((?:`[A-Za-z][A-Za-z0-9_-]{1,32}`[、,，与和\s]*)+)",
+            r"(?:服务|容器)[^`\n]{0,80}((?:`[A-Za-z][A-Za-z0-9_-]{1,32}`[、,，与和\s]*)+)",
             sentence,
             flags=re.I,
         ):
             for token in re.findall(r"`([A-Za-z][A-Za-z0-9_-]{1,32})`", match.group(1)):
                 lowered = token.lower()
-                if lowered in _GENERIC_COMPOSE or lowered in _NOT_SERVICE_TOKENS:
+                if not _looks_like_compose_service(lowered):
                     continue
                 names.add(lowered)
-        if re.search(r"服务|容器|service", sentence, flags=re.I):
-            for match in _KEBAB_RE.finditer(sentence):
-                token = match.group(1)
-                if token in _GENERIC_COMPOSE:
-                    continue
-                names.add(token)
     return names
 
 
+def _looks_like_compose_service(token: str) -> bool:
+    lowered = (token or "").lower()
+    if not lowered or lowered in _GENERIC_COMPOSE or lowered in _NOT_SERVICE_TOKENS:
+        return False
+    if "_" in lowered:
+        return False
+    if lowered.endswith(("-data", "-net", "-volume", "-root", "-logs")):
+        return False
+    return True
+
+
 _TABLE_CLAIM_RE = re.compile(
-    r"(?:数据表|业务表|张表|表名|create_table|CREATE TABLE)[^。\n]{0,120}"
-    r"|`([a-z][a-z0-9_]+)`\s*(?:表|table)\b",
+    r"(?:表名[:：]\s*)((?:`[a-z][a-z0-9_]+`[、,，与和\s]*)+)"
+    r"|`([a-z][a-z0-9_]+)`\s*(?:表|table)\b"
+    r"|create_table\(\s*[\"']([a-z][a-z0-9_]+)"
+    r"|CREATE TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`\"']?([a-z][a-z0-9_]+)",
     re.IGNORECASE,
 )
 
@@ -358,8 +379,15 @@ def _mentioned_tables(text: str) -> set[str]:
             tokens = [group for group in match.groups() if group]
             tokens.extend(re.findall(r"`([a-z][a-z0-9_]+)`", window))
             for token in tokens:
-                if token and token not in _GENERIC_TABLES:
-                    names.add(token)
+                if not token or token in _GENERIC_TABLES:
+                    continue
+                if re.search(
+                    rf"(?:列|字段|column|columns)\s*`{re.escape(token)}`|`{re.escape(token)}`\s*(?:列|字段|column)",
+                    sentence,
+                    flags=re.I,
+                ):
+                    continue
+                names.add(token)
     return names
 
 
@@ -370,7 +398,13 @@ def _sentence_window(text: str, index: int) -> str:
     return text[start + 1 : end]
 
 
-def _flag_target_mismatches(text: str, flags: dict[str, str], cmd_names: set[str]) -> list[str]:
+def _flag_target_mismatches(
+    text: str, flags_by_cmd: dict[str, dict[str, str]], cmd_names: set[str]
+) -> list[str]:
+    """Fail when a backticked binary is paired with a flag whose help names another."""
+    flags: dict[str, str] = {}
+    for bucket in flags_by_cmd.values():
+        flags.update(bucket)
     hits: list[str] = []
     leaves = {name.split("/")[-1] for name in cmd_names}
     for match in _FLAG_MENTION_RE.finditer(text or ""):
@@ -379,7 +413,11 @@ def _flag_target_mismatches(text: str, flags: dict[str, str], cmd_names: set[str
         if not help_text:
             continue
         sentence = _sentence_window(text, match.start())
-        mentioned = [leaf for leaf in leaves if re.search(rf"\b{re.escape(leaf)}\b", sentence)]
+        mentioned = [
+            leaf
+            for leaf in leaves
+            if re.search(rf"`{re.escape(leaf)}`|cmd/{re.escape(leaf)}\b", sentence)
+        ]
         if not mentioned:
             continue
         help_l = help_text.lower().replace("_", "-")
@@ -478,7 +516,7 @@ def handbook_source_fact_offenders(
     services_by_file = load_compose_services_by_file(repo_root)
     services = set().union(*services_by_file.values()) if services_by_file else set()
     tables = load_database_tables(repo_root)
-    flags = load_cli_flag_help(repo_root)
+    flags_by_cmd = load_cli_flags_by_cmd(repo_root)
     idents = load_source_identifiers(repo_root)
     cmd_names = load_cmd_names(repo_root)
     health_routes = load_health_routes(repo_root)
@@ -505,7 +543,7 @@ def handbook_source_fact_offenders(
             claimed = _mentioned_tables(text)
             hits.extend(f"table:{name}" for name in sorted(claimed - tables)[:8])
             hits.extend(_orm_offenders(text, repo_root)[:4])
-        hits.extend(_flag_target_mismatches(text, flags, cmd_names)[:4])
+        hits.extend(_flag_target_mismatches(text, flags_by_cmd, cmd_names)[:4])
         hits.extend(_ident_offenders(text, idents, readme)[:6])
         hits.extend(_route_cite_offenders(text, endpoints)[:8])
         if "健康检查" in path.name:
