@@ -189,6 +189,14 @@ op.create_table(
     sa.Column("article_id", sa.Integer, sa.ForeignKey("articles.id")),
 )
 op.create_primary_key("pk_favorites", "favorites", ["user_id", "article_id"])
+op.create_table(
+    "commentaries",
+    sa.Column("id", sa.Integer, primary_key=True),
+    sa.Column("body", sa.Text),
+    *timestamps(),
+)
+def create_updated_at_trigger():
+    pass
 """,
         encoding="utf-8",
     )

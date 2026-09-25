@@ -165,6 +165,26 @@ def rewrite_join_tag_types(content: str) -> str:
     return _MERMAID_FENCE_RE.sub(_fix, content or "")
 
 
+def package_strip_targets(content: str, root: Path) -> list[str]:
+    known = known_go_package_names(root)
+    targets: list[str] = []
+    for match in re.finditer(r"`internal/([A-Za-z0-9_-]+)`", content or ""):
+        if match.group(1) not in known and f"internal/{match.group(1)}" not in known:
+            targets.append(match.group(0))
+    for match in re.finditer(r"`([A-Za-z][A-Za-z0-9_-]{3,})`\s*包", content or ""):
+        if match.group(1) not in known:
+            targets.append(match.group(0))
+    for match in re.finditer(
+        r"(周边包如|子包如|内部包如|核心包如)\s*"
+        r"((?:`[A-Za-z][A-Za-z0-9_-]{3,}`(?:[、,，]\s*)?)+)",
+        content or "",
+    ):
+        for name in re.findall(r"`([A-Za-z][A-Za-z0-9_-]{3,})`", match.group(2)):
+            if name not in known:
+                targets.append(f"`{name}`")
+    return targets
+
+
 def known_go_package_names(root: Path) -> set[str]:
     names: set[str] = set()
     for base in ("internal", "cmd", "pkg"):
@@ -178,30 +198,205 @@ def known_go_package_names(root: Path) -> set[str]:
     return names
 
 
+def dangling_rewrite_artifacts(content: str) -> list[str]:
+    """Flag gaps left when a backticked token was deleted (double spaces, bare particles)."""
+    found: list[str] = []
+    for match in re.finditer(r".{0,12}  .{0,12}", content or ""):
+        snippet = match.group(0)
+        if "  " in snippet and re.search(r"(使用|而非|以及|或者|并且|包)", snippet):
+            found.append(snippet.strip())
+    for match in re.finditer(r"使用\s{2,}而非", content or ""):
+        found.append(match.group(0))
+    return found
+
+
+def audit_text_rewrite(
+    before: str, after: str, *, target_spans: list[str]
+) -> dict[str, int]:
+    """Count removed characters; anything outside an exact target span is collateral."""
+    if before == after:
+        return {"removed": 0, "targeted": 0, "collateral": 0}
+    import difflib
+
+    matcher = difflib.SequenceMatcher(a=before, b=after, autojunk=False)
+    removed = 0
+    targeted = 0
+    untargeted = []
+    for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
+        if tag not in {"delete", "replace"}:
+            continue
+        chunk = before[i1:i2]
+        removed += len(chunk)
+        covered = 0
+        cores = [re.sub(r"[`\s、,，]", "", span) for span in target_spans if span]
+        for span, core in zip(target_spans, cores, strict=False):
+            if not span:
+                continue
+            if span in chunk or (core and core in chunk):
+                covered = len(chunk)
+                break
+            if chunk in span and chunk.strip():
+                covered = len(chunk)
+                break
+        targeted += min(len(chunk), covered)
+        if covered == 0:
+            untargeted.append(chunk)
+    targeted = min(targeted, removed)
+    leftover = max(0, removed - targeted)
+    if leftover and re.fullmatch(r"[\s、,，`]*", "".join(untargeted) or ""):
+        leftover = 0
+        targeted = removed
+    return {
+        "removed": removed,
+        "targeted": targeted,
+        "collateral": leftover,
+    }
+
+
 def strip_unknown_go_packages(content: str, root: Path) -> str:
+    """Remove only unknown names in an explicit package context; keep files/tables/commands."""
     known = known_go_package_names(root)
     if not known:
         return content or ""
     text = content or ""
 
+    def _is_known(name: str) -> bool:
+        return name in known or any(name == item.split("/")[-1] for item in known)
+
     def _internal(match: re.Match[str]) -> str:
         name = match.group(1)
-        return match.group(0) if name in known or f"internal/{name}" in known else ""
+        return match.group(0) if _is_known(name) or f"internal/{name}" in known else ""
 
     text = re.sub(r"`internal/([A-Za-z0-9_-]+)`", _internal, text)
 
-    def _tick(match: re.Match[str]) -> str:
+    def _pkg_phrase(match: re.Match[str]) -> str:
         name = match.group(1)
-        if name in known or any(name == item.split("/")[-1] for item in known):
-            return match.group(0)
-        if (root / "internal").is_dir() and re.fullmatch(r"[a-z][a-z0-9_-]{3,}", name):
-            return ""
-        return match.group(0)
+        return match.group(0) if _is_known(name) else ""
 
-    text = re.sub(r"`([A-Za-z][A-Za-z0-9_-]{3,})`", _tick, text)
+    text = re.sub(r"`([A-Za-z][A-Za-z0-9_-]{3,})`(\s*包)", _pkg_phrase, text)
+
+    def _pkg_list(match: re.Match[str]) -> str:
+        names = re.findall(r"`([A-Za-z][A-Za-z0-9_-]{3,})`", match.group(2))
+        kept = [f"`{name}`" for name in names if _is_known(name)]
+        return match.group(1) + "、".join(kept)
+
+    text = re.sub(
+        r"(周边包如|子包如|内部包如|核心包如)\s*"
+        r"((?:`[A-Za-z][A-Za-z0-9_-]{3,}`(?:[、,，]\s*)?)+)",
+        _pkg_list,
+        text,
+    )
     text = re.sub(r"、\s*、", "、", text)
     text = re.sub(r"、{2,}", "、", text)
+    text = re.sub(r"如\s*、", "如 ", text)
+    if text != (content or ""):
+        text = re.sub(r"(\S) {2,}(\S)", r"\1 \2", text)
     return text
+
+
+def load_route_method_table(root: Path) -> dict[str, str]:
+    """HTTP method by path from HandleFunc bodies and FastAPI decorators — not the LLM."""
+    table: dict[str, str] = {}
+    if not root.exists():
+        return table
+    handle = re.compile(r"""HandleFunc\(\s*["']([^"']+)["']""")
+    fastapi = re.compile(
+        r"""@(?:router|app)\.(post|get|put|patch|delete)\(\s*['"]([^'"]*)['"]""",
+        re.I,
+    )
+    files: list[Path] = []
+    for base in (root / "cmd", root / "internal", root / "app", root):
+        if not base.exists():
+            continue
+        if base.is_file():
+            continue
+        files.extend(path for path in base.rglob("*.go") if not path.name.endswith("_test.go"))
+        files.extend(base.rglob("*.py"))
+    seen: set[Path] = set()
+    for path in files:
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for match in handle.finditer(text):
+            route = match.group(1)
+            window = text[match.start() : match.start() + 480]
+            if "MethodPost" in window or 'Method != "POST"' in window or "http.MethodPost" in window:
+                table[route] = "POST"
+            elif "MethodGet" in window or "http.MethodGet" in window:
+                table[route] = "GET"
+        for match in fastapi.finditer(text):
+            route = match.group(2) or "/"
+            table[route] = match.group(1).upper()
+    return table
+
+
+def rewrite_route_methods_from_table(content: str, root: Path) -> str:
+    table = load_route_method_table(root)
+    if not table:
+        return content or ""
+
+    def _repl(match: re.Match[str]) -> str:
+        method, path = match.group(1).upper(), match.group(2)
+        honest = table.get(path)
+        if honest and honest != method:
+            return f"{honest} {path}"
+        return match.group(0)
+
+    return re.sub(
+        r"\b(GET|POST|PUT|PATCH|DELETE)\s+(/[A-Za-z0-9_/{}.:-]*)",
+        _repl,
+        content or "",
+    )
+
+
+def attach_missing_route_cites(content: str, endpoints: list[dict] | None) -> str:
+    if not endpoints:
+        return content or ""
+    by_path: dict[str, dict] = {}
+    for item in endpoints:
+        path = str(item.get("path") or "")
+        if path:
+            by_path[path] = item
+    out: list[str] = []
+    claim = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\s+(/[A-Za-z0-9_/{}.:-]*)")
+    for line in (content or "").splitlines():
+        if "<cite>" in line or not claim.search(line):
+            out.append(line)
+            continue
+        match = claim.search(line)
+        if match is None:
+            out.append(line)
+            continue
+        found = by_path.get(match.group(2))
+        if found is None:
+            out.append(line)
+            continue
+        item = found
+        file_path = str(item.get("file_path") or "")
+        line_no = int(item.get("line_number") or item.get("line_start") or 0)
+        if file_path and line_no > 0:
+            out.append(f"{line.rstrip()} <cite>{file_path}:{line_no}-{line_no}</cite>")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def leftover_mermaid_is_unusable(content: str) -> bool:
+    blocks = re.findall(r"```mermaid\s*(.*?)```", content or "", flags=re.I | re.S)
+    if not blocks:
+        return False
+    for block in blocks:
+        if re.search(r"->>\s*\w+\s*:\s*$", block, flags=re.M):
+            return True
+        if "list flow" in block.lower():
+            return True
+        if "ErrorWrapper" in block:
+            return True
+    return False
 
 
 def rewrite_readme_route_cites(content: str, endpoints: list[dict] | None) -> str:
@@ -960,9 +1155,7 @@ def strip_empty_sections_and_footnotes(content: str) -> str:
     return "".join(kept)
 
 
-def rewrite_architecture_role_claims(content: str) -> str:
-    text = content or ""
-    replacements = (
+ARCHITECTURE_ROLE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
         (r"边缘 Agent\s*`?cmd/ccagent", "主 REST/Web 服务 `cmd/ccagent"),
         (r"边缘 Agent\s*`?ccagent`?", "主 REST/Web 服务 ccagent"),
         (r"边缘 Agent ccagent", "主 REST/Web 服务 ccagent"),
@@ -1008,8 +1201,22 @@ def rewrite_architecture_role_claims(content: str) -> str:
         (r"作为隧道客户端入口", "作为主 REST/Web 入口"),
         (r"带隧道能力的主 REST/Web 服务", "gRPC 控制面"),
         (r"作为隧道客户端连向", "作为主 REST/Web 服务对外提供"),
-    )
-    for pattern, repl in replacements:
+        (r"`cmd/ccagent` 是与采集端配套的客户端入口", "`cmd/ccagent` 是主 REST/Web 入口"),
+        (r"是与采集端配套的客户端入口", "是主 REST/Web 入口"),
+        (r"\*\*客户端入口 `cmd/ccagent`\*\*", "**主 REST/Web 入口 `cmd/ccagent`**"),
+        (r"客户端入口 `cmd/ccagent`", "主 REST/Web 入口 `cmd/ccagent`"),
+        (
+            r"隧道客户端\s*\(`?probe-agent`?\)\s*不在仓库范围内",
+            "隧道客户端 `probe-agent` 位于 `cmd/probe-agent`",
+        ),
+        (r"`?probe-agent`?[^。\n]{0,24}不在仓库范围内", "`probe-agent` 位于 `cmd/probe-agent`"),
+        (r"不在仓库范围内，由 `ccprobe-control`", "位于 `cmd/probe-agent`，由 `ccprobe-control`"),
+)
+
+
+def rewrite_architecture_role_claims(content: str) -> str:
+    text = content or ""
+    for pattern, repl in ARCHITECTURE_ROLE_REPLACEMENTS:
         text = re.sub(pattern, repl, text)
     return text
 
@@ -1139,7 +1346,7 @@ def build_verify_section(root: Path) -> str:
         return (
             "## 启动与验证\n\n"
             "1. 按安装步骤准备 `.env` 并完成迁移。\n\n"
-            "2. 确认应用进程已监听：`poetry run uvicorn app.main:app --reload`\n"
+            "2. 用真实路由确认进程存活：`curl http://127.0.0.1:8000/api/tags`\n"
         )
     return ""
 
@@ -1181,6 +1388,7 @@ def apply_deterministic_rewrites(
     text = sanitize_leftover_handbook_mermaid(text)
     text = rewrite_token_const_cite(text, root)
     text = rewrite_checkout_directory_name(text, root)
+    text = rewrite_route_methods_from_table(text, root)
     text = strip_unknown_go_packages(text, root)
     text = strip_meta_instructions(text)
     text = strip_header_only_cites(text, root)

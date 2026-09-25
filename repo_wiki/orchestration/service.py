@@ -2376,7 +2376,18 @@ class RepoWikiService:
         content = markdown.strip() or f"# {page.title}\n"
         if not content.startswith("#"):
             content = f"# {page.title}\n\n{content}"
+        from repo_wiki.generator.deterministic_sections import load_route_method_table
+
+        method_table = load_route_method_table(self.root)
+        if composition_context is not None and method_table:
+            for endpoint in getattr(composition_context, "endpoints", []) or []:
+                if not isinstance(endpoint, dict):
+                    continue
+                path = str(endpoint.get("path") or "")
+                if path in method_table:
+                    endpoint["method"] = method_table[path]
         from repo_wiki.generator.deterministic_sections import (
+            leftover_mermaid_is_unusable,
             sanitize_leftover_handbook_mermaid,
         )
 
@@ -2410,7 +2421,7 @@ class RepoWikiService:
 
         is_api_page = page.category == WikiTaxonomyCategory.API_REFERENCE
         is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
-        if self._existing_mermaid_is_thin(content):
+        if leftover_mermaid_is_unusable(content) or self._existing_mermaid_is_thin(content):
             content = self._strip_mermaid_fences(content)
         needs_er_mermaid = is_data_model_page and not self._content_has_er_mermaid(content)
         needs_any_mermaid = (
@@ -2445,8 +2456,10 @@ class RepoWikiService:
                 cites.append(citation_renderer.render_cite_block_from_candidate(candidate))
 
         from repo_wiki.generator.deterministic_sections import (
+            attach_missing_route_cites,
             rewrite_architecture_role_claims,
             rewrite_readme_route_cites,
+            rewrite_route_methods_from_table,
             rewrite_token_const_cite,
             strip_dangling_colon_leads,
             strip_empty_sections_and_footnotes,
@@ -2454,14 +2467,16 @@ class RepoWikiService:
         )
 
         content = rewrite_architecture_role_claims(content)
+        content = rewrite_route_methods_from_table(content, self.root)
         content = strip_unknown_go_packages(content, self.root)
         content = rewrite_token_const_cite(content, self.root)
-        content = rewrite_readme_route_cites(
-            content,
+        endpoints_for_cites = (
             list(getattr(composition_context, "endpoints", []) or [])
             if composition_context is not None
-            else [],
+            else []
         )
+        content = rewrite_readme_route_cites(content, endpoints_for_cites)
+        content = attach_missing_route_cites(content, endpoints_for_cites)
         try:
             from repo_wiki.generator.compose_evidence import (
                 load_repo_import_edges,
@@ -2618,23 +2633,39 @@ class RepoWikiService:
                 ("进程角色",),
                 "## 角色说明\n\n进程角色见整体架构概览。\n",
             )
+        cores = architecture_core_packages(self.root)
+        for rel in cores:
+            cite = cite_existing_meaningful(self.root, rel)
+            if not cite:
+                continue
+            if rel.lower() not in content.lower():
+                continue
+            if f"<cite>{rel}" in content.replace("\\", "/"):
+                continue
+            content = re.sub(
+                rf"`{re.escape(rel)}`(?!\s*<cite>)",
+                f"`{rel}` {cite}",
+                content,
+                count=1,
+            )
+        content = re.sub(
+            r"\n## 核心包\n\n(?:- `[^`]+`\s*<cite>[^<]+</cite>\s*\n)+",
+            "\n",
+            content,
+        )
         if has_architecture_core_citation(content, self.root):
             return content
+        required = architecture_required_packages(self.root)
         missing = [
             rel
-            for rel in architecture_required_packages(self.root)
-            if rel.lower() not in content.lower()
+            for rel in required
+            if rel.lower() not in " ".join(re.findall(r"<cite>\s*([^<]+?)\s*</cite>", content, flags=re.I)).lower()
         ]
-        cores = architecture_core_packages(self.root)
-        cited = " ".join(re.findall(r"<cite>\s*([^<]+?)\s*</cite>", content, flags=re.I)).lower()
-        extra_rels = [
-            rel for rel in list(dict.fromkeys([*missing, *cores])) if rel.lower() not in cited
-        ]
-        extra = [(rel, cite_existing_meaningful(self.root, rel)) for rel in extra_rels]
+        extra = [(rel, cite_existing_meaningful(self.root, rel)) for rel in missing]
         extra = [(rel, item) for rel, item in extra if item]
         if extra:
-            bullets = "\n".join(f"- `{rel}` {cite}" for rel, cite in extra[:8])
-            content = content.rstrip() + f"\n\n## 核心包\n\n{bullets}\n"
+            sentences = " ".join(f"`{rel}` 承担对应职责。 {cite}" for rel, cite in extra[:4])
+            content = content.rstrip() + f"\n\n{sentences}\n"
         return content
 
     def _ensure_data_model_source_cites(self, page: Any, content: str) -> str:
@@ -2889,8 +2920,11 @@ class RepoWikiService:
             lines.append(f"### {family}")
             lines.append("")
             for endpoint in grouped[family]:
-                method = str(endpoint.get("method") or "").upper().strip()
-                path = str(endpoint.get("path") or "").strip()
+                from repo_wiki.generator.mermaid_planner import _honest_method_path
+
+                method, path = _honest_method_path(endpoint, self.root)
+                method = method.upper().strip()
+                path = path.strip()
                 handler = str(endpoint.get("handler") or "").strip()
                 file_path = str(endpoint.get("file_path") or "").strip()
                 if handler in {"func", "anonymous"}:
@@ -3063,7 +3097,10 @@ class RepoWikiService:
             mermaid_key = normalize_mermaid_block(rendered)
             is_er = "erDiagram" in rendered
             is_seq = "sequenceDiagram" in rendered and "->>" in rendered
-            if mermaid_key in self._seen_mermaid_hashes:
+            from repo_wiki.planner.schema import WikiTaxonomyCategory as _Cat
+
+            force_er = is_er and getattr(page, "category", None) == _Cat.DATA_MODELS
+            if mermaid_key in self._seen_mermaid_hashes and not force_er:
                 continue
             if not is_er and not is_seq and mermaid_edge_count(rendered) < 2:
                 continue

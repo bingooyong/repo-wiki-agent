@@ -45,6 +45,36 @@ _REFERENCED_RE = re.compile(
 )
 
 
+def parse_compose_env_file_edges(text: str) -> list[tuple[str, str]]:
+    """Return (.env, service) edges only when that service declares env_file."""
+    if not (text or "").strip():
+        return []
+    try:
+        import yaml  # type: ignore
+
+        data = yaml.safe_load(text)
+    except Exception:
+        data = None
+    edges: list[tuple[str, str]] = []
+    if isinstance(data, dict) and isinstance(data.get("services"), dict):
+        for name, spec in data["services"].items():
+            if not isinstance(spec, dict):
+                continue
+            env_file = spec.get("env_file")
+            if env_file:
+                edges.append((".env", str(name)))
+        return edges
+    current = ""
+    for raw in (text or "").splitlines():
+        svc = re.match(r"^  ([A-Za-z][A-Za-z0-9_-]*):\s*$", raw)
+        if svc:
+            current = svc.group(1)
+            continue
+        if current and re.match(r"^    env_file:\s*", raw):
+            edges.append((".env", current))
+    return edges
+
+
 def parse_compose_topology(text: str) -> tuple[list[str], list[tuple[str, str]]]:
     """Return service names and real depends_on edges. Networks/volumes are omitted."""
     if not (text or "").strip():
@@ -127,7 +157,9 @@ def load_compose_from_root(root: Path) -> tuple[list[str], list[tuple[str, str]]
     ):
         path = root / name
         if path.is_file():
-            return parse_compose_topology(path.read_text(encoding="utf-8", errors="ignore"))
+            raw = path.read_text(encoding="utf-8", errors="ignore")
+            names, depends = parse_compose_topology(raw)
+            return names, [*depends, *parse_compose_env_file_edges(raw)]
     return [], []
 
 
