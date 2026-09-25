@@ -17,7 +17,6 @@ from repo_wiki.generator.compose_evidence import (
     prose_role_contradictions,
 )
 from repo_wiki.generator.composer import (
-    ComposerContext,
     build_composer_input,
     create_composer,
 )
@@ -155,9 +154,7 @@ async def test_evidence_meta_talk_reasks_and_is_not_stripped(tmp_path: Path) -> 
     )
     composer = create_composer(provider=provider)
     composer.workspace_root = root
-    output = await composer.compose_page(
-        build_composer_input(_auth_page(), None, _context(root))
-    )
+    output = await composer.compose_page(build_composer_input(_auth_page(), None, _context(root)))
     assert provider.call_count == 2
     assert output.rejected is False
     assert "当前证据覆盖的是" in output.markdown
@@ -229,9 +226,7 @@ def test_file_line_links_become_bullet_own_cites_not_neighbour(tmp_path: Path) -
         "<cite>cmd/custom-probe/serv_reflect.go:26-31</cite>",
     ]
     promoted = promote_file_line_links(markdown, tmp_path)
-    attached = attach_adjacent_cites(
-        promoted, tags, workspace_root=tmp_path, strict_match=True
-    )
+    attached = attach_adjacent_cites(promoted, tags, workspace_root=tmp_path, strict_match=True)
     out = realign_irrelevant_cites(attached, tags, tmp_path)
     assert "<cite>cmd/custom-probe/main.go:105-145</cite>" in out
     assert "<cite>cmd/custom-probe/main.go:220-275</cite>" in out
@@ -337,7 +332,9 @@ def test_fastapi_intro_cites_readme_and_migration(tmp_path: Path) -> None:
     common = root / "app" / "models" / "common.py"
     common.parent.mkdir(parents=True, exist_ok=True)
     common.write_text(
-        "\n".join(["# pad"] * 5 + ["class DateTimeModelMixin:", "    created_at = None"] + ["# pad"] * 12),
+        "\n".join(
+            ["# pad"] * 5 + ["class DateTimeModelMixin:", "    created_at = None"] + ["# pad"] * 12
+        ),
         encoding="utf-8",
     )
     page = _page(
@@ -393,9 +390,7 @@ def test_fastapi_intro_cites_readme_and_migration(tmp_path: Path) -> None:
         ],
         bound_count=2,
     )
-    out = _service(root)._enforce_qoder_page_contract(
-        page, markdown, binding, add_mermaid=False
-    )
+    out = _service(root)._enforce_qoder_page_contract(page, markdown, binding, add_mermaid=False)
     intro = out.split("## 核心数据模型")[0]
     tables = out.split("## 核心数据模型")[1]
     assert "README.md" in intro
