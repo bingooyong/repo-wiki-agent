@@ -155,6 +155,8 @@ def resolve_source_docs_conflicts(
 
         # Feature claim without source confirmation.
         for claim in conflicting_claims:
+            if claim.lower().startswith("listen-port:"):
+                continue
             if claim.lower() not in source_tokens:
                 status, classification = _status_for_doc(doc, "deferred")
                 items.append(

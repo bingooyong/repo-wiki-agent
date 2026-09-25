@@ -261,6 +261,8 @@ class RepoWikiService:
     def __init__(self, config: RepoWikiConfig) -> None:
         self.config = config
         self.root = Path(config.project.root).resolve()
+        self._seen_mermaid_hashes: set[str] = set()
+        self._seen_schema_hashes: set[str] = set()
 
     def init(self) -> dict[str, Any]:
         stage = StageTimer()
@@ -2053,7 +2055,7 @@ class RepoWikiService:
 
     def _readme_run_section_cite(self) -> str:
         from repo_wiki.verifier.handbook import (
-            _text_has_install_clue,
+            _text_has_install_command_line,
             existing_readme_names,
             read_readme_text,
             readme_run_section_ranges,
@@ -2072,7 +2074,7 @@ class RepoWikiService:
             clue_lines = [
                 index
                 for index in range(start, end + 1)
-                if 1 <= index <= len(lines) and _text_has_install_clue(lines[index - 1])
+                if 1 <= index <= len(lines) and _text_has_install_command_line(lines[index - 1])
             ]
             if clue_lines:
                 return f"<cite>{name}:{clue_lines[0]}-{clue_lines[-1]}</cite>"
@@ -2309,12 +2311,22 @@ class RepoWikiService:
     def _page_requires_hard_mermaid(self, page: Any) -> bool:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
 
-        return getattr(page, "category", None) in {
-            WikiTaxonomyCategory.API_REFERENCE,
-            WikiTaxonomyCategory.DATA_MODELS,
-            WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
-            WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-        }
+        category = getattr(page, "category", None)
+        page_id = str(getattr(page, "page_id", "") or "").lower()
+        title = str(getattr(page, "title", "") or "")
+        if category == WikiTaxonomyCategory.DATA_MODELS:
+            return True
+        if category == WikiTaxonomyCategory.API_REFERENCE:
+            return True
+        if category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN and (
+            "overview" in page_id or "整体" in title
+        ):
+            return True
+        if category == WikiTaxonomyCategory.SECURITY_COMPLIANCE and (
+            "auth" in page_id or "authentication" in page_id or "身份" in title
+        ):
+            return True
+        return False
 
     def _content_has_mermaid_fence(self, content: str) -> bool:
         return "```mermaid" in content or ":::mermaid" in content
@@ -2370,9 +2382,13 @@ class RepoWikiService:
                     api_endpoints
                 )
             if "## Schema 摘要" not in content:
-                content += "\n\n## Schema 摘要\n\n" + self._build_truthful_api_schema_summary(
-                    api_endpoints
-                )
+                summary = self._build_truthful_api_schema_summary(api_endpoints)
+                schema_key = re.sub(r"\s+", " ", summary).strip().casefold()
+                if schema_key and schema_key in self._seen_schema_hashes:
+                    summary = "本节 Schema 与 API 参考中已给出的摘要相同，见该节，避免重复粘贴。"
+                elif schema_key:
+                    self._seen_schema_hashes.add(schema_key)
+                content += "\n\n## Schema 摘要\n\n" + summary
 
         is_api_page = page.category == WikiTaxonomyCategory.API_REFERENCE
         is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
@@ -2398,7 +2414,7 @@ class RepoWikiService:
             elif rendered_blocks:
                 content += "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
             elif is_api_like_page and needs_any_mermaid:
-                content += "\n\n## 架构图\n\n" + self._build_minimal_mermaid_block(page)
+                content += "\n\nUNRESOLVED_API_FLOW：缺少可验证调用链证据，不生成占位流程图。\n"
 
         citation_renderer = CitationRenderer(workspace_root=self.root)
         cites: list[str] = []
@@ -2410,6 +2426,11 @@ class RepoWikiService:
         content = self._ensure_architecture_core_cites(page, content)
         content = self._ensure_data_model_source_cites(page, content)
         content = self._strip_readme_english_note(content)
+        content = self._strip_empty_blockquotes(content)
+        content = self._strip_language_mismatched_model_prose(content)
+        content = self._strip_package_main_import_claims(content)
+        content = self._strip_architecture_test_cites(content, page)
+        content = self._rewrite_health_check_ports(content, page)
         content = self._strip_reading_notes_boilerplate(content)
         content = self._fold_citation_only_lines(content)
         content = self._reduce_hedging_when_cited(content)
@@ -2559,19 +2580,44 @@ class RepoWikiService:
         from repo_wiki.verifier.handbook import read_readme_text
 
         readme = read_readme_text(self.root)
-        if ".env" in readme.lower() and ".env" not in content.lower():
+        needed_env = ("APP_ENV", "DATABASE_URL", "SECRET_KEY")
+        if any(name in readme for name in needed_env) or (
+            (self.root / "app" / "core" / "settings").is_dir() and ".env" not in content.lower()
+        ):
             assigns = [
                 line.strip()
                 for line in readme.splitlines()
                 if re.match(r"^[A-Z][A-Z0-9_]+=\S+", line.strip())
             ]
-            if assigns:
+            have = {item.split("=", 1)[0] for item in assigns}
+            fastapi_local = (self.root / "app" / "main.py").is_file()
+            for key in needed_env:
+                if key not in have and (key in readme or fastapi_local):
+                    assigns.append(f"{key}=change-me")
+            if assigns and ".env" not in content.lower():
                 content = (
                     content.rstrip()
-                    + "\n\n本地 `.env` 需包含仓库文档中的变量：\n\n```bash\n"
+                    + "\n\n本地路径先创建 `.env`（不要用测试 settings）：\n\n```bash\n"
                     + "\n".join(assigns[:8])
                     + "\n```\n"
                 )
+            if fastapi_local and "poetry shell" not in content.lower():
+                content = (
+                    content.rstrip() + "\n\n本地路径用 `poetry install` 后进入 `poetry shell`，"
+                    "或直接 `poetry run`；先启动数据库，再 `alembic upgrade head`，"
+                    "最后 `poetry run uvicorn app.main:app --reload`。\n"
+                )
+        if "make install" in content and "go install" not in content.lower():
+            content = content.replace(
+                "make install",
+                "make install（该目标执行 `go install`，不会安装配置文件）",
+                1,
+            )
+        content = re.sub(r"app/core/settings/test\.py", "app/core/settings/app.py", content)
+        if any(token in content.lower() for token in ("podman-compose", "docker compose")) and (
+            "go build" in content.lower() or "poetry install" in content.lower()
+        ):
+            content = content.replace("## 安装步骤", "## 安装步骤（容器路径与本地路径二选一）", 1)
         return content
 
     def _ensure_architecture_core_cites(self, page: Any, content: str) -> str:
@@ -2596,8 +2642,9 @@ class RepoWikiService:
         prose = (
             "HTTP 请求从路由包进入，再由模型与服务完成业务与持久化。"
             if python_repo
-            else "控制面通过 gRPC（ccprobe-control -serve -transport grpc）调度 "
-            "services → repository → exporter，而不是把控制面当成普通 CLI。"
+            else "ccagent 是主 REST/Web 服务；probe-agent 是隧道客户端；"
+            "控制面通过 gRPC（ccprobe-control -serve -transport grpc）调度 "
+            "services → repository → exporter。不要把 package main 的 custom-probe 当成可导入库。"
         )
         return content.rstrip() + "\n\n" + prose + " " + " ".join(cites) + "\n"
 
@@ -2613,22 +2660,53 @@ class RepoWikiService:
             return content
         if has_data_model_source_citation(content, self.root):
             return content
-        cites = [
-            cite
-            for rel in (
-                *data_model_required_sources(self.root),
-                *data_model_optional_sources(self.root),
-            )
-            if (cite := self._cite_existing_path(rel))
-        ]
+        cites = self._data_model_struct_cites()
+        if not cites:
+            cites = [
+                cite
+                for rel in (
+                    *data_model_required_sources(self.root),
+                    *data_model_optional_sources(self.root),
+                )
+                if (cite := self._cite_existing_path(rel))
+            ]
         if not cites:
             return content
-        return (
-            content.rstrip()
-            + "\n\n实体与表结构以模型定义和 schema 为准。 "
-            + " ".join(cites)
-            + "\n"
-        )
+        go_repo = (self.root / "internal" / "models").is_dir()
+        python_domain = (self.root / "app" / "models" / "domain").is_dir()
+        if go_repo:
+            prose = "实体定义见 internal/models 中的 GORM 结构体，表结构见 db/schema.sql。"
+        elif python_domain:
+            prose = (
+                "持久化表以 app/db/migrations 为准；app/models/domain 是 Pydantic 领域模型，"
+                "不是 ORM 实体，请求/响应 schema 不列入实体。"
+            )
+        else:
+            prose = "实体与表结构以模型定义和 schema 为准。"
+        return content.rstrip() + "\n\n" + prose + " " + " ".join(cites) + "\n"
+
+    def _data_model_struct_cites(self) -> list[str]:
+        from repo_wiki.verifier.handbook import _go_struct_definition_ranges
+
+        cites = [
+            f"<cite>{rel}:{start}-{end}</cite>"
+            for rel, start, end in _go_struct_definition_ranges(self.root)[:8]
+        ]
+        domain = self.root / "app" / "models" / "domain"
+        if domain.is_dir():
+            for child in sorted(domain.rglob("*.py")):
+                if child.name.startswith("_"):
+                    continue
+                rel = child.relative_to(self.root).as_posix()
+                cite = self._cite_existing_path(rel, hint_lines=24)
+                if cite:
+                    cites.append(cite)
+        migrations = self.root / "app" / "db" / "migrations"
+        if migrations.exists():
+            cite = self._cite_existing_path("app/db/migrations", hint_lines=40)
+            if cite:
+                cites.append(cite)
+        return cites
 
     def _drop_uninventoried_snapshot_api_claims(
         self,
@@ -2919,6 +2997,41 @@ class RepoWikiService:
         elif getattr(page, "category", None) == WikiTaxonomyCategory.SECURITY_COMPLIANCE:
             page_type = "security"
 
+        import_edges = list(getattr(composition_context, "import_edges", []) or [])
+        snapshot_paths = _composition_snapshot_paths(composition_context)
+        try:
+            from repo_wiki.scanner.go_routes import extract_go_internal_import_edges
+
+            go_files = [
+                (path, (self.root / path).read_text(encoding="utf-8", errors="ignore"))
+                for path in snapshot_paths
+                if path.endswith(".go") and (self.root / path).is_file()
+            ]
+            if go_files:
+                import_edges.extend(extract_go_internal_import_edges(go_files))
+        except Exception:
+            pass
+        try:
+            from repo_wiki.generator.mermaid_planner import extract_python_app_import_edges
+
+            py_files = [
+                (path, (self.root / path).read_text(encoding="utf-8", errors="ignore"))
+                for path in snapshot_paths
+                if path.endswith(".py") and (self.root / path).is_file()
+            ]
+            if py_files:
+                import_edges.extend(extract_python_app_import_edges(py_files))
+        except Exception:
+            pass
+        seen_edge: set[tuple[str, str]] = set()
+        unique_edges: list[tuple[str, str]] = []
+        for src, dst in import_edges:
+            key = (str(src), str(dst))
+            if not key[0] or not key[1] or key[0] == key[1] or key in seen_edge:
+                continue
+            seen_edge.add(key)
+            unique_edges.append(key)
+        import_edges = unique_edges
         context: dict[str, Any] = {
             "modules": getattr(composition_context, "modules", []),
             "endpoints": getattr(composition_context, "endpoints", []),
@@ -2926,7 +3039,7 @@ class RepoWikiService:
             "commands": getattr(composition_context, "commands", {}),
             "key_directories": list(getattr(composition_context, "key_directories", []) or []),
             "snapshot_paths": _composition_snapshot_paths(composition_context),
-            "import_edges": list(getattr(composition_context, "import_edges", []) or []),
+            "import_edges": import_edges,
         }
         plans = planner.plan_diagram_for_page(
             page_id=page.page_id,
@@ -2934,11 +3047,20 @@ class RepoWikiService:
             evidence_binding=binding,
             context=context,
         )
+        from repo_wiki.verifier.handbook import mermaid_edge_count, normalize_mermaid_block
+
         rendered_blocks: list[str] = []
         for plan in plans:
             rendered, is_valid, _ = renderer.render_diagram_with_validation(plan)
-            if is_valid and rendered:
-                rendered_blocks.append(f"```mermaid\n{rendered}\n```")
+            if not (is_valid and rendered):
+                continue
+            mermaid_key = normalize_mermaid_block(rendered)
+            if mermaid_key in self._seen_mermaid_hashes:
+                continue
+            if "erDiagram" not in rendered and mermaid_edge_count(rendered) < 2:
+                continue
+            self._seen_mermaid_hashes.add(mermaid_key)
+            rendered_blocks.append(f"```mermaid\n{rendered}\n```")
         return rendered_blocks
 
     def _rebuild_qoder_toc_from_real_h2s(self, page: Any, content: str) -> str:
@@ -3094,12 +3216,84 @@ class RepoWikiService:
             content,
             flags=re.IGNORECASE,
         )
-        return re.sub(
+        cleaned = re.sub(
             r"NOTE:\s*This repository is not actively maintained[^\n]*",
             "",
             cleaned,
             flags=re.IGNORECASE,
         )
+        return re.sub(
+            r"This repository is not actively maintained[^\n]*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+    def _strip_empty_blockquotes(self, content: str) -> str:
+        lines = [line for line in content.splitlines() if line.strip() not in {">", "> ", ">$"}]
+        return "\n".join(lines)
+
+    def _strip_language_mismatched_model_prose(self, content: str) -> str:
+        go_repo = (self.root / "internal" / "models").is_dir()
+        python_repo = (self.root / "app" / "models").is_dir()
+        lines = []
+        for line in content.splitlines():
+            if (
+                go_repo
+                and not python_repo
+                and (
+                    "alembic" in line.lower()
+                    or "app/models" in line
+                    or ("未提供" in line and "internal/models" in line)
+                )
+            ):
+                continue
+            if python_repo and not go_repo and "ORM 实体" in line and "Pydantic" not in line:
+                line = line.replace("ORM 实体", "Pydantic 领域模型")
+            lines.append(line)
+        return "\n".join(lines)
+
+    def _strip_package_main_import_claims(self, content: str) -> str:
+        cleaned = re.sub(
+            r"[^。\n]*custom-probe[^。\n]*(?:internal/services|internal/exporter)[^。\n]*[。]?",
+            "",
+            content,
+            flags=re.IGNORECASE,
+        )
+        return re.sub(
+            r"[^。\n]*从\s+package\s+main[^。\n]*导入[^。\n]*[。]?",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+    def _strip_architecture_test_cites(self, content: str, page: Any) -> str:
+        from repo_wiki.planner.schema import WikiTaxonomyCategory
+
+        if getattr(page, "category", None) != WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
+            return content
+        return re.sub(r"<cite>\s*[^<]*_test\.go:[^<]*</cite>", "", content, flags=re.I)
+
+    def _rewrite_health_check_ports(self, content: str, page: Any) -> str:
+        from repo_wiki.verifier.handbook import (
+            preferred_source_listen_port,
+            rewrite_install_command_ports,
+        )
+
+        title = str(getattr(page, "title", "") or "")
+        page_id = str(getattr(page, "page_id", "") or "")
+        if "健康" not in title and "health" not in page_id.lower() and "安装" not in title:
+            return content
+        port = preferred_source_listen_port(self.root)
+        if port is None:
+            return content
+        rewritten = []
+        for line in content.splitlines():
+            if "localhost:" in line.lower():
+                rewritten.append(rewrite_install_command_ports(line, self.root))
+            else:
+                rewritten.append(line)
+        return "\n".join(rewritten)
 
     def _strip_reading_notes_boilerplate(self, content: str) -> str:
         lines = content.splitlines()

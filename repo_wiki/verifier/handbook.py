@@ -387,11 +387,21 @@ def has_readme_run_section_citation(markdown: str, repo_root: Path) -> bool:
         cited = "\n".join(lines[max(0, start - 1) : max(start, end)])
         if _text_is_badge_header(cited):
             continue
-        if _text_has_install_clue(cited):
+        if _text_has_install_command_line(cited):
             return True
     if not found_readme:
         return False
     return not run_ranges
+
+
+def _text_has_install_command_line(text: str) -> bool:
+    for line in (text or "").splitlines():
+        stripped = line.strip().lstrip("$").strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if any(pattern.search(stripped) for pattern in _REPO_INSTALL_LINE_PATTERNS):
+            return True
+    return False
 
 
 def _cmd_package_exists(repo_root: Path, target: str) -> bool:
@@ -558,8 +568,29 @@ def rewrite_install_command_ports(command: str, repo_root: Path) -> str:
     return _DOC_LOCALHOST_PORT_RE.sub(f"localhost:{port}", command)
 
 
+_MERMAID_FENCE_RE = re.compile(r"```mermaid\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+_MERMAID_EDGE_RE = re.compile(r"-->|==>|-\.-|-\.|<--|\|\|--")
+
+
 def mermaid_block_is_generic_placeholder(block: str) -> bool:
     return bool(_GENERIC_PLACEHOLDER_MERMAID_RE.search(block or ""))
+
+
+def normalize_mermaid_block(block: str) -> str:
+    lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for line in (block or "").splitlines()
+        if line.strip() and not line.strip().startswith("%%")
+    ]
+    return "\n".join(lines).casefold()
+
+
+def extract_mermaid_blocks(text: str) -> list[str]:
+    return [match.group(1).strip() for match in _MERMAID_FENCE_RE.finditer(text or "")]
+
+
+def mermaid_edge_count(block: str) -> int:
+    return len(_MERMAID_EDGE_RE.findall(block or ""))
 
 
 def handbook_placeholder_mermaid_pages(content_dir: Path | None) -> list[str]:
@@ -572,6 +603,116 @@ def handbook_placeholder_mermaid_pages(content_dir: Path | None) -> list[str]:
         if mermaid_block_is_generic_placeholder(text):
             found.append(path.as_posix())
     return found
+
+
+def handbook_duplicate_mermaid_groups(
+    content_dir: Path | None, max_copies: int = 2
+) -> dict[str, list[str]]:
+    """Normalized mermaid bodies copied onto more than ``max_copies`` pages."""
+    if content_dir is None or not content_dir.exists():
+        return {}
+    groups: dict[str, list[str]] = {}
+    for path in iter_markdown_pages(content_dir):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        seen_on_page: set[str] = set()
+        for block in extract_mermaid_blocks(text):
+            key = normalize_mermaid_block(block)
+            if not key or key in seen_on_page:
+                continue
+            seen_on_page.add(key)
+            groups.setdefault(key, []).append(path.as_posix())
+    return {key: pages for key, pages in groups.items() if len(pages) > max_copies}
+
+
+def handbook_thin_mermaid_pages(content_dir: Path | None) -> list[str]:
+    """Pages whose mermaid fences have fewer than two edges and are not ER relations."""
+    if content_dir is None or not content_dir.exists():
+        return []
+    found: list[str] = []
+    for path in iter_markdown_pages(content_dir):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for block in extract_mermaid_blocks(text):
+            if "erdiagram" in block.lower():
+                if mermaid_edge_count(block) < 1 and block.lower().count("{") > 1:
+                    found.append(path.as_posix())
+                    break
+                continue
+            if mermaid_edge_count(block) < 2:
+                found.append(path.as_posix())
+                break
+    return found
+
+
+_SQL_FENCE_RE = re.compile(r"```sql\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+_SCHEMA_SECTION_RE = re.compile(
+    r"##\s+Schema 摘要\n(.*?)(?=\n## |\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
+_SCHEMA_SUMMARY_RE = re.compile(
+    r"UNRESOLVED_API_SCHEMA|证据中可确认的 schema 相关元数据",
+    re.IGNORECASE,
+)
+
+
+def handbook_reserved_mermaid_id_pages(content_dir: Path | None) -> list[str]:
+    """Pages whose mermaid fences use reserved node ids such as ``end``."""
+    if content_dir is None or not content_dir.exists():
+        return []
+    from repo_wiki.generator.mermaid_planner import _reserved_mermaid_ids
+
+    found: list[str] = []
+    for path in iter_markdown_pages(content_dir):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for block in extract_mermaid_blocks(text):
+            if _reserved_mermaid_ids(block):
+                found.append(path.as_posix())
+                break
+    return found
+
+
+def handbook_duplicate_schema_groups(
+    content_dir: Path | None, max_copies: int = 2
+) -> dict[str, list[str]]:
+    """Identical SQL/schema blocks copied onto more than ``max_copies`` pages."""
+    if content_dir is None or not content_dir.exists():
+        return {}
+    groups: dict[str, list[str]] = {}
+    for path in iter_markdown_pages(content_dir):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        seen_on_page: set[str] = set()
+        blocks = list(_SQL_FENCE_RE.findall(text))
+        for section in _SCHEMA_SECTION_RE.findall(text):
+            cleaned = re.sub(r"<cite>[^<]+</cite>", "", section)
+            if _SCHEMA_SUMMARY_RE.search(cleaned) or len(cleaned.strip()) >= 80:
+                blocks.append(cleaned)
+        for block in blocks:
+            key = normalize_mermaid_block(block)
+            if not key or key in seen_on_page:
+                continue
+            seen_on_page.add(key)
+            groups.setdefault(key, []).append(path.as_posix())
+    return {key: pages for key, pages in groups.items() if len(pages) > max_copies}
+
+
+def handbook_distinct_evidence_mermaid_count(content_dir: Path | None) -> tuple[int, int]:
+    """Return (distinct evidence-backed diagrams, total pages). Copies do not count twice."""
+    pages = list(iter_markdown_pages(content_dir)) if content_dir and content_dir.exists() else []
+    distinct: set[str] = set()
+    copies = handbook_duplicate_mermaid_groups(content_dir, max_copies=2)
+    copied_keys = set(copies)
+    for path in pages:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for block in extract_mermaid_blocks(text):
+            key = normalize_mermaid_block(block)
+            if not key or key in copied_keys or mermaid_block_is_generic_placeholder(block):
+                continue
+            if "erdiagram" in block.lower():
+                if mermaid_edge_count(block) < 1:
+                    continue
+            elif mermaid_edge_count(block) < 2:
+                continue
+            distinct.add(key)
+    return len(distinct), len(pages)
 
 
 _GENERIC_GO_INSTALL = re.compile(
@@ -694,6 +835,22 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
                             root,
                         )
                     )
+    has_compose = any(
+        token in item.lower()
+        for item in commands
+        for token in ("podman-compose", "docker compose", "docker-compose")
+    )
+    schema_cmds = [item for item in commands if "schema.sql" in item]
+    if schema_cmds:
+        preferred_schema = next(
+            (item for item in schema_cmds if "exec" in item.lower()),
+            schema_cmds[0],
+        )
+        commands = [item for item in commands if "schema.sql" not in item]
+        commands.append(preferred_schema)
+    if has_compose:
+        commands = [item for item in commands if "./bin/ccagent" not in item]
+    commands = [f"poetry run {item}" if item.startswith("uvicorn ") else item for item in commands]
     commands.sort(key=_install_command_priority)
     return commands[:limit]
 
@@ -747,10 +904,15 @@ def data_model_required_sources(repo_root: Path) -> list[str]:
     required: list[str] = []
     if (repo_root / "internal" / "models").is_dir():
         required.append("internal/models")
-    if (repo_root / "app" / "models").is_dir():
+    if (repo_root / "app" / "models" / "domain").is_dir():
+        required.append("app/models/domain")
+    elif (repo_root / "app" / "models").is_dir():
         required.append("app/models")
+    migrations = repo_root / "app" / "db" / "migrations"
     alembic = repo_root / "alembic"
-    if alembic.is_dir() and any(alembic.rglob("*.py")):
+    if migrations.exists() and any(migrations.rglob("*")):
+        required.append("app/db/migrations")
+    elif alembic.is_dir() and any(alembic.rglob("*.py")):
         required.append("alembic")
     return required
 
@@ -771,9 +933,58 @@ def has_data_model_source_citation(markdown: str, repo_root: Path) -> bool:
     cited = " ".join(
         match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")
     ).lower()
+    if required and not all(need.lower() in cited for need in required):
+        return False
+    if (repo_root / "internal" / "models").is_dir() and not _has_go_struct_definition_cite(
+        markdown, repo_root
+    ):
+        return False
     if required:
-        return all(need.lower() in cited for need in required)
+        return True
     return any(need.lower() in cited for need in optional)
+
+
+def _go_struct_definition_ranges(repo_root: Path) -> list[tuple[str, int, int]]:
+    models_dir = repo_root / "internal" / "models"
+    if not models_dir.is_dir():
+        return []
+    found: list[tuple[str, int, int]] = []
+    struct_re = re.compile(r"^type\s+([A-Z][A-Za-z0-9_]*)\s+struct\s*\{")
+    for path in sorted(models_dir.rglob("*.go")):
+        if path.name.endswith("_test.go"):
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        for index, line in enumerate(lines, start=1):
+            if struct_re.match(line):
+                found.append((rel, index, min(len(lines), index + 20)))
+    return found
+
+
+def _has_go_struct_definition_cite(markdown: str, repo_root: Path) -> bool:
+    ranges = _go_struct_definition_ranges(repo_root)
+    if not ranges:
+        return True
+    for match in _CITE_RE.finditer(markdown or ""):
+        raw = match.group(1).replace("\\", "/")
+        path, _sep, rest = raw.partition(":")
+        if not rest:
+            continue
+        start_s, _dash, end_s = rest.partition("-")
+        try:
+            start = int(re.sub(r"\D.*", "", start_s) or "0")
+            end = int(re.sub(r"\D.*", "", end_s or start_s) or start)
+        except ValueError:
+            continue
+        for rel, struct_start, struct_end in ranges:
+            if path.lower() != rel.lower():
+                continue
+            # File-header cites like :1-8 that merely graze a later struct do not count.
+            if start <= 1 and struct_start > 3:
+                continue
+            if start <= struct_end and end >= struct_start:
+                return True
+    return False
 
 
 def has_api_routes_citation(

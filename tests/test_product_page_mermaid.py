@@ -349,10 +349,10 @@ def test_overview_contract_mermaid_omits_filenames_and_tool_folders(tmp_path: Pa
         modules=[
             {"name": "__init__.py", "path": "app/__init__.py"},
             {"name": "main.py", "path": "app/main.py"},
-            {"name": "api", "path": "app/api"},
-            {"name": "services", "path": "app/services"},
+            {"name": "api", "path": "app/api", "depends_on": ["services"]},
+            {"name": "services", "path": "app/services", "depends_on": ["db"]},
             {"name": "core", "path": "app/core"},
-            {"name": "db", "path": "app/db"},
+            {"name": "db", "path": "app/db", "depends_on": ["models"]},
             {"name": "models", "path": "app/models"},
             {"name": "resources", "path": "app/resources"},
             {"name": "tests", "path": "tests"},

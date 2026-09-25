@@ -1449,7 +1449,7 @@ def test_schema_sql_alone_does_not_satisfy_go_data_model_check(tmp_path: Path) -
     _write_synthetic_go_repo(tmp_path)
     page = "# 数据模型\n\n表结构见 schema。<cite>db/schema.sql:1-8</cite>\n"
     assert has_data_model_source_citation(page, tmp_path) is False
-    page += "<cite>internal/models/endpoint.go:1-8</cite>\n"
+    page += "<cite>internal/models/endpoint.go:4-20</cite>\n"
     assert has_data_model_source_citation(page, tmp_path) is True
 
 

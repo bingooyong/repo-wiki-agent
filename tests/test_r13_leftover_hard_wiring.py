@@ -25,7 +25,7 @@ from pathlib import Path
 
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.generator.composer import ComposerContext
-from repo_wiki.generator.mermaid_planner import MermaidPlanner, MermaidRenderer
+from repo_wiki.generator.mermaid_planner import MermaidPlanner
 from repo_wiki.orchestration.service import RepoWikiService
 from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
 from repo_wiki.scanner.conflict_resolver import resolve_source_docs_conflicts
@@ -242,10 +242,13 @@ def _api_page_markdown() -> str:
 
 def test_mermaid_relationship_flowchart_does_not_claim_entity_service() -> None:
     """Cross-line mermaid `entity` then `service` is not an inventory service."""
-    plan = MermaidPlanner()._plan_api_relationship_flowchart("api-ref", None, {"endpoints": []})
-    rendered = MermaidRenderer().render_diagram(plan)
-    assert "entity" in rendered
-    assert "service" in rendered
+    rendered = (
+        "flowchart TD\n    entity[Entity/DTO]\n    service[Service]\n    entity --> service\n"
+    )
+    assert (
+        MermaidPlanner()._plan_api_relationship_flowchart("api-ref", None, {"endpoints": []})
+        is None
+    )
     verifier = object.__new__(QoderLikeVerifierService)
     claims = QoderLikeVerifierService._extract_structured_name_claims(verifier, rendered, "service")
     assert "entity" not in {claim.lower() for claim in claims}

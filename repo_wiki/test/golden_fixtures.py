@@ -46,6 +46,7 @@ def build_strict_qoder_mock_pages(language_label: str) -> dict[str, str]:
 ```mermaid
 graph LR
   Client[{language_label}] --> Service[Core]
+  Service --> Store[Persistence]
 ```
 
 <cite>source:fixtures/golden/sample_repo/README.md:1-40</cite>
@@ -68,6 +69,7 @@ graph LR
 ```mermaid
 flowchart TD
   A[Ingress] --> B[Domain]
+  B --> C[Persistence]
 ```
 
 <cite>source:fixtures/golden/sample_repo/README.md:41-80</cite>

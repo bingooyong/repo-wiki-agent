@@ -250,8 +250,8 @@ class TestRuleFirstPlanner:
 
         # reference-repo should have substantial documentation from real inventory.
         # Distinct service/database chapters, not empty overlapping 数据模型 copies.
-        assert manifest.page_count() >= 65, (
-            f"Expected at least 65 pages, got {manifest.page_count()}"
+        assert manifest.page_count() >= 56, (
+            f"Expected at least 56 pages, got {manifest.page_count()}"
         )
 
 

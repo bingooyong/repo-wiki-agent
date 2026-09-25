@@ -1250,8 +1250,8 @@ class RuleFirstPlanner:
         )
 
     def _generate_security_pages(self) -> None:
-        """Generate security and compliance pages."""
-        # Security overview
+        """Generate only security pages that have code evidence; fold the rest."""
+        kinds = self._security_evidence_kinds()
         self._add_page(
             page_id=self._make_page_id(
                 "security-overview", WikiTaxonomyCategory.SECURITY_COMPLIANCE
@@ -1262,102 +1262,56 @@ class RuleFirstPlanner:
             sort_order=0,
             tags=["security", "compliance"],
         )
+        if "auth" in kinds:
+            self._add_page(
+                page_id=self._make_page_id(
+                    "authentication", WikiTaxonomyCategory.SECURITY_COMPLIANCE
+                ),
+                title="身份认证",
+                category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
+                parent="security-overview",
+                sort_order=1,
+                tags=["auth", "authentication"],
+            )
+        if "authz" in kinds:
+            self._add_page(
+                page_id=self._make_page_id(
+                    "authorization", WikiTaxonomyCategory.SECURITY_COMPLIANCE
+                ),
+                title="权限管理",
+                category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
+                parent="security-overview",
+                sort_order=2,
+                tags=["authz", "authorization"],
+            )
+        if "encryption" in kinds and "auth" not in kinds:
+            self._add_page(
+                page_id=self._make_page_id("encryption", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
+                title="加密策略",
+                category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
+                parent="security-overview",
+                sort_order=3,
+                tags=["encryption", "security"],
+            )
 
-        # Authentication
-        self._add_page(
-            page_id=self._make_page_id("authentication", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="身份认证",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=1,
-            tags=["auth", "authentication"],
-        )
-
-        # Authorization
-        self._add_page(
-            page_id=self._make_page_id("authorization", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="权限管理",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=2,
-            tags=["authz", "authorization"],
-        )
-
-        # Data protection
-        self._add_page(
-            page_id=self._make_page_id("data-protection", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="数据保护",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=3,
-            tags=["data", "protection"],
-        )
-
-        # Encryption
-        self._add_page(
-            page_id=self._make_page_id("encryption", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="加密策略",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=4,
-            tags=["encryption", "security"],
-        )
-
-        # API security
-        self._add_page(
-            page_id=self._make_page_id("api-security", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="API安全",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=5,
-            tags=["api", "security"],
-        )
-
-        # Audit logging
-        self._add_page(
-            page_id=self._make_page_id("audit-logging", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="审计日志",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=6,
-            tags=["audit", "logging"],
-        )
-
-        # Compliance frameworks
-        self._add_page(
-            page_id=self._make_page_id(
-                "compliance-frameworks", WikiTaxonomyCategory.SECURITY_COMPLIANCE
-            ),
-            title="合规框架",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=7,
-            tags=["compliance", "standards"],
-        )
-
-        # Security best practices
-        self._add_page(
-            page_id=self._make_page_id(
-                "security-best-practices", WikiTaxonomyCategory.SECURITY_COMPLIANCE
-            ),
-            title="安全最佳实践",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=8,
-            tags=["best-practices", "security"],
-        )
-
-        # Vulnerability management
-        self._add_page(
-            page_id=self._make_page_id(
-                "vulnerability-management", WikiTaxonomyCategory.SECURITY_COMPLIANCE
-            ),
-            title="漏洞管理",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=9,
-            tags=["vulnerability", "security"],
-        )
+    def _security_evidence_kinds(self) -> set[str]:
+        kinds: set[str] = set()
+        root = Path(self.identity.root_path)
+        files: list[str] = []
+        if root.is_dir():
+            files = [path.as_posix() for path in root.rglob("*") if path.is_file()]
+        for raw in files:
+            low = raw.replace("\\", "/").lower()
+            name = Path(low).name
+            if any(token in name for token in ("jwt", "apiauth", "auth")) or "/security.py" in low:
+                kinds.add("auth")
+            if any(token in low for token in ("rbac", "permission", "authorize")):
+                kinds.add("authz")
+            if any(token in low for token in ("encrypt", "crypto", "password", "hash")) and (
+                "jwt" not in name and "auth" not in name
+            ):
+                kinds.add("encryption")
+        return kinds
 
     def _generate_troubleshooting_pages(self) -> None:
         """Generate troubleshooting pages."""

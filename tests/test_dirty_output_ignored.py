@@ -35,7 +35,8 @@ The schema is documented below.
 
 ```mermaid
 graph LR
-  A --> B
+  A[{title}] --> B[Core]
+  B --> C[Store]
 ```
 
 Relationship entity ERD schema 关系 实体 数据库 表 字段.

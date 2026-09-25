@@ -318,7 +318,6 @@ class TestMermaidPlanner:
         assert len(diagrams) >= 1
         diagram_types = {d.diagram_type for d in diagrams}
         assert MermaidDiagramType.SEQUENCE_DIAGRAM in diagram_types
-        assert MermaidDiagramType.FLOWCHART in diagram_types
 
     def test_plan_api_diagram_includes_list_detail_count_parameter_flows(self):
         """API 合同必须覆盖 list/detail/count/parameter 检索流。"""

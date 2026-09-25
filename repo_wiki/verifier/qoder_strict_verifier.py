@@ -76,6 +76,37 @@ _QUALITY_METRIC_LEAK = re.compile(
 )
 
 
+_ENGLISH_CLAIM_STOPWORDS = frozenset(
+    {
+        "method",
+        "layer",
+        "type",
+        "name",
+        "call",
+        "handler",
+        "too",
+        "large",
+        "request",
+        "entity",
+        "service",
+        "model",
+        "data",
+        "core",
+        "public",
+    }
+)
+
+
+def _looks_like_inventory_symbol(token: str) -> bool:
+    if token.lower() in _ENGLISH_CLAIM_STOPWORDS:
+        return False
+    if "_" in token or "-" in token:
+        return True
+    if re.match(r"^[A-Z][a-zA-Z0-9]+[A-Z][a-zA-Z0-9]*$", token):
+        return True
+    return token.islower() and len(token) >= 6
+
+
 def _prose_without_fences(text: str) -> str:
     """Drop fenced code/mermaid so diagram node ids are not inventory claims."""
     lines: list[str] = []
@@ -1116,29 +1147,24 @@ class QoderLikeVerifierService(VerifierService):
         return True
 
     def _check_qoder_mermaid_coverage(self) -> CheckResult:
-        from repo_wiki.generator.io import read_text
+        from repo_wiki.verifier.handbook import handbook_distinct_evidence_mermaid_count
 
         content_dir = self._find_content_dir()
         if not content_dir:
             return self._skip_check("mermaid-coverage", "No content directory")
-        md_files = list(content_dir.rglob("*.md"))
-        if not md_files:
+        distinct, total_pages = handbook_distinct_evidence_mermaid_count(content_dir)
+        if not total_pages:
             return self._skip_check("mermaid-coverage", "No markdown pages")
-        with_mermaid = 0
-        for page in md_files:
-            try:
-                content = read_text(page)
-            except Exception:
-                continue
-            if "```mermaid" in content or ":::mermaid" in content:
-                with_mermaid += 1
-        ratio = with_mermaid / len(md_files)
+        ratio = distinct / total_pages
         if ratio < self.MIN_MERMAID_COVERAGE:
             return CheckResult(
                 name="qoder-mermaid-coverage",
                 status="FAIL",
                 message=f"Mermaid coverage too low: {ratio:.2%}",
-                details={"pages_with_mermaid": with_mermaid, "total_pages": len(md_files)},
+                details={
+                    "distinct_evidence_diagrams": distinct,
+                    "total_pages": total_pages,
+                },
                 reason_code="QODER_MERMAID_LOW",
                 gate_type=GateType.HARD,
             )
@@ -1146,7 +1172,10 @@ class QoderLikeVerifierService(VerifierService):
             name="qoder-mermaid-coverage",
             status="PASS",
             message=f"Mermaid coverage OK: {ratio:.2%}",
-            details={"pages_with_mermaid": with_mermaid, "total_pages": len(md_files)},
+            details={
+                "distinct_evidence_diagrams": distinct,
+                "total_pages": total_pages,
+            },
             gate_type=GateType.HARD,
         )
 
@@ -1901,12 +1930,17 @@ class QoderLikeVerifierService(VerifierService):
                             "problem": problem,
                         }
                     )
-        if invalid:
+        wrapped = self._handbook_backtick_cite_pages()
+        if invalid or wrapped:
             return CheckResult(
                 name="qoder-citation-targets",
                 status="FAIL",
                 message=f"{len(invalid)} invalid repository citation targets",
-                details={"invalid": invalid[:30], "invalid_count": len(invalid)},
+                details={
+                    "invalid": invalid[:30],
+                    "invalid_count": len(invalid),
+                    "backtick_wrapped_pages": wrapped[:20],
+                },
                 reason_code="QODER_CITATION_INVALID",
                 gate_type=GateType.HARD,
             )
@@ -2370,7 +2404,19 @@ class QoderLikeVerifierService(VerifierService):
                 r"\b[Ss]ervice[ \t]+([a-z][a-z0-9_-]{2,})\b",
                 r"\b([a-z][a-z0-9_-]{2,})[ \t]+service\b",
             )
-            generic = {"service", "services", "core", "public", "entity"}
+            generic = {
+                "service",
+                "services",
+                "core",
+                "public",
+                "entity",
+                "method",
+                "layer",
+                "type",
+                "name",
+                "call",
+                "handler",
+            }
         else:
             patterns = (
                 r"\b(?:Model|Entity)[ \t]+`([^`]+)`",
@@ -2378,12 +2424,22 @@ class QoderLikeVerifierService(VerifierService):
                 r"\b(?:Model|Entity)[ \t]+([A-Za-z][A-Za-z0-9_-]{2,})\b",
                 r"\b([A-Za-z][A-Za-z0-9_-]{2,})[ \t]+(?:model|entity)\b",
             )
-            generic = {"model", "models", "entity", "entities", "data"}
+            generic = {
+                "model",
+                "models",
+                "entity",
+                "entities",
+                "data",
+                "too",
+                "large",
+                "request",
+            }
+        prose = re.sub(r"\b\d{3}\s+Request Entity Too Large\b", " ", prose, flags=re.I)
         claims: set[str] = set()
         for pattern in patterns:
             for value in re.findall(pattern, prose):
                 claim = value.strip("`.,;:()[]{} ")
-                if claim and claim.lower() not in generic:
+                if claim and claim.lower() not in generic and _looks_like_inventory_symbol(claim):
                     claims.add(claim)
         return claims
 
@@ -2801,18 +2857,50 @@ class QoderLikeVerifierService(VerifierService):
         )
 
     def _check_handbook_placeholder_mermaid(self) -> CheckResult:
-        pages = handbook_placeholder_mermaid_pages(self._find_content_dir())
-        if len(pages) < 2:
-            return self._handbook_pass(
-                "qoder-handbook-placeholder-mermaid",
-                "No generic placeholder mermaid copied across pages",
-            )
-        return self._handbook_fail(
-            "qoder-handbook-placeholder-mermaid",
-            "QODER_HANDBOOK_PLACEHOLDER_MERMAID",
-            "Generic placeholder mermaid is copied across handbook pages",
-            {"pages": pages},
+        from repo_wiki.verifier.handbook import (
+            handbook_duplicate_mermaid_groups,
+            handbook_duplicate_schema_groups,
+            handbook_reserved_mermaid_id_pages,
+            handbook_thin_mermaid_pages,
         )
+
+        content_dir = self._find_content_dir()
+        pages = handbook_placeholder_mermaid_pages(content_dir)
+        duplicates = handbook_duplicate_mermaid_groups(content_dir, max_copies=2)
+        thin = handbook_thin_mermaid_pages(content_dir)
+        reserved = handbook_reserved_mermaid_id_pages(content_dir)
+        schemas = handbook_duplicate_schema_groups(content_dir, max_copies=2)
+        if len(pages) >= 2 or duplicates or thin or reserved or schemas:
+            copied = sorted({page for group in duplicates.values() for page in group})
+            schema_pages = sorted({page for group in schemas.values() for page in group})
+            return self._handbook_fail(
+                "qoder-handbook-placeholder-mermaid",
+                "QODER_HANDBOOK_PLACEHOLDER_MERMAID",
+                "Generic, copied, edgeless, reserved-id, or duplicated-schema mermaid/schema",
+                {
+                    "placeholder_pages": pages,
+                    "duplicate_pages": copied[:20],
+                    "thin_pages": thin[:20],
+                    "reserved_id_pages": reserved[:20],
+                    "duplicate_schema_pages": schema_pages[:20],
+                },
+            )
+        return self._handbook_pass(
+            "qoder-handbook-placeholder-mermaid",
+            "No generic placeholder mermaid copied across pages",
+        )
+
+    def _handbook_backtick_cite_pages(self) -> list[str]:
+        content_dir = self._find_content_dir()
+        if content_dir is None or not content_dir.exists():
+            return []
+        pattern = re.compile(r"`\s*<cite>[^<]+</cite>\s*`")
+        found: list[str] = []
+        for page in content_dir.rglob("*.md"):
+            text = page.read_text(encoding="utf-8", errors="ignore")
+            if pattern.search(text):
+                found.append(page.as_posix())
+        return found
 
     def _check_qoder_source_evidence(self) -> CheckResult:
         """Fail when a code repo handbook cites almost no product source files."""

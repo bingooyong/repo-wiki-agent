@@ -905,18 +905,36 @@ class LLMPageComposer:
         if page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
             rules.append(
                 "- 架构页：必须引用核心包（Python 必引 `app/api/routes` 与 `app/models`；"
-                "Go 必引 `internal/control`、`internal/services`、`internal/repository`、"
-                "`internal/exporter`）。"
+                "Go 必引 `cmd/ccagent`、`internal/control`、`internal/services`、"
+                "`internal/repository`、`internal/exporter`）。"
+                "ccagent 是主 REST/Web 服务，不是领取任务的 Agent；probe-agent 是隧道客户端。"
                 "Go 控制面是 `ccprobe-control -serve -transport grpc`，不要写成普通 CLI。"
+                "不要引用 `*_test.go`，不要声称从 `package main`（如 custom-probe）导入类型。"
                 "不要把示例/demo/scaffold 二进制当成系统架构。"
             )
         if page.category == WikiTaxonomyCategory.DATA_MODELS:
-            rules.append(
-                "- 数据模型页：必须引用 `app/models` 或 `internal/models`（若存在），"
-                "以及 alembic 迁移；`schema.sql` 不能代替模型源码。"
-                "字段类型用源码真实类型，关系按 `*_id` / gorm foreignKey / schema REFERENCES，"
-                "不要猜测自环，也不要整段粘贴 README 的英文 NOTE。"
-            )
+            root = Path(self.workspace_root or ".")
+            go_models = (root / "internal" / "models").is_dir()
+            python_domain = (root / "app" / "models" / "domain").is_dir()
+            if go_models:
+                rules.append(
+                    "- 数据模型页：必须引用 `internal/models` 里 GORM 结构体的定义行"
+                    "（不要只引文件头），可选引用 `db/schema.sql`。"
+                    "不要写 app/models 或 alembic。字段类型用源码真实类型，"
+                    "关系按 `*_id` / gorm foreignKey / schema REFERENCES，不要猜测自环。"
+                )
+            elif python_domain:
+                rules.append(
+                    "- 数据模型页：ER 以 `app/db/migrations` 的表为准（users/profiles/"
+                    "articles/tags/favorites/comments），并引用 `app/models/domain`。"
+                    "这些是 Pydantic 领域模型 + asyncpg/raw SQL，不是 ORM 实体；"
+                    "不要把 request/response schema 列成实体，也不要引用 alembic/env.py。"
+                )
+            else:
+                rules.append(
+                    "- 数据模型页：必须引用真实模型源码与迁移；`schema.sql` 不能代替模型源码。"
+                    "不要整段粘贴 README 的英文 NOTE。"
+                )
         return "\n".join(rules)
 
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:

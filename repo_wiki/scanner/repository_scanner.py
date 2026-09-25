@@ -822,6 +822,12 @@ class RepositoryScanner:
                         )
 
             if "migration" in lower_path or "alembic" in lower_path:
+                fks_by_table: dict[str, list[str]] = {}
+                for src, _column, dest in extract_sql_foreign_keys(file.text):
+                    rel = f"belongs_to:{dest}"
+                    bucket = fks_by_table.setdefault(src.lower(), [])
+                    if rel not in bucket:
+                        bucket.append(rel)
                 for table in re.findall(
                     r"(?i)create\s+table\s+(?:if\s+not\s+exists\s+)?([A-Za-z_][A-Za-z0-9_]*)",
                     file.text,
@@ -832,6 +838,8 @@ class RepositoryScanner:
                             type="migration_table",
                             module=module_name,
                             file_path=path_str,
+                            relationships=list(fks_by_table.get(table.lower(), [])),
+                            table_name=table,
                         )
                     )
 
@@ -862,7 +870,7 @@ class RepositoryScanner:
         models = list(dedup.values())
         if any(model.type in {"go_gorm", "go_struct_db"} for model in models):
             models = [model for model in models if model.type in {"go_gorm", "go_struct_db"}]
-        table_to_model = {
+        table_to_model: dict[str, DataModel] = {
             (model.table_name or "").lower(): model for model in models if model.table_name
         }
         for file in files:
@@ -872,13 +880,13 @@ class RepositoryScanner:
             if "schema.sql" not in lowered and "migration" not in lowered:
                 continue
             for from_table, _column, to_table in extract_sql_foreign_keys(file.text):
-                source = table_to_model.get(from_table.lower())
-                dest = table_to_model.get(to_table.lower())
-                if source is None or dest is None:
+                src_model = table_to_model.get(from_table.lower())
+                dest_model = table_to_model.get(to_table.lower())
+                if src_model is None or dest_model is None:
                     continue
-                rel = f"belongs_to:{dest.name}"
-                if rel not in source.relationships:
-                    source.relationships.append(rel)
+                rel = f"belongs_to:{dest_model.name}"
+                if rel not in src_model.relationships:
+                    src_model.relationships.append(rel)
         return models
 
     def _ensure_modules_cover_entities(

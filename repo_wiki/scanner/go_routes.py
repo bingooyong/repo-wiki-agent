@@ -227,6 +227,8 @@ def _related_model_name(
         return None
     if field_name in _SELF_FK_FIELDS:
         return current_model
+    if field_name in {"ServiceID", "ServiceId"} and "BizTreeNode" in known_models:
+        return "BizTreeNode"
     if sql_fks and current_table and table_to_model:
         col = (column or _snake_field_name(field_name)).lower()
         for from_table, fk_col, to_table in sql_fks:
@@ -305,29 +307,47 @@ def _parse_gorm_fields(
     return tuple(attrs), tuple(types), pk, tuple(rels)
 
 
-_SQL_CREATE_TABLE_RE = re.compile(
-    r"CREATE TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+`?(\w+)`?\s*\((.*?)\)\s*;",
-    re.IGNORECASE | re.DOTALL,
+_SQL_CREATE_HEAD_RE = re.compile(
+    r"CREATE TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+`?(\w+)`?\s*\(",
+    re.IGNORECASE,
 )
 _SQL_FK_RE = re.compile(
-    r"FOREIGN KEY\s*\(\s*`?(\w+)`?\s*\)\s*REFERENCES\s+`?(\w+)`?",
+    r"FOREIGN KEY\s*\(\s*`?([A-Za-z_]\w*)`?\s*\)\s*REFERENCES\s+`?([A-Za-z_]\w*)`?",
     re.IGNORECASE,
 )
 _SQL_INLINE_REF_RE = re.compile(
-    r"`?(\w+)`?\s+\w+[^,\n]*?\s+REFERENCES\s+`?(\w+)`?",
+    r"(?m)^\s*`?([A-Za-z_]\w*)`?\s+[A-Za-z]+(?:\s*\([^)]*\))?[^,\n]*?\s+REFERENCES\s+`?([A-Za-z_]\w*)`?",
     re.IGNORECASE,
 )
+
+
+def _sql_create_table_body(text: str, open_paren: int) -> str:
+    """Return the CREATE TABLE body, ignoring ENUM/index parens and ENGINE suffix."""
+    depth = 0
+    for index in range(open_paren, len(text)):
+        char = text[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_paren + 1 : index]
+    return ""
 
 
 def extract_sql_foreign_keys(text: str) -> list[tuple[str, str, str]]:
     """Return ``(from_table, column, to_table)`` from CREATE TABLE FK clauses."""
     found: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str, str]] = set()
-    for match in _SQL_CREATE_TABLE_RE.finditer(text or ""):
+    for match in _SQL_CREATE_HEAD_RE.finditer(text or ""):
         table = match.group(1)
-        body = match.group(2)
+        body = _sql_create_table_body(text, match.end() - 1)
+        if not body:
+            continue
         pairs = list(_SQL_FK_RE.findall(body)) + list(_SQL_INLINE_REF_RE.findall(body))
         for column, dest in pairs:
+            if column.lower() in {"foreign", "key", "constraint"}:
+                continue
             key = (table.lower(), column.lower(), dest.lower())
             if key in seen:
                 continue

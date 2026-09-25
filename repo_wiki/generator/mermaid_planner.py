@@ -34,6 +34,16 @@ _WIKI_TOOL_LAYERS: tuple[tuple[str, str], ...] = (
     ("layer_repo_wiki", ".repo-wiki"),
 )
 _MERMAID_UNSAFE_ID = re.compile(r"[^A-Za-z0-9_]")
+_MERMAID_RESERVED_IDS = frozenset(
+    {
+        "end",
+        "subgraph",
+        "style",
+        "class",
+        "click",
+        "direction",
+    }
+)
 _WIKI_PIPELINE_LABELS = frozenset(
     {"仓库扫描", "llm生成", "质量校验", "repo-wiki", "wiki生成", "llm generate"}
 )
@@ -45,6 +55,8 @@ def mermaid_ident(value: str, prefix: str = "n") -> str:
     text = re.sub(r"_+", "_", text).strip("_")
     if not text or text[0].isdigit():
         text = f"{prefix}_{text}" if text else prefix
+    if text.casefold() in _MERMAID_RESERVED_IDS:
+        text = f"{prefix}_{text}"
     return text[:48]
 
 
@@ -73,11 +85,88 @@ def _page_tokens(page_id: str) -> set[str]:
     return {part for part in re.split(r"[-_/]", (page_id or "").lower()) if len(part) >= 3}
 
 
+def _endpoint_matches_page(endpoint: dict[str, Any], tokens: set[str]) -> bool:
+    if not tokens:
+        return True
+    hay = " ".join(
+        str(endpoint.get(key) or "") for key in ("path", "file_path", "service", "handler")
+    ).lower()
+    return any(token in hay for token in tokens)
+
+
+_PY_APP_IMPORT_RE = re.compile(
+    r"(?m)^\s*(?:from\s+(app(?:\.[A-Za-z_][\w]*)*)\s+import|import\s+(app(?:\.[A-Za-z_][\w]*)*))"
+)
+
+
+def python_app_package_label(path_or_module: str) -> str:
+    """Map ``app/api/routes/articles.py`` / ``app.services.jwt`` to a package label."""
+    text = (path_or_module or "").replace("\\", "/").strip()
+    if text.endswith(".py"):
+        text = text[:-3]
+    text = text.replace(".", "/")
+    parts = [part for part in text.split("/") if part and part != "__init__"]
+    if not parts or parts[0] != "app":
+        return ""
+    if len(parts) >= 3 and parts[1] in {"api", "models"}:
+        return "/".join(parts[:3])
+    if len(parts) >= 2:
+        return "/".join(parts[:2])
+    return "app"
+
+
+def extract_python_app_import_edges(files: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Return ``(from_pkg, to_pkg)`` edges among ``app/*`` packages."""
+    edges: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for path, text in files:
+        src = python_app_package_label(path)
+        if not src:
+            continue
+        for match in _PY_APP_IMPORT_RE.finditer(text or ""):
+            dest = python_app_package_label(match.group(1) or match.group(2) or "")
+            if not dest or dest == src:
+                continue
+            key = (src, dest)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append(key)
+    return edges
+
+
+_SCHEMA_NAME_SUFFIXES = (
+    "request",
+    "response",
+    "schema",
+    "in",
+    "out",
+    "create",
+    "update",
+    "config",
+)
+
+
+def _is_request_response_schema(model: dict[str, Any]) -> bool:
+    name = str(model.get("name") or "")
+    path = str(model.get("file_path") or "").replace("\\", "/").lower()
+    if "models/schemas" in path or "/schemas/" in path:
+        return True
+    lowered = name.lower()
+    return (
+        any(lowered.endswith(suffix) for suffix in _SCHEMA_NAME_SUFFIXES)
+        and str(model.get("type") or "") != "migration_table"
+    )
+
+
 def _package_from_file(path: str) -> str:
     parts = [part for part in path.replace("\\", "/").split("/") if part]
     if "internal" in parts:
         index = parts.index("internal")
         return "/".join(parts[index : index + 2])
+    app_label = python_app_package_label(path)
+    if app_label:
+        return app_label
     if len(parts) >= 2:
         return parts[-2]
     return parts[-1] if parts else ""
@@ -246,10 +335,27 @@ def validate_mermaid_syntax(
     elif diagram_type == MermaidDiagramType.STATE_DIAGRAM:
         errors.extend(_validate_state_syntax(diagram_code, lines))
 
+    reserved = _reserved_mermaid_ids(diagram_code)
+    if reserved:
+        errors.append("Reserved Mermaid node id: " + ", ".join(sorted(reserved)))
+
     if errors:
         return False, "; ".join(errors[:3])  # Limit to first 3 errors
 
     return True, "Valid"
+
+
+def _reserved_mermaid_ids(diagram_code: str) -> set[str]:
+    found: set[str] = set()
+    for raw in re.findall(r"(?m)^\s*([A-Za-z][A-Za-z0-9_]*)\s*(\[|\(|-->)", diagram_code or ""):
+        ident = raw[0] if isinstance(raw, tuple) else raw
+        if str(ident).casefold() in _MERMAID_RESERVED_IDS:
+            found.add(str(ident))
+    for raw in re.findall(r"-->\s*([A-Za-z][A-Za-z0-9_]*)\s*(\[|\(|$)", diagram_code or ""):
+        ident = raw[0] if isinstance(raw, tuple) else raw
+        if str(ident).casefold() in _MERMAID_RESERVED_IDS:
+            found.add(str(ident))
+    return found
 
 
 def _validate_flowchart_syntax(code: str, lines: list[str]) -> list[str]:
@@ -390,10 +496,8 @@ def _module_name_and_path(module: Any, index: int) -> tuple[str, str]:
 
 
 def _is_full_architecture_page(page_id: str) -> bool:
-    pid = (page_id or "").lower()
-    return pid in {"architecture-overview", "project-overview", "overview"} or pid.endswith(
-        ("architecture-overview", "project-overview")
-    )
+    pid = (page_id or "").lower().rsplit("/", 1)[-1]
+    return pid in {"architecture-overview", "project-overview", "overview", "architecture"}
 
 
 def _module_label(module: Any, index: int = 0) -> str:
@@ -402,23 +506,6 @@ def _module_label(module: Any, index: int = 0) -> str:
     if len(parts) >= 2 and parts[0] in {"internal", "pkg", "cmd"}:
         return "/".join(parts[:2])
     return name
-
-
-def _python_request_flow_edges(context: dict[str, Any]) -> list[tuple[str, str]]:
-    """routes → services/dependencies → repositories/db from existing app/ packages."""
-    paths = _iter_snapshot_paths(context)
-    layers = [
-        label
-        for label, needle in (
-            ("app/api/routes", "app/api/routes"),
-            ("app/services", "app/services"),
-            ("app/api/dependencies", "app/api/dependencies"),
-            ("app/db", "app/db"),
-            ("app/models", "app/models"),
-        )
-        if _snapshot_contains_path(paths, needle)
-    ]
-    return [(layers[idx], layers[idx + 1]) for idx in range(len(layers) - 1)]
 
 
 def _import_edges_from_context(context: dict[str, Any]) -> list[tuple[str, str]]:
@@ -441,7 +528,8 @@ def _import_edges_from_context(context: dict[str, Any]) -> list[tuple[str, str]]
     for index, module in enumerate(context.get("modules") or []):
         if not isinstance(module, dict):
             continue
-        src = _module_label(module, index)
+        src_labels = _product_module_labels([module])
+        src = src_labels[0] if src_labels else _module_label(module, index)
         if not src:
             continue
         for dep in module.get("depends_on") or []:
@@ -576,16 +664,16 @@ class MermaidPlanner:
         )
 
         # Plan based on page type
-        if page_type in {"architecture", "security"} or (
+        if page_type == "security":
+            auth = self._plan_auth_flow_diagram(page_id, evidence_binding, context)
+            if auth:
+                diagrams.append(auth)
+        elif page_type == "architecture" or (
             page_type == "overview" and _is_full_architecture_page(page_id)
         ):
             diagram = self._plan_overview_architecture_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
-            if page_type == "security":
-                auth = self._plan_auth_flow_diagram(page_id, evidence_binding, context)
-                if auth:
-                    diagrams.append(auth)
 
         elif page_type in ("service", "section"):
             diagram = self._plan_service_diagram(page_id, evidence_binding, context)
@@ -616,6 +704,20 @@ class MermaidPlanner:
         """Plan architecture/overview flowchart from import-derived package edges."""
         labels = _product_module_labels(context.get("modules") or [])
         import_edges = _import_edges_from_context(context)
+        tokens = _page_tokens(page_id)
+        scoped = [
+            label
+            for label in labels
+            if tokens
+            and any(
+                token in label.lower().replace("/", "-") or token in label.lower()
+                for token in tokens
+            )
+        ]
+        if not _is_full_architecture_page(page_id):
+            if not scoped:
+                return None
+            labels = scoped
         preferred = {
             label
             for label in labels
@@ -641,19 +743,13 @@ class MermaidPlanner:
             chosen = list(labels)
         if not chosen:
             chosen = [label for label in labels if label.startswith(("internal/", "app/"))]
-        layer_edges = _python_request_flow_edges(context)
-        for src, dst in layer_edges:
-            if src not in chosen:
-                chosen.append(src)
-            if dst not in chosen:
-                chosen.append(dst)
         nodes = [
             DiagramNode(id=mermaid_ident(label), label=label, shape="rectangle") for label in chosen
         ]
         chosen_set = set(chosen)
         edges: list[DiagramEdge] = []
         seen_edges: set[tuple[str, str]] = set()
-        for src, dst in [*import_edges, *layer_edges]:
+        for src, dst in import_edges:
             if src in chosen_set and dst in chosen_set and (src, dst) not in seen_edges:
                 seen_edges.add((src, dst))
                 edges.append(DiagramEdge(from_node=mermaid_ident(src), to_node=mermaid_ident(dst)))
@@ -682,27 +778,27 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        paths = _iter_snapshot_paths(context)
-        layers = [
-            label
-            for label, needle in (
-                ("app/api/routes", "app/api/routes"),
-                ("app/api/dependencies", "app/api/dependencies"),
-                ("app/core", "app/core"),
-                ("app/models", "app/models"),
-            )
-            if _snapshot_contains_path(paths, needle)
-        ]
-        if len(layers) < 2:
+        import_edges = _import_edges_from_context(context)
+        auth_tokens = ("auth", "jwt", "security", "dependenc", "password")
+        labels = _product_module_labels(context.get("modules") or [])
+        chosen = [label for label in labels if any(token in label.lower() for token in auth_tokens)]
+        for path in _iter_snapshot_paths(context):
+            low = path.replace("\\", "/").lower()
+            if any(token in low for token in auth_tokens):
+                label = _package_from_file(path) or python_app_package_label(path)
+                if label and label not in chosen:
+                    chosen.append(label)
+        chosen_set = set(chosen)
+        edges: list[DiagramEdge] = []
+        seen: set[tuple[str, str]] = set()
+        for src, dst in import_edges:
+            if src in chosen_set and dst in chosen_set and (src, dst) not in seen:
+                seen.add((src, dst))
+                edges.append(DiagramEdge(from_node=mermaid_ident(src), to_node=mermaid_ident(dst)))
+        if len(edges) < 2:
             return None
         nodes = [
-            DiagramNode(id=mermaid_ident(label), label=label, shape="rectangle") for label in layers
-        ]
-        edges = [
-            DiagramEdge(
-                from_node=mermaid_ident(layers[idx]), to_node=mermaid_ident(layers[idx + 1])
-            )
-            for idx in range(len(layers) - 1)
+            DiagramNode(id=mermaid_ident(label), label=label, shape="rectangle") for label in chosen
         ]
         evidence_spans = []
         if evidence_binding:
@@ -820,12 +916,20 @@ class MermaidPlanner:
         for endpoint in endpoints:
             if not isinstance(endpoint, dict):
                 continue
-            path = str(endpoint.get("path") or "")
-            if tokens and not any(token in path.lower() for token in tokens):
+            if not _endpoint_matches_page(endpoint, tokens):
                 continue
             selected.append(endpoint)
         if not selected:
+            general_api = (page_id or "").lower().rsplit("/", 1)[-1] in {
+                "api-ref",
+                "api-reference",
+                "api",
+            } or (page_id or "").lower().endswith("api-reference")
+            if not general_api:
+                return None
             selected = [endpoint for endpoint in endpoints if isinstance(endpoint, dict)]
+        if not selected:
+            return None
 
         for endpoint in selected[:16]:
             path = str(endpoint.get("path", "/unknown"))
@@ -871,11 +975,7 @@ class MermaidPlanner:
         """Map real handler/package relationships; skip the generic MVC stencil."""
         endpoints = [item for item in context.get("endpoints") or [] if isinstance(item, dict)]
         tokens = _page_tokens(page_id)
-        selected = [
-            item
-            for item in endpoints
-            if not tokens or any(token in str(item.get("path") or "").lower() for token in tokens)
-        ] or endpoints
+        selected = [item for item in endpoints if _endpoint_matches_page(item, tokens)]
         labels: list[str] = []
         seen: set[str] = set()
         for endpoint in selected:
@@ -889,38 +989,36 @@ class MermaidPlanner:
             if raw not in seen:
                 seen.add(raw)
                 labels.append(raw)
+        import_edges = _import_edges_from_context(context)
+        neighbors = set(labels)
+        for src, dst in import_edges:
+            if src in neighbors:
+                neighbors.add(dst)
+            if dst in labels:
+                neighbors.add(src)
+        labels = [label for label in labels if label in neighbors]
+        for src, dst in import_edges:
+            if src in neighbors and dst not in labels:
+                labels.append(dst)
+            if dst in neighbors and src not in labels:
+                labels.append(src)
         if len(labels) < 2:
-            labels = _product_module_labels(context.get("modules") or [])[:5]
-        if len(labels) >= 2:
-            nodes = [
-                DiagramNode(id=mermaid_ident(label, prefix="svc"), label=label, shape="rectangle")
-                for label in labels[:8]
-            ]
-            chosen_set = set(labels[:8])
-            import_edges = _import_edges_from_context(context)
-            edges = [
-                DiagramEdge(
-                    from_node=mermaid_ident(src, prefix="svc"),
-                    to_node=mermaid_ident(dst, prefix="svc"),
-                )
-                for src, dst in import_edges
-                if src in chosen_set and dst in chosen_set
-            ]
-        else:
-            nodes = [
-                DiagramNode(id="frontend", label="Frontend", shape="rectangle"),
-                DiagramNode(id="controller", label="Controller", shape="rectangle"),
-                DiagramNode(id="service", label="Service", shape="rectangle"),
-                DiagramNode(id="repository", label="Repository", shape="rectangle"),
-                DiagramNode(id="entity", label="Entity/DTO", shape="rectangle"),
-            ]
-            edges = [
-                DiagramEdge(from_node="frontend", to_node="controller", label="API call"),
-                DiagramEdge(from_node="controller", to_node="service", label="orchestrate"),
-                DiagramEdge(from_node="service", to_node="repository", label="read/write"),
-                DiagramEdge(from_node="repository", to_node="entity", label="map"),
-                DiagramEdge(from_node="service", to_node="entity", label="DTO transform"),
-            ]
+            return None
+        nodes = [
+            DiagramNode(id=mermaid_ident(label, prefix="svc"), label=label, shape="rectangle")
+            for label in labels[:8]
+        ]
+        chosen_set = set(labels[:8])
+        edges = [
+            DiagramEdge(
+                from_node=mermaid_ident(src, prefix="svc"),
+                to_node=mermaid_ident(dst, prefix="svc"),
+            )
+            for src, dst in import_edges
+            if src in chosen_set and dst in chosen_set
+        ]
+        if len(edges) < 2:
+            return None
 
         return DiagramPlan(
             diagram_id=f"{page_id}-service-relationship-flow",
@@ -1000,7 +1098,16 @@ class MermaidPlanner:
             item
             for item in models
             if str(item.get("type") or "")
-            in {"", "go_gorm", "go_struct_db", "python_class", "ts_definition", "jvm_class"}
+            in {
+                "",
+                "go_gorm",
+                "go_struct_db",
+                "python_class",
+                "ts_definition",
+                "jvm_class",
+                "migration_table",
+            }
+            and not _is_request_response_schema(item)
         ]
         if any(
             str(item.get("type") or "") in {"go_gorm", "go_struct_db"} for item in product_models
@@ -1009,6 +1116,16 @@ class MermaidPlanner:
                 item
                 for item in product_models
                 if str(item.get("type") or "") in {"go_gorm", "go_struct_db"}
+            ]
+        elif any(str(item.get("type") or "") == "migration_table" for item in product_models):
+            product_models = [
+                item
+                for item in product_models
+                if str(item.get("type") or "") == "migration_table"
+                or (
+                    str(item.get("type") or "") == "python_class"
+                    and "models/domain" in str(item.get("file_path") or "").replace("\\", "/")
+                )
             ]
 
         er_entities = []
@@ -1090,16 +1207,18 @@ class MermaidPlanner:
         cmd_list = list(commands.items())[:8]
         if cmd_list:
             # Start node
-            nodes.append(DiagramNode(id="start", label="Start", shape="circle"))
-            prev_node = "start"
+            start_id = mermaid_ident("start", prefix="ops")
+            nodes.append(DiagramNode(id=start_id, label="Start", shape="circle"))
+            prev_node = start_id
             for cmd, _ in cmd_list:
-                cmd_id = f"cmd_{cmd}"
+                cmd_id = mermaid_ident(f"cmd_{cmd}", prefix="ops")
                 nodes.append(DiagramNode(id=cmd_id, label=cmd, shape="rectangle"))
                 edges.append(DiagramEdge(from_node=prev_node, to_node=cmd_id))
                 prev_node = cmd_id
             # End node
-            nodes.append(DiagramNode(id="end", label="End", shape="circle"))
-            edges.append(DiagramEdge(from_node=prev_node, to_node="end"))
+            end_id = mermaid_ident("finish", prefix="ops")
+            nodes.append(DiagramNode(id=end_id, label="End", shape="circle"))
+            edges.append(DiagramEdge(from_node=prev_node, to_node=end_id))
 
         evidence_spans = []
         if evidence_binding:

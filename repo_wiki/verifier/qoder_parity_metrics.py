@@ -937,18 +937,19 @@ class ParityMetricExtractor:
         if not content_dir:
             return self._fail_result("data_model_aggregation", "No data model pages found")
 
-        # Look for data model pages
+        # Canonical data-model chapter only — not 故障排除/数据库问题.md keyword hits.
         dm_files = []
         for f in content_dir.rglob("*.md"):
             relative_text = f.relative_to(content_dir).as_posix()
             lower_text = relative_text.lower()
+            if any(token in relative_text for token in ("故障排除", "troubleshooting")):
+                continue
             if (
-                "data" in lower_text
-                or "model" in lower_text
-                or "schema" in lower_text
-                or "数据模型" in relative_text
-                or "数据库" in relative_text
-                or "迁移" in relative_text
+                "数据模型" in relative_text
+                or "data-model" in lower_text
+                or "/data_models/" in lower_text
+                or lower_text.endswith("data-models.md")
+                or "/models/" in lower_text
             ):
                 dm_files.append(f)
 
@@ -977,7 +978,9 @@ class ParityMetricExtractor:
                     or "字段" in content
                     or "迁移" in content
                 )
-                if sum([has_relationships, has_diagrams, has_schema]) >= 2:
+                has_er = "erdiagram" in lower_content
+                has_cite = "<cite>" in lower_content
+                if has_er and has_cite or sum([has_relationships, has_diagrams, has_schema]) >= 2:
                     aggregated_count += 1
             except Exception:
                 continue
