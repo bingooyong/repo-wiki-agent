@@ -52,11 +52,8 @@ _GENERIC_IDENTIFIERS = frozenset(
 )
 _FILE_LINE_RE = re.compile(r"^((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+):(\d+)(?:-(\d+))?$")
 _MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\n]+)\)")
-_PRODUCT_IDENTITY_RE = re.compile(
-    r"产品身份|不再积极维护|不再活跃维护|not actively maintained|fastapi-realworld"
-)
-_DANGLING_README_RE = re.compile(r"`README\.(?:rst|md)`")
-_HEADER_README_CITE_RE = re.compile(r"README\.(?:rst|md):1-(?:8|9|10|19|20)\b")
+_PRODUCT_IDENTITY_RE = re.compile(r"产品身份|不再积极维护|不再活跃维护|not actively maintained")
+_DANGLING_README_RE = re.compile(r"(?:(?<=[。；])|^)\s*`README\.(?:rst|md)`\s*[。；]?")
 _SEVEN_TABLES_RE = re.compile(r"7\s*张业务表")
 _RST_SKIP_RE = re.compile(r"^(?:\.\.|:|\||---+)")
 
@@ -363,12 +360,8 @@ def rewrite_fastapi_intro_cites(
 
 
 def _is_identity_intro_line(line: str) -> bool:
-    """True only for product-identity prose, a dangling README name, or a logo/badge cite."""
-    return bool(
-        _PRODUCT_IDENTITY_RE.search(line)
-        or _DANGLING_README_RE.search(line)
-        or _HEADER_README_CITE_RE.search(line)
-    )
+    """True only for maintenance-status prose or a leftover ``README.rst`` token."""
+    return bool(_PRODUCT_IDENTITY_RE.search(line) or _DANGLING_README_RE.search(line))
 
 
 def _readme_line_is_skippable(stripped: str) -> bool:

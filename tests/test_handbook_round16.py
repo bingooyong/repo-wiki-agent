@@ -403,8 +403,9 @@ def test_api_intro_rewrites_identity_cite_and_strips_dangling_readme(tmp_path: P
     )
     assert f"README.rst:{note_line}" in intro
     assert "authentication.py:23-26" not in intro
-    assert "`README.rst`" not in intro
+    assert "。`README.rst`" not in intro
     assert "。。" not in intro
+    assert "仓库根说明文件 `README.rst`" in intro
     assert "http_error.py:1-3" in rest
     assert "README.rst:28" not in rest
 
@@ -435,6 +436,34 @@ def test_conduit_error_page_keeps_local_cite(tmp_path: Path) -> None:
     assert "http_error.py:1-3" in out
     assert "README.rst:28" not in out
     assert "README.rst:6" not in out
+
+
+def test_quickstart_excerpt_keeps_header_readme_cite(tmp_path: Path) -> None:
+    root = _fastapi_repo(tmp_path)
+    (root / "README.rst").write_text(
+        ".. image:: logo.png\n\n"
+        + "\n".join(f"badge {i}" for i in range(1, 26))
+        + "\n\n**NOTE**: This repository is not actively maintained "
+        "because this example is quite complete and does its primary goal "
+        "- passing Conduit testsuite.\n",
+        encoding="utf-8",
+    )
+    page = _page(
+        "performance-issues",
+        "性能问题",
+        WikiTaxonomyCategory.TROUBLESHOOTING,
+        "故障排除/性能问题.md",
+    )
+    markdown = (
+        "# 性能问题\n\n"
+        "## 这是什么\n\n"
+        "仓库文件中与 `Quickstart` 相关的原文如下。\n"
+        "<cite>README.rst:1-10</cite>\n"
+    )
+    out = _service(root)._enforce_qoder_page_contract(page, markdown, None, add_mermaid=False)
+    assert "README.rst:1-10" in out
+    assert "README.rst:28" not in out
+    assert "README.rst:29" not in out
 
 
 def test_empty_cite_parens_are_stripped() -> None:
