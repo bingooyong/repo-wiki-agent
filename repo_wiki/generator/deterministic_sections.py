@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 from repo_wiki.verifier.handbook import (
     existing_readme_names,
@@ -1113,11 +1114,11 @@ def extract_alembic_tables(text: str) -> list[dict[str, object]]:
     return tables
 
 
-def load_alembic_migration_models(root: Path) -> list[dict[str, object]]:
+def load_alembic_migration_models(root: Path) -> list[dict[str, Any]]:
     versions = root / "app" / "db" / "migrations" / "versions"
     if not versions.is_dir():
         return []
-    models: list[dict[str, object]] = []
+    models: list[dict[str, Any]] = []
     for path in sorted(versions.glob("*.py")):
         tables = extract_alembic_tables(path.read_text(encoding="utf-8", errors="ignore"))
         rel = path.relative_to(root).as_posix()

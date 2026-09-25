@@ -114,6 +114,7 @@ def cassette_write_dir() -> Path | None:
 
 def cassette_jsonl_path(directory: Path | None = None) -> Path | None:
     write_root = cassette_write_dir()
+    root: Path | None
     if write_root is not None:
         root = write_root
     else:
