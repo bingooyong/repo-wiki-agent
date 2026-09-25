@@ -2383,23 +2383,8 @@ class RepoWikiService:
         if is_api_like_page:
             api_endpoints = self._evidence_backed_api_endpoints(page, composition_context)
             content = self._strip_unsupported_generic_api_claims(content, api_endpoints)
-            page_id = str(getattr(page, "page_id", "") or "")
-            from repo_wiki.generator.deterministic_sections import is_api_catalog_owner_page
-
-            leaf = page_id.lower().rsplit("/", 1)[-1]
-            group_leaves = {
-                "authentication-authorization-api",
-                "frontend-application-api",
-                "agent-proxy-api",
-                "ccprobe-control-api-reference",
-                "error-handling-status-codes",
-                "error-codes",
-            }
             if "## API 分组" not in content:
-                owner = is_api_catalog_owner_page(
-                    page_id=page_id, title=str(getattr(page, "title", "") or "")
-                )
-                if api_endpoints and (owner or leaf in group_leaves):
+                if api_endpoints:
                     content += "\n\n## API 分组\n\n" + self._build_truthful_api_group_section(
                         api_endpoints
                     )
@@ -2422,15 +2407,7 @@ class RepoWikiService:
         is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
         if self._existing_mermaid_is_thin(content):
             content = self._strip_mermaid_fences(content)
-        from repo_wiki.generator.deterministic_sections import is_data_model_owner_page
-
-        page_id_for_er = str(getattr(page, "page_id", "") or "")
-        title_for_er = str(getattr(page, "title", "") or "")
-        needs_er_mermaid = (
-            is_data_model_page
-            and is_data_model_owner_page(page_id=page_id_for_er, title=title_for_er)
-            and not self._content_has_er_mermaid(content)
-        )
+        needs_er_mermaid = is_data_model_page and not self._content_has_er_mermaid(content)
         needs_any_mermaid = (
             add_mermaid
             or is_api_page
@@ -2777,10 +2754,16 @@ class RepoWikiService:
         if leaf in {"error-handling-status-codes", "error-codes"}:
             return []
         tokens = _page_scope_needles(page_id) | _page_scope_needles(title)
-        filtered = [item for item in normalized if _endpoint_matches_page(item, tokens)]
-        if leaf not in group_pages:
-            return []
-        return self._order_api_endpoints_for_pages(filtered)
+        generic = {"api", "ref", "reference", "overview", "page", "docs", "service"}
+        specific = {token for token in tokens if token not in generic}
+        if specific:
+            filtered = [item for item in normalized if _endpoint_matches_page(item, specific)]
+            if filtered:
+                return self._order_api_endpoints_for_pages(filtered)
+        if leaf in group_pages:
+            filtered = [item for item in normalized if _endpoint_matches_page(item, tokens)]
+            return self._order_api_endpoints_for_pages(filtered)
+        return []
 
     def _strip_unsupported_generic_api_claims(
         self,
@@ -3319,8 +3302,11 @@ class RepoWikiService:
     def _fold_citation_only_lines(self, content: str) -> str:
         out: list[str] = []
         for line in content.splitlines():
-            if self._line_is_citation_tags_only(line):
-                continue
+            if self._line_is_citation_tags_only(line) and out:
+                prev = out[-1].rstrip()
+                if prev and not prev.startswith("#") and not prev.startswith("```"):
+                    out[-1] = prev + " " + line.strip()
+                    continue
             out.append(line)
         return "\n".join(out)
 

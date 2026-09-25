@@ -57,9 +57,10 @@ def test_qoder_page_contract_does_not_emit_unsupported_generic_api_claims(tmp_pa
     assert "/resources" not in rendered
     assert '"auth": "Bearer token"' not in rendered
     assert "需要 Bearer Token" not in rendered
-    assert "UNRESOLVED_API_AUTH" in rendered
-    assert "UNRESOLVED_API_ENDPOINTS" in rendered
-    assert "UNRESOLVED_API_FLOW" in rendered
+    assert "UNRESOLVED_API_AUTH" not in rendered
+    assert "UNRESOLVED_API_ENDPOINTS" not in rendered
+    assert "UNRESOLVED_API_FLOW" not in rendered
+    assert "本组接口见 API参考" in rendered
     assert "API网关" not in rendered
     assert "路由并鉴权" not in rendered
 

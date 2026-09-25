@@ -559,7 +559,10 @@ def _is_full_architecture_page(page_id: str) -> bool:
     return pid in {
         "architecture-overview",
         "architecture",
+        "overview",
+        "project-overview",
         "整体架构概览",
+        "项目概述",
     }
 
 
@@ -726,7 +729,7 @@ class MermaidPlanner:
             if auth:
                 diagrams.append(auth)
         elif page_type in {"architecture", "overview"}:
-            if page_type == "architecture" or _is_full_architecture_page(page_id):
+            if page_type == "overview" or _is_full_architecture_page(page_id):
                 diagram = self._plan_overview_architecture_diagram(
                     page_id, evidence_binding, context
                 )
@@ -775,19 +778,18 @@ class MermaidPlanner:
             from repo_wiki.generator.deterministic_sections import is_data_model_owner_page
 
             pid = page_id or ""
-            if is_data_model_owner_page(page_id=pid, title=""):
-                diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
-                if diagram:
-                    diagrams.append(diagram)
+            diagram = self._plan_data_model_diagram(page_id, evidence_binding, context)
+            if diagram:
+                diagrams.append(diagram)
             elif any(token in pid.lower() for token in ("schema", "架构", "database")):
                 keys = self._plan_join_key_diagram(page_id, evidence_binding, context)
                 if keys:
                     diagrams.append(keys)
             if any(
                 token in pid.lower() for token in ("migration", "迁移", "database-schema", "schema")
-            ) or not is_data_model_owner_page(page_id=pid, title=""):
+            ) and not is_data_model_owner_page(page_id=pid, title=""):
                 migration = self._plan_migration_flow(page_id, evidence_binding, context)
-                if migration and not is_data_model_owner_page(page_id=pid, title=""):
+                if migration:
                     diagrams.append(migration)
 
         elif page_type == "ops":
@@ -1005,6 +1007,9 @@ class MermaidPlanner:
         relation_plan = self._plan_api_relationship_flowchart(page_id, evidence_binding, context)
         if relation_plan:
             plans.append(relation_plan)
+        er_plan = self._plan_api_er_diagram(page_id, evidence_binding, context)
+        if er_plan:
+            plans.append(er_plan)
         return plans
 
     def _plan_api_sequence_diagram(
