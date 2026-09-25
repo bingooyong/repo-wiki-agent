@@ -203,4 +203,5 @@ def test_critical_false_fact_gate_and_coverage_remain_hard() -> None:
     assert "QODER_CRITICAL_FALSE_FACT" in threshold.STRICT_HARD_CODES
     assert "QODER_CITATION_FACT_COVERAGE_LOW" in threshold.STRICT_HARD_CODES
     verifier_src = Path("repo_wiki/verifier/qoder_strict_verifier.py").read_text(encoding="utf-8")
-    assert "if ratio < 0.95:" in verifier_src
+    assert "CLAIM_CITATION_FLOOR = 0.95" in verifier_src
+    assert "if ratio < self.CLAIM_CITATION_FLOOR:" in verifier_src

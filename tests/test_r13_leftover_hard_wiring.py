@@ -478,6 +478,7 @@ def test_r13_leftover_hard_gates_remain_hard() -> None:
         assert threshold.get_gate_type(code).value == "HARD"
     assert PARITY_METRICS["api_aggregation"].threshold == 0.60
     verifier_src = Path("repo_wiki/verifier/qoder_strict_verifier.py").read_text(encoding="utf-8")
-    assert "if ratio < 0.95:" in verifier_src
+    assert "CLAIM_CITATION_FLOOR = 0.95" in verifier_src
+    assert "if ratio < self.CLAIM_CITATION_FLOOR:" in verifier_src
     assert "QODER_CRITICAL_FALSE_FACT" in QoderLikeSeverityThreshold.STRICT_HARD_CODES
     assert "QODER_API_AGGREGATION_LOW" in QoderLikeSeverityThreshold.STRICT_HARD_CODES

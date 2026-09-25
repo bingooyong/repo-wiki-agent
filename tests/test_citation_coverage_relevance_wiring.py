@@ -216,5 +216,6 @@ def test_coverage_and_relevance_gates_remain_hard() -> None:
     from repo_wiki.verifier import qoder_strict_verifier as verifier_mod
 
     source = Path(verifier_mod.__file__).read_text(encoding="utf-8")
-    assert "if ratio < 0.95:" in source
+    assert "CLAIM_CITATION_FLOOR = 0.95" in source
+    assert "if ratio < self.CLAIM_CITATION_FLOOR:" in source
     assert 'reason_code="QODER_CITATION_FACT_COVERAGE_LOW"' in source

@@ -715,7 +715,8 @@ def test_citation_fact_coverage_window_unchanged() -> None:
     assert int(covered_next["covered"]) >= 1
 
     source = Path("repo_wiki/verifier/qoder_strict_verifier.py").read_text(encoding="utf-8")
-    assert "ratio < 0.95" in source
+    assert "CLAIM_CITATION_FLOOR = 0.95" in source
+    assert "if ratio < self.CLAIM_CITATION_FLOOR:" in source
     assert "QODER_CITATION_FACT_COVERAGE_LOW" in QoderLikeSeverityThreshold.STRICT_HARD_CODES
     window_src = Path("repo_wiki/verifier/citation_fact_coverage.py").read_text(encoding="utf-8")
     assert "claim.line - 1" in window_src
