@@ -281,7 +281,6 @@ def rewrite_fastapi_intro_cites(
     alembic_rel = "app/db/migrations/versions/fdf8821871d7_main_tables.py"
     if not (root / alembic_rel).is_file() and not (root / "app" / "main.py").is_file():
         return markdown
-    from repo_wiki.evidence.citation_renderer import unique_root_readme_name
     from repo_wiki.generator.deterministic_sections import cite_existing_meaningful
 
     title = str(getattr(page, "title", "") or "")
@@ -311,37 +310,47 @@ def rewrite_fastapi_intro_cites(
         for name in ("README.rst", "README.md", "README.txt", "README")
         if (root / name).is_file()
     ]
-    readme = unique_root_readme_name(root) or (readme_names[0] if readme_names else "")
-    intro_bounds = _section_bounds(lines, "简介")
-    if readme_names and intro_owner and intro_bounds:
-        start, end = intro_bounds
-        claim = "\n".join(lines[start:end])
+    identity_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if _PRODUCT_IDENTITY_RE.search(line) or re.search(r"`README\.(?:rst|md)`", line)
+    ]
+    if intro_owner:
+        intro_bounds = _section_bounds(lines, "简介")
+        if intro_bounds:
+            start, end = intro_bounds
+            identity_indexes.extend(range(start, end))
+    if readme_names and identity_indexes:
+        claim = "\n".join(lines[i] for i in identity_indexes if 0 <= i < len(lines))
         readme_cite = ""
         for name in readme_names:
             readme_cite = cite_readme_supporting_line(root, name, claim)
             if readme_cite:
-                readme = name
                 break
         if readme_cite:
-            for index in range(start, end):
+            seen: set[int] = set()
+            for index in identity_indexes:
+                if index in seen or index < 0 or index >= len(lines):
+                    continue
+                seen.add(index)
                 if _PRODUCT_IDENTITY_RE.search(lines[index]) or re.search(
-                    r"`README\.(?:rst|md)`", lines[index]
+                    r"`README\.(?:rst|md)`|README\.rst:1-|README\.md:1-", lines[index]
                 ):
                     _replace_adjacent_cite(lines, index, readme_cite)
                     lines[index] = re.sub(r"`README\.(?:rst|md)`", "", lines[index])
                     lines[index] = re.sub(r"。\s*。", "。", lines[index])
                     changed = True
-                    break
-    if _SEVEN_TABLES_RE.search(markdown) and (root / alembic_rel).is_file():
+    if (root / alembic_rel).is_file():
         mig_cite = cite_alembic_upgrade_range(root, alembic_rel) or (
             cite_existing_meaningful(root, alembic_rel)
         )
         if mig_cite:
             for index, line in enumerate(lines):
-                if _SEVEN_TABLES_RE.search(line):
+                if _SEVEN_TABLES_RE.search(line) or re.search(
+                    rf"{re.escape(alembic_rel)}:1-1?\d\b", line
+                ):
                     _replace_adjacent_cite(lines, index, mig_cite)
                     changed = True
-                    break
     if not changed:
         return markdown
     rewritten = "\n".join(lines)
