@@ -80,6 +80,7 @@ def _endpoint_actor(endpoint: dict[str, Any]) -> str:
         return name.rsplit(".", 1)[0]
     return _package_from_file(file_path) or "API"
 
+
 # ============================================================================
 # DIAGRAM TYPE DEFINITIONS
 # ============================================================================
@@ -817,7 +818,9 @@ class MermaidPlanner:
 
         er_entities = []
         for model in models[:10]:  # Limit to 10 models
-            entity_name = mermaid_er_field(str(model.get("name") or model.get("table") or "unknown"))
+            entity_name = mermaid_er_field(
+                str(model.get("name") or model.get("table") or "unknown")
+            )
             attributes = [
                 mermaid_er_field(str(item))
                 for item in (model.get("attributes") or [])

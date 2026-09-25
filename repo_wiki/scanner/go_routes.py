@@ -33,9 +33,7 @@ _GIN_ROUTE_RE = re.compile(
     r"""\b([A-Za-z_]\w*)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|Any|Handle)\(\s*"""
     r"""(?:((?:http\.Method\w+)|(?:"[A-Z]+"))\s*,\s*)?["']([^"']+)["']""",
 )
-_HANDLE_FUNC_RE = re.compile(
-    r"""(?:http\.)?HandleFunc\(\s*["']([^"']+)["']\s*,\s*([A-Za-z_]\w*)"""
-)
+_HANDLE_FUNC_RE = re.compile(r"""(?:http\.)?HandleFunc\(\s*["']([^"']+)["']\s*,\s*([A-Za-z_]\w*)""")
 _MUX_HANDLE_RE = re.compile(
     r"""(?:^|[^\w.])(?:\w+\.)?Handle\(\s*["']([^"']+)["']""",
     re.MULTILINE,

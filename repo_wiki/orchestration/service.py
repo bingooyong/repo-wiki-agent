@@ -2109,11 +2109,7 @@ class RepoWikiService:
             commands.append(text)
 
         makefile = next(
-            (
-                path
-                for path in (self.root / "Makefile", self.root / "makefile")
-                if path.is_file()
-            ),
+            (path for path in (self.root / "Makefile", self.root / "makefile") if path.is_file()),
             None,
         )
         if makefile is not None:
@@ -2551,7 +2547,9 @@ class RepoWikiService:
             return "/".join(parts[:2])
         return parts[0] if parts else path
 
-    def _order_api_endpoints_for_pages(self, endpoints: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _order_api_endpoints_for_pages(
+        self, endpoints: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         def _sort_key(endpoint: dict[str, Any]) -> tuple[int, str, str]:
             path = str(endpoint.get("path") or "")
             method = str(endpoint.get("method") or "")
@@ -2577,7 +2575,11 @@ class RepoWikiService:
         family_names = sorted(
             grouped,
             key=lambda name: (
-                1 if any(self._is_scaffold_demo_route(str(ep.get("path") or "")) for ep in grouped[name]) else 0,
+                1
+                if any(
+                    self._is_scaffold_demo_route(str(ep.get("path") or "")) for ep in grouped[name]
+                )
+                else 0,
                 name,
             ),
         )
@@ -2595,7 +2597,7 @@ class RepoWikiService:
                 cite = ""
                 if file_path:
                     line_number = endpoint.get("line_number") or endpoint.get("line_start") or 1
-                    details.append(f"`{file_path}`")
+                    details.append(f"`{file_path}`:{line_number}")
                     cite = f" <cite>{file_path}:{line_number}</cite>"
                 suffix = f"（{'，'.join(details)}）" if details else ""
                 lines.append(f"- {method} {path}{suffix}{cite}")

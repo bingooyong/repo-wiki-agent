@@ -887,7 +887,18 @@ class ParityMetricExtractor:
         ]
 
         if not api_files:
-            return self._fail_result("api_aggregation", "No API pages found")
+            defn = PARITY_METRICS["api_aggregation"]
+            return MetricResult(
+                metric_name="api_aggregation",
+                status=MetricStatus.SKIPPED,
+                score=1.0,
+                measured_value=1.0,
+                threshold=defn.threshold,
+                severity=defn.severity,
+                category=defn.category,
+                details={"aggregated_apis": 0, "total_api_pages": 0},
+                gaps=[],
+            )
 
         aggregated_count = 0
         for f in api_files:

@@ -709,7 +709,9 @@ def test_go_install_commands_come_from_makefile_and_cmd(tmp_path: Path) -> None:
     service = RepoWikiService(cfg)
     commands = service._install_commands_from_repo_files()
     assert any("cmd/ccagent/main.go" in item for item in commands)
-    assert not any(item.strip() in {"go run .", "go build -o probe_exporter ."} for item in commands)
+    assert not any(
+        item.strip() in {"go run .", "go build -o probe_exporter ."} for item in commands
+    )
 
 
 def test_mermaid_er_rejects_brace_attribute_names() -> None:
@@ -740,7 +742,10 @@ def test_mermaid_er_rejects_brace_attribute_names() -> None:
     assert rendered is not None
     assert "{id}" not in rendered
     assert "ProbeEndpoint" in rendered
-    assert validate_mermaid_syntax("erDiagram\n    X {{id}}\n", MermaidDiagramType.ER_DIAGRAM)[0] is False
+    assert (
+        validate_mermaid_syntax("erDiagram\n    X {{id}}\n", MermaidDiagramType.ER_DIAGRAM)[0]
+        is False
+    )
 
 
 def test_architecture_mermaid_prefers_internal_packages() -> None:

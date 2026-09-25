@@ -161,7 +161,8 @@ def build_claim_coverage(
     uncovered: list[dict[str, object]] = []
     for claim in claims:
         span_end = claim.end_line or claim.line
-        citation_window = set(range(claim.line - 1, span_end + 2))
+        citation_window = {claim.line - 1, claim.line, claim.line + 1}
+        citation_window.update(range(claim.line, span_end + 2))
         if citation_window & valid_repo_citation_lines:
             covered += 1
         else:

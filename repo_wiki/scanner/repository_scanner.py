@@ -433,10 +433,11 @@ class RepositoryScanner:
                         commands[key] = f"make {key}"
 
         language = self._detect_language(files)
-        if language == "go":
+        has_root_go_mod = any(file.path.as_posix() == "go.mod" for file in files)
+        if has_root_go_mod or language == "go":
             go_commands = self._extract_go_commands(files, makefile)
             for key, value in go_commands.items():
-                if value and not commands[key]:
+                if value:
                     commands[key] = value
         fallback = {
             "python": {"start": "python -m app", "test": "pytest -q", "lint": "ruff check ."},
@@ -470,14 +471,19 @@ class RepositoryScanner:
                     continue
                 if re.search(r"\bgo\s+build\b", line) and "build" not in found:
                     found["build"] = " ".join(line.split())
-                if re.search(r"\b(?:podman-compose|docker-compose|go\s+run)\b", line) and "start" not in found:
+                if (
+                    re.search(r"\b(?:podman-compose|docker-compose|go\s+run)\b", line)
+                    and "start" not in found
+                ):
                     found["start"] = " ".join(line.split())
                 if re.search(r"\bgo\s+test\b", line) and "test" not in found:
                     found["test"] = " ".join(line.split())
             if "build" not in found and re.search(r"^install:", makefile.text, re.M):
                 found["build"] = "make install"
             if "start" not in found and re.search(r"^(?:up|run|start):", makefile.text, re.M):
-                found["start"] = "make up" if re.search(r"^up:", makefile.text, re.M) else "make run"
+                found["start"] = (
+                    "make up" if re.search(r"^up:", makefile.text, re.M) else "make run"
+                )
         if "build" not in found:
             for file in files:
                 rel = file.path.as_posix()

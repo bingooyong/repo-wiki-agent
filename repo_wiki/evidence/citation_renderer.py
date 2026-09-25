@@ -122,8 +122,10 @@ def sanitize_citation_payloads(raw: str, workspace_root: str | Path | None = Non
     valid: list[str] = []
     for part in parts:
         coerced = _coerce_path_line_cite(part, workspace_root)
-        if coerced and _citation_file_exists(coerced, workspace_root) and _citation_range_in_file(
-            coerced, workspace_root
+        if (
+            coerced
+            and _citation_file_exists(coerced, workspace_root)
+            and _citation_range_in_file(coerced, workspace_root)
         ):
             valid.append(coerced)
     return valid
