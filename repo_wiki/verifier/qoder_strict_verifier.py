@@ -3238,10 +3238,9 @@ class QoderLikeVerifierService(VerifierService):
             return []
         found: list[str] = []
         for page in content_dir.rglob("*.md"):
-            text = re.sub(
-                r"```.*?```", " ", page.read_text(encoding="utf-8", errors="ignore"), flags=re.S
-            )
-            if re.search(r"`[^`\n]*<cite>[^`\n]*`", text):
+            text = page.read_text(encoding="utf-8", errors="ignore")
+            stripped = re.sub(r"```.*?```", " ", text, flags=re.S)
+            if any("<cite>" in span for span in re.findall(r"`([^`\n]*)`", stripped)):
                 found.append(page.as_posix())
         return found
 

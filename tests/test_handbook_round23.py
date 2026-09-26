@@ -36,7 +36,10 @@ from repo_wiki.verifier.handbook_routes import (
     route_completeness_ratio,
     unsupported_route_languages,
 )
-from repo_wiki.verifier.qoder_strict_verifier import QoderLikeSeverityThreshold
+from repo_wiki.verifier.qoder_strict_verifier import (
+    QoderLikeSeverityThreshold,
+    QoderLikeVerifierService,
+)
 from repo_wiki.verifier.source_facts import (
     _GENERIC_COMPOSE,
     _GENERIC_TABLES,
@@ -115,6 +118,22 @@ def test_1_install_gate_requires_balanced_steps() -> None:
     assert not re.search(r"`[^`\n]*<cite>[^`\n]*`", re.sub(r"```.*?```", " ", closed, flags=re.S))
     inside = "1. `git clone x <cite>README.md:1-1</cite>`\n\n```bash\ngit clone x\n```\n"
     assert "cite-inside-code" in install_page_render_errors(inside)
+
+
+def test_1_cite_between_inline_spans_is_not_wrapped(tmp_path: Path) -> None:
+    content = tmp_path / "repowiki" / "zh" / "content"
+    content.mkdir(parents=True)
+    (content / "between.md").write_text(
+        "用 `Caddyfile` 做反向代理。<cite>docs/note.md:1-1</cite> 再执行 `caddy run`。\n",
+        encoding="utf-8",
+    )
+    (content / "inside.md").write_text(
+        "命令是 `git clone x <cite>README.md:1-1</cite>`。\n",
+        encoding="utf-8",
+    )
+    found = QoderLikeVerifierService(tmp_path, strict=True)._handbook_backtick_cite_pages()
+    assert any(path.endswith("inside.md") for path in found)
+    assert not any(path.endswith("between.md") for path in found)
 
 
 def test_2_extractor_keeps_env_createdb_and_joins_backslash() -> None:
@@ -383,6 +402,26 @@ Harbor Lamp watches coastal beacons.
     assert sources.get("version") == "package.json"
     injected = ensure_overview_names_framework("# Overview\n\nA coastal wiki.\n", tmp_path)
     assert "Harbor Lamp" in injected
+    from repo_wiki.core.config import RepoWikiConfig
+
+    cfg = RepoWikiConfig()
+    cfg.project.root = str(tmp_path)
+    service = RepoWikiService(cfg)
+    tagged = WikiPagePlan(
+        page_id="project-overview",
+        title="项目概述",
+        category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        output_path="项目概述/项目概述.md",
+        tags=["quickstart", "installation"],
+    )
+    assert service._fallback_is_onboarding_page(tagged)
+    rendered = service._enforce_qoder_page_contract(
+        tagged,
+        "# 项目概述\n\n## 这是什么\n\nA coastal wiki.\n",
+        None,
+        add_mermaid=False,
+    )
+    assert "Harbor Lamp" in rendered
 
 
 def test_7_odm_and_definition_cites(tmp_path: Path) -> None:

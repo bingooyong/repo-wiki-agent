@@ -1829,9 +1829,13 @@ class RepoWikiService:
         return bool(reason)
 
     def _fallback_is_onboarding_page(self, page: Any) -> bool:
-        from repo_wiki.generator.composer import is_handbook_overview_page
-
-        return is_handbook_overview_page(page)
+        page_id = str(getattr(page, "page_id", "") or "").lower().rsplit("/", 1)[-1]
+        title = str(getattr(page, "title", "") or "").strip().lower()
+        stem = Path(str(getattr(page, "output_path", "") or "")).stem.lower()
+        return bool(
+            {"project-overview", "overview", "项目概述", "项目概览", "project overview"}
+            & {page_id, title, stem}
+        )
 
     def _fallback_is_install_page(self, page: Any) -> bool:
         from repo_wiki.generator.composer import is_handbook_install_page
@@ -1926,12 +1930,6 @@ class RepoWikiService:
         content = sanitize_leftover_handbook_mermaid(content)
         content = self._strip_reading_notes_boilerplate(content)
         content = self._strip_readme_english_note(content)
-        if self._fallback_is_onboarding_page(page):
-            from repo_wiki.generator.deterministic_sections import (
-                ensure_overview_names_framework,
-            )
-
-            content = ensure_overview_names_framework(content, self.root)
 
         is_api_like_page = self._is_qoder_api_contract_page(page)
         if is_api_like_page:
@@ -2154,12 +2152,6 @@ class RepoWikiService:
         from repo_wiki.generator.deterministic_sections import strip_header_only_cites
 
         content = normalize_citation_markup(content, self.root)
-        if self._fallback_is_onboarding_page(page):
-            from repo_wiki.generator.deterministic_sections import (
-                ensure_overview_names_framework,
-            )
-
-            content = ensure_overview_names_framework(content, self.root)
         content = strip_header_only_cites(content, self.root)
         content = self._append_short_migration_evidence(page, content)
         content = restore_code_units(content, _sacred_code)
@@ -2187,6 +2179,12 @@ class RepoWikiService:
                     )
                 else:
                     content += "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
+        if self._fallback_is_onboarding_page(page):
+            from repo_wiki.generator.deterministic_sections import (
+                ensure_overview_names_framework,
+            )
+
+            content = ensure_overview_names_framework(content, self.root)
         return content.strip() + "\n"
 
     def _write_raw_reply(self, page: Any, raw_markdown: str) -> None:
