@@ -908,15 +908,23 @@ def install_page_render_errors(markdown: str) -> list[str]:
     errors: list[str] = []
     if text.count("```") % 2:
         errors.append("unbalanced-fences")
-    if re.search(r"`[^`\n]*<cite>", text) or any(
-        "<cite>" in block for _lang, block in _FENCE_RE.findall(text)
-    ):
+    fenced = list(_FENCE_RE.findall(text))
+    if any("<cite>" in block for _lang, block in fenced):
         errors.append("cite-inside-code")
-    steps = re.findall(r"^(\d+)\.\s+`([^`]+)`", text, re.M)
+    stripped = _FENCE_RE.sub(" ", text)
+    if any("<cite>" in span for span in re.findall(r"`([^`\n]*)`", stripped)):
+        errors.append("cite-inside-code")
+    heading = re.search(r"^##\s+安装步骤\s*$", text, re.M)
+    region = text
+    if heading:
+        rest = text[heading.end() :]
+        nxt = re.search(r"^##\s+", rest, re.M)
+        region = rest[: nxt.start()] if nxt else rest
+    steps = re.findall(r"^(\d+)\.\s+`([^`]+)`", region, re.M)
     numbers = [int(item[0]) for item in steps]
     if numbers and numbers != list(range(1, len(numbers) + 1)):
         errors.append("step-number-gap")
-    fences = [block.strip() for _lang, block in _FENCE_RE.findall(text)]
+    fences = [block.strip() for _lang, block in _FENCE_RE.findall(region)]
     commands = [cmd.strip() for _num, cmd in steps]
     if commands and fences and commands != fences[: len(commands)]:
         errors.append("step-fence-mismatch")

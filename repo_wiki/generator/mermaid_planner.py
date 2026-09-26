@@ -1,21 +1,4 @@
-"""Mermaid diagram planner and renderer for wiki pages.
-
-This module provides:
-- MermaidDiagramType: Enum of supported diagram types
-- DiagramPlan: Plan for a diagram with evidence backing
-- MermaidPlanner: Decides which diagram type to use based on page type and evidence
-- MermaidRenderer: Renders valid Mermaid syntax
-- validate_mermaid_syntax: Validates Mermaid syntax before writing
-
-Phase 24 - Task 24.4: Mermaid diagram planner and renderer
-
-Diagram types supported:
-- flowchart: Process flows, architecture flows (TD/BT/LR/RL)
-- sequenceDiagram: API calls, service interactions
-- erDiagram: Entity relationships for data models
-- classDiagram: Module/class relationships
-- stateDiagram: State machine transitions
-"""
+"""Mermaid planner and renderer."""
 
 from __future__ import annotations
 
@@ -64,30 +47,32 @@ def mermaid_er_field(value: str) -> str:
     return text
 
 
+_SCALAR = {
+    "int": "int",
+    "int8": "int",
+    "int16": "int",
+    "int32": "int",
+    "int64": "int",
+    "uint": "int",
+    "uint64": "int",
+    "integer": "int",
+    "bigint": "int",
+    "smallint": "int",
+    "float": "float",
+    "float32": "float",
+    "float64": "float",
+    "bool": "bool",
+    "boolean": "bool",
+    "time": "datetime",
+    "datetime": "datetime",
+    "timestamp": "datetime",
+    "index": "index",
+    "unique": "index",
+}
+
+
 def _mermaid_scalar_type(value: str) -> str:
-    lowered = (value or "").split(".")[-1].lower().lstrip("*[]")
-    if lowered in {
-        "int",
-        "int8",
-        "int16",
-        "int32",
-        "int64",
-        "uint",
-        "uint64",
-        "integer",
-        "bigint",
-        "smallint",
-    }:
-        return "int"
-    if lowered in {"float", "float32", "float64"}:
-        return "float"
-    if lowered in {"bool", "boolean"}:
-        return "bool"
-    if lowered in {"time", "datetime", "timestamp"}:
-        return "datetime"
-    if lowered in {"index", "unique"}:
-        return "index"
-    return "string"
+    return _SCALAR.get((value or "").split(".")[-1].lower().lstrip("*[]"), "string")
 
 
 def _join_key_scalar(name: str, raw_type: str = "") -> str:
@@ -231,8 +216,6 @@ def _honest_method_path(endpoint: dict[str, Any], root: Path | None = None) -> t
     table = load_route_method_table(root)
     if path in table:
         method = table[path]
-    elif "force-resync" in path.lower():
-        method = "POST"
     if not path:
         return "", ""
     return method or "GET", path
@@ -348,8 +331,6 @@ def _request_flow_score(endpoint: dict[str, Any], page_id: str, tokens: set[str]
     leaf = (page_id or "").lower()
     score = sum(3 for token in tokens if token in hay)
     if "agent" in leaf and "healthz" in path:
-        score += 6
-    if "control" in leaf and "force-resync" in path:
         score += 6
     if any(token in leaf for token in ("frontend", "前端", "web")):
         if "web" in path or "static" in hay:
@@ -593,15 +574,7 @@ class MermaidSyntaxError(Exception):
 def validate_mermaid_syntax(
     diagram_code: str, diagram_type: MermaidDiagramType
 ) -> tuple[bool, str]:
-    """Validate Mermaid diagram syntax.
-
-    Args:
-        diagram_code: The Mermaid diagram code (without ```mermaid wrapper)
-        diagram_type: Type of diagram
-
-    Returns:
-        (is_valid, error_message) tuple
-    """
+    """Validate Mermaid diagram syntax. Returns (is_valid, error_message)."""
     if not diagram_code or not diagram_code.strip():
         return False, "Diagram code is empty"
 
@@ -1009,13 +982,7 @@ def _iter_snapshot_paths(context: dict[str, Any]) -> list[str]:
 
 
 class MermaidPlanner:
-    """Plans Mermaid diagrams for wiki pages based on page type and evidence.
-
-    The planner decides:
-    1. Which diagram type is most appropriate for the page
-    2. What content should go in the diagram
-    3. Which evidence spans back the diagram elements
-    """
+    """Plans Mermaid diagrams for wiki pages."""
 
     def __init__(self, workspace_root: str | None = None) -> None:
         self.workspace_root = workspace_root
@@ -1027,17 +994,7 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None = None,
         context: dict[str, Any] | None = None,
     ) -> list[DiagramPlan]:
-        """Plan diagrams for a wiki page.
-
-        Args:
-            page_id: Unique page identifier
-            page_type: Page type string (e.g., "overview", "api", "data")
-            evidence_binding: Evidence binding with candidates
-            context: Additional context (modules, endpoints, etc.)
-
-        Returns:
-            List of DiagramPlan objects for this page
-        """
+        """Plan diagrams for a wiki page."""
         diagrams: list[DiagramPlan] = []
         context = context or {}
 
@@ -2425,14 +2382,7 @@ class MermaidRenderer:
         pass
 
     def render_diagram(self, plan: DiagramPlan) -> str:
-        """Render a DiagramPlan to Mermaid syntax string.
-
-        Args:
-            plan: DiagramPlan to render
-
-        Returns:
-            Mermaid code string (without ```mermaid wrapper)
-        """
+        """Render a DiagramPlan to Mermaid syntax."""
         if plan.diagram_type == MermaidDiagramType.FLOWCHART:
             return self._render_flowchart(plan)
         elif plan.diagram_type == MermaidDiagramType.SEQUENCE_DIAGRAM:
@@ -2614,11 +2564,6 @@ def create_planner(workspace_root: str | None = None) -> MermaidPlanner:
 
 
 def create_renderer() -> MermaidRenderer:
-    """Create a Mermaid renderer.
-
-    Returns:
-        MermaidRenderer instance
-    """
     return MermaidRenderer()
 
 
@@ -2629,21 +2574,7 @@ def plan_and_render_diagram(
     context: dict[str, Any] | None = None,
     workspace_root: str | None = None,
 ) -> tuple[str | None, bool, str]:
-    """Plan and render a diagram for a wiki page.
-
-    This is a convenience function that combines planning and rendering
-    with syntax validation.
-
-    Args:
-        page_id: Unique page identifier
-        page_type: Page type string
-        evidence_binding: Evidence binding with candidates
-        context: Additional context
-        workspace_root: Optional workspace root
-
-    Returns:
-        (rendered_diagram, is_valid, error_message) tuple
-    """
+    """Plan and render a diagram for a wiki page."""
     planner = create_planner(workspace_root)
     renderer = create_renderer()
 
@@ -2661,15 +2592,7 @@ def link_diagram_to_evidence(
     diagram_plan: DiagramPlan,
     evidence_binding: PageEvidenceBinding | None,
 ) -> DiagramPlan:
-    """Link a diagram plan to evidence spans.
-
-    Args:
-        diagram_plan: Diagram plan to update
-        evidence_binding: Evidence binding with candidates
-
-    Returns:
-        Updated diagram plan with evidence links
-    """
+    """Link a diagram plan to evidence spans."""
     if not evidence_binding:
         return diagram_plan
 

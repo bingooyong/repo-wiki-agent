@@ -24,7 +24,7 @@ _PY_INCLUDE_RE = re.compile(
 _PREFIX_CONST_RE = re.compile(
     r"""(\w+)\s*(?::[^=\n]+)?=\s*['\"](/[^'\"]*)['\"]""",
 )
-_IMPORT_AS_RE = re.compile(r"from\s+([\w.]+)\s+import\s+(\w+)(?:\s+as\s+(\w+))?")
+_IMPORT_RE = re.compile(r"from\s+([\w.]+)\s+import\s+(\([^)]+\)|[^\n#]+)", re.S)
 _GROUP_RE = re.compile(r"""(\w+)\s*:?=\s*(\w+)\.Group\(\s*['\"]([^'\"]+)['\"]""")
 _TO_RE = re.compile(
     r"""(\w+)\.To\(\s*['\"]([A-Z]+(?:\s*,\s*[A-Z]+)*)['\"]\s*,\s*['\"]([^'\"]+)['\"]"""
@@ -37,9 +37,20 @@ _GO_CTOR_RE = re.compile(
     r"""(\w+)\s*:?=\s*(?:gin\.(?:Default|New)|chi\.NewRouter|echo\.New|http\.NewServeMux|mux\.NewRouter|fiber\.New)\("""
 )
 _GO_PATH_TAG_RE = re.compile(r'path:"(/[^"]+)"')
-_GO_REGISTER_RE = re.compile(
-    r"""(?:RegisterService|RegisterRawRoute|HandleFunc)\(\s*['\"](/[^'\"]+)['\"]"""
+_GO_TYPE_METHOD_RE = re.compile(
+    r"func\s+\((?:\w+\s+)?\*?([A-Z]\w*)\)\s+([A-Z][A-Za-z0-9]*)\s*\((?:\w+\s+\*?([A-Z]\w*))?"
 )
+_STRUCT_BODY_RE = re.compile(r"type\s+(\w+)\s+struct\s*\{([^}]*)\}", re.S)
+_REQ_PATH_RE = re.compile(r'path:"([^"]+)"(?:[^`]*seq:"(\d+)")?')
+_REG_SVC_RE = re.compile(
+    r"""RegisterService\(\s*['\"](/[^'\"]+)['\"]\s*,\s*(?:New(\w+)\(|&?(\w+)\{)"""
+)
+_REG_RAW_RE = re.compile(
+    r"""RegisterRawRoute\(\s*(?:http\.Method(\w+)|['\"]([A-Z]+)['\"])\s*,\s*['\"](/[^'\"]+)['\"]"""
+)
+_HANDLE_FUNC_RE = re.compile(r"""HandleFunc\(\s*['\"](?:([A-Z]+)\s+)?(/[^'\"]+)['\"]""")
+_SKIP_REFLECT = frozenset({"Init", "Register", "ServeHTTP"})
+_HEADER_NAME_RE = re.compile(r"^X-[A-Za-z0-9-]+$")
 _JS_ROUTE_RE = re.compile(
     r"""(\w+)\.(get|post|put|patch|delete|options|head)\(\s*['\"](/[^'\"]+)['\"]""",
     re.I,
@@ -52,12 +63,36 @@ ROUTE_COMPLETENESS_MIN = 0.5
 def _norm_path(path: str) -> str:
     text = (path or "").rstrip("。，、):")
     text = re.sub(r"\{([^}]+)\}", r":\1", text)
+    if len(text) > 1:
+        text = text.rstrip("/")
     return text or "/"
 
 
 def concat_http_paths(*parts: str) -> str:
     segs = [s for part in parts for s in str(part).strip().split("/") if s]
     return "/" + "/".join(segs) if segs else "/"
+
+
+def _reflect_method_path(base: str, name: str, req_body: str) -> str:
+    leaf = name[5:] if name.startswith("Serve") and len(name) > 5 else name
+    if leaf.startswith("Handle") and len(leaf) > 6:
+        leaf = leaf[6:]
+    route = concat_http_paths(base, leaf.lower())
+    present = {seg.lstrip(":*") for seg in route.split("/") if seg}
+    extras: list[tuple[int, str]] = []
+    star = ""
+    for match in _REQ_PATH_RE.finditer(req_body or ""):
+        token = match.group(1)
+        if token.startswith("*"):
+            star = token[1:]
+            continue
+        extras.append((int(match.group(2) or 0), token.lstrip(":")))
+    for _seq, token in sorted(extras):
+        if token and token not in present:
+            route = concat_http_paths(route, ":" + token)
+    if star and star not in present:
+        route = route.rstrip("/") + "/*" + star
+    return route
 
 
 def extract_handbook_http_paths(markdown: str) -> set[tuple[str, str]]:
@@ -67,6 +102,11 @@ def extract_handbook_http_paths(markdown: str) -> set[tuple[str, str]]:
         path = _norm_path(match.group(2))
         first = path.strip("/").split("/", 1)[0].upper()
         if not path.startswith("/") or first in _HTTP:
+            continue
+        segs = [item for item in path.split("/") if item]
+        if not segs or _HEADER_NAME_RE.match(segs[0]) or segs[0] == "debug":
+            continue
+        if len(segs) == 1 and segs[0][:1] in "{:":
             continue
         found.add((match.group(1).upper(), path))
     return found
@@ -99,6 +139,16 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
     by_stem: dict[str, str] = {}
     file_set = {path for path, _text in files}
     aliases: dict[tuple[str, str], tuple[str, str]] = {}
+    type_methods: dict[str, list[tuple[str, str, str]]] = {}
+    structs: dict[tuple[str, str], str] = {}
+    for path, text in files:
+        if path.endswith(".go") and not path.endswith("_test.go"):
+            for match in _GO_TYPE_METHOD_RE.finditer(text):
+                type_methods.setdefault(match.group(1), []).append(
+                    (match.group(2), match.group(3) or "", path)
+                )
+            for match in _STRUCT_BODY_RE.finditer(text):
+                structs[(path, match.group(1))] = match.group(2)
 
     def _module_file(module: str, name: str = "") -> str | None:
         for cand in (
@@ -118,10 +168,16 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
     for path, text in files:
         if path.endswith(".py"):
             by_stem[path.rsplit("/", 1)[-1].removesuffix(".py")] = path
-            for match in _IMPORT_AS_RE.finditer(text):
-                dest = _module_file(match.group(1), match.group(2))
-                if dest:
-                    aliases[(path, match.group(3) or match.group(2))] = (dest, match.group(2))
+            for match in _IMPORT_RE.finditer(text):
+                for part in match.group(2).replace("(", " ").replace(")", " ").split(","):
+                    names = [
+                        item.strip() for item in re.split(r"\s+as\s+", part.strip()) if item.strip()
+                    ]
+                    if not names or not names[0].isidentifier():
+                        continue
+                    dest = _module_file(match.group(1), names[0])
+                    if dest:
+                        aliases[(path, names[-1])] = (dest, names[0])
             for match in _PY_ROUTER_RE.finditer(text):
                 prefixes[(path, match.group(1))] = match.group(2) or ""
                 if "FastAPI" in match.group(0):
@@ -159,8 +215,31 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
                         found.add((method, route))
             for match in _GO_PATH_TAG_RE.finditer(text):
                 found.add(("ANY", match.group(1)))
-            for match in _GO_REGISTER_RE.finditer(text):
-                found.add(("ANY", match.group(1)))
+            for match in _REG_SVC_RE.finditer(text):
+                base = match.group(1)
+                kind = match.group(2) or match.group(3) or ""
+                found.add(("ANY", concat_http_paths(base)))
+                for name, req, method_file in type_methods.get(kind, ()):
+                    if name in _SKIP_REFLECT:
+                        continue
+                    body = structs.get((method_file, req), "")
+                    if not body:
+                        body = next(
+                            (item for (src, typ), item in structs.items() if typ == req),
+                            "",
+                        )
+                    full = _reflect_method_path(base, name, body)
+                    found.add(("ANY", full))
+                    found.add(("ANY", full.split("/:")[0].split("/*")[0] or full))
+            for match in _REG_RAW_RE.finditer(text):
+                found.add(
+                    (
+                        (match.group(1) or match.group(2) or "ANY").upper(),
+                        concat_http_paths(match.group(3)),
+                    )
+                )
+            for match in _HANDLE_FUNC_RE.finditer(text):
+                found.add(((match.group(1) or "ANY").upper(), concat_http_paths(match.group(2))))
         if path.endswith((".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx")):
             js_router = set(_JS_ROUTER_RE.findall(text)) | {"app", "router", "server"}
             for match in _JS_ROUTE_RE.finditer(text):

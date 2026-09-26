@@ -5,7 +5,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from repo_wiki.generator.deterministic_sections import build_install_section, build_verify_section
+from repo_wiki.generator.deterministic_sections import (
+    build_install_section,
+    build_verify_section,
+    ensure_overview_names_framework,
+)
 from repo_wiki.generator.mermaid_planner import MermaidPlanner
 from repo_wiki.orchestration.quality_artifacts import build_generation_quality_documents
 from repo_wiki.orchestration.service import RepoWikiService
@@ -24,6 +28,7 @@ from repo_wiki.verifier.handbook import (
 )
 from repo_wiki.verifier.handbook_routes import (
     ROUTE_COMPLETENESS_MIN,
+    _norm_path,
     extract_handbook_http_paths,
     extract_source_http_paths,
     handbook_route_crosscheck_mismatches,
@@ -59,6 +64,7 @@ $ touch .env
 """,
     )
     section = build_install_section(tmp_path)
+    assert re.search(r"^1\. `.+`\n<cite>", section, re.M)
     assert "<cite>" not in section.split("```")[1]
     assert "`<cite>" not in section
     assert section.count("```") % 2 == 0
@@ -92,6 +98,15 @@ def test_1_install_gate_requires_balanced_steps() -> None:
     assert install_page_render_errors(broken)
     gapped = "## 安装步骤\n\n1. `git clone x`\n\n```bash\ngit clone x\n```\n\n3. `touch .env`\n\n```bash\ntouch .env\n```\n"
     assert any("step" in item for item in install_page_render_errors(gapped))
+    closed = (
+        "## 安装步骤\n\n1. `git clone x`\n\n```bash\ngit clone x\n```\n\n"
+        "用 `Caddyfile` 反向代理。<cite>docs/note.md:1-1</cite>\n\n"
+        "## 启动与验证\n\n1. `curl http://127.0.0.1:9/ready` <cite>README.md:2-2</cite>\n"
+    )
+    assert install_page_render_errors(closed) == []
+    assert "`<cite>" not in closed
+    inside = "1. `git clone x <cite>README.md:1-1</cite>`\n\n```bash\ngit clone x\n```\n"
+    assert "cite-inside-code" in install_page_render_errors(inside)
 
 
 def test_2_extractor_keeps_env_createdb_and_joins_backslash() -> None:
@@ -264,6 +279,76 @@ export default router;
     assert route_completeness_ratio(one_of_four, four) < ROUTE_COMPLETENESS_MIN
 
 
+def test_5_multi_import_empty_path_and_register_methods() -> None:
+    files = [
+        (
+            "main.py",
+            "from pack.routes import api as api_router\n"
+            "application = FastAPI()\n"
+            "API_PREFIX = '/svc'\n"
+            "application.include_router(api_router, prefix=API_PREFIX)\n",
+        ),
+        (
+            "pack/routes.py",
+            "from pack import notes, faces\n"
+            "router = APIRouter()\n"
+            "router.include_router(notes.router, prefix='/pads/{pid}/replies')\n"
+            "router.include_router(faces.router, prefix='/faces')\n",
+        ),
+        (
+            "pack/notes.py",
+            "router = APIRouter()\n"
+            '@router.get("")\n'
+            "def list_replies():\n    return {}\n"
+            '@router.delete("/{rid}")\n'
+            "def drop_reply():\n    return {}\n",
+        ),
+        (
+            "pack/faces.py",
+            "router = APIRouter()\n"
+            '@router.get(\n    "/{name}"\n)\n'
+            "def show_face():\n    return {}\n",
+        ),
+        (
+            "beacon/reg.go",
+            "func init() {\n"
+            '    RegisterService("/beacon", NewLamp())\n'
+            '    RegisterRawRoute(http.MethodGet, "/metrics", handler)\n'
+            '    mux.HandleFunc("GET /debug/info", info)\n'
+            "}\n",
+        ),
+        (
+            "beacon/lamp.go",
+            "type Lamp struct{}\n"
+            "func NewLamp() *Lamp { return &Lamp{} }\n"
+            "func (l *Lamp) Flash() {}\n"
+            "func (l *Lamp) dim() {}\n"
+            "type BurstRequest struct {\n"
+            '    Name string `path:":name" seq:"1"`\n'
+            "}\n"
+            "func (l *Lamp) ServeBurst(req *BurstRequest) {}\n",
+        ),
+    ]
+    source = {(_m, _norm_path(_p)) for _m, _p in extract_source_http_paths(files)}
+    paths = {path for _method, path in source}
+    assert ("GET", "/svc/pads/:pid/replies") in source
+    assert ("DELETE", "/svc/pads/:pid/replies/:rid") in source
+    assert ("GET", "/svc/faces/:name") in source
+    assert "/beacon/flash" in paths
+    assert "/beacon/burst/:name" in paths
+    assert "/beacon/burst" in paths
+    assert not any(path.endswith("/dim") for path in paths)
+    assert "/metrics" in paths
+    assert "/debug/info" in paths
+    handbook = (
+        "# API\n\nGET `/X-Trace` 与 GET `/:id` 与 GET `/svc/faces/{name}` "
+        "与 GET `/debug/pprof/allocs`。\n"
+    )
+    mismatches = handbook_route_crosscheck_mismatches(handbook, files)
+    assert not any("X-Trace" in item or item.endswith(" /:id") for item in mismatches)
+    assert not mismatches
+
+
 def test_6_identity_readme_h1_and_sources(tmp_path: Path) -> None:
     _write(
         tmp_path / "README.md",
@@ -288,6 +373,8 @@ Harbor Lamp watches coastal beacons.
     sources = identity.identity_sources or {}
     assert sources.get("display_name") == "readme"
     assert sources.get("version") == "package.json"
+    injected = ensure_overview_names_framework("# Overview\n\nA coastal wiki.\n", tmp_path)
+    assert "Harbor Lamp" in injected
 
 
 def test_7_odm_and_definition_cites(tmp_path: Path) -> None:

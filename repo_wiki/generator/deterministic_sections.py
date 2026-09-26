@@ -193,14 +193,20 @@ def derive_framework_stack(root: Path) -> str:
 
 
 def ensure_overview_names_framework(content: str, root: Path) -> str:
-    """State the detected framework on the overview page when the model omitted it."""
-    framework = derive_framework_stack(root)
-    if not framework:
-        return content or ""
-    if framework.lower() in (content or "").lower():
-        return content or ""
-    sentence = f"本仓库的 Web 框架是 {framework}，技术栈由 pyproject 与应用入口导入确定。"
+    """State framework and README display name when the overview omitted them."""
+    from repo_wiki.planner.identity import resolve_repository_identity
+
     text = content or ""
+    bits: list[str] = []
+    framework = derive_framework_stack(root)
+    if framework and framework.lower() not in text.lower():
+        bits.append(f"本仓库的 Web 框架是 {framework}，技术栈由 pyproject 与应用入口导入确定。")
+    name = (resolve_repository_identity(root).display_name or "").strip()
+    if name and name.lower() not in text.lower():
+        bits.append(f"本仓库产品名是 {name}。")
+    if not bits:
+        return text
+    sentence = " ".join(bits)
     lines = text.splitlines()
     if lines and lines[0].startswith("#"):
         rest = "\n".join(lines[1:]).lstrip("\n")
@@ -247,8 +253,6 @@ def leftover_request_flow_is_untrustworthy(block: str) -> bool:
     if "ErrorWrapper" in text:
         return True
     if "/healthz" in text and re.search(r"X-[A-Za-z0-9-]*Token", text):
-        return True
-    if re.search(r"GET\s+/force-resync", text):
         return True
     if (
         re.search(r"Auth\w*Dep", text)
@@ -681,16 +685,11 @@ def rewrite_token_const_cite(content: str, root: Path) -> str:
     )
 
 
-def rewrite_force_resync_method(content: str) -> str:
-    return re.sub(r"GET(\s+/force-resync)", r"POST\1", content or "")
-
-
 def sanitize_leftover_handbook_mermaid(content: str) -> str:
     text = strip_untrustworthy_request_flow_mermaid(content or "")
     text = strip_page_id_mermaid_suffixes(text)
     text = strip_invented_join_id_pk(text)
-    text = rewrite_join_tag_types(text)
-    return rewrite_force_resync_method(text)
+    return rewrite_join_tag_types(text)
 
 
 def is_auth_identity_page(*, page_id: str = "", title: str = "") -> bool:
@@ -887,7 +886,10 @@ def build_install_section(root: Path) -> str:
     lines = ["## 安装步骤", ""]
     for index, command in enumerate(commands, start=1):
         cite = cite_readme_line(root, command.split()[0] if command.split() else command)
-        lines.extend([f"{index}. `{command}`", "", "```bash", command, "```", ""])
+        lines.append(f"{index}. `{command}`")
+        if cite:
+            lines.append(cite)
+        lines.extend(["", "```bash", command, "```", ""])
         if cite:
             lines.extend([cite, ""])
     return "\n".join(lines)

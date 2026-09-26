@@ -1,11 +1,4 @@
-"""LLM page composer pipeline for Qoder-style Markdown article generation.
-
-This module provides the core composer that integrates:
-- Page plan (WikiPagePlan) and evidence binding (PageEvidenceBinding)
-- Prompt contracts (PagePromptContract) and skeleton builder
-- Citation renderer for evidence preservation
-- Mock LLM provider for CI, optional real provider for smoke tests
-"""
+"""LLM page composer pipeline."""
 
 from __future__ import annotations
 

@@ -195,10 +195,7 @@ def attach_adjacent_cites(
         claim_idx = max(claim.line - 1, 0)
         if claim_idx < len(in_fence) and in_fence[claim_idx]:
             continue
-        nxt = insert_at
-        while nxt < len(lines) and not lines[nxt].strip():
-            nxt += 1
-        if nxt < len(lines) and "```" in lines[nxt]:
+        if insert_at < len(lines) and "```" in lines[insert_at]:
             continue
         if insert_at > 0 and "```" in lines[insert_at - 1]:
             continue
