@@ -329,6 +329,28 @@ def test_1_upgrade_numeric_and_unique_suffix_keeps_braces() -> None:
     assert handbook_route_crosscheck_mismatches(upgraded, files, api_page=True) == []
 
 
+def test_2_mermaid_short_paths_upgrade() -> None:
+    files = [
+        (
+            "app.py",
+            "app = FastAPI()\n"
+            "@app.get('/harbor/feed')\n"
+            "def feed():\n    return {}\n"
+            "@app.post('/harbor/login')\n"
+            "def login():\n    return {}\n",
+        )
+    ]
+    mermaid = (
+        "# API\n\n```mermaid\nsequenceDiagram\n"
+        "    Client->>feed: GET /feed\n"
+        "    Client->>login: POST /login\n```\n"
+    )
+    upgraded = upgrade_handbook_route_paths(mermaid, files)
+    assert "GET /harbor/feed" in upgraded
+    assert "POST /harbor/login" in upgraded
+    assert handbook_route_crosscheck_mismatches(upgraded, files, api_page=True) == []
+
+
 def test_2_drop_unmatched_short_paths() -> None:
     from repo_wiki.verifier.handbook_routes import drop_unmatched_handbook_routes
 

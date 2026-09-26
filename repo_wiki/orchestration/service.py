@@ -2814,6 +2814,17 @@ class RepoWikiService:
                         markdown.rstrip() + "\n\n## 架构图\n\n" + "\n\n".join(rendered_blocks)
                     )
             page_results[idx] = (path, markdown)
+        from repo_wiki.generator.deterministic_sections import (
+            strip_dangling_colon_leads,
+            unstep_prose_backtick_items,
+        )
+        from repo_wiki.verifier.handbook_routes import (
+            drop_unmatched_handbook_routes,
+            iter_route_source_files,
+            upgrade_handbook_route_paths,
+        )
+
+        route_files = iter_route_source_files(self.root)
         for idx in sorted(page_results):
             if idx < 0 or idx >= len(pages_to_compose):
                 continue
@@ -2821,6 +2832,10 @@ class RepoWikiService:
             path, markdown = page_results[idx]
             markdown = self._ensure_minimum_prose_density(markdown, page)
             markdown = self._rebuild_qoder_toc_from_real_h2s(page, markdown)
+            markdown = upgrade_handbook_route_paths(markdown, route_files)
+            markdown = drop_unmatched_handbook_routes(markdown, route_files)
+            markdown = unstep_prose_backtick_items(markdown)
+            markdown = strip_dangling_colon_leads(markdown)
             page_results[idx] = (path, markdown)
 
     def _schema_summary_owner_rank(self, page: Any, page_idx: int) -> tuple[int, str, int]:
