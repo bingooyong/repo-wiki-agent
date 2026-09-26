@@ -2154,6 +2154,12 @@ class RepoWikiService:
         from repo_wiki.generator.deterministic_sections import strip_header_only_cites
 
         content = normalize_citation_markup(content, self.root)
+        if self._fallback_is_onboarding_page(page):
+            from repo_wiki.generator.deterministic_sections import (
+                ensure_overview_names_framework,
+            )
+
+            content = ensure_overview_names_framework(content, self.root)
         content = strip_header_only_cites(content, self.root)
         content = self._append_short_migration_evidence(page, content)
         content = restore_code_units(content, _sacred_code)
@@ -2211,13 +2217,16 @@ class RepoWikiService:
 
     def _rewrite_install_page_contract(self, page: Any, content: str) -> str:
         """Replace install/quick-start steps with README fence commands."""
-        from repo_wiki.generator.composer import is_handbook_install_page
         from repo_wiki.generator.deterministic_sections import (
             build_install_section,
+            is_install_owner_page,
             replace_h2_section,
         )
 
-        if not is_handbook_install_page(page):
+        if not is_install_owner_page(
+            page_id=str(getattr(page, "page_id", "") or ""),
+            title=str(getattr(page, "title", "") or ""),
+        ):
             return content
         section = build_install_section(self.root)
         if not section:

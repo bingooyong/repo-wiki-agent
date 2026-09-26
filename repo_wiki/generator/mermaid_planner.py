@@ -1322,7 +1322,6 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        """Plan primary API sequence diagram (legacy single-plan entrypoint)."""
         plans = self.plan_api_diagrams(page_id, evidence_binding, context)
         return plans[0] if plans else None
 
@@ -1332,11 +1331,7 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> list[DiagramPlan]:
-        """Plan API diagram contract:
-        1) endpoint lifecycle sequence diagram
-        2) service/controller/repository/entity flowchart
-        3) ER diagram when relationship evidence exists
-        """
+        """Plan API diagrams from source endpoints."""
         plans: list[DiagramPlan] = []
         sequence_plan = self._plan_api_sequence_diagram(page_id, evidence_binding, context)
         if sequence_plan:
@@ -1769,7 +1764,6 @@ class MermaidPlanner:
         evidence_binding: PageEvidenceBinding | None,
         context: dict[str, Any],
     ) -> DiagramPlan | None:
-        """Plan ops flowchart from CI jobs only — never an invented start/build/test/lint chain."""
         return self._plan_ci_job_diagram(page_id, evidence_binding, context)
 
     def _plan_compose_topology(

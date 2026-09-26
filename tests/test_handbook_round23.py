@@ -112,6 +112,7 @@ def test_1_install_gate_requires_balanced_steps() -> None:
     )
     assert install_page_render_errors(closed) == []
     assert "`<cite>" not in closed
+    assert not re.search(r"`[^`\n]*<cite>[^`\n]*`", re.sub(r"```.*?```", " ", closed, flags=re.S))
     inside = "1. `git clone x <cite>README.md:1-1</cite>`\n\n```bash\ngit clone x\n```\n"
     assert "cite-inside-code" in install_page_render_errors(inside)
 

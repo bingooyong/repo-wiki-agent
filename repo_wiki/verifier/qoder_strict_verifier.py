@@ -3236,11 +3236,12 @@ class QoderLikeVerifierService(VerifierService):
         content_dir = self._find_content_dir()
         if content_dir is None or not content_dir.exists():
             return []
-        pattern = re.compile(r"`\s*<cite>[^<]+</cite>\s*`")
         found: list[str] = []
         for page in content_dir.rglob("*.md"):
-            text = page.read_text(encoding="utf-8", errors="ignore")
-            if pattern.search(text):
+            text = re.sub(
+                r"```.*?```", " ", page.read_text(encoding="utf-8", errors="ignore"), flags=re.S
+            )
+            if re.search(r"`[^`\n]*<cite>[^`\n]*`", text):
                 found.append(page.as_posix())
         return found
 
