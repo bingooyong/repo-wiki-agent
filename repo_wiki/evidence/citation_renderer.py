@@ -24,7 +24,7 @@ _DROP_CITATION_SCHEMES = ("file:", "path:", "relpath:")
 _PLACEHOLDER_CITE_BODY = "start-end"
 _CITE_BLOCK_RE = re.compile(r"(<cite>\s*)([^<]+?)(\s*</cite>)")
 _BACKTICK_WRAPPED_CITE_RE = re.compile(
-    r"`[ \t]*((?:<cite>[ \t]*[^<\n]+?[ \t]*</cite>)+)[ \t]*`",
+    r"`[ \t]*((?:<cite>[^<]*</cite>)+)[ \t]*`",
     re.IGNORECASE,
 )
 _BRACKET_CITE_RE = re.compile(r"(\[cite:\s*)([^\]]+?)(\])")

@@ -122,10 +122,12 @@ curl http://127.0.0.1:9/ready
         output_path="docs/pages/quick-start.md",
     )
     draft = "# 安装\n\n## 安装步骤\n\n1. leftover\n"
-    for page in (install, quick):
-        rewritten = service._rewrite_install_page_contract(page, draft)
-        assert "git clone https://example.invalid/demo.git" in rewritten
-        assert "leftover" not in rewritten
+    rewritten = service._rewrite_install_page_contract(install, draft)
+    assert "git clone https://example.invalid/demo.git" in rewritten
+    assert "leftover" not in rewritten
+    satellite = service._rewrite_install_page_contract(quick, draft)
+    assert "git clone https://example.invalid/demo.git" not in satellite
+    assert satellite == draft
 
     numbered = "## 安装步骤\n\n1. `git clone x`\n\n```bash\ngit clone x\n```\n\n4. `uv sync`\n"
     assert strip_empty_numbered_steps(numbered) == numbered
