@@ -76,6 +76,7 @@ _JS_ROUTE_RE = re.compile(
     re.I,
 )
 _JS_ROUTER_RE = re.compile(r"""(?:const|let|var)\s+(\w+)\s*=\s*(?:Router|express)\s*\(""")
+_FETCH_RE = re.compile(r"""fetch\(\s*['"](/[^'"]+)['"]""")
 _UNSUPPORTED_ROUTE_SUFFIXES = frozenset({".rb", ".java", ".php", ".rs", ".kt"})
 _FRAMEWORK_MARK = re.compile(
     r"\b(?:fastapi|flask|django|starlette|gin-gonic|labstack/echo|go-chi|"
@@ -341,6 +342,8 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
                     continue
                 for method in _methods_from_blob(match.group(3)):
                     found.add((method, concat_http_paths(match.group(2))))
+        for match in _FETCH_RE.finditer(text):
+            found.add(("ANY", _norm_path(concat_http_paths(match.group(1)))))
     by_name: dict[str, list[tuple[str, str]]] = {}
     for key in prefixes:
         by_name.setdefault(key[1], []).append(key)

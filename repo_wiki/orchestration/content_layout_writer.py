@@ -828,6 +828,7 @@ class ContentLayoutWriter:
         pages: list[tuple[str, str]],
         selected_source_paths: set[str] | None = None,
         planner_titles: dict[str, str] | None = None,
+        prune_missing: bool = True,
     ) -> tuple[list[str], dict[str, Any]]:
         """Write already-composed Markdown pages into the content directory.
 
@@ -883,7 +884,7 @@ class ContentLayoutWriter:
             stats["by_category"][category] += 1
 
         keep = set(written)
-        if self._content_dir.is_dir():
+        if prune_missing and self._content_dir.is_dir():
             for leftover in self._content_dir.rglob("*.md"):
                 rel = leftover.relative_to(self._content_dir).as_posix()
                 if rel not in keep:

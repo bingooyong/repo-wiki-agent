@@ -664,6 +664,7 @@ class RepoWikiService:
             composition["pages"],
             selected_source_paths=selected_paths,
             planner_titles={page.output_path: page.title for page in plan.pages},
+            prune_missing=not in_place,
         )
         if in_place:
             disk_pages = [
@@ -2205,6 +2206,7 @@ class RepoWikiService:
             content = ensure_overview_names_framework(content, self.root)
         from repo_wiki.generator.deterministic_sections import (
             strip_dangling_colon_leads,
+            strip_empty_mermaid_arrows,
             unstep_prose_backtick_items,
         )
         from repo_wiki.verifier.handbook_routes import (
@@ -2216,6 +2218,7 @@ class RepoWikiService:
         route_files = iter_route_source_files(self.root)
         content = upgrade_handbook_route_paths(content, route_files)
         content = drop_unmatched_handbook_routes(content, route_files)
+        content = strip_empty_mermaid_arrows(content)
         content = unstep_prose_backtick_items(content)
         content = strip_dangling_colon_leads(content)
         return content.strip() + "\n"
@@ -2816,6 +2819,7 @@ class RepoWikiService:
             page_results[idx] = (path, markdown)
         from repo_wiki.generator.deterministic_sections import (
             strip_dangling_colon_leads,
+            strip_empty_mermaid_arrows,
             unstep_prose_backtick_items,
         )
         from repo_wiki.verifier.handbook_routes import (
@@ -2834,6 +2838,7 @@ class RepoWikiService:
             markdown = self._rebuild_qoder_toc_from_real_h2s(page, markdown)
             markdown = upgrade_handbook_route_paths(markdown, route_files)
             markdown = drop_unmatched_handbook_routes(markdown, route_files)
+            markdown = strip_empty_mermaid_arrows(markdown)
             markdown = unstep_prose_backtick_items(markdown)
             markdown = strip_dangling_colon_leads(markdown)
             page_results[idx] = (path, markdown)

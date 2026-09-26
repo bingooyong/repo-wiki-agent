@@ -610,6 +610,20 @@ def rewrite_route_cites_from_endpoints(
     return "\n".join(out)
 
 
+def strip_empty_mermaid_arrows(content: str) -> str:
+    """Drop mermaid messages that route rewrite emptied to `Actor->>X:`."""
+
+    def _fix(match: re.Match[str]) -> str:
+        kept = [
+            line
+            for line in match.group(2).splitlines()
+            if not re.search(r"->>\s*\w+\s*:\s*$", line)
+        ]
+        return match.group(1) + "\n".join(kept) + match.group(3)
+
+    return re.sub(r"(```mermaid\s*)(.*?)(```)", _fix, content or "", flags=re.I | re.S)
+
+
 def leftover_mermaid_is_unusable(content: str) -> bool:
     blocks = re.findall(r"```mermaid\s*(.*?)```", content or "", flags=re.I | re.S)
     if not blocks:
