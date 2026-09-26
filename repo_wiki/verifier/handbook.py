@@ -73,11 +73,8 @@ def contains_evidence_meta_talk(text: str) -> bool:
 
 
 def handbook_page_is_fallback_stub(markdown: str) -> bool:
-    """True for fallback stubs and any page under the 800-character body floor."""
-    text = markdown or ""
-    if any(marker in text for marker in _FALLBACK_STUB_MARKERS):
-        return True
-    return handbook_page_body_len(text) < MIN_HANDBOOK_BODY_CHARS
+    """True only for explicit fallback stub markers. Short pages must ship and FAIL."""
+    return any(marker in (markdown or "") for marker in _FALLBACK_STUB_MARKERS)
 
 
 _README_NAMES = ("README.md", "README.rst", "README.txt", "README")
@@ -262,9 +259,15 @@ def page_contains_identity_token(markdown: str, token: str) -> bool:
 def overview_identity_satisfied(markdown: str, repo_root: Path) -> bool:
     """Return True when the overview states the resolved product identity.
 
-    Only ``identity_match_tokens`` (display_name, package name, directory)
-    count. Any 4+ character README word is not an identity token.
+    Compare against ``identity_sources``: README h1 display_name wins, then
+    package name / directory tokens.
     """
+    from repo_wiki.planner.identity import resolve_repository_identity
+
+    identity = resolve_repository_identity(repo_root)
+    preferred = identity.display_name or identity.name
+    if preferred and page_contains_identity_token(markdown, preferred):
+        return True
     return any(
         page_contains_identity_token(markdown, token) for token in identity_match_tokens(repo_root)
     )
@@ -613,13 +616,6 @@ def collect_doc_listen_ports(text: str) -> set[int]:
     return {int(match.group(1)) for match in _DOC_LOCALHOST_PORT_RE.finditer(text or "")}
 
 
-def preferred_source_listen_port(repo_root: Path) -> int | None:
-    ports = collect_source_listen_ports(repo_root)
-    if not ports:
-        return None
-    return min(ports)
-
-
 _MERMAID_FENCE_RE = re.compile(r"```mermaid\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 _MERMAID_EDGE_TOKENS = (
     _MERMAID_ARROW,
@@ -802,15 +798,20 @@ def _iter_entry_mains(root: Path) -> list[Path]:
     return found
 
 
-_FENCE_RE = re.compile(r"```(?:bash|sh|shell|console|zsh)?\n(.*?)```", re.I | re.S)
+_FENCE_RE = re.compile(r"```(\w*)\n(.*?)```", re.I | re.S)
 _RST_LITERAL_RE = re.compile(r"::[ \t]*\n(?:[ \t]*\n)*((?:[ \t]+\S.*\n?)+)")
 _PROMPT_RE = re.compile(r"^(?:\$|>)\s+")
-_MAKE_JUNK_RE = re.compile(r"""^(?:@|\t)|\$\(|\$\$|\\$""")
+_MAKE_JUNK_RE = re.compile(r"^(?:@|\t)|\$\$")
+_MAKE_FENCE_LANGS = frozenset({"make", "makefile"})
+_SHELL_FENCE_LANGS = frozenset({"", "bash", "sh", "shell", "console", "zsh", "text"})
 _SHELL_START_RE = re.compile(
     r"^(?:git|cp|mv|cd|curl|wget|make|uv|pip3?|poetry|npm|pnpm|yarn|go|docker|"
-    r"podman|alembic|uvicorn|mysql|psql|export|python|uvx|\./)",
+    r"podman|alembic|uvicorn|mysql|psql|export|python|uvx|touch|echo|createdb|"
+    r"npx|openssl|mkdir|chmod|source|set|\./)",
     re.I,
 )
+_RUN_CMD_RE = re.compile(r"\b(?:pytest|npm test|pnpm test|yarn test|go test|make test)\b", re.I)
+_PLACEHOLDER_RE = re.compile(r"[{<][A-Za-z_][A-Za-z0-9_-]*[>}]")
 _REPO_INSTALL_LINE_PATTERNS = (
     re.compile(r"docker(?:-|\s+)compose", re.I),
     re.compile(r"\bpodman-compose\b", re.I),
@@ -822,11 +823,11 @@ _REPO_INSTALL_LINE_PATTERNS = (
 
 
 def _is_rejected_shell_line(line: str) -> bool:
-    if not line or line.startswith("#"):
+    if not line or line.startswith("#") or line.startswith(("or ", "OR ")):
         return True
     if _MAKE_JUNK_RE.search(line):
         return True
-    if line.endswith("\\"):
+    if _PLACEHOLDER_RE.search(line):
         return True
     if " " not in line and not line.startswith("./") and "/" not in line:
         return True
@@ -849,7 +850,7 @@ def _join_shell_continuations(lines: list[str]) -> list[str]:
 
 
 def extract_readme_shell_commands(text: str) -> list[str]:
-    """Copy shell lines from README fences / RST literals / prompt lines. Keep order."""
+    """Copy shell lines from README fences / RST literals. Keep order."""
     commands: list[str] = []
     seen: set[str] = set()
 
@@ -869,27 +870,57 @@ def extract_readme_shell_commands(text: str) -> list[str]:
         for raw in _join_shell_continuations(block.splitlines()):
             _take(raw)
 
-    for block in _FENCE_RE.findall(text or ""):
+    fenced = False
+    for lang, block in _FENCE_RE.findall(text or ""):
+        if lang.lower() in _MAKE_FENCE_LANGS:
+            continue
+        if lang.lower() not in _SHELL_FENCE_LANGS:
+            continue
+        fenced = True
         _take_block(block)
     for block in _RST_LITERAL_RE.findall(text or ""):
+        fenced = True
         _take_block(block)
-    if not commands:
+    if not fenced:
         _take_block(text or "")
     return commands
 
 
 def install_steps_invalid_reason(content: str) -> str | None:
-    """Fail the page when a numbered/fenced step is makefile junk or a ``\\`` stump."""
-    for raw in (content or "").splitlines():
+    """Fail only when makefile recipe syntax leaked into a rendered step."""
+    for raw in _join_shell_continuations((content or "").splitlines()):
         line = raw.strip().lstrip("0123456789.").strip().strip("`")
-        if _MAKE_JUNK_RE.search(line) or line.endswith("\\"):
+        if _MAKE_JUNK_RE.search(line):
             return "invalid-install-step"
-    for block in _FENCE_RE.findall(content or ""):
-        for raw in block.splitlines():
+    for lang, block in _FENCE_RE.findall(content or ""):
+        if lang.lower() in _MAKE_FENCE_LANGS:
+            continue
+        for raw in _join_shell_continuations(block.splitlines()):
             line = _PROMPT_RE.sub("", raw.rstrip())
-            if _MAKE_JUNK_RE.search(line) or line.endswith("\\"):
+            if _MAKE_JUNK_RE.search(line):
                 return "invalid-install-step"
     return None
+
+
+def install_page_render_errors(markdown: str) -> list[str]:
+    """Rendered install pages: balanced fences, 1..N steps, no cite inside code."""
+    text = markdown or ""
+    errors: list[str] = []
+    if text.count("```") % 2:
+        errors.append("unbalanced-fences")
+    if re.search(r"`[^`\n]*<cite>", text) or any(
+        "<cite>" in block for _lang, block in _FENCE_RE.findall(text)
+    ):
+        errors.append("cite-inside-code")
+    steps = re.findall(r"^(\d+)\.\s+`([^`]+)`", text, re.M)
+    numbers = [int(item[0]) for item in steps]
+    if numbers and numbers != list(range(1, len(numbers) + 1)):
+        errors.append("step-number-gap")
+    fences = [block.strip() for _lang, block in _FENCE_RE.findall(text)]
+    commands = [cmd.strip() for _num, cmd in steps]
+    if commands and fences and commands != fences[: len(commands)]:
+        errors.append("step-fence-mismatch")
+    return errors
 
 
 def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
@@ -899,7 +930,9 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
 
     def _add(command: str) -> None:
         text = " ".join(command.split()).strip()
-        if not text or _GENERIC_GO_INSTALL.search(text) or text.endswith("\\"):
+        if not text or _GENERIC_GO_INSTALL.search(text):
+            return
+        if _RUN_CMD_RE.search(text):
             return
         key = text.casefold()
         if key in seen:
@@ -1030,7 +1063,11 @@ def has_architecture_core_citation(markdown: str, repo_root: Path) -> bool:
     return all(rel.lower() in cited for rel in cores)
 
 
-_CLASS_RE = re.compile(r"^class\s+([A-Z][A-Za-z0-9_]+)\s*\(([^)]*)\)", re.M)
+_ODM_SCHEMA_RE = re.compile(
+    r"(?:(?:const|let|var|export\s+(?:const|let|var))\s+)?([A-Z][A-Za-z0-9_]*)\s*=\s*"
+    r"(?:new\s+)?(?:\w+\.)?Schema\s*\("
+)
+_CLASS_RE = re.compile(r"^class\s+([A-Z][A-Za-z0-9_]+)\s*(?:\(([^)]*)\))?", re.M)
 _TABLE_TRUE_RE = re.compile(r"\btable\s*=\s*True\b")
 _TABLENAME_RE = re.compile(r"__tablename__\s*=")
 _GORM_STRUCT_RE = re.compile(r"type\s+([A-Z][A-Za-z0-9_]+)\s+struct\b")
@@ -1053,8 +1090,9 @@ def discover_model_classes(repo_root: Path) -> list[tuple[str, str]]:
     """Real tables only: SQLModel table=True, SQLAlchemy __tablename__, DB-used Go, CREATE TABLE."""
     found: list[tuple[str, str]] = []
     go_used: set[str] = set()
+    extra_skip = _SKIP_DISCOVERY_DIRS | {"tests", "test", "__tests__"}
     for path in repo_root.rglob("*"):
-        if not path.is_file() or any(part in _SKIP_DISCOVERY_DIRS for part in path.parts):
+        if not path.is_file() or any(part in extra_skip for part in path.parts):
             continue
         rel = path.relative_to(repo_root).as_posix()
         if path.suffix == ".py":
@@ -1089,6 +1127,12 @@ def discover_model_classes(repo_root: Path) -> list[tuple[str, str]]:
             text = path.read_text(encoding="utf-8", errors="ignore")
             for match in _SQL_CREATE_RE.finditer(text):
                 found.append((match.group(1), rel))
+        elif path.suffix in {".js", ".ts", ".mjs", ".cjs"}:
+            if any(part in {"tests", "test", "__tests__"} for part in path.parts):
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for match in _ODM_SCHEMA_RE.finditer(text):
+                found.append((match.group(1), rel))
     for path in repo_root.rglob("*.go"):
         if any(part in _SKIP_DISCOVERY_DIRS for part in path.parts) or path.name.endswith(
             "_test.go"
@@ -1115,7 +1159,7 @@ def discover_dto_classes(repo_root: Path) -> list[tuple[str, str]]:
         text = path.read_text(encoding="utf-8", errors="ignore")
         starts = [item.start() for item in _CLASS_RE.finditer(text)]
         for match in _CLASS_RE.finditer(text):
-            name, bases = match.group(1), match.group(2)
+            name, bases = match.group(1), match.group(2) or ""
             if name in tables:
                 continue
             nxt = next((pos for pos in starts if pos > match.start()), len(text))
@@ -1125,6 +1169,43 @@ def discover_dto_classes(repo_root: Path) -> list[tuple[str, str]]:
             if "BaseModel" in bases or _DTO_NAME_RE.search(name):
                 found.append((name, rel))
     return found
+
+
+def model_definition_cite_offenders(markdown: str, repo_root: Path) -> list[str]:
+    """Each discovered model must be cited at its definition line range."""
+    cited = [match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")]
+    bad: list[str] = []
+    for name, rel in discover_model_classes(repo_root):
+        if any(part in {"tests", "test", "__tests__"} for part in Path(rel).parts):
+            continue
+        path = repo_root / rel
+        start = 1
+        if path.is_file():
+            for index, line in enumerate(
+                path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
+            ):
+                if re.search(
+                    rf"(?:type|class|const|let|var|CREATE\s+TABLE)\s+{re.escape(name)}\b",
+                    line,
+                    re.I,
+                ):
+                    start = index
+                    break
+        ok = False
+        for raw in cited:
+            target, _, span = raw.partition(":")
+            if Path(target).as_posix().lower() != rel.lower():
+                continue
+            nums = re.findall(r"\d+", span)
+            if not nums:
+                continue
+            lo, hi = int(nums[0]), int(nums[-1])
+            if lo <= start <= hi:
+                ok = True
+                break
+        if not ok:
+            bad.append(f"defcite:{name}")
+    return bad
 
 
 def repo_has_routes_or_db(repo_root: Path) -> bool:

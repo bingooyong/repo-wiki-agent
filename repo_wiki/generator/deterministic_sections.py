@@ -29,7 +29,6 @@ _HEADER_CITE_RE = re.compile(
 _PLANNING_LEAK_RE = re.compile(
     r"页面规划与证据绑定|页面基于仓库扫描|从提供的证据可见|证据中可确认的"
 )
-_REQUIRED_GO_STRUCTS: tuple[str, ...] = ()
 _AUTH_ENV_RE = re.compile(
     r"Env[A-Z][A-Za-z0-9]*(?:Token|Key)|[A-Z][A-Z0-9_]+(?:API_TOKEN|AUTH_TOKEN|SECRET_KEY)"
 )
@@ -44,12 +43,6 @@ def _repo_is_go(root: Path) -> bool:
     from repo_wiki.generator.process_roles import repo_has_go_cmd_binaries
 
     return repo_has_go_cmd_binaries(root)
-
-
-def _repo_is_python(root: Path) -> bool:
-    from repo_wiki.generator.process_roles import repo_has_python_app
-
-    return repo_has_python_app(root)
 
 
 def discover_go_struct_names(root: Path) -> list[str]:
@@ -885,17 +878,18 @@ def strip_meta_instructions(content: str) -> str:
 
 
 def build_install_section(root: Path) -> str:
-    """Copy install commands from this repo's docs only. No templates."""
+    """Copy install commands from this repo's docs only. Cite after each fence."""
     from repo_wiki.verifier.handbook import collect_repo_install_commands
 
-    commands = [
-        item for item in collect_repo_install_commands(root) if item and not item.endswith("\\")
-    ]
+    commands = [item for item in collect_repo_install_commands(root) if item]
     if not commands:
         return ""
     lines = ["## 安装步骤", ""]
     for index, command in enumerate(commands, start=1):
+        cite = cite_readme_line(root, command.split()[0] if command.split() else command)
         lines.extend([f"{index}. `{command}`", "", "```bash", command, "```", ""])
+        if cite:
+            lines.extend([cite, ""])
     return "\n".join(lines)
 
 
@@ -1087,7 +1081,25 @@ def build_data_model_cite_block(root: Path) -> str:
     )
     if not names:
         return ""
-    cites = " ".join(c for _n, c in named[:8])
+    def_cites: list[str] = []
+    for name, rel in discover_model_classes(root):
+        if any(part in {"tests", "test", "__tests__"} for part in Path(rel).parts):
+            continue
+        path = root / rel
+        start = 1
+        if path.is_file():
+            for index, line in enumerate(
+                path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
+            ):
+                if re.search(
+                    rf"(?:type|class|const|let|var|CREATE\s+TABLE)\s+{re.escape(name)}\b",
+                    line,
+                    re.I,
+                ):
+                    start = index
+                    break
+        def_cites.append(f"<cite>{rel}:{start}-{start}</cite>")
+    cites = " ".join([*(c for _n, c in named[:8]), *def_cites[:12]])
     up = ""
     for path in sorted(root.rglob("*.sql")):
         if any(part in {".git", "vendor", "node_modules"} for part in path.parts):
@@ -1361,17 +1373,17 @@ def build_verify_section(root: Path) -> str:
     """Emit compose healthcheck URLs only. No invented /health or uvicorn."""
     from repo_wiki.verifier.source_facts import load_compose_healthcheck_urls
 
-    urls = load_compose_healthcheck_urls(root)
+    urls = [
+        item
+        for item in load_compose_healthcheck_urls(root)
+        if item.startswith(("http://", "https://", "curl "))
+    ]
     if not urls:
         return ""
     documented = cite_readme_line(root, "/health") or cite_readme_line(root, "/healthz")
     lines = ["## 启动与验证", ""]
     for index, target in enumerate(urls, start=1):
-        curl = target
-        if curl.startswith(":"):
-            curl = f"http://127.0.0.1{curl}"
-        if not curl.startswith("curl"):
-            curl = f"curl {curl}"
+        curl = target if target.startswith("curl") else f"curl {target}"
         suffix = f" {documented}" if documented else ""
         lines.append(f"{index}. `{curl}`{suffix}")
     lines.append("")

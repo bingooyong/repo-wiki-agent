@@ -263,16 +263,15 @@ def _related_model_name(
         return None
     if stem in known_models and stem != current_model:
         return stem
-    prefixed = [
-        name
-        for prefix in ("Probe", "Biz")
-        if (name := f"{prefix}{stem}") in known_models and name != current_model
-    ]
-    if len(prefixed) == 1:
-        return prefixed[0]
     matches = [name for name in known_models if name.endswith(stem) and name != current_model]
     if len(matches) == 1:
         return matches[0]
+    if current_model and matches:
+        lead = re.match(r"[A-Z][a-z]+|[A-Z]+", current_model)
+        prefix = lead.group(0) if lead else ""
+        same = [name for name in matches if prefix and name.startswith(prefix)]
+        if len(same) == 1:
+            return same[0]
     return None
 
 
@@ -540,6 +539,8 @@ def extract_go_endpoints(files: Sequence[tuple[str, str]]) -> list[GoEndpoint]:
             call = match.group(2)
             method_expr = match.group(3)
             route_path = match.group(4)
+            if not str(route_path).startswith("/"):
+                continue
             lineno = text[: match.start()].count("\n") + 1
             if _METHOD_PATH_LITERAL_RE.match(route_path.strip()):
                 method, route_path = _split_method_path(route_path)

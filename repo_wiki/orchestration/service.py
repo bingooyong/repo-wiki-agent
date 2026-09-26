@@ -45,28 +45,6 @@ from repo_wiki.verifier.api_claim_inventory import (
 from repo_wiki.verifier.handbook import is_page_local_quality_rejection
 from repo_wiki.verifier.service import VerifierService
 
-_INSTALL_FENCE_COMMAND_PATTERNS = (
-    re.compile(r"docker(?:-|\s+)compose(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
-    re.compile(r"\bpodman-compose(?:\s+[A-Za-z0-9_-]+){0,6}", re.I),
-    re.compile(r"\bpodman(?:\s+[A-Za-z0-9_-]+){0,6}", re.I),
-    re.compile(r"\bmake(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
-    re.compile(r"\bgo\s+build(?:\s+[A-Za-z0-9_./-]+){0,8}", re.I),
-    re.compile(r"podman exec[^\n]{0,80}schema\.sql", re.I),
-    re.compile(r"mysql[^\n]{0,80}schema\.sql", re.I),
-    re.compile(r"curl\s+https?://localhost:\d+\S*", re.I),
-    re.compile(r"\./bin/[A-Za-z0-9_-]+", re.I),
-    re.compile(r"\bgo\s+run(?:\s+[A-Za-z0-9_./-]+){0,8}", re.I),
-    re.compile(r"\bgo\s+test(?:\s+[A-Za-z0-9_./-]+){0,6}", re.I),
-    re.compile(r"\bgo\s+mod(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
-    re.compile(r"\buv\s+sync\b", re.I),
-    re.compile(r"\buv\s+run(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
-    re.compile(r"\bnpm\s+install(?:\s+[A-Za-z0-9_@/-]+){0,4}", re.I),
-    re.compile(r"\bnpx\s+[A-Za-z0-9_@/-]+", re.I),
-    re.compile(r"\byarn\s+(?:install|dev|build)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
-    re.compile(r"\bpnpm\s+(?:install|dev)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
-    re.compile(r"\bpip(?:3)?\s+install(?:\s+[A-Za-z0-9_\[\]'\"=-]+){0,4}", re.I),
-    re.compile(r"\bpoetry\s+(?:install|run)(?:\s+[A-Za-z0-9_-]+){0,4}", re.I),
-)
 _PROMPT_LEAK_PHRASES = (
     "端点由用户在请求中提供",
     "you are a technical writer",
@@ -98,23 +76,6 @@ _PROMPT_LEAK_PHRASES = (
 _QUALITY_METRIC_LEAK = re.compile(
     r"\bTests\s+\d+\s*/\s*\d+\b|\bCoverage\s+\d+%\b|\b21\s*/\s*25\b",
     re.IGNORECASE,
-)
-_GENERIC_GO_INSTALL = re.compile(
-    r"\bgo\s+(?:build|run|mod\s+download)\s+(?:-o\s+\S+\s+)?(?:\.|./\.\.\.)\b",
-    re.IGNORECASE,
-)
-_INSTALL_ENV_CLUE_PATTERNS = (
-    re.compile(r"\bDATABASE_URL\b", re.I),
-    re.compile(r"\bPOSTGRES(?:QL)?\b", re.I),
-    re.compile(r"\bMYSQL\b", re.I),
-    re.compile(r"\bSQLITE3?\b", re.I),
-    re.compile(r"\bschema\.sql\b", re.I),
-    re.compile(r"\bpodman-compose\b", re.I),
-    re.compile(r"\bdocker(?:-|\s+)compose\b", re.I),
-    re.compile(r"\buv\s+sync\b", re.I),
-    re.compile(r"\bnpm\s+install\b", re.I),
-    re.compile(r"\bpip(?:3)?\s+install\b", re.I),
-    re.compile(r"\bpoetry\s+(?:install|run)\b", re.I),
 )
 
 
@@ -221,35 +182,6 @@ def _composition_snapshot_paths(composition_context: Any) -> list[str]:
     for item in getattr(composition_context, "key_directories", None) or []:
         paths.append(str(item))
     return [path for path in paths if path]
-
-
-def _fallback_install_env_clues(
-    snippets: list[str],
-    commands: list[str],
-    evidence: dict[str, Any],
-    binding: Any | None,
-) -> str:
-    blob_parts = [" ".join(snippets), " ".join(commands)]
-    for item in evidence.get("snippets") or []:
-        blob_parts.append(str(item.get("summary") or ""))
-    if binding and getattr(binding, "candidates", None):
-        for candidate in binding.candidates[:12]:
-            span = getattr(candidate, "span", None)
-            blob_parts.append(str(getattr(span, "span_text", "") or ""))
-    blob = "\n".join(blob_parts)
-    found: list[str] = []
-    seen: set[str] = set()
-    for pattern in _INSTALL_ENV_CLUE_PATTERNS:
-        match = pattern.search(blob)
-        if not match:
-            continue
-        token = " ".join(match.group(0).split())
-        key = token.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        found.append(token)
-    return "、".join(found)
 
 
 if TYPE_CHECKING:
@@ -1619,17 +1551,10 @@ class RepoWikiService:
                 inject_planner_mermaid=False,
             )
             self._write_raw_reply(page, getattr(output, "raw_markdown", "") or output.markdown)
-            from repo_wiki.generator.composer import is_handbook_install_page
-            from repo_wiki.verifier.handbook import (
-                handbook_page_is_fallback_stub,
-                install_steps_invalid_reason,
-            )
+            from repo_wiki.verifier.handbook import handbook_page_is_fallback_stub
 
             if handbook_page_is_fallback_stub(enriched):
                 write_fallback(page, binding, page_idx, "tiny_or_stub_page")
-                return
-            if is_handbook_install_page(page) and install_steps_invalid_reason(enriched):
-                write_fallback(page, binding, page_idx, "invalid-install-step")
                 return
             self._store_composer_cache_page(
                 cache,
@@ -2145,7 +2070,6 @@ class RepoWikiService:
         content = self._strip_language_mismatched_model_prose(content)
         content = self._strip_package_main_import_claims(content)
         content = self._strip_architecture_test_cites(content, page)
-        content = self._rewrite_health_check_ports(content, page)
         content = self._strip_reading_notes_boilerplate(content)
         from repo_wiki.generator.deterministic_sections import (
             build_core_service_section,
@@ -2285,11 +2209,6 @@ class RepoWikiService:
             except OSError:
                 continue
 
-    def _cite_existing_path(self, rel: str, hint_lines: int = 8) -> str:  # noqa: ARG002
-        from repo_wiki.generator.deterministic_sections import cite_existing_meaningful
-
-        return cite_existing_meaningful(self.root, rel)
-
     def _rewrite_install_page_contract(self, page: Any, content: str) -> str:
         """Replace install/quick-start steps with README fence commands."""
         from repo_wiki.generator.composer import is_handbook_install_page
@@ -2340,7 +2259,10 @@ class RepoWikiService:
     def _ensure_data_model_source_cites(self, page: Any, content: str) -> str:
         from repo_wiki.generator.deterministic_sections import build_data_model_cite_block
         from repo_wiki.planner.schema import WikiTaxonomyCategory
-        from repo_wiki.verifier.handbook import has_data_model_source_citation
+        from repo_wiki.verifier.handbook import (
+            has_data_model_source_citation,
+            model_definition_cite_offenders,
+        )
 
         if getattr(page, "category", None) != WikiTaxonomyCategory.DATA_MODELS:
             return content
@@ -2352,8 +2274,10 @@ class RepoWikiService:
             replace_h2_section,
         )
 
-        if not has_data_model_source_citation(content, self.root) or has_runon_struct_cite_line(
-            content
+        if (
+            not has_data_model_source_citation(content, self.root)
+            or has_runon_struct_cite_line(content)
+            or model_definition_cite_offenders(content, self.root)
         ):
             content = replace_h2_section(
                 content, ("实体定义", "持久化表", "数据库与迁移策略"), block
@@ -2525,9 +2449,6 @@ class RepoWikiService:
                 line = line.replace('"auth": "Bearer token"', '"auth": "unspecified"')
             cleaned_lines.append(line)
         return "\n".join(cleaned_lines).strip()
-
-    def _ensure_unresolved_api_evidence_marker(self, content: str) -> str:
-        return content
 
     def _is_qoder_api_contract_page(self, page: Any) -> bool:
         """True only for API reference pages, not titles/paths that merely contain 'API'."""
@@ -2959,34 +2880,6 @@ class RepoWikiService:
             headings.append(title)
         return headings[:10]
 
-    def _build_minimal_mermaid_block(self, page: Any) -> str:
-        from repo_wiki.planner.schema import WikiTaxonomyCategory
-
-        if page.category == WikiTaxonomyCategory.API_REFERENCE:
-            return ""
-        if page.category == WikiTaxonomyCategory.DATA_MODELS:
-            return (
-                "```mermaid\n"
-                "erDiagram\n"
-                "    CORE_ENTITY ||--o{ SERVICE_MODEL : maps_to\n"
-                "    CORE_ENTITY {\n"
-                "      string id\n"
-                "      string domain\n"
-                "    }\n"
-                "    SERVICE_MODEL {\n"
-                "      string service\n"
-                "      string version\n"
-                "    }\n"
-                "```\n"
-            )
-        return (
-            "```mermaid\n"
-            "flowchart TD\n"
-            '    A["应用模块"] --> B["业务服务"]\n'
-            '    B --> C["数据与仓库"]\n'
-            "```\n"
-        )
-
     def _count_prose_chars(self, content: str) -> int:
         lines = content.splitlines()
         prose_lines: list[str] = []
@@ -3113,10 +3006,6 @@ class RepoWikiService:
             return content
         return re.sub(r"<cite>\s*[^<]*_test\.go:[^<]*</cite>", "", content, flags=re.I)
 
-    def _rewrite_health_check_ports(self, content: str, page: Any) -> str:
-        """Do not rewrite listen ports in generated pages; keep the model's URL."""
-        return content
-
     def _strip_reading_notes_boilerplate(self, content: str) -> str:
         lines = content.splitlines()
         out: list[str] = []
@@ -3148,23 +3037,25 @@ class RepoWikiService:
     def _fold_citation_only_lines(self, content: str) -> str:
         out: list[str] = []
         pending_blanks: list[str] = []
+        in_fence = False
         for line in content.splitlines():
-            if not line.strip():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+            if not stripped:
                 pending_blanks.append(line)
                 continue
             if self._line_is_citation_tags_only(line):
+                if in_fence:
+                    pending_blanks.clear()
+                    continue
                 idx = len(out) - 1
                 while idx >= 0 and not out[idx].strip():
                     idx -= 1
                 if idx >= 0:
                     prev = out[idx].rstrip()
-                    if (
-                        prev
-                        and not prev.startswith("#")
-                        and "```" not in prev
-                        and not prev.strip().startswith("```")
-                    ):
-                        out[idx] = prev + " " + line.strip()
+                    if prev and not prev.startswith("#") and "`" not in prev:
+                        out[idx] = prev + " " + stripped
                         pending_blanks.clear()
                         continue
             out.extend(pending_blanks)

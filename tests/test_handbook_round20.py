@@ -248,7 +248,7 @@ def test_slash_orm_path_and_root_sql_and_healthz(tmp_path: Path) -> None:
     )
     found = handbook_source_fact_offenders(content, tmp_path)
     flat = [item for hits in found.values() for item in hits]
-    assert "orm:missing-models" in flat
+    assert any(item.startswith("orm:") and "models" in item for item in flat)
 
 
 def test_claim_floor_uses_constant() -> None:
@@ -260,7 +260,7 @@ def test_claim_floor_uses_constant() -> None:
 
 
 def test_generator_version_is_r20() -> None:
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r22-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r23-")
 
 
 def test_empty_span_rejection_constant() -> None:

@@ -11,7 +11,7 @@ _DATA_PLANE_RE = re.compile(
     re.IGNORECASE,
 )
 _CONTROL_PLANE_RE = re.compile(
-    r"control-plane|control plane|EstablishTunnel|grpc-listen|TunnelHub",
+    r"control-plane|control plane|EstablishTunnel|grpc-listen|\b\w*Tunnel\w*Hub\b",
     re.IGNORECASE,
 )
 _TUNNEL_CLIENT_RE = re.compile(
@@ -103,28 +103,6 @@ def _read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return ""
-
-
-def _cmd_package_text(root: Path, cmd_dir: Path) -> tuple[str, str, str]:
-    gos = sorted(
-        path
-        for path in cmd_dir.glob("*.go")
-        if path.is_file() and not path.name.endswith("_test.go")
-    )
-    if not gos:
-        return "", "", ""
-    main = next((path for path in gos if path.name == "main.go"), gos[0])
-    chunks = [_read_text(main)]
-    for sibling in gos:
-        if sibling != main:
-            chunks.append(_read_text(sibling)[:8000])
-    docs = ""
-    for readme in ("README.md", "README.rst", "README.txt"):
-        candidate = cmd_dir / readme
-        if candidate.is_file():
-            docs = _read_text(candidate)
-            break
-    return main.relative_to(root).as_posix(), "\n".join(chunks), docs
 
 
 def _route_count(text: str) -> int:
@@ -342,10 +320,6 @@ def derive_repo_process_names(root: Path | str | None) -> set[str]:
     return names
 
 
-def is_example_process(item: RepoProcess) -> bool:
-    return bool(item.example)
-
-
 def _main_entry_candidates(processes: list[RepoProcess]) -> list[RepoProcess]:
     """HTTP server + real routes is the REST/Web entry even if it also embeds gRPC."""
     eligible = [
@@ -434,15 +408,6 @@ def path_looks_like_example_cmd(file_path: str) -> bool:
 
 def repo_has_go_cmd_binaries(root: Path | str | None) -> bool:
     return bool(discover_cmd_processes(root))
-
-
-def repo_has_python_app(root: Path | str | None) -> bool:
-    if root is None:
-        return False
-    base = Path(root)
-    return (base / "app").is_dir() and (
-        (base / "app" / "main.py").is_file() or any((base / "app").rglob("*.py"))
-    )
 
 
 def unknown_process_mentions(markdown: str, allowed: set[str]) -> list[str]:

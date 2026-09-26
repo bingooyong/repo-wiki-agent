@@ -228,7 +228,11 @@ def _readme_visible_lines(content: str) -> list[str]:
         if not stripped or re.fullmatch(r"#+", stripped):
             in_note_block = False
             continue
-        if _NOTE_LINE_RE.match(stripped) or _README_NOTE_RE.search(stripped):
+        if (
+            stripped.startswith(">")
+            or _NOTE_LINE_RE.match(stripped)
+            or _README_NOTE_RE.search(stripped)
+        ):
             in_note_block = True
             continue
         if in_note_block:
@@ -251,6 +255,7 @@ def _readme_visible_lines(content: str) -> list[str]:
             _is_rst_noise_line(stripped)
             or _README_COMMAND_RE.match(stripped)
             or _is_markdown_badge_line(stripped)
+            or stripped.startswith(("- ", "* ", "+ "))
         ):
             continue
         lines.append(stripped)
@@ -295,33 +300,18 @@ def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
 
 
 def resolve_repository_identity(root: Path) -> RepositoryIdentity:
-    """Resolve repository identity from metadata files.
-
-    This function reads multiple sources to build a complete picture
-    of the repository identity, preferring explicit metadata over
-    generic workspace names.
-
-    Args:
-        root: The repository root path
-
-    Returns:
-        RepositoryIdentity with resolved metadata
-    """
+    """Resolve identity from README h1, then package manifests, then directory name."""
     name_candidates: list[tuple[str, str | None]] = []
 
-    # 1. Read package.json if exists
     package_json = root / "package.json"
     if package_json.exists():
         try:
             data = json.loads(package_json.read_text(encoding="utf-8"))
             if name := data.get("name"):
                 name_candidates.append((name, "package.json"))
-            if data.get("version"):
-                pass  # handled below
         except (json.JSONDecodeError, OSError):
             pass
 
-    # 2. Read pyproject.toml if exists ([project] or [tool.poetry])
     pyproject = root / "pyproject.toml"
     pyproject_fields: dict[str, str] = {}
     if pyproject.exists():
@@ -330,18 +320,13 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         if name := pyproject_fields.get("name"):
             name_candidates.append((name, "pyproject.toml"))
 
-    # 3. Read pom.xml if exists
     pom_xml = root / "pom.xml"
     if pom_xml.exists():
         content = pom_xml.read_text(encoding="utf-8", errors="ignore")
         match = re.search(r"<artifactId>([^<]+)</artifactId>", content)
         if match:
             name_candidates.append((match.group(1), "pom.xml"))
-        match = re.search(r"<version>([^<]+)</version>", content)
-        if match and match.group(1) != "${project.version}":
-            pass  # handled below
 
-    # 4. Try git remote for name
     git_root = root / ".git"
     if git_root.exists():
         try:
@@ -354,7 +339,6 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
             )
             if remote_url.returncode == 0:
                 url = remote_url.stdout.strip()
-                # Extract repo name from URL
                 if match := re.search(r"/([^/]+?)(?:\.git)?$", url):
                     git_name = match.group(1)
                     name_candidates.append((git_name, "git-remote"))
@@ -365,15 +349,13 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
     if readme_title:
         name_candidates.append((readme_title, "readme"))
 
-    # 5. Fallback to directory name
     name_candidates.append((root.name, "directory-name"))
 
-    # Select the best name (prefer explicit metadata, then README title, then git/directory)
     name_priority = [
+        "readme",
         "package.json",
         "pyproject.toml",
         "pom.xml",
-        "readme",
         "git-remote",
         "directory-name",
     ]
@@ -392,28 +374,36 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         best_name = "unknown"
         best_source = "fallback"
 
-    # Read description from package.json first (explicit metadata)
+    package_name = next(
+        (
+            candidate
+            for candidate, src in name_candidates
+            if src in {"package.json", "pyproject.toml", "pom.xml"}
+        ),
+        None,
+    )
+
     description: str | None = None
+    description_source = ""
     version: str | None = None
-    if package_json.exists():
+    version_source = ""
+    if _is_product_sentence(readme_description):
+        description = (readme_description or "")[:200]
+        description_source = "readme"
+    if not description and package_json.exists():
         try:
             data = json.loads(package_json.read_text(encoding="utf-8"))
             if desc := data.get("description"):
                 description = desc[:200]
+                description_source = "package.json"
         except (json.JSONDecodeError, OSError):
             pass
-
-    # Then try README prose if package.json had no product sentence. Skip RST
-    # badge junk. Fall back to pyproject description. Never use AGENTS.md,
-    # init stubs, or eval reports as product identity.
-    if not _is_product_sentence(description) and _is_product_sentence(readme_description):
-        description = (readme_description or "")[:200]
     if not _is_product_sentence(description):
         pyproject_description = pyproject_fields.get("description")
         if _is_product_sentence(pyproject_description):
             description = (pyproject_description or "")[:200]
+            description_source = "pyproject.toml"
 
-    # Read version from various sources.
     for metadata_path in [package_json, pyproject, pom_xml]:
         if metadata_path.exists():
             content = metadata_path.read_text(encoding="utf-8", errors="ignore")
@@ -422,24 +412,29 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
                     data = json.loads(content)
                     if v := data.get("version"):
                         version = str(v)
+                        version_source = "package.json"
                         break
                 except json.JSONDecodeError:
                     continue
             elif metadata_path.name == "pyproject.toml":
                 if v := pyproject_fields.get("version"):
                     version = v
+                    version_source = "pyproject.toml"
                     break
             elif metadata_path.name == "pom.xml":
                 match = re.search(r"<version>([^<]+)</version>", content)
                 if match and match.group(1) != "${project.version}":
                     version = match.group(1)
+                    version_source = "pom.xml"
                     break
 
     if not version:
         version = _latest_product_version(root)
+        if version:
+            version_source = "git-tag"
 
     return RepositoryIdentity(
-        name=best_name,
+        name=package_name or best_name,
         display_name=best_name if best_source == "readme" else _human_readable_name(best_name),
         root_path=str(root.resolve()),
         language="unknown",
@@ -449,6 +444,22 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         description=description,
         entry_points=[],
         source_digest=None,
+        identity_sources={
+            "name": str(
+                next(
+                    (
+                        src
+                        for candidate, src in name_candidates
+                        if candidate == (package_name or best_name) and src
+                    ),
+                    best_source,
+                )
+                or ""
+            ),
+            "display_name": "readme" if best_source == "readme" else (best_source or ""),
+            "version": version_source,
+            "description": description_source,
+        },
     )
 
 

@@ -147,7 +147,7 @@ def test_overview_names_fastapi_from_pyproject(tmp_path: Path) -> None:
     filled = ensure_overview_names_framework(raw, root)
     assert "FastAPI" in filled
     named = filled.replace("RealWorld", "Conduit RealWorld", 1)
-    assert overview_identity_satisfied(named, root) is False
+    assert overview_identity_satisfied(named, root) is True
     assert overview_identity_satisfied(filled + "\n\ndemo 是本仓库产品。\n", root)
     page = _page(
         "project-overview", "项目概述", WikiTaxonomyCategory.PROJECT_OVERVIEW, "项目概述.md"

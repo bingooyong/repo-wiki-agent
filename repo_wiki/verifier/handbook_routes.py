@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from pathlib import Path
 
 _HTTP = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ANY"})
 _HANDBOOK_ROUTE_RE = re.compile(
@@ -29,12 +30,29 @@ _TO_RE = re.compile(
     r"""(\w+)\.To\(\s*['\"]([A-Z]+(?:\s*,\s*[A-Z]+)*)['\"]\s*,\s*['\"]([^'\"]+)['\"]"""
 )
 _GO_METHOD_RE = re.compile(
-    r"""(\w+)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|Get|Post|Put|Patch|Delete|Head|Any)\(\s*['\"]([^'\"]+)['\"]"""
+    r"""(\w+)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|Get|Post|Put|Patch|Delete|Head|Any)\(\s*['\"](/[^'\"]+)['\"]"""
+)
+_NON_ROUTE_RECV = frozenset({"Header", "Tag", "Query", "Form", "Cookie"})
+_GO_CTOR_RE = re.compile(
+    r"""(\w+)\s*:?=\s*(?:gin\.(?:Default|New)|chi\.NewRouter|echo\.New|http\.NewServeMux|mux\.NewRouter|fiber\.New)\("""
 )
 _GO_PATH_TAG_RE = re.compile(r'path:"(/[^"]+)"')
 _GO_REGISTER_RE = re.compile(
     r"""(?:RegisterService|RegisterRawRoute|HandleFunc)\(\s*['\"](/[^'\"]+)['\"]"""
 )
+_JS_ROUTE_RE = re.compile(
+    r"""(\w+)\.(get|post|put|patch|delete|options|head)\(\s*['\"](/[^'\"]+)['\"]""",
+    re.I,
+)
+_JS_ROUTER_RE = re.compile(r"""(?:const|let|var)\s+(\w+)\s*=\s*(?:Router|express)\s*\(""")
+_UNSUPPORTED_ROUTE_SUFFIXES = frozenset({".rb", ".java", ".php", ".rs", ".kt"})
+ROUTE_COMPLETENESS_MIN = 0.5
+
+
+def _norm_path(path: str) -> str:
+    text = (path or "").rstrip("。，、):")
+    text = re.sub(r"\{([^}]+)\}", r":\1", text)
+    return text or "/"
 
 
 def concat_http_paths(*parts: str) -> str:
@@ -44,7 +62,7 @@ def concat_http_paths(*parts: str) -> str:
 
 def extract_handbook_http_paths(markdown: str) -> set[tuple[str, str]]:
     return {
-        (m.group(1).upper(), m.group(2).rstrip("。，、):"))
+        (m.group(1).upper(), _norm_path(m.group(2)))
         for m in _HANDBOOK_ROUTE_RE.finditer(markdown or "")
     }
 
@@ -110,14 +128,19 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
                 routes.append((path, match.group(1), match.group(2).upper(), match.group(3)))
         if path.endswith(".go") and not path.endswith("_test.go"):
             group: dict[str, str] = {}
+            routers = set(_GO_CTOR_RE.findall(text))
             for match in _GROUP_RE.finditer(text):
                 group[match.group(1)] = concat_http_paths(
                     group.get(match.group(2), ""), match.group(3)
                 )
+                routers.add(match.group(1))
+                routers.add(match.group(2))
             for match in _GO_METHOD_RE.finditer(text):
+                if match.group(1) in _NON_ROUTE_RECV:
+                    continue
+                if routers and match.group(1) not in routers and match.group(1) not in group:
+                    continue
                 method = match.group(2).upper()
-                if method == "ANY":
-                    method = "ANY"
                 found.add(
                     (
                         method,
@@ -133,6 +156,12 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
                 found.add(("ANY", match.group(1)))
             for match in _GO_REGISTER_RE.finditer(text):
                 found.add(("ANY", match.group(1)))
+        if path.endswith((".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx")):
+            js_router = set(_JS_ROUTER_RE.findall(text)) | {"app", "router", "server"}
+            for match in _JS_ROUTE_RE.finditer(text):
+                if match.group(1) not in js_router:
+                    continue
+                found.add((match.group(2).upper(), concat_http_paths(match.group(3))))
     by_name: dict[str, list[tuple[str, str]]] = {}
     for key in prefixes:
         by_name.setdefault(key[1], []).append(key)
@@ -197,13 +226,42 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
 def handbook_route_crosscheck_mismatches(
     markdown: str, files: Sequence[tuple[str, str]]
 ) -> list[str]:
-    source = extract_source_http_paths(files)
+    source = {(_m, _norm_path(_p)) for _m, _p in extract_source_http_paths(files)}
     paths = {path for _method, path in source}
     bad: list[str] = []
     for method, path in extract_handbook_http_paths(markdown):
         if (method, path) in source or path in paths:
             continue
-        if any(path.endswith(src) or src.endswith(path) for src in paths if src not in {"", "/"}):
-            continue
         bad.append(f"{method} {path}")
     return sorted(bad)
+
+
+def route_completeness_gap(markdown: str, files: Sequence[tuple[str, str]]) -> list[str]:
+    handbook = extract_handbook_http_paths(markdown)
+    handbook_paths = {path for _method, path in handbook}
+    missing: list[str] = []
+    for method, path in extract_source_http_paths(files):
+        path = _norm_path(path)
+        if (method, path) in handbook or path in handbook_paths:
+            continue
+        missing.append(f"{method} {path}")
+    return sorted(missing)
+
+
+def route_completeness_ratio(markdown: str, files: Sequence[tuple[str, str]]) -> float:
+    source = {(_m, _norm_path(_p)) for _m, _p in extract_source_http_paths(files)}
+    if not source:
+        return 1.0
+    handbook = extract_handbook_http_paths(markdown)
+    paths = {path for _method, path in handbook}
+    covered = sum(1 for method, path in source if (method, path) in handbook or path in paths)
+    return covered / len(source)
+
+
+def unsupported_route_languages(files: Sequence[tuple[str, str]]) -> tuple[str, ...]:
+    found: list[str] = []
+    for path, _text in files:
+        suffix = Path(path).suffix.lower() if "." in path else ""
+        if suffix in _UNSUPPORTED_ROUTE_SUFFIXES:
+            found.append(suffix.lstrip("."))
+    return tuple(sorted(set(found)))

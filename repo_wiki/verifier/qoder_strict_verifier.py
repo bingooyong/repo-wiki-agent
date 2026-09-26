@@ -14,20 +14,13 @@ from repo_wiki.evidence.citation_renderer import (
 )
 from repo_wiki.orchestration.eval_layout import (
     find_git_root,
-    ignored_dirty_roots,
     is_git_dirty,
-    path_is_ignored_eval_output,
-    porcelain_status_relpath,
 )
 from repo_wiki.verifier.api_claim_inventory import (
     FASTAPI_AUTODOC_PATHS,
     api_claim_in_inventory,
-    api_path_slot_key,
-    apply_api_mount_prefix,
     extract_http_method_paths,
-    inventory_api_mount_prefix,
     is_fastapi_framework_docs_path,
-    normalize_claimed_api_path,
 )
 from repo_wiki.verifier.handbook import (
     contains_generator_meta,
@@ -44,6 +37,7 @@ from repo_wiki.verifier.handbook import (
     install_go_builds_use_package_dir,
     install_run_clue_count,
     iter_markdown_pages,
+    model_definition_cite_offenders,
     overview_identity_satisfied,
     read_readme_text,
 )
@@ -2246,26 +2240,6 @@ class QoderLikeVerifierService(VerifierService):
             return {}
         return payload if isinstance(payload, dict) else {}
 
-    def _collect_page_quality_states(self, *payloads: dict[str, Any]) -> dict[str, str]:
-        states: dict[str, str] = {}
-        for payload in payloads:
-            for container_key in ("pages", "page_quality", "page_registry"):
-                items = payload.get(container_key)
-                if not isinstance(items, list):
-                    continue
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                    rel = (
-                        item.get("relative_path")
-                        or item.get("path")
-                        or item.get("page_relative_path")
-                    )
-                    state = item.get("quality_state") or item.get("state") or item.get("status")
-                    if isinstance(rel, str) and isinstance(state, str):
-                        states[self._strip_content_prefix(rel)] = state
-        return states
-
     def _strip_content_prefix(self, value: str) -> str:
         return value.removeprefix("content/")
 
@@ -2496,21 +2470,6 @@ class QoderLikeVerifierService(VerifierService):
                 if claim and claim.lower() not in generic and _looks_like_inventory_symbol(claim):
                     claims.add(claim)
         return claims
-
-    def _normalize_claimed_api_path(self, path: str) -> str:
-        return normalize_claimed_api_path(path)
-
-    def _api_path_slot_key(self, path: str) -> str:
-        """Treat `{id}` and `{project_id}` as the same path slot."""
-        return api_path_slot_key(path)
-
-    def _inventory_api_mount_prefix(self, apis: set[tuple[str, str]]) -> str:
-        """Shared first segment (commonly `/api`) when it dominates inventory routes."""
-        return inventory_api_mount_prefix(apis)
-
-    def _apply_api_mount_prefix(self, path: str, prefix: str) -> str:
-        """Join a mount prefix onto a claim without doubling an existing prefix."""
-        return apply_api_mount_prefix(path, prefix)
 
     def _api_claim_in_inventory(self, method: str, path: str, apis: set[tuple[str, str]]) -> bool:
         return api_claim_in_inventory(method, path, apis)
@@ -2815,9 +2774,13 @@ class QoderLikeVerifierService(VerifierService):
             return self._skip_check("qoder-handbook-install-fence", "Installation page absent")
         repo_root = self._handbook_repo_root()
         offenders: list[str] = []
+        from repo_wiki.verifier.handbook import install_page_render_errors
+
         for page in pages:
             text = page.read_text(encoding="utf-8", errors="ignore")
-            if not has_fenced_install_run_command(text, repo_root):
+            if not has_fenced_install_run_command(text, repo_root) or install_page_render_errors(
+                text
+            ):
                 offenders.append(page.as_posix())
         if offenders:
             return self._handbook_fail(
@@ -2891,13 +2854,13 @@ class QoderLikeVerifierService(VerifierService):
         if not pages:
             return self._skip_check("qoder-handbook-data-model-source", "Data-model page absent")
         repo_root = self._handbook_repo_root()
-        missing = [
-            page.as_posix()
-            for page in pages
+        missing = []
+        for page in pages:
+            text = page.read_text(encoding="utf-8", errors="ignore")
             if not has_data_model_source_citation(
-                page.read_text(encoding="utf-8", errors="ignore"), repo_root
-            )
-        ]
+                text, repo_root
+            ) or model_definition_cite_offenders(text, repo_root):
+                missing.append(page.as_posix())
         if missing:
             return self._handbook_fail(
                 "qoder-handbook-data-model-source",
@@ -3164,7 +3127,13 @@ class QoderLikeVerifierService(VerifierService):
         )
 
     def _check_handbook_route_crosscheck(self) -> CheckResult:
-        from repo_wiki.verifier.handbook_routes import handbook_route_crosscheck_mismatches
+        from repo_wiki.verifier.handbook_routes import (
+            ROUTE_COMPLETENESS_MIN,
+            extract_handbook_http_paths,
+            handbook_route_crosscheck_mismatches,
+            route_completeness_ratio,
+            unsupported_route_languages,
+        )
 
         repo_root = self._handbook_repo_root()
         content_dir = self._find_content_dir()
@@ -3172,8 +3141,9 @@ class QoderLikeVerifierService(VerifierService):
             return self._skip_check("qoder-handbook-route-crosscheck", "No markdown pages")
         files: list[tuple[str, str]] = []
         skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
+        suffixes = {".py", ".go", ".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx"}
         for path in repo_root.rglob("*"):
-            if not path.is_file() or path.suffix not in {".py", ".go"}:
+            if not path.is_file() or path.suffix not in suffixes | {".rb", ".java", ".php", ".rs"}:
                 continue
             if any(part in skip for part in path.parts):
                 continue
@@ -3183,24 +3153,41 @@ class QoderLikeVerifierService(VerifierService):
                     path.read_text(encoding="utf-8", errors="ignore"),
                 )
             )
-        if not files:
+        unsupported = unsupported_route_languages(files)
+        if unsupported:
+            return self._handbook_fail(
+                "qoder-handbook-route-crosscheck",
+                "QODER_HANDBOOK_ROUTE_CROSSCHECK",
+                "Unsupported route language is a release-grade fail",
+                {"languages": list(unsupported)},
+            )
+        source_files = [item for item in files if Path(item[0]).suffix in suffixes]
+        if not source_files:
             return self._skip_check("qoder-handbook-route-crosscheck", "No route sources")
         mismatch: list[str] = []
+        blobs: list[str] = []
         for page in content_dir.rglob("*.md"):
-            name = page.name.lower()
-            if not any(token in name for token in ("api", "接口")):
+            text = page.read_text(encoding="utf-8", errors="ignore")
+            if not extract_handbook_http_paths(text) and not any(
+                token in page.name.lower() for token in ("api", "接口")
+            ):
                 continue
-            mismatch.extend(
-                handbook_route_crosscheck_mismatches(
-                    page.read_text(encoding="utf-8", errors="ignore"), files
-                )
-            )
+            blobs.append(text)
+            mismatch.extend(handbook_route_crosscheck_mismatches(text, source_files))
         if mismatch:
             return self._handbook_fail(
                 "qoder-handbook-route-crosscheck",
                 "QODER_HANDBOOK_ROUTE_CROSSCHECK",
                 "Handbook HTTP paths are missing from the independent source extraction",
                 {"mismatch": mismatch[:20]},
+            )
+        combined = "\n".join(blobs)
+        if blobs and route_completeness_ratio(combined, source_files) < ROUTE_COMPLETENESS_MIN:
+            return self._handbook_fail(
+                "qoder-handbook-route-crosscheck",
+                "QODER_HANDBOOK_ROUTE_CROSSCHECK",
+                "Handbook API pages miss too many source routes",
+                {"ratio": route_completeness_ratio(combined, source_files)},
             )
         return self._handbook_pass(
             "qoder-handbook-route-crosscheck",
@@ -3222,22 +3209,21 @@ class QoderLikeVerifierService(VerifierService):
             dropped_ids = [
                 str(item)
                 for item in (
-                    summary.get("dropped_core_page_ids") or summary.get("dropped_page_ids") or []
+                    summary.get("dropped_page_ids") or summary.get("dropped_core_page_ids") or []
                 )
-                if _is_core_handbook_page(str(item))
+                if item
             ]
-            if not dropped_ids:
-                extra = summary.get("dropped_page_ids") or []
-                dropped_ids = [str(item) for item in extra if _is_core_handbook_page(str(item))]
-            count = len(dropped_ids)
-            if count:
+            cores = [item for item in dropped_ids if _is_core_handbook_page(item)]
+            if dropped_ids:
                 return self._handbook_fail(
                     "qoder-handbook-dropped-cores",
                     "QODER_HANDBOOK_DROPPED_CORE",
-                    "Dropped core handbook pages are a hard fail",
+                    "Dropped handbook pages without a replacement are a hard fail",
                     {
-                        "dropped_core_count": count,
-                        "dropped_core_page_ids": dropped_ids,
+                        "dropped_count": len(dropped_ids),
+                        "dropped_page_ids": dropped_ids,
+                        "dropped_core_count": len(cores),
+                        "dropped_core_page_ids": cores,
                     },
                 )
             return self._handbook_pass(
@@ -3311,16 +3297,6 @@ class QoderLikeVerifierService(VerifierService):
             reason_code="QODER_SOURCE_EVIDENCE_LOW",
             gate_type=GateType.HARD,
         )
-
-    def _ignored_dirty_roots(self, git_root: Path) -> list[Path]:
-        return ignored_dirty_roots(git_root, self.isolated_output)
-
-    @staticmethod
-    def _porcelain_relpath(line: str) -> str:
-        return porcelain_status_relpath(line)
-
-    def _path_is_ignored_output(self, git_root: Path, relpath: str) -> bool:
-        return path_is_ignored_eval_output(git_root, relpath, self.isolated_output)
 
     def _git_dirty(self, path: Path) -> bool:
         """Return True if the repository has uncommitted changes outside isolated output."""

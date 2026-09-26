@@ -174,14 +174,6 @@ def load_compose_health_map(root: Path) -> list[ComposeHealthBinding]:
             items = test if isinstance(test, list) else [test]
             blob = " ".join(str(item) for item in items if item)
             urls = [m.group(1).rstrip('",]') for m in _HEALTHCHECK_URL_RE.finditer(blob)]
-            ports = [
-                m.group(1)
-                for item in (spec.get("ports") or [] if isinstance(spec.get("ports"), list) else [])
-                for m in [re.search(r"(\d+):\d+", str(item))]
-                if m
-            ]
-            if check and not urls:
-                urls = [f":{port}" for port in ports]
             for url in urls:
                 key = (str(name), url)
                 if key in seen:
@@ -390,10 +382,10 @@ def _healthcheck_url_mentioned(text: str, url: str) -> bool:
     if url in blob:
         return True
     port = re.search(r":(\d+)", url)
-    if port and f":{port.group(1)}" in blob:
-        return True
     path = re.search(r"/(?:healthz?|readyz|livez|metrics)[A-Za-z0-9_/?&=-]*", url)
-    return bool(path and path.group(0) in blob)
+    if not port or not path:
+        return False
+    return f":{port.group(1)}" in blob and path.group(0) in blob
 
 
 def _health_binding_mentioned(text: str, binding: ComposeHealthBinding) -> bool:
@@ -401,9 +393,6 @@ def _health_binding_mentioned(text: str, binding: ComposeHealthBinding) -> bool:
         if binding.service not in sentence:
             continue
         if _healthcheck_url_mentioned(sentence, binding.url):
-            return True
-        port = re.search(r":(\d+)", binding.url)
-        if port and (f":{port.group(1)}" in sentence or port.group(1) in sentence):
             return True
     return False
 
@@ -511,13 +500,14 @@ def _orm_offenders(text: str, root: Path) -> list[str]:
         hits.append("orm:Base.metadata")
     if re.search(r"--autogenerate|Autogenerate", text):
         hits.append("orm:autogenerate")
-    models_dirs = [
-        path
-        for path in root.rglob("models")
-        if path.is_dir() and not any(part in _SKIP_DIRS for part in path.parts)
-    ]
-    if re.search(r"[A-Za-z0-9_.]+(?:\.|/)models\b", text) and not models_dirs:
-        hits.append("orm:missing-models")
+    for match in re.finditer(
+        r"[`'\"]([A-Za-z0-9_./-]+(?:\.|/)models(?:/[A-Za-z0-9_./-]*)?)[`'\"]",
+        text,
+    ):
+        cited = match.group(1).replace(".", "/").rstrip("/")
+        exists = (root / cited).exists()
+        if not exists:
+            hits.append(f"orm:{match.group(1)}")
     return hits
 
 
@@ -596,9 +586,10 @@ def handbook_source_fact_offenders(
         migration_page = any(
             token in f"{path.name} {text[:240]}" for token in ("迁移", "表", "migration")
         )
-        if tables and migration_page:
-            claimed = _mentioned_tables(text)
-            hits.extend(f"table:{name}" for name in sorted(claimed - tables)[:8])
+        if migration_page:
+            if tables:
+                claimed = _mentioned_tables(text)
+                hits.extend(f"table:{name}" for name in sorted(claimed - tables)[:8])
             hits.extend(_orm_offenders(text, repo_root)[:4])
         hits.extend(_flag_target_mismatches(text, flags_by_cmd, cmd_names)[:4])
         hits.extend(_ident_offenders(text, idents, readme)[:6])
@@ -629,13 +620,13 @@ def source_fact_prompt_block(root: Path, *, page_id: str = "", title: str = "") 
         if mapped:
             lines.append(
                 "本页编排 healthcheck 映射："
-                + "、".join(f"`{item.service}`→`{item.url}`" for item in mapped[:8])
+                + "、".join(f"`{item.service}`→`{item.url}`" for item in mapped)
             )
         else:
             services = sorted(load_compose_healthcheck_services(root))
             if services:
                 lines.append(
-                    "本页编排 healthcheck 服务：" + "、".join(f"`{name}`" for name in services[:8])
+                    "本页编排 healthcheck 服务：" + "、".join(f"`{name}`" for name in services)
                 )
     if any(token in blob for token in ("数据模型", "data-model", "data_model", "data model")):
         tables = sorted(load_database_tables(root))

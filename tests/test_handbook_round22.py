@@ -134,7 +134,7 @@ curl http://127.0.0.1:9/ready
     )
     assert "1. `git clone x`" in kept
     assert "4. `uv sync`" in kept
-    assert install_steps_invalid_reason("1. `go build \\\n") == "invalid-install-step"
+    assert install_steps_invalid_reason("1. `@echo build`\n") == "invalid-install-step"
 
 
 def test_b_identity_html_h1_skips_numbered_and_version_bullets(tmp_path: Path) -> None:
@@ -347,10 +347,10 @@ func List(db *DB) { db.Find(&ResultFilter{}) }
     assert any("001_up.sql" in item or "sql/001_up.sql" in item for item in required)
     assert not any("001_down.sql" in item for item in required)
     page = (
-        "# 数据模型\nAccount 与 Note、Widget 是表。<cite>models.py:1</cite>"
-        "<cite>orm.py:1</cite><cite>store.go:1</cite>\n"
+        "# 数据模型\nAccount 与 Note、Widget 是表。<cite>models.py:4-5</cite>"
+        "<cite>orm.py:6-7</cite><cite>store.go:3-5</cite>\n"
         "AccountIn 是 DTO，没有 int id。\n"
-        "<cite>sql/001_up.sql:1</cite>\n"
+        "<cite>sql/001_up.sql:1-1</cite>\n"
     )
     assert has_data_model_source_citation(page, tmp_path) is True
     absent = "# 数据模型\n仓库没有 sql 目录。\n<cite>models.py:1</cite>\n"
@@ -380,7 +380,7 @@ services:
     content = tmp_path / "pages"
     _write(
         content / "健康检查.md",
-        "api 使用 `http://127.0.0.1:8000/health`。blackbox 使用 `:9115`。\n",
+        "api 使用 `http://127.0.0.1:8000/health`。blackbox 使用 `http://127.0.0.1:9115/metrics`。\n",
     )
     assert handbook_source_fact_offenders(content, tmp_path) == {}
     _write(
@@ -430,7 +430,8 @@ def test_f_dropped_core_and_short_skeleton_cannot_hide(tmp_path: Path) -> None:
     assert MIN_HANDBOOK_BODY_CHARS == 800
     skeleton = "# 概述\n\n短页。\n"
     assert handbook_page_body_len(skeleton) < 800
-    assert handbook_page_is_fallback_stub(skeleton) is True
+    assert handbook_page_is_fallback_stub(skeleton) is False
+    assert handbook_page_body_len(skeleton) < 800
     assert "QODER_HANDBOOK_DROPPED_CORE" in QoderLikeSeverityThreshold.STRICT_HARD_CODES
 
 

@@ -23,30 +23,6 @@ from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 _DROP_CITATION_SCHEMES = ("file:", "path:", "relpath:")
 _PLACEHOLDER_CITE_BODY = "start-end"
 _CITE_BLOCK_RE = re.compile(r"(<cite>\s*)([^<]+?)(\s*</cite>)")
-_SOURCE_FILE_SUFFIXES = frozenset(
-    {
-        ".go",
-        ".py",
-        ".md",
-        ".rst",
-        ".txt",
-        ".yml",
-        ".yaml",
-        ".json",
-        ".toml",
-        ".sql",
-        ".sh",
-        ".proto",
-        ".js",
-        ".ts",
-        ".tsx",
-        ".jsx",
-        ".rs",
-        ".java",
-        ".kt",
-    }
-)
-_HOST_PORT_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}:\d+(?:-\d+)?$")
 _BACKTICK_WRAPPED_CITE_RE = re.compile(
     r"`\s*(<cite>\s*[^<]+?\s*</cite>)\s*`",
     re.IGNORECASE,
@@ -214,41 +190,6 @@ def is_placeholder_citation_ref(raw: str) -> bool:
     if value.lower().startswith("source:"):
         value = value[len("source:") :].lstrip()
     return value.lower() == _PLACEHOLDER_CITE_BODY
-
-
-def _looks_like_source_cite(value: str, workspace_root: str | Path | None = None) -> bool:
-    """True for repo paths with a real suffix or an existing file — not host:port."""
-    body = value.strip()
-    if body.lower().startswith("source:"):
-        body = body[len("source:") :].lstrip()
-    if _HOST_PORT_RE.fullmatch(body):
-        return False
-    match = _VALID_CITE_BODY_RE.fullmatch(body)
-    if not match:
-        return False
-    path_text = match.group("path").strip().replace("\\", "/")
-    if not path_text or path_text[:1].isdigit():
-        return False
-    suffix = Path(path_text).suffix.lower()
-    if suffix in _SOURCE_FILE_SUFFIXES:
-        return True
-    if workspace_root is None:
-        return False
-    try:
-        return (Path(workspace_root) / path_text).is_file()
-    except OSError:
-        return False
-
-
-def _cite_path_only(body: str) -> str | None:
-    raw = normalize_citation_ref(body).strip()
-    if raw.lower().startswith("source:"):
-        raw = raw[len("source:") :].lstrip()
-    match = _VALID_CITE_BODY_RE.fullmatch(raw)
-    if match:
-        path_text = match.group("path").strip()
-        return path_text or None
-    return None
 
 
 def collapse_citation_text_gaps(text: str) -> str:

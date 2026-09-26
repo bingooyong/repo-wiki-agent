@@ -29,11 +29,6 @@ from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
 from repo_wiki.planner.rule_first import _is_filename_like_module_name
 
-_WIKI_TOOL_LAYERS: tuple[tuple[str, str], ...] = (
-    ("layer_docs", "docs/"),
-    ("layer_ai", "ai/source-of-truth"),
-    ("layer_repo_wiki", ".repo-wiki"),
-)
 _MERMAID_UNSAFE_ID = re.compile(r"[^A-Za-z0-9_]")
 _MERMAID_RESERVED_IDS = frozenset(
     {
@@ -215,7 +210,7 @@ def frontend_fetch_paths(root: Path | None) -> list[str]:
     if root is None:
         return []
     found: list[str] = []
-    fetch_re = re.compile(r"""['"](/(?:probe|tag|api/v1)[^'"]*)['"]""")
+    fetch_re = re.compile(r"""fetch\(\s*['"](/[^'"]+)['"]""")
     for base in (root / "web", root / "static"):
         if not base.exists():
             continue
@@ -343,7 +338,7 @@ def _real_error_node(root: Path | None, endpoint: dict[str, Any]) -> str:
 _GENERIC_GO_HANDLERS = frozenset(
     {"func", "anonymous", "Handle", "r_GET", "r.GET", "r_POST", "r.POST", "handler"}
 )
-_FRONTEND_ROUTE_PREFIXES = ("/probe/endpoint", "/tag", "/api/v1")
+_FRONTEND_ROUTE_PREFIXES = ("/api", "/web", "/static")
 
 
 def _request_flow_score(endpoint: dict[str, Any], page_id: str, tokens: set[str]) -> int:
@@ -363,7 +358,7 @@ def _request_flow_score(endpoint: dict[str, Any], page_id: str, tokens: set[str]
             score += 8
         from repo_wiki.generator.process_roles import path_looks_like_example_cmd
 
-        if path_looks_like_example_cmd(file_path) or path.rstrip("/") == "/probe":
+        if path_looks_like_example_cmd(file_path):
             score -= 12
         if "agent/list" in path:
             score -= 8
@@ -420,6 +415,7 @@ _SCHEMA_NAME_SUFFIXES = (
     "request",
     "response",
     "schema",
+    "dto",
     "in",
     "out",
     "create",
@@ -470,10 +466,8 @@ def _endpoint_actor(endpoint: dict[str, Any]) -> str:
             return example_name or "example"
         if path.rstrip("/") in {"/health", "/healthz"}:
             return "HealthHandler"
-        if path.rstrip("/") == "/probe":
-            return "ProbeHandler"
         leaf = handler.split(".")[-1] if handler else ""
-        if leaf in {"ProbeHandler", "HealthHandler"}:
+        if leaf and leaf not in _GENERIC_GO_HANDLERS:
             return leaf
         return example_name or "example"
     if "internal/agent" in file_path or (
@@ -488,11 +482,6 @@ def _endpoint_actor(endpoint: dict[str, Any]) -> str:
     if "." in name:
         return name.rsplit(".", 1)[0]
     return _package_from_file(file_path) or "API"
-
-
-# ============================================================================
-# DIAGRAM TYPE DEFINITIONS
-# ============================================================================
 
 
 class MermaidDiagramType(str, Enum):
@@ -536,11 +525,6 @@ PAGE_TYPE_TO_DIAGRAM_PREFERENCE = {
     # Development guides benefit from flowcharts
     "development": [MermaidDiagramType.FLOWCHART, MermaidDiagramType.JOURNEY_DIAGRAM],
 }
-
-
-# ============================================================================
-# DIAGRAM PLAN AND EVIDENCE
-# ============================================================================
 
 
 @dataclass
@@ -598,11 +582,6 @@ class DiagramPlan:
 
     # Rendered mermaid code (populated after rendering)
     rendered_diagram: str | None = None
-
-
-# ============================================================================
-# MERMAID SYNTAX VALIDATOR
-# ============================================================================
 
 
 class MermaidSyntaxError(Exception):
@@ -1029,33 +1008,6 @@ def _iter_snapshot_paths(context: dict[str, Any]) -> list[str]:
     return [path for path in paths if path]
 
 
-def _snapshot_contains_path(paths: list[str], target: str) -> bool:
-    needle = target.strip("/").replace("\\", "/")
-    for path in paths:
-        normalized = path.replace("\\", "/").strip("/")
-        if not normalized:
-            continue
-        if normalized == needle or normalized.startswith(f"{needle}/"):
-            return True
-        if "/" not in needle and normalized.split("/")[0] == needle:
-            return True
-    return False
-
-
-def _wiki_tool_layers_present(context: dict[str, Any]) -> list[tuple[str, str]]:
-    paths = _iter_snapshot_paths(context)
-    layers: list[tuple[str, str]] = []
-    for layer_id, layer_label in _WIKI_TOOL_LAYERS:
-        if _snapshot_contains_path(paths, layer_label):
-            layers.append((layer_id, layer_label))
-    return layers
-
-
-# ============================================================================
-# MERMAID PLANNER
-# ============================================================================
-
-
 class MermaidPlanner:
     """Plans Mermaid diagrams for wiki pages based on page type and evidence.
 
@@ -1103,28 +1055,15 @@ class MermaidPlanner:
                 )
                 if diagram:
                     diagrams.append(diagram)
-            settings = self._plan_settings_flow(page_id, evidence_binding, context)
-            if settings and not modules:
-                diagrams.append(settings)
         elif page_type == "architecture":
             diagram = self._plan_overview_architecture_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
-            if _is_full_architecture_page(page_id):
-                tunnel = self._plan_grpc_tunnel(page_id, evidence_binding, context)
-                if tunnel:
-                    diagrams.append(tunnel)
 
         elif page_type in ("service", "section", "development"):
             diagram = self._plan_service_diagram(page_id, evidence_binding, context)
             if diagram:
                 diagrams.append(diagram)
-            if any(
-                token in (page_id or "").lower() for token in ("agent", "tunnel", "probe", "控制")
-            ):
-                tunnel = self._plan_grpc_tunnel(page_id, evidence_binding, context)
-                if tunnel:
-                    diagrams.append(tunnel)
 
         elif page_type == "api":
             diagrams.extend(self.plan_api_diagrams(page_id, evidence_binding, context))
@@ -1195,9 +1134,6 @@ class MermaidPlanner:
                 migration = self._plan_migration_flow(page_id, evidence_binding, context)
                 if migration:
                     diagrams.append(migration)
-                trigger = self._plan_timestamp_trigger_flow(page_id, evidence_binding, context)
-                if trigger:
-                    diagrams.append(trigger)
 
         elif page_type == "ops":
             diagram = self._plan_ops_diagram(page_id, evidence_binding, context)
@@ -1271,12 +1207,12 @@ class MermaidPlanner:
                 for token in (
                     "repository",
                     "services",
-                    "probe",
-                    "exporter",
                     "agent",
                     "models",
                     "control",
                     "routes",
+                    "domain",
+                    "app",
                 )
             )
         }
@@ -1712,49 +1648,6 @@ class MermaidPlanner:
             else [],
         )
 
-    def _plan_timestamp_trigger_flow(
-        self,
-        page_id: str,
-        evidence_binding: PageEvidenceBinding | None,
-        context: dict[str, Any],
-    ) -> DiagramPlan | None:
-        root = Path(self.workspace_root) if self.workspace_root else None
-        if root is None:
-            return None
-        versions = root / "app" / "db" / "migrations" / "versions"
-        if not versions.is_dir():
-            return None
-        hit = ""
-        for path in sorted(versions.glob("*.py")):
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            if re.search(r"updated_at.*trigger|trigger.*updated_at", text, flags=re.I):
-                hit = path.name[:32]
-                break
-        if not hit:
-            return None
-        return DiagramPlan(
-            diagram_id=f"{page_id}-timestamp-trigger",
-            diagram_type=MermaidDiagramType.FLOWCHART,
-            title="Updated-at trigger",
-            description="Alembic installs update_updated_at_column on tables",
-            nodes=[
-                DiagramNode(id="version_fn", label=hit, shape="rectangle"),
-                DiagramNode(id="trigger_fn", label="updated_at trigger", shape="rectangle"),
-                DiagramNode(
-                    id="tables",
-                    label="timestamped tables",
-                    shape="rectangle",
-                ),
-            ],
-            edges=[
-                DiagramEdge(from_node="version_fn", to_node="trigger_fn"),
-                DiagramEdge(from_node="trigger_fn", to_node="tables"),
-            ],
-            evidence_spans=[c.span for c in evidence_binding.candidates]
-            if evidence_binding
-            else [],
-        )
-
     def _plan_data_model_diagram(
         self,
         page_id: str,
@@ -1989,53 +1882,6 @@ class MermaidPlanner:
             else [],
         )
 
-    def _plan_grpc_tunnel(
-        self,
-        page_id: str,
-        evidence_binding: PageEvidenceBinding | None,
-        context: dict[str, Any],
-    ) -> DiagramPlan | None:
-        root = Path(self.workspace_root) if self.workspace_root else None
-        if root is None:
-            return None
-        from repo_wiki.generator.process_roles import derive_process_roles
-
-        roles = derive_process_roles(root)
-        if not any("tunnel_client" in item.kinds or "data_plane" in item.kinds for item in roles):
-            return None
-        hub_hit = False
-        for base in (root / "internal", root / "cmd"):
-            if not base.exists():
-                continue
-            for path in base.rglob("*.go"):
-                if path.name.endswith("_test.go"):
-                    continue
-                try:
-                    text = path.read_text(encoding="utf-8", errors="ignore")
-                except OSError:
-                    continue
-                if "TunnelHub" in text:
-                    hub_hit = True
-                    break
-            if hub_hit:
-                break
-        if not hub_hit:
-            return None
-        return DiagramPlan(
-            diagram_id=f"{page_id}-grpc-tunnel",
-            diagram_type=MermaidDiagramType.SEQUENCE_DIAGRAM,
-            title="gRPC tunnel",
-            description="data-plane heartbeats through TunnelHub",
-            sequence_participants=["ProbeAgent", "TunnelHub", "ControlPlane"],
-            sequence_messages=[
-                ("ProbeAgent", "TunnelHub", "Register/Heartbeat"),
-                ("TunnelHub", "ControlPlane", "Session status"),
-            ],
-            evidence_spans=[c.span for c in evidence_binding.candidates]
-            if evidence_binding
-            else [],
-        )
-
     def _plan_overview_module_flow(
         self,
         page_id: str,
@@ -2079,33 +1925,20 @@ class MermaidPlanner:
         if root is None:
             return None
         routes = root / "app" / "api" / "routes"
-        common = None
+        mutating: list[Path] = []
         if routes.is_dir():
-            for path in routes.rglob("*.py"):
+            for path in sorted(routes.rglob("*.py")):
                 try:
                     text = path.read_text(encoding="utf-8", errors="ignore")
                 except OSError:
                     continue
-                if "favorite" in text.lower():
-                    common = path
-                    break
-        follow = None
-        if routes.is_dir():
-            for path in routes.rglob("*.py"):
-                if path == common:
-                    continue
-                try:
-                    text = path.read_text(encoding="utf-8", errors="ignore")
-                except OSError:
-                    continue
-                if "follow" in text.lower():
-                    follow = path
-                    break
-        if not (common and Path(common).is_file() and follow and Path(follow).is_file()):
+                if re.search(r"@(?:\w+\.)?(post|delete)\(", text, flags=re.I):
+                    mutating.append(path)
+        if len(mutating) < 2:
             return None
         participants = ["Client"]
         messages: list[tuple[str, str, str]] = []
-        for path in (Path(common), Path(follow)):
+        for path in mutating[:8]:
             try:
                 text = path.read_text(encoding="utf-8", errors="ignore")
             except OSError:
@@ -2262,45 +2095,6 @@ class MermaidPlanner:
             sequence_messages=[
                 ("Client", dep_name, f"{prefix} token"),
                 (dep_name, "jwt", fn_name),
-            ],
-            evidence_spans=[c.span for c in evidence_binding.candidates]
-            if evidence_binding
-            else [],
-        )
-
-    def _plan_settings_flow(
-        self,
-        page_id: str,
-        evidence_binding: PageEvidenceBinding | None,
-        context: dict[str, Any],
-    ) -> DiagramPlan | None:
-        root = Path(self.workspace_root) if self.workspace_root else None
-        if root is None or not (root / "app" / "core" / "settings").exists():
-            return None
-        pid = (page_id or "").lower()
-        if not any(
-            token in pid
-            for token in ("overview", "setting", "项目概述", "project-overview", "installation")
-        ):
-            return None
-        if any(token in pid for token in ("architecture", "架构设计", "事件", "模块", "数据流")):
-            if "overview" not in pid and "整体" not in pid and "项目概述" not in pid:
-                return None
-        return DiagramPlan(
-            diagram_id=f"{page_id}-settings-flow",
-            diagram_type=MermaidDiagramType.FLOWCHART,
-            title="Settings loading",
-            description=".env loaded before alembic and app",
-            nodes=[
-                DiagramNode(id="ovw_env_file_n", label="env-file", shape="rectangle"),
-                DiagramNode(id="ovw_settings_n", label="settings", shape="rectangle"),
-                DiagramNode(id="ovw_alembic_n", label="alembic env.py", shape="rectangle"),
-                DiagramNode(id="ovw_app_main_n", label="app.main", shape="rectangle"),
-            ],
-            edges=[
-                DiagramEdge(from_node="ovw_env_file_n", to_node="ovw_settings_n"),
-                DiagramEdge(from_node="ovw_settings_n", to_node="ovw_alembic_n"),
-                DiagramEdge(from_node="ovw_settings_n", to_node="ovw_app_main_n"),
             ],
             evidence_spans=[c.span for c in evidence_binding.candidates]
             if evidence_binding
@@ -2624,11 +2418,6 @@ class MermaidPlanner:
         )
 
 
-# ============================================================================
-# MERMAID RENDERER
-# ============================================================================
-
-
 class MermaidRenderer:
     """Renders Mermaid diagram plans to valid Mermaid syntax."""
 
@@ -2819,20 +2608,8 @@ class MermaidRenderer:
         return f"```mermaid\n{rendered}\n```"
 
 
-# ============================================================================
-# FACTORY AND HELPERS
-# ============================================================================
-
-
 def create_planner(workspace_root: str | None = None) -> MermaidPlanner:
-    """Create a Mermaid planner.
-
-    Args:
-        workspace_root: Optional workspace root for path resolution
-
-    Returns:
-        MermaidPlanner instance
-    """
+    """Create a Mermaid planner."""
     return MermaidPlanner(workspace_root=workspace_root)
 
 

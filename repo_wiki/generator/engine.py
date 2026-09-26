@@ -1649,17 +1649,9 @@ class CanonicalModelResolver:
         """Get request/response types."""
         return self.get_canonical_by_category(ModelCategory.REQUEST_RESPONSE)
 
-    def get_duplicated_projections(self) -> list[CanonicalModel]:
-        """Get duplicated projections."""
-        return self.get_canonical_by_category(ModelCategory.DUPLICATED_PROJECTION)
-
     def get_high_frequency_models(self) -> list[CanonicalModel]:
         """Get high-frequency models for fixtures."""
         return [c for c in self.canonical_models if c.is_high_frequency]
-
-    def get_infrastructure_models(self) -> list[CanonicalModel]:
-        """Get infrastructure models (config, db tables, etc.)."""
-        return self.get_canonical_by_category(ModelCategory.INFRASTRUCTURE)
 
     def summarize_canonical_models(self) -> str:
         """Generate a summary of canonical model resolution."""

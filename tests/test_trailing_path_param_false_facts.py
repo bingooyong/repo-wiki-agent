@@ -11,12 +11,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from repo_wiki.verifier.qoder_strict_verifier import (
-    QoderLikeSeverityThreshold,
-    QoderLikeVerifierService,
+from repo_wiki.verifier.api_claim_inventory import (
     api_claim_in_inventory,
     extract_http_method_paths,
     normalize_claimed_api_path,
+)
+from repo_wiki.verifier.qoder_strict_verifier import (
+    QoderLikeSeverityThreshold,
+    QoderLikeVerifierService,
 )
 
 

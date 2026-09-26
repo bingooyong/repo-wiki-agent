@@ -205,13 +205,20 @@ def build_generation_quality_documents(
         if isinstance(item, dict) and (item.get("dropped") or item.get("page_id"))
     ]
     dropped_ids.extend(str(item) for item in (llm_summary.get("dropped_page_ids") or []) if item)
-    dropped_core_ids = sorted({item for item in dropped_ids if _is_core_handbook_page(item)})
+    unique_dropped = sorted({item for item in dropped_ids if item})
+    dropped_core_ids = [item for item in unique_dropped if _is_core_handbook_page(item)]
+    written_ids = {
+        str(item.get("page_id") or "")
+        for item in quality_pages
+        if str(item.get("quality_state") or "") not in {"DROPPED"}
+    }
+    unreplaced_dropped = [item for item in unique_dropped if item not in written_ids]
     all_ready = bool(quality_pages) and all(
         p["quality_state"] in _READY_STATES for p in quality_pages
     )
     grade = (
         "FAIL"
-        if dropped_core_ids
+        if dropped_core_ids or unreplaced_dropped
         else "PASS"
         if all_ready
         else "FALLBACK"
@@ -245,9 +252,8 @@ def build_generation_quality_documents(
             "pass_count": counts.get("PASS", 0),
             "fallback_count": counts.get("FALLBACK", 0),
             "degraded_count": counts.get("DEGRADED", 0),
-            "dropped_count": counts.get("DROPPED", 0)
-            + int(llm_summary.get("dropped_page_count") or 0)
-            + len({item for item in dropped_ids if item}),
+            "dropped_count": len(unique_dropped),
+            "dropped_page_ids": unique_dropped,
             "dropped_core_count": len(dropped_core_ids),
             "dropped_core_page_ids": dropped_core_ids,
             "unidentified_count": counts.get("UNIDENTIFIED", 0),

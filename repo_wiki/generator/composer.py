@@ -268,11 +268,6 @@ def is_handbook_overview_page(page: WikiPagePlan) -> bool:
     return title in _HANDBOOK_OVERVIEW_TITLES or title.lower() in _HANDBOOK_OVERVIEW_TITLES
 
 
-def is_handbook_onboarding_page(page: WikiPagePlan) -> bool:
-    """True for handbook overview or install / quick-start / setup pages."""
-    return is_handbook_overview_page(page) or is_handbook_install_page(page)
-
-
 # =============================================================================
 # COMPOSER CONTRACTS AND RESULTS
 # =============================================================================
@@ -993,13 +988,6 @@ class LLMPageComposer:
             "- 指向仓库根说明文件时必须使用仓库中实际存在的文件名"
             "（README.md / README.rst / README.txt / README），不要指向不存在的文件。"
         )
-
-    def _is_handbook_overview_or_install(self, page: WikiPagePlan) -> bool:
-        return is_handbook_overview_page(page) or is_handbook_install_page(page)
-
-    def _evidence_has_api_routes(self, binding: PageEvidenceBinding | None) -> bool:
-        has_routes, _has_go = self._evidence_route_layout(binding)
-        return has_routes
 
     def _evidence_route_layout(self, binding: PageEvidenceBinding | None) -> tuple[bool, bool]:
         if binding is None:
