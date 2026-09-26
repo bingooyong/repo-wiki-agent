@@ -19,9 +19,7 @@ _CURL_RE = re.compile(
     r"\bcurl\b[^\n]*?(?:-X|--request)\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b[^\n]*?(https?://[^\s`]+|/[\w:.{}/-]*)",
     re.I,
 )
-_PATH_ONLY_RE = re.compile(
-    r"`(/(?:[A-Za-z0-9._~:-]+|\{[^}]+\}|:[A-Za-z0-9_]+)(?:/(?:[A-Za-z0-9._~:-]+|\{[^}]+\}|:[A-Za-z0-9_]+))*)`"
-)
+_PATH_ONLY_RE = re.compile(r"`(/[A-Za-z0-9._~:/{}\-]+)`")
 _TABLE_PATH_RE = re.compile(r"^\|\s*`?(/(?:[^|`]+))`?", re.M)
 _PY_DECO_RE = re.compile(
     r"""@(\w+)\.(get|post|put|patch|delete|options|head)\(\s*['\"]([^'\"]*)['\"]""",
