@@ -5,14 +5,6 @@ This module provides the core composer that integrates:
 - Prompt contracts (PagePromptContract) and skeleton builder
 - Citation renderer for evidence preservation
 - Mock LLM provider for CI, optional real provider for smoke tests
-
-Phase 24 - Task 24.3: LLM page composer pipeline
-
-Key features:
-- Uses MockLLMProvider in CI and tests
-- Optional real-provider smoke when REAL_LLM_PROVIDER env exists
-- Preserves citations through normalization
-- Rejects pages that lose required evidence or headings
 """
 
 from __future__ import annotations

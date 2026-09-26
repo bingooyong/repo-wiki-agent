@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from repo_wiki.generator.deterministic_sections import build_install_section, build_verify_section
@@ -23,6 +24,7 @@ from repo_wiki.verifier.handbook import (
 )
 from repo_wiki.verifier.handbook_routes import (
     ROUTE_COMPLETENESS_MIN,
+    extract_handbook_http_paths,
     extract_source_http_paths,
     handbook_route_crosscheck_mismatches,
     route_completeness_gap,
@@ -68,6 +70,21 @@ $ touch .env
     assert folded.splitlines()[0] == "1. `git clone x`"
     assert "<cite>README.md:4-4</cite>" in folded
     assert install_page_render_errors(section) == []
+    from repo_wiki.evidence.citation_renderer import normalize_citation_markup
+    from repo_wiki.generator.adjacent_cites import attach_adjacent_cites
+
+    stepped = (
+        "## 安装步骤\n\n1. `git clone x`\n\n```bash\ngit clone x\n```\n<cite>README.md:4-4</cite>\n"
+    )
+    attached = attach_adjacent_cites(
+        stepped,
+        ["<cite>docs/note.md:2-8</cite>"],
+        workspace_root=tmp_path,
+    )
+    normalized = normalize_citation_markup(attached, tmp_path)
+    assert "``bash" not in normalized.replace("```bash", "")
+    assert not re.search(r"`[^`\n]*<cite", re.sub(r"```.*?```", "", normalized))
+    assert install_page_render_errors(normalized) == []
 
 
 def test_1_install_gate_requires_balanced_steps() -> None:
@@ -233,6 +250,9 @@ export default router;
         "/ready",
     ) in extract_source_http_paths(files)
     assert unsupported_route_languages([("svc.rb", "get '/x' do\nend\n")]) == ("rb",)
+    assert not extract_handbook_http_paths("PUT /articles/:slug then DELETE /articles/:slug") & {
+        ("PUT", "/DELETE")
+    }
     one_of_four = "# API\n\nGET `/alpha`\n"
     four = [
         (

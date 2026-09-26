@@ -61,10 +61,15 @@ def concat_http_paths(*parts: str) -> str:
 
 
 def extract_handbook_http_paths(markdown: str) -> set[tuple[str, str]]:
-    return {
-        (m.group(1).upper(), _norm_path(m.group(2)))
-        for m in _HANDBOOK_ROUTE_RE.finditer(markdown or "")
-    }
+    text = re.sub(r"```.*?```", " ", markdown or "", flags=re.S)
+    found: set[tuple[str, str]] = set()
+    for match in _HANDBOOK_ROUTE_RE.finditer(text):
+        path = _norm_path(match.group(2))
+        first = path.strip("/").split("/", 1)[0].upper()
+        if not path.startswith("/") or first in _HTTP:
+            continue
+        found.add((match.group(1).upper(), path))
+    return found
 
 
 def _prefix_constants(files: Sequence[tuple[str, str]]) -> dict[str, str]:

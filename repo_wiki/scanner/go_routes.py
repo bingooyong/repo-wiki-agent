@@ -429,8 +429,7 @@ def _split_method_path(raw: str, default_method: str = "GET") -> tuple[str, str]
     match = _METHOD_PATH_LITERAL_RE.match(text)
     if match:
         return match.group(1).upper(), match.group(2)
-    path = text if text.startswith("/") else "/" + text.lstrip()
-    return default_method, path
+    return default_method, text
 
 
 def handle_func_method(text: str, match_start: int, raw_path: str) -> str:
@@ -486,7 +485,9 @@ def extract_go_endpoints(files: Sequence[tuple[str, str]]) -> list[GoEndpoint]:
         method_u = method.upper()
         if method_u not in _HTTP_METHODS:
             method_u = "ANY"
-        path_n = path if path.startswith("/") else "/" + path
+        if not path.startswith("/"):
+            return
+        path_n = path
         key = (method_u, path_n, file_path)
         if key in seen:
             return
