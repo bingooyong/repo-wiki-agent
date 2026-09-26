@@ -68,6 +68,13 @@ $ touch .env
     assert "<cite>" not in section.split("```")[1]
     assert "`<cite>" not in section
     assert section.count("```") % 2 == 0
+    from repo_wiki.evidence.citation_renderer import normalize_citation_markup as _norm_cites
+
+    clustered = _norm_cites(
+        "见 `<cite>README.md:1-1</cite><cite>README.md:2-2</cite>` 说明。\n", tmp_path
+    )
+    assert "`<cite>" not in clustered
+    assert "<cite>README.md:" in clustered
     from repo_wiki.core.config import RepoWikiConfig
 
     folded = RepoWikiService(RepoWikiConfig())._fold_citation_only_lines(
