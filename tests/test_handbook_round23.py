@@ -363,7 +363,7 @@ def test_5_multi_import_empty_path_and_register_methods() -> None:
     assert ("GET", "/svc/faces/:name") in source
     assert "/beacon/flash" in paths
     assert "/beacon/burst/:name" in paths
-    assert "/beacon/burst" in paths
+    assert "/beacon/burst" not in paths
     assert not any(path.endswith("/dim") for path in paths)
     assert "/metrics" in paths
     assert "/debug/info" in paths
@@ -372,8 +372,10 @@ def test_5_multi_import_empty_path_and_register_methods() -> None:
         "与 GET `/debug/pprof/allocs`。\n"
     )
     mismatches = handbook_route_crosscheck_mismatches(handbook, files)
-    assert not any("X-Trace" in item or item.endswith(" /:id") for item in mismatches)
-    assert not mismatches
+    assert any("X-Trace" in item for item in mismatches)
+    assert any(item.endswith(" /:id") for item in mismatches)
+    assert any("pprof" in item for item in mismatches)
+    assert not any("faces" in item for item in mismatches)
 
 
 def test_6_identity_readme_h1_and_sources(tmp_path: Path) -> None:

@@ -126,8 +126,8 @@ curl http://127.0.0.1:9/ready
     assert "git clone https://example.invalid/demo.git" in rewritten
     assert "leftover" not in rewritten
     satellite = service._rewrite_install_page_contract(quick, draft)
-    assert "git clone https://example.invalid/demo.git" not in satellite
-    assert satellite == draft
+    assert "git clone https://example.invalid/demo.git" in satellite
+    assert "leftover" not in satellite
 
     numbered = "## 安装步骤\n\n1. `git clone x`\n\n```bash\ngit clone x\n```\n\n4. `uv sync`\n"
     assert strip_empty_numbered_steps(numbered) == numbered
@@ -269,16 +269,16 @@ def login():
             "svc.go",
             """
 package svc
-type EchoReq struct {
-    Path string `path:"/hello/echo"`
+func Mount(r Router) {
+    r.POST("/hello/echo", Echo)
 }
 """,
         ),
     ]
     source = extract_source_http_paths(files)
     assert ("POST", "/api/users/login") in source
-    assert ("ANY", "/hello/echo") in source
-    handbook = "GET `/api/users/login` 与 ANY `/hello/echo` 与 GET `/invented`。"
+    assert ("POST", "/hello/echo") in source
+    handbook = "POST `/api/users/login` 与 POST `/hello/echo` 与 GET `/invented`。"
     mismatches = handbook_route_crosscheck_mismatches(handbook, files)
     assert not any("api/users/login" in item or "hello/echo" in item for item in mismatches)
     assert any("invented" in item for item in mismatches)

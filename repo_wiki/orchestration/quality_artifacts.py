@@ -256,6 +256,7 @@ def build_generation_quality_documents(
             "dropped_page_ids": unique_dropped,
             "dropped_core_count": len(dropped_core_ids),
             "dropped_core_page_ids": dropped_core_ids,
+            "reask_counts_by_page_type": dict(llm_summary.get("reask_counts_by_page_type") or {}),
             "unidentified_count": counts.get("UNIDENTIFIED", 0),
             "llm_mode": llm_summary.get("mode"),
             "fallback_page_count": llm_summary.get("fallback_page_count", 0),

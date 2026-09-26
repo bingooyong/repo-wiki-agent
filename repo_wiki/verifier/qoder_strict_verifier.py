@@ -2767,31 +2767,43 @@ class QoderLikeVerifierService(VerifierService):
         )
 
     def _check_handbook_install_fence(self) -> CheckResult:
-        pages = find_matching_pages(
-            self._find_content_dir(), ("installation", "安装指南", "安装与配置")
-        )
-        if not pages:
+        content_dir = self._find_content_dir()
+        if not content_dir:
             return self._skip_check("qoder-handbook-install-fence", "Installation page absent")
         repo_root = self._handbook_repo_root()
         offenders: list[str] = []
         from repo_wiki.verifier.handbook import install_page_render_errors
 
+        named = find_matching_pages(
+            content_dir,
+            ("installation", "安装指南", "安装与配置", "quick-start", "quickstart", "快速开始指南"),
+        )
+        command_pages = [
+            page
+            for page in content_dir.rglob("*.md")
+            if re.search(r"^\d+\.\s+`", page.read_text(encoding="utf-8", errors="ignore"), re.M)
+        ]
+        pages = list(dict.fromkeys([*named, *command_pages]))
+        if not pages:
+            return self._skip_check("qoder-handbook-install-fence", "Installation page absent")
         for page in pages:
             text = page.read_text(encoding="utf-8", errors="ignore")
-            if not has_fenced_install_run_command(text, repo_root) or install_page_render_errors(
-                text
-            ):
+            render_errors = install_page_render_errors(text)
+            needs_run = page in named and not any(
+                token in page.stem.lower() for token in ("quick", "快速")
+            )
+            if render_errors or (needs_run and not has_fenced_install_run_command(text, repo_root)):
                 offenders.append(page.as_posix())
         if offenders:
             return self._handbook_fail(
                 "qoder-handbook-install-fence",
                 "QODER_HANDBOOK_INSTALL_FENCE",
-                "Installation page missing a fenced install/run command block",
+                "Command page has a CommonMark render error or missing fenced command",
                 {"pages": offenders},
             )
         return self._handbook_pass(
             "qoder-handbook-install-fence",
-            "Installation page includes a fenced install/run command",
+            "Command pages render with closed fences and grounded steps",
         )
 
     def _check_handbook_api_route_file(self) -> CheckResult:
@@ -3131,7 +3143,9 @@ class QoderLikeVerifierService(VerifierService):
             ROUTE_COMPLETENESS_MIN,
             extract_handbook_http_paths,
             handbook_route_crosscheck_mismatches,
+            iter_route_source_files,
             route_completeness_ratio,
+            source_extraction_is_unsupported,
             unsupported_route_languages,
         )
 
@@ -3139,20 +3153,7 @@ class QoderLikeVerifierService(VerifierService):
         content_dir = self._find_content_dir()
         if not content_dir:
             return self._skip_check("qoder-handbook-route-crosscheck", "No markdown pages")
-        files: list[tuple[str, str]] = []
-        skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__"}
-        suffixes = {".py", ".go", ".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx"}
-        for path in repo_root.rglob("*"):
-            if not path.is_file() or path.suffix not in suffixes | {".rb", ".java", ".php", ".rs"}:
-                continue
-            if any(part in skip for part in path.parts):
-                continue
-            files.append(
-                (
-                    path.relative_to(repo_root).as_posix(),
-                    path.read_text(encoding="utf-8", errors="ignore"),
-                )
-            )
+        files = iter_route_source_files(repo_root)
         unsupported = unsupported_route_languages(files)
         if unsupported:
             return self._handbook_fail(
@@ -3161,25 +3162,34 @@ class QoderLikeVerifierService(VerifierService):
                 "Unsupported route language is a release-grade fail",
                 {"languages": list(unsupported)},
             )
+        suffixes = {".py", ".go", ".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx"}
         source_files = [item for item in files if Path(item[0]).suffix in suffixes]
+        if source_extraction_is_unsupported(files or source_files):
+            return self._handbook_fail(
+                "qoder-handbook-route-crosscheck",
+                "QODER_HANDBOOK_ROUTE_CROSSCHECK",
+                "Unsupported route idiom or empty extraction is a release-grade fail",
+                {"unsupported": True, "source_routes": 0},
+            )
         if not source_files:
             return self._skip_check("qoder-handbook-route-crosscheck", "No route sources")
         mismatch: list[str] = []
         blobs: list[str] = []
         for page in content_dir.rglob("*.md"):
             text = page.read_text(encoding="utf-8", errors="ignore")
-            if not extract_handbook_http_paths(text) and not any(
-                token in page.name.lower() for token in ("api", "接口")
-            ):
+            api_page = any(token in page.name.lower() for token in ("api", "接口"))
+            if not extract_handbook_http_paths(text, api_page=api_page) and not api_page:
                 continue
             blobs.append(text)
-            mismatch.extend(handbook_route_crosscheck_mismatches(text, source_files))
+            mismatch.extend(
+                handbook_route_crosscheck_mismatches(text, source_files, api_page=api_page)
+            )
         if mismatch:
             return self._handbook_fail(
                 "qoder-handbook-route-crosscheck",
                 "QODER_HANDBOOK_ROUTE_CROSSCHECK",
                 "Handbook HTTP paths are missing from the independent source extraction",
-                {"mismatch": mismatch[:20]},
+                {"mismatch": mismatch[:20], "invented": mismatch[:20]},
             )
         combined = "\n".join(blobs)
         if blobs and route_completeness_ratio(combined, source_files) < ROUTE_COMPLETENESS_MIN:
@@ -3214,16 +3224,20 @@ class QoderLikeVerifierService(VerifierService):
                 if item
             ]
             cores = [item for item in dropped_ids if _is_core_handbook_page(item)]
-            if dropped_ids:
+            from repo_wiki.verifier.handbook import core_page_stub_offenders
+
+            stubs = core_page_stub_offenders(self._find_content_dir())
+            if dropped_ids or stubs:
                 return self._handbook_fail(
                     "qoder-handbook-dropped-cores",
                     "QODER_HANDBOOK_DROPPED_CORE",
-                    "Dropped handbook pages without a replacement are a hard fail",
+                    "Dropped handbook pages or shipped core stubs are a hard fail",
                     {
                         "dropped_count": len(dropped_ids),
                         "dropped_page_ids": dropped_ids,
                         "dropped_core_count": len(cores),
                         "dropped_core_page_ids": cores,
+                        "core_stubs": stubs,
                     },
                 )
             return self._handbook_pass(

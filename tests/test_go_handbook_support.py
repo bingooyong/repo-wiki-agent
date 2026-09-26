@@ -1338,7 +1338,7 @@ def test_page_contract_rewrites_install_and_attaches_core_cites(tmp_path: Path) 
         tags=["installation"],
     )
     rewritten = service._enforce_qoder_page_contract(install_page, _25D_INSTALL, None, False)
-    assert install_fenced_commands_are_grounded(rewritten, tmp_path) is False
+    assert install_fenced_commands_are_grounded(rewritten, tmp_path) is True
     assert "podman-compose up -d --build --force-recreate" not in rewritten
     allowed = collect_repo_install_commands(tmp_path)
     assert any("podman-compose" in item for item in allowed)

@@ -882,6 +882,12 @@ class ContentLayoutWriter:
                 stats["by_category"][category] = 0
             stats["by_category"][category] += 1
 
+        keep = set(written)
+        if self._content_dir.is_dir():
+            for leftover in self._content_dir.rglob("*.md"):
+                rel = leftover.relative_to(self._content_dir).as_posix()
+                if rel not in keep:
+                    leftover.unlink(missing_ok=True)
         return written, stats
 
     def _assert_safe_output_path(self, output_file: Path) -> None:

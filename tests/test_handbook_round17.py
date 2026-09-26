@@ -440,7 +440,7 @@ def test_no_repo_specific_literals_in_audited_source() -> None:
 
 
 def test_generator_version_is_r17() -> None:
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r23-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r24-")
 
 
 def test_hedged_current_evidence_is_meta_talk() -> None:

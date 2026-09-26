@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 
 class DocumentLayer(Enum):
@@ -15,50 +14,6 @@ class DocumentLayer(Enum):
     SECTION = "section"  # Thematic section layer (docs/sections/)
     MODULE = "module"  # Individual module documentation (docs/modules/)
     PHASE = "phase"  # Stage-governance layer (docs/phases/) - REPO-AGENT INTERNAL ONLY
-
-
-class OutputLayerPolicy(Enum):
-    """Policy classification for document layers.
-
-    This defines which layers are appropriate for target repositories vs.
-    which layers are repo-agent internal governance only.
-    """
-
-    # Layers that should be generated for target repositories
-    TARGET_OUTPUT = "target_output"  # docs/00-05, docs/sections/, docs/modules/
-
-    # Layers that are repo-agent internal governance and should NOT be
-    # generated for target repositories - they live in repo-agent's own repo
-    GOVERNANCE_ONLY = "governance_only"  # docs/phases/, .apm/, scripts/
-
-    # Layers that are source-of-truth inputs, not generated outputs
-    SOURCE_OF_TRUTH = "source_of_truth"  # ai/source-of-truth/
-
-
-def get_layer_policy(layer: DocumentLayer) -> OutputLayerPolicy:
-    """Get the output policy for a given document layer.
-
-    Policy Rules:
-    - PHASE layer: GOVERNANCE_ONLY (repo-agent internal only, not for target repos)
-    - OVERVIEW, SECTION, MODULE layers: TARGET_OUTPUT (generated for target repos)
-
-    Note: PHASE is implicitly GOVERNANCE_ONLY because it is checked first above.
-    All other layers default to TARGET_OUTPUT since they represent generated
-    target-repository documentation (docs/00-05, docs/sections/, docs/modules/).
-    """
-    if layer == DocumentLayer.PHASE:
-        return OutputLayerPolicy.GOVERNANCE_ONLY
-    return OutputLayerPolicy.TARGET_OUTPUT
-
-
-def is_target_output_layer(layer: DocumentLayer) -> bool:
-    """Check if a layer should be generated for target repositories."""
-    return get_layer_policy(layer) == OutputLayerPolicy.TARGET_OUTPUT
-
-
-def is_governance_only_layer(layer: DocumentLayer) -> bool:
-    """Check if a layer is repo-agent internal and should not be generated for targets."""
-    return get_layer_policy(layer) == OutputLayerPolicy.GOVERNANCE_ONLY
 
 
 @dataclass(frozen=True)
@@ -251,11 +206,6 @@ def get_canonical_slug(slug: str) -> str | None:
     return section.canonical_slug if section else None
 
 
-def is_known_section_slug(slug: str) -> bool:
-    """Check if a slug (canonical or alias) is a known section."""
-    return get_section_by_slug(slug) is not None
-
-
 def section_contract(section_slug: str) -> DocumentContract:
     """Generate a section layer contract for a given section slug.
 
@@ -423,25 +373,6 @@ def validate_contract_coverage(template_root: Path) -> list[str]:
             missing.append(contract.template_path)
 
     return missing
-
-
-def get_contracts_by_layer(layer: DocumentLayer) -> tuple[DocumentContract, ...]:
-    """Get all contracts filtered by document layer.
-
-    This is useful for generation and validation strategies that need to
-    operate on specific layers (e.g., generating only section docs, or
-    validating only overview docs).
-    """
-    if layer == DocumentLayer.OVERVIEW:
-        return CORE_DOCUMENT_CONTRACTS
-    elif layer == DocumentLayer.SECTION:
-        return all_section_contracts()
-    elif layer == DocumentLayer.PHASE:
-        return all_phase_contracts()
-    elif layer == DocumentLayer.MODULE:
-        # Module contracts are dynamically generated per module, return empty tuple
-        return ()
-    return ()
 
 
 # =============================================================================
@@ -1055,193 +986,10 @@ def validate_section_cross_links(content: str, section_slug: str) -> tuple[bool,
     return True, f"Section {section_slug} has proper cross-links"
 
 
-def validate_all_required_sections_exist(section_dir: Path) -> tuple[bool, list[str]]:
-    """Validate that all required section pages exist.
-
-    Required sections: project, architecture, services, data-model, api, operations, development, security
-
-    Parameters:
-    - section_dir: The root directory containing docs/sections/
-
-    Returns (is_valid, missing_sections) tuple.
-    """
-    required_sections = [
-        "project",
-        "architecture",
-        "services",
-        "data-model",
-        "api",
-        "operations",
-        "development",
-        "security",
-    ]
-
-    missing = []
-    for section_slug in required_sections:
-        is_valid, _ = validate_section_page_exists(section_slug, section_dir)
-        if not is_valid:
-            missing.append(section_slug)
-
-    if missing:
-        return False, missing
-    return True, []
-
-
-# =============================================================================
-# OUTPUT LAYER MANIFEST AND BOUNDARY RULES (Phase 09)
-# =============================================================================
-# This manifest defines which layers belong to repo-agent governance vs.
-# which belong to generated target-repository outputs.
-#
-# LAYER OWNERSHIP:
-#   GOVERNANCE_ONLY layers:
-#     - PHASE (docs/phases/): repo-agent internal stage-governance docs
-#     - These should ONLY be generated in repo-agent's own repo, NOT in targets
-#
-#   TARGET_OUTPUT layers:
-#     - OVERVIEW (docs/00-05): Fixed reader-facing entry points
-#     - SECTION (docs/sections/): Thematic section pages
-#     - MODULE (docs/modules/): Individual module documentation
-#     - These ARE appropriate for target repositories
-#
-# BOUNDARY RULES:
-#   1. Phase layer docs (docs/phases/) MUST NOT be generated for target repos
-#   2. Target repos should only receive OVERVIEW, SECTION, MODULE layers
-#   3. Governance docs live in repo-agent's own .apm/Memory and docs/phases/
-#   4. Generation tasks MUST check layer policy before writing outputs
-
-OUTPUT_LAYER_MANIFEST: tuple[tuple[DocumentLayer, OutputLayerPolicy, str], ...] = (
-    # Layer, Policy, Description
-    (
-        DocumentLayer.OVERVIEW,
-        OutputLayerPolicy.TARGET_OUTPUT,
-        "Reader-facing fixed entry points (00-05)",
-    ),
-    (
-        DocumentLayer.SECTION,
-        OutputLayerPolicy.TARGET_OUTPUT,
-        "Thematic section pages (docs/sections/)",
-    ),
-    (
-        DocumentLayer.MODULE,
-        OutputLayerPolicy.TARGET_OUTPUT,
-        "Individual module docs (docs/modules/)",
-    ),
-    (
-        DocumentLayer.PHASE,
-        OutputLayerPolicy.GOVERNANCE_ONLY,
-        "Stage-governance docs (docs/phases/) - INTERNAL ONLY",
-    ),
-)
-
-
-def get_output_manifest() -> dict[str, Any]:
-    """Get the output layer manifest as a structured dictionary.
-
-    Returns:
-        Dictionary with layer policies, descriptions, and boundary rules.
-    """
-    governance_layers: list[dict[str, str]] = []
-    target_output_layers: list[dict[str, str]] = []
-    boundary_rules = [
-        "Phase layer docs (docs/phases/) MUST NOT be generated for target repos",
-        "Target repos should only receive OVERVIEW, SECTION, MODULE layers",
-        "Governance docs live in repo-agent's own .apm/Memory and docs/phases/",
-        "Generation tasks MUST check layer policy before writing outputs",
-    ]
-
-    for layer, policy, description in OUTPUT_LAYER_MANIFEST:
-        entry = {"layer": layer.value, "policy": policy.value, "description": description}
-        if policy == OutputLayerPolicy.GOVERNANCE_ONLY:
-            governance_layers.append(entry)
-        else:
-            target_output_layers.append(entry)
-
-    return {
-        "governance_layers": governance_layers,
-        "target_output_layers": target_output_layers,
-        "boundary_rules": boundary_rules,
-    }
-
-
-def validate_output_boundary(output_path: str, layer: DocumentLayer) -> tuple[bool, str]:
-    """Validate that an output path is appropriate for the given layer policy.
-
-    This rejects mixed governance-vs-target output paths.
-
-    Args:
-        output_path: The intended output path (e.g., 'docs/phases/phase-01.md')
-        layer: The document layer of the contract
-
-    Returns:
-        (is_valid, reason) tuple
-    """
-    # Phase layer should never go to target repos (check for docs/phases/ in target output)
-    if layer == DocumentLayer.PHASE:
-        if output_path.startswith("docs/phases/"):
-            return False, (
-                f"BOUNDARY VIOLATION: Phase layer output '{output_path}' should NOT be "
-                "generated for target repositories. Phase docs are GOVERNANCE_ONLY. "
-                "They belong in repo-agent's own repository only."
-            )
-
-    # All target output layers must go to docs/ not to .apm/ or other governance dirs
-    if is_target_output_layer(layer):
-        forbidden_prefixes = (".apm/", "scripts/", ".repo-wiki/internal/")
-        for prefix in forbidden_prefixes:
-            if output_path.startswith(prefix):
-                return False, (
-                    f"BOUNDARY VIOLATION: Target output '{output_path}' uses governance prefix '{prefix}'. "
-                    f"Target outputs must go to docs/ hierarchy, not governance directories."
-                )
-
-    return True, "Output path passes boundary validation"
-
-
-# =============================================================================
-# UNIFIED LINK BUILDER (Phase 09 - Task 9.2)
-# =============================================================================
-# Canonical relative path rules for navigation between document layers.
-#
-# PATH DEPTHS:
-#   docs/00-overview.md              -> depth 0 (root overview)
-#   docs/01-architecture.md         -> depth 0 (root overview)
-#   docs/03-module-map.md            -> depth 0 (root overview)
-#   docs/04-api-contracts.md         -> depth 0 (root overview)
-#   docs/05-data-model.md            -> depth 0 (root overview)
-#   docs/sections/<slug>/index.md    -> depth 1 (section page)
-#   docs/modules/<name>.md          -> depth 0 (module page, same level as overview)
-#
-# LINK PATTERNS:
-#   From overview (depth 0) to section (depth 1):
-#     sections/<slug>/index.md
-#
-#   From section (depth 1) to overview (depth 0):
-#     ../../00-overview.md
-#
-#   From section (depth 1) to another section (depth 1):
-#     ../<slug>/index.md
-#
-#   From section (depth 1) to module (depth 0):
-#     ../../docs/modules/<name>.md
-#
-#   From overview (depth 0) to module (depth 0):
-#     docs/modules/<name>.md
-
-
 class DocType(Enum):
-    """Document type for link building."""
-
-    OVERVIEW = "overview"  # docs/00-overview.md, docs/01-architecture.md, etc.
-    SECTION = "section"  # docs/sections/<slug>/index.md
-    MODULE = "module"  # docs/modules/<name>.md
-
-
-def get_doc_depth(doc_type: DocType) -> int:
-    """Get the directory depth for a document type."""
-    if doc_type == DocType.SECTION:
-        return 1  # docs/sections/<slug>/index.md
-    return 0  # docs/*.md, docs/modules/*.md
+    OVERVIEW = "overview"
+    SECTION = "section"
+    MODULE = "module"
 
 
 def build_relative_link(
@@ -1250,78 +998,15 @@ def build_relative_link(
     from_type: DocType | None = None,
     to_type: DocType | None = None,
 ) -> str:
-    """Build a deterministic relative link between documents.
-
-    This replaces hardcoded ../ patterns with correct relative paths
-    based on document types and positions.
-
-    Args:
-        from_doc: The source document path (e.g., 'docs/sections/architecture/index.md')
-        to_doc: The target document path (e.g., 'docs/00-overview.md')
-        from_type: Optional DocType hint for the source document
-        to_type: Optional DocType hint for the target document
-
-    Returns:
-        Correct relative path (e.g., '../../00-overview.md')
-    """
-    # Parse paths to get directory components
-    from_path = Path(from_doc)
-    to_path = Path(to_doc)
-
-    from_parts = from_path.parts
-    to_parts = to_path.parts
-
-    # Find common prefix
+    from_parts = Path(from_doc).parts
+    to_parts = Path(to_doc).parts
     common_len = 0
-    for i in range(min(len(from_parts), len(to_parts))):
-        if from_parts[i] == to_parts[i]:
-            common_len += 1
-        else:
+    for left, right in zip(from_parts, to_parts, strict=False):
+        if left != right:
             break
-
-    # Build relative path
-    # Go up from from_doc's parent directory to common ancestor
-    # The last element in from_parts is the filename, so we subtract 1
-    from_dir_depth = max(0, len(from_parts) - 1 - common_len)
-    down_path = to_parts[common_len:]
-
-    relative = "../" * from_dir_depth + "/".join(down_path)
-
-    # Normalize the path (remove leading ./ if present)
-    if relative.startswith("./"):
-        relative = relative[2:]
-
-    return relative
-
-
-def section_to_overview_link(section_slug: str) -> str:
-    """Build correct relative path from section page to overview doc.
-
-    From: docs/sections/<slug>/index.md
-    To:   docs/00-overview.md
-    Path: ../../00-overview.md
-    """
-    return build_relative_link(
-        f"docs/sections/{section_slug}/index.md",
-        "docs/00-overview.md",
-        DocType.SECTION,
-        DocType.OVERVIEW,
-    )
-
-
-def section_to_section_link(from_slug: str, to_slug: str) -> str:
-    """Build correct relative path from one section to another.
-
-    From: docs/sections/<from_slug>/index.md
-    To:   docs/sections/<to_slug>/index.md
-    Path: ../<to_slug>/index.md
-    """
-    return build_relative_link(
-        f"docs/sections/{from_slug}/index.md",
-        f"docs/sections/{to_slug}/index.md",
-        DocType.SECTION,
-        DocType.SECTION,
-    )
+        common_len += 1
+    relative = "../" * max(0, len(from_parts) - 1 - common_len) + "/".join(to_parts[common_len:])
+    return relative[2:] if relative.startswith("./") else relative
 
 
 def overview_to_section_link(section_slug: str) -> str:
@@ -1337,55 +1022,6 @@ def overview_to_section_link(section_slug: str) -> str:
         DocType.OVERVIEW,
         DocType.SECTION,
     )
-
-
-def overview_to_module_link(module_name: str) -> str:
-    """Build correct relative path from overview to module page.
-
-    From: docs/00-overview.md (or other overview at depth 0)
-    To:   docs/modules/<module_name>.md
-    Path: docs/modules/<module_name>.md
-    """
-    return build_relative_link(
-        "docs/00-overview.md",
-        f"docs/modules/{module_name}.md",
-        DocType.OVERVIEW,
-        DocType.MODULE,
-    )
-
-
-def section_to_module_link(section_slug: str, module_name: str) -> str:
-    """Build correct relative path from section page to module page.
-
-    From: docs/sections/<slug>/index.md
-    To:   docs/modules/<module_name>.md
-    Path: ../../docs/modules/<module_name>.md
-    """
-    return build_relative_link(
-        f"docs/sections/{section_slug}/index.md",
-        f"docs/modules/{module_name}.md",
-        DocType.SECTION,
-        DocType.MODULE,
-    )
-
-
-# Registry of canonical link patterns for validation
-CANONICAL_LINK_PATTERNS: dict[str, str] = {
-    # From section pages (depth 1) to overview (depth 0)
-    "section -> overview": "../../00-overview.md",
-    "section -> architecture": "../../01-architecture.md",
-    "section -> module-map": "../../03-module-map.md",
-    "section -> api-contracts": "../../04-api-contracts.md",
-    "section -> data-model": "../../05-data-model.md",
-    # From overview (depth 0) to section (depth 1)
-    "overview -> section": "sections/{slug}/index.md",
-    # From section (depth 1) to section (depth 1)
-    "section -> section": "../{slug}/index.md",
-    # From overview (depth 0) to module (depth 0)
-    "overview -> module": "docs/modules/{name}.md",
-    # From section (depth 1) to module (depth 0)
-    "section -> module": "../../docs/modules/{name}.md",
-}
 
 
 # =============================================================================

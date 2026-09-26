@@ -260,7 +260,7 @@ def test_claim_floor_uses_constant() -> None:
 
 
 def test_generator_version_is_r20() -> None:
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r23-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r24-")
 
 
 def test_empty_span_rejection_constant() -> None:

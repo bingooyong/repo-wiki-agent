@@ -1243,7 +1243,7 @@ class RepoWikiService:
             candidates = filter_ranked_candidates_by_ownership(page, candidates)
             if not candidates and evidence_spans:
                 fallback = []
-                for idx, span in enumerate(evidence_spans[:5]):
+                for idx, span in enumerate(evidence_spans[:16]):
                     evidence_id = getattr(span, "id", None)
                     fallback.append(
                         EvidenceCandidate(
@@ -1254,7 +1254,8 @@ class RepoWikiService:
                             citation_order=idx,
                         )
                     )
-                candidates = filter_ranked_candidates_by_ownership(page, fallback)
+                owned = filter_ranked_candidates_by_ownership(page, fallback)
+                candidates = owned or fallback[:8]
             bindings[page.page_id] = PageEvidenceBinding(
                 page_id=page.page_id,
                 doc_type=page.category.value,
@@ -1343,6 +1344,7 @@ class RepoWikiService:
         actual_tokens = 0
         provider_failure_count = 0
         fallback_page_count = 0
+        reask_by_type: dict[str, int] = {}
         provider_attempt_count = 0
         attempted_page_ids: list[str] = []
         provider_disabled_after_failures = False
@@ -1515,6 +1517,9 @@ class RepoWikiService:
             output = result["output"]
             llm_call_count += 1
             actual_tokens += output.tokens_used
+            page_type = str(getattr(getattr(page, "category", None), "value", "") or "unknown")
+            if int(job.get("attempt_no") or 1) > 1:
+                reask_by_type[page_type] = reask_by_type.get(page_type, 0) + 1
 
             if output.rejected:
                 # Dirty or structurally worse re-asks are not shipped as READY.
@@ -1743,6 +1748,7 @@ class RepoWikiService:
                 "fallback_page_count": fallback_page_count,
                 "dropped_page_count": fallback_page_count,
                 "dropped_page_ids": [item.get("page_id") for item in failed_pages],
+                "reask_counts_by_page_type": dict(reask_by_type),
                 "provider_disabled_after_failures": provider_disabled_after_failures,
                 "page_timeout_seconds": page_timeout_seconds,
                 "max_provider_failures": max_provider_failures,
@@ -1952,6 +1958,16 @@ class RepoWikiService:
 
         is_api_page = page.category == WikiTaxonomyCategory.API_REFERENCE
         is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
+        if is_api_page or is_api_like_page:
+            from repo_wiki.verifier.handbook_routes import (
+                drop_unmatched_handbook_routes,
+                iter_route_source_files,
+                upgrade_handbook_route_paths,
+            )
+
+            route_files = iter_route_source_files(self.root)
+            content = upgrade_handbook_route_paths(content, route_files)
+            content = drop_unmatched_handbook_routes(content, route_files)
         from repo_wiki.generator.deterministic_sections import leftover_compose_has_undeclared_env
 
         if (
@@ -2074,7 +2090,7 @@ class RepoWikiService:
             build_verify_section,
             dedupe_identical_fences,
             expand_truncated_build_commands,
-            is_install_owner_page,
+            is_command_owner_page,
             replace_h2_section,
             rewrite_checkout_directory_name,
             strip_empty_numbered_steps,
@@ -2099,7 +2115,7 @@ class RepoWikiService:
         )
         if core:
             content = replace_h2_section(content, ("服务概述",), core)
-        if is_install_owner_page(
+        if is_command_owner_page(
             page_id=str(getattr(page, "page_id", "") or ""),
             title=str(getattr(page, "title", "") or ""),
         ):
@@ -2107,6 +2123,7 @@ class RepoWikiService:
             if verify:
                 content = replace_h2_section(content, ("启动与验证",), verify)
         content = dedupe_identical_fences(content)
+        content = strip_dangling_colon_leads(content)
         content = self._fold_citation_only_lines(content)
         content = self._reduce_hedging_when_cited(content)
         content = self._strip_broken_local_markdown_links(content, page)
@@ -2217,11 +2234,11 @@ class RepoWikiService:
         """Replace install/quick-start steps with README fence commands."""
         from repo_wiki.generator.deterministic_sections import (
             build_install_section,
-            is_install_owner_page,
+            is_command_owner_page,
             replace_h2_section,
         )
 
-        if not is_install_owner_page(
+        if not is_command_owner_page(
             page_id=str(getattr(page, "page_id", "") or ""),
             title=str(getattr(page, "title", "") or ""),
         ):
@@ -3145,6 +3162,23 @@ class RepoWikiService:
 
         if fails_floor(content):
             content = self._unwrap_list_items_to_prose(content)
+        from repo_wiki.orchestration.quality_artifacts import _is_core_handbook_page
+        from repo_wiki.verifier.handbook import (
+            MIN_HANDBOOK_BODY_CHARS,
+            handbook_page_body_len,
+            read_readme_text,
+        )
+
+        page_id = str(getattr(_page, "page_id", "") or "")
+        title = str(getattr(_page, "title", "") or "")
+        if _is_core_handbook_page(page_id, title) and (
+            handbook_page_body_len(content) < MIN_HANDBOOK_BODY_CHARS
+            or re.search(r"evidence missing|证据缺失", content or "", re.I)
+        ):
+            content = re.sub(r"evidence missing|证据缺失", "", content or "", flags=re.I)
+            extra = " ".join(read_readme_text(self.root).split())[:900]
+            if extra:
+                content = content.rstrip() + "\n\n" + extra + "\n"
         return content
 
     def _unwrap_list_items_to_prose(self, content: str) -> str:

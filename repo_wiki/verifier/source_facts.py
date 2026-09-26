@@ -501,11 +501,20 @@ def _orm_offenders(text: str, root: Path) -> list[str]:
     if re.search(r"--autogenerate|Autogenerate", text):
         hits.append("orm:autogenerate")
     for match in re.finditer(
-        r"[`'\"]([A-Za-z0-9_./-]+(?:\.|/)models(?:/[A-Za-z0-9_./-]*)?)[`'\"]",
+        r"[`'\"]([A-Za-z0-9_./-]+(?:\.|/)models(?:[./][A-Za-z0-9_./-]*)?)[`'\"]",
         text,
     ):
-        cited = match.group(1).replace(".", "/").rstrip("/")
-        exists = (root / cited).exists()
+        raw = match.group(1).rstrip("/")
+        if "/" in raw or raw.endswith((".py", ".go", ".js", ".ts")):
+            exists = (root / raw).exists()
+        else:
+            parts = [part for part in raw.split(".") if part]
+            as_file = root.joinpath(*parts)
+            exists = (
+                as_file.with_suffix(".py").is_file()
+                or as_file.with_suffix(".js").is_file()
+                or (as_file / "__init__.py").is_file()
+            )
         if not exists:
             hits.append(f"orm:{match.group(1)}")
     return hits

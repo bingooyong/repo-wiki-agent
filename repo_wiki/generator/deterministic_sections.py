@@ -134,11 +134,18 @@ _SECURITY_PATH_TOKENS = ("auth", "jwt", "security", "hmac", "secret", "mtls")
 
 def is_install_owner_page(*, page_id: str = "", title: str = "") -> bool:
     pid = (page_id or "").lower().rsplit("/", 1)[-1]
-    if pid in _INSTALL_SATELLITE_IDS:
-        return False
     if pid in _INSTALL_OWNER_IDS:
         return True
     return any(token in (title or "") for token in ("安装与配置", "安装指南"))
+
+
+def is_command_owner_page(*, page_id: str = "", title: str = "") -> bool:
+    pid = (page_id or "").lower().rsplit("/", 1)[-1]
+    if pid in _INSTALL_OWNER_IDS or pid in _INSTALL_SATELLITE_IDS:
+        return True
+    return any(
+        token in (title or "") for token in ("安装与配置", "安装指南", "快速开始", "快速开始指南")
+    )
 
 
 def is_architecture_owner_page(*, page_id: str = "", title: str = "") -> bool:
@@ -878,15 +885,26 @@ def strip_meta_instructions(content: str) -> str:
 
 def build_install_section(root: Path) -> str:
     """Copy install commands from this repo's docs only. Cite after each fence."""
-    from repo_wiki.verifier.handbook import collect_repo_install_commands
+    from repo_wiki.verifier.handbook import (
+        _PLACEHOLDER_RE,
+        classify_shell_command,
+        collect_repo_install_commands,
+    )
 
-    commands = [item for item in collect_repo_install_commands(root) if item]
+    commands = [
+        item
+        for item in collect_repo_install_commands(root)
+        if item and classify_shell_command(item) == "install"
+    ]
     if not commands:
         return ""
     lines = ["## 安装步骤", ""]
     for index, command in enumerate(commands, start=1):
         cite = cite_readme_line(root, command.split()[0] if command.split() else command)
-        lines.append(f"{index}. `{command}`")
+        label = f"{index}. `{command}`"
+        if _PLACEHOLDER_RE.search(command):
+            label += " （模板）"
+        lines.append(label)
         if cite:
             lines.append(cite)
         lines.extend(["", "```bash", command, "```", ""])
@@ -1220,6 +1238,8 @@ def strip_dangling_colon_leads(content: str) -> str:
                 nxt.startswith(("-", "*", "```", "    ", "\t")) or re.match(r"^\d+\.", nxt)
             )
             if not nxt or nxt.startswith("#") or not continues:
+                if len(line.strip()) < 80:
+                    continue
                 kept.append(re.sub(r"[：:]\s*$", "。", line))
                 continue
         kept.append(line)
@@ -1372,7 +1392,8 @@ def rewrite_checkout_directory_name(content: str, root: Path) -> str:
 
 
 def build_verify_section(root: Path) -> str:
-    """Emit compose healthcheck URLs only. No invented /health or uvicorn."""
+    """Emit compose healthcheck URLs plus real run commands. No invented probes."""
+    from repo_wiki.verifier.handbook import collect_repo_run_commands
     from repo_wiki.verifier.source_facts import load_compose_healthcheck_urls
 
     urls = [
@@ -1380,14 +1401,24 @@ def build_verify_section(root: Path) -> str:
         for item in load_compose_healthcheck_urls(root)
         if item.startswith(("http://", "https://", "curl "))
     ]
-    if not urls:
+    runs = [item for item in collect_repo_run_commands(root) if item]
+    if not urls and not runs:
         return ""
     documented = cite_readme_line(root, "/health") or cite_readme_line(root, "/healthz")
     lines = ["## 启动与验证", ""]
-    for index, target in enumerate(urls, start=1):
+    index = 1
+    for command in runs:
+        cite = cite_readme_line(root, command.split()[0] if command.split() else command)
+        lines.append(f"{index}. `{command}`")
+        if cite:
+            lines.append(cite)
+        lines.extend(["", "```bash", command, "```", ""])
+        index += 1
+    for target in urls:
         curl = target if target.startswith("curl") else f"curl {target}"
         suffix = f" {documented}" if documented else ""
         lines.append(f"{index}. `{curl}`{suffix}")
+        index += 1
     lines.append("")
     return "\n".join(lines)
 
@@ -1496,8 +1527,8 @@ def apply_deterministic_rewrites(
     core = build_core_service_section(root, page_id=page_id, title=title)
     if core:
         text = replace_h2_section(text, ("服务概述",), core)
-    if is_install_owner_page(page_id=page_id, title=title) or (
-        not page_id and title in {"安装与配置", "安装指南"}
+    if is_command_owner_page(page_id=page_id, title=title) or (
+        not page_id and title in {"安装与配置", "安装指南", "快速开始指南"}
     ):
         verify = build_verify_section(root)
         if verify:
@@ -1509,8 +1540,8 @@ def apply_deterministic_rewrites(
             text = replace_h2_section(text, ("API 分组",), "## API 分组\n\n本组接口见 API参考。\n")
     text = strip_invented_join_id_pk(text)
     text = strip_empty_numbered_steps(text)
-    text = strip_dangling_colon_leads(text)
     text = strip_empty_sections_and_footnotes(text)
     text = strip_reader_unresolved_markers(text)
     text = dedupe_identical_fences(text)
+    text = strip_dangling_colon_leads(text)
     return rebuild_toc_from_h2s(text)

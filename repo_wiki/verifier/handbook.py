@@ -77,6 +77,61 @@ def handbook_page_is_fallback_stub(markdown: str) -> bool:
     return any(marker in (markdown or "") for marker in _FALLBACK_STUB_MARKERS)
 
 
+_CORE_PAGE_STEMS = frozenset(
+    {
+        "project-overview",
+        "项目概述",
+        "installation",
+        "安装与配置",
+        "安装指南",
+        "quick-start",
+        "quickstart",
+        "快速开始",
+        "快速开始指南",
+        "api-overview",
+        "api-reference",
+        "api参考",
+        "data-models-overview",
+        "data-model",
+        "data-models",
+        "数据模型",
+    }
+)
+_STUB_MISSING_RE = re.compile(r"evidence missing|证据缺失", re.I)
+_APPENDIX_HEAD_RE = re.compile(r"附录|清单|checklist|appendix", re.I)
+
+
+def _core_page_type(path: Path) -> str:
+    return path.stem.replace("\\", "/").lower()
+
+
+def core_page_is_stub(markdown: str) -> list[str]:
+    text = markdown or ""
+    reasons: list[str] = []
+    if handbook_page_body_len(text) < MIN_HANDBOOK_BODY_CHARS:
+        reasons.append("under-floor")
+    if _STUB_MISSING_RE.search(text):
+        reasons.append("evidence-missing")
+    headings = [
+        item.strip() for item in re.findall(r"^##\s+(.+)$", text, re.M) if item.strip() != "目录"
+    ]
+    if headings and all(_APPENDIX_HEAD_RE.search(item) for item in headings):
+        reasons.append("appendix-only")
+    return reasons
+
+
+def core_page_stub_offenders(content_dir: Path | None) -> dict[str, list[str]]:
+    found: dict[str, list[str]] = {}
+    for path in iter_markdown_pages(content_dir):
+        stem = _core_page_type(path)
+        if stem not in _CORE_PAGE_STEMS:
+            continue
+        reasons = core_page_is_stub(path.read_text(encoding="utf-8", errors="ignore"))
+        if reasons:
+            found[stem] = reasons
+    return found
+
+
 _README_NAMES = ("README.md", "README.rst", "README.txt", "README")
 _OVERVIEW_PAGE_TOKENS = ("project-overview", "项目概述")
 _INSTALL_PAGE_TOKENS = ("installation", "安装指南", "安装与配置")
@@ -131,12 +186,8 @@ def contains_generator_meta(markdown: str) -> bool:
 
 
 def has_unclosed_fence(markdown: str) -> bool:
-    """Return True when a ``` fenced code block is opened and never closed."""
-    in_fence = False
-    for line in markdown.splitlines():
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
-    return in_fence
+    """True when CommonMark leaves a fence open. Trailing text is not a closer."""
+    return commonmark_fence_is_unclosed(markdown)
 
 
 def is_page_timeout_rejection(reason: str | None) -> bool:
@@ -314,18 +365,18 @@ def iter_fenced_code_bodies(markdown: str) -> list[str]:
     buf: list[str] = []
     for line in markdown.splitlines():
         stripped = line.strip()
-        if stripped.startswith("```"):
-            if not in_fence:
-                in_fence = True
-                info = stripped[3:].strip()
-                lang = info.split()[0].lower() if info else ""
-                buf = []
-            else:
-                if lang != "mermaid":
-                    bodies.append("\n".join(buf))
-                in_fence = False
-                lang = ""
-                buf = []
+        if not in_fence and stripped.startswith("```"):
+            in_fence = True
+            info = stripped[3:].strip()
+            lang = info.split()[0].lower() if info else ""
+            buf = []
+            continue
+        if in_fence and _commonmark_fence_close(line):
+            if lang != "mermaid":
+                bodies.append("\n".join(buf))
+            in_fence = False
+            lang = ""
+            buf = []
             continue
         if in_fence:
             buf.append(line)
@@ -810,7 +861,6 @@ _SHELL_START_RE = re.compile(
     r"npx|openssl|mkdir|chmod|source|set|\./)",
     re.I,
 )
-_RUN_CMD_RE = re.compile(r"\b(?:pytest|npm test|pnpm test|yarn test|go test|make test)\b", re.I)
 _PLACEHOLDER_RE = re.compile(r"[{<][A-Za-z_][A-Za-z0-9_-]*[>}]")
 _REPO_INSTALL_LINE_PATTERNS = (
     re.compile(r"docker(?:-|\s+)compose", re.I),
@@ -822,12 +872,37 @@ _REPO_INSTALL_LINE_PATTERNS = (
 )
 
 
+def classify_shell_command(command: str) -> str:
+    text = " ".join((command or "").split()).lower()
+    if re.search(
+        r"\b(?:rm\s+-rf|dropdb|drop\s+database|"
+        r"(?:docker(?:-|\s+)compose|podman-compose)\s+down|"
+        r"migrate\s+down|alembic\s+downgrade)\b",
+        text,
+    ):
+        return "destructive"
+    if re.search(r"\b(?:pytest|npm test|pnpm test|yarn test|go test|make test)\b", text):
+        return "test"
+    if re.search(r"\b(?:ruff|eslint|prettier|black|isort|gofmt|flake8|mypy)\b", text):
+        return "lint"
+    if re.search(
+        r"\b(?:uvicorn|gunicorn|npm (?:start|run)|pnpm (?:dev|start)|yarn (?:dev|start)|"
+        r"go run|(?:docker(?:-|\s+)compose|podman-compose)\s+up|"
+        r"make (?:up|run|start|serve))\b",
+        text,
+    ):
+        return "run"
+    return "install"
+
+
+def _strip_shell_comment(line: str) -> str:
+    return re.sub(r"\s+#\s.*$", "", line or "")
+
+
 def _is_rejected_shell_line(line: str) -> bool:
     if not line or line.startswith("#") or line.startswith(("or ", "OR ")):
         return True
     if _MAKE_JUNK_RE.search(line):
-        return True
-    if _PLACEHOLDER_RE.search(line):
         return True
     if " " not in line and not line.startswith("./") and "/" not in line:
         return True
@@ -857,7 +932,7 @@ def extract_readme_shell_commands(text: str) -> list[str]:
     def _take(raw: str) -> None:
         if raw.startswith("\t"):
             return
-        line = _PROMPT_RE.sub("", raw.strip())
+        line = _strip_shell_comment(_PROMPT_RE.sub("", raw.strip()))
         if _is_rejected_shell_line(line):
             return
         key = line.casefold()
@@ -902,45 +977,112 @@ def install_steps_invalid_reason(content: str) -> str | None:
     return None
 
 
+def _commonmark_fence_close(line: str, opener_len: int = 3) -> bool:
+    raw = (line or "").rstrip("\n")
+    indent = len(raw) - len(raw.lstrip(" "))
+    if indent > 3:
+        return False
+    body = raw.lstrip(" ")
+    ticks = 0
+    while ticks < len(body) and body[ticks] == "`":
+        ticks += 1
+    return ticks >= opener_len and body[ticks:].strip() == ""
+
+
+def commonmark_fence_is_unclosed(markdown: str) -> bool:
+    in_fence = False
+    opener = 3
+    for line in (markdown or "").splitlines():
+        if not in_fence:
+            stripped = line.lstrip(" ")
+            indent = len(line) - len(stripped)
+            if indent > 3 or not stripped.startswith("```"):
+                continue
+            ticks = 0
+            while ticks < len(stripped) and stripped[ticks] == "`":
+                ticks += 1
+            if ticks >= 3:
+                in_fence = True
+                opener = ticks
+            continue
+        if _commonmark_fence_close(line, opener):
+            in_fence = False
+    return in_fence
+
+
+def dangling_colon_lead_ins(markdown: str) -> list[str]:
+    """Sentences that end in a colon and are not followed by a command."""
+    lines = (markdown or "").splitlines()
+    found: list[str] = []
+    for index, line in enumerate(lines):
+        if not re.search(r"[：:]\s*$", line):
+            continue
+        nxt = next((item for item in lines[index + 1 :] if item.strip()), "")
+        if nxt.startswith(("-", "*", "```", "    ", "\t")) or re.match(r"^\d+\.", nxt):
+            continue
+        found.append(line.strip())
+    return found
+
+
 def install_page_render_errors(markdown: str) -> list[str]:
-    """Rendered install pages: balanced fences, 1..N steps, no cite inside code."""
+    """CommonMark-rendered command pages: closed fences, 1..N steps, no cite in code."""
     text = markdown or ""
     errors: list[str] = []
-    if text.count("```") % 2:
-        errors.append("unbalanced-fences")
-    fenced = list(_FENCE_RE.findall(text))
-    if any("<cite>" in block for _lang, block in fenced):
-        errors.append("cite-inside-code")
-    stripped = _FENCE_RE.sub(" ", text)
-    if any("<cite>" in span for span in re.findall(r"`([^`\n]*)`", stripped)):
-        errors.append("cite-inside-code")
-    heading = re.search(r"^##\s+安装步骤\s*$", text, re.M)
-    region = text
-    if heading:
-        rest = text[heading.end() :]
-        nxt = re.search(r"^##\s+", rest, re.M)
-        region = rest[: nxt.start()] if nxt else rest
-    steps = re.findall(r"^(\d+)\.\s+`([^`]+)`", region, re.M)
-    numbers = [int(item[0]) for item in steps]
-    if numbers and numbers != list(range(1, len(numbers) + 1)):
-        errors.append("step-number-gap")
-    fences = [block.strip() for _lang, block in _FENCE_RE.findall(region)]
-    commands = [cmd.strip() for _num, cmd in steps]
-    if commands and fences and commands != fences[: len(commands)]:
-        errors.append("step-fence-mismatch")
-    return errors
+    tokens = []
+    try:
+        from markdown_it import MarkdownIt
+
+        tokens = MarkdownIt("commonmark").parse(text)
+    except Exception:
+        tokens = []
+
+    def _walk(items: list[object]) -> None:
+        for tok in items:
+            kind = getattr(tok, "type", "")
+            content = getattr(tok, "content", "") or ""
+            if kind == "fence":
+                if "<cite>" in content:
+                    errors.append("cite-inside-code")
+                if any(re.match(r"^`{3,}\s+\S", line) for line in content.splitlines()):
+                    errors.append("unclosed-fence")
+            if kind == "code_inline":
+                if "<cite>" in content:
+                    errors.append("cite-inside-code")
+                if not content.strip():
+                    errors.append("empty-inline-code")
+            children = getattr(tok, "children", None)
+            if children:
+                _walk(children)
+
+    if tokens:
+        _walk(tokens)
+    if commonmark_fence_is_unclosed(text):
+        errors.append("unclosed-fence")
+    for part in re.split(r"(?=^##\s+)", text, flags=re.M):
+        steps = re.findall(r"^(\d+)\.\s+`([^`]+)`", part, re.M)
+        numbers = [int(item[0]) for item in steps]
+        if numbers and numbers != list(range(1, len(numbers) + 1)):
+            errors.append("step-number-gap")
+        fences = [block.strip() for _lang, block in _FENCE_RE.findall(part)]
+        commands = [cmd.strip() for _num, cmd in steps]
+        if commands and fences and commands != fences[: len(commands)]:
+            errors.append("step-fence-mismatch")
+    if dangling_colon_lead_ins(text):
+        errors.append("dangling-lead-in")
+    return list(dict.fromkeys(errors))
 
 
-def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
-    """Collect install/run commands from this repo's README fences, in source order."""
+def _collect_repo_commands(root: Path, *classes: str) -> list[str]:
+    """Collect README/Makefile commands, classified, with no count cap."""
     commands: list[str] = []
     seen: set[str] = set()
+    allowed = set(classes)
 
     def _add(command: str) -> None:
         text = " ".join(command.split()).strip()
         if not text or _GENERIC_GO_INSTALL.search(text):
             return
-        if _RUN_CMD_RE.search(text):
+        if classify_shell_command(text) not in allowed:
             return
         key = text.casefold()
         if key in seen:
@@ -971,7 +1113,18 @@ def collect_repo_install_commands(root: Path, limit: int = 12) -> list[str]:
     )
     if has_compose:
         commands = [item for item in commands if "./bin/" not in item]
-    return commands[:limit]
+    return commands
+
+
+def collect_repo_install_commands(root: Path, limit: int | None = None) -> list[str]:
+    """Collect install and run commands. No implicit cap; callers may still slice."""
+    commands = _collect_repo_commands(root, "install", "run")
+    return commands if limit is None else commands[:limit]
+
+
+def collect_repo_run_commands(root: Path) -> list[str]:
+    """Collect run/dev commands. Never truncated."""
+    return _collect_repo_commands(root, "run")
 
 
 def architecture_core_packages(repo_root: Path) -> list[str]:
@@ -1075,6 +1228,7 @@ _ODM_SCHEMA_RE = re.compile(
     r"(?:(?:const|let|var|export\s+(?:const|let|var))\s+)?([A-Z][A-Za-z0-9_]*)\s*=\s*"
     r"(?:new\s+)?(?:\w+\.)?Schema\s*\("
 )
+_ODM_MODEL_RE = re.compile(r"""(?:mongoose\s*\.\s*)?model\(\s*['\"]([^'\"]+)['\"]\s*,\s*(\w+)""")
 _CLASS_RE = re.compile(r"^class\s+([A-Z][A-Za-z0-9_]+)\s*(?:\(([^)]*)\))?", re.M)
 _TABLE_TRUE_RE = re.compile(r"\btable\s*=\s*True\b")
 _TABLENAME_RE = re.compile(r"__tablename__\s*=")
@@ -1139,8 +1293,14 @@ def discover_model_classes(repo_root: Path) -> list[tuple[str, str]]:
             if any(part in {"tests", "test", "__tests__"} for part in path.parts):
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
-            for match in _ODM_SCHEMA_RE.finditer(text):
-                found.append((match.group(1), rel))
+            schemas = {match.group(1) for match in _ODM_SCHEMA_RE.finditer(text)}
+            registered = list(_ODM_MODEL_RE.finditer(text))
+            if registered:
+                for match in registered:
+                    found.append((match.group(1), rel))
+            else:
+                for name in schemas:
+                    found.append((name, rel))
     for path in repo_root.rglob("*.go"):
         if any(part in _SKIP_DISCOVERY_DIRS for part in path.parts) or path.name.endswith(
             "_test.go"
@@ -1183,6 +1343,8 @@ def model_definition_cite_offenders(markdown: str, repo_root: Path) -> list[str]
     """Each discovered model must be cited at its definition line range."""
     cited = [match.group(1).replace("\\", "/") for match in _CITE_RE.finditer(markdown or "")]
     bad: list[str] = []
+    if re.search(r"declared in source|源码中声明", markdown or "", re.I):
+        bad.append("placeholder-cell")
     for name, rel in discover_model_classes(repo_root):
         if any(part in {"tests", "test", "__tests__"} for part in Path(rel).parts):
             continue

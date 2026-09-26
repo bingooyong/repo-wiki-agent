@@ -424,7 +424,7 @@ def test_prompt_does_not_invite_evidence_meta() -> None:
     assert "证据状态" not in text
     assert "只写能从证据核对的事实" not in text
     assert LLMPageComposer
-    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r23-")
+    assert COMPOSER_GENERATOR_VERSION.startswith("handbook-r24-")
 
 
 def test_source_facts_skip_lists_are_pinned() -> None:

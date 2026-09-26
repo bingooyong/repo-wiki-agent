@@ -146,8 +146,10 @@ def _is_product_sentence(text: str | None) -> bool:
         return False
     if _RST_FIELD_LIST_RE.match(stripped) or _RST_SUBSTITUTION_LINE_RE.fullmatch(stripped):
         return False
+    if re.match(r"^(?:desc|description)\s*:", stripped, flags=re.I):
+        return False
     if re.search(
-        r"more modern|other repositories|can be found in|changelog"
+        r"more modern|other repositories|can be found in|changelog|release[- ]notes?"
         r"|^(?:first,|then |run |set environment|create database|for example using|a stray \d)",
         stripped,
         flags=re.I,
@@ -237,7 +239,14 @@ def _readme_visible_lines(content: str) -> list[str]:
             continue
         if in_note_block:
             continue
-        if _ARCHIVED_LINE_RE.search(stripped) or _CHANGELOG_BULLET_RE.match(stripped):
+        if (
+            _ARCHIVED_LINE_RE.search(stripped)
+            or _CHANGELOG_BULLET_RE.match(stripped)
+            or re.match(r"^(?:desc|description)\s*:", stripped, flags=re.I)
+            or re.match(
+                r"^#+\s*(?:changelog|change\s*log|release[- ]notes?)\b", stripped, flags=re.I
+            )
+        ):
             continue
         heading = stripped.lstrip("#").strip()
         if heading and (
