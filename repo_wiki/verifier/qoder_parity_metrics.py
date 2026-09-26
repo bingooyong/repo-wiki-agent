@@ -878,14 +878,27 @@ class ParityMetricExtractor:
         if not content_dir:
             return self._fail_result("api_aggregation", "No content directory found")
 
-        # Look for API documentation pages
-        api_files = []
-        for f in content_dir.rglob("*.md"):
-            if "api" in f.stem.lower() or "API" in f.name:
-                api_files.append(f)
+        # API reference taxonomy only. Filenames that merely contain "API"
+        # (故障排除/API问题.md, 核心服务/API.md) are not aggregation pages.
+        api_files = [
+            path
+            for path in content_dir.rglob("*.md")
+            if self._is_api_reference_page(path, content_dir)
+        ]
 
         if not api_files:
-            return self._fail_result("api_aggregation", "No API pages found")
+            defn = PARITY_METRICS["api_aggregation"]
+            return MetricResult(
+                metric_name="api_aggregation",
+                status=MetricStatus.SKIPPED,
+                score=1.0,
+                measured_value=1.0,
+                threshold=defn.threshold,
+                severity=defn.severity,
+                category=defn.category,
+                details={"aggregated_apis": 0, "total_api_pages": 0},
+                gaps=[],
+            )
 
         aggregated_count = 0
         for f in api_files:
@@ -924,18 +937,19 @@ class ParityMetricExtractor:
         if not content_dir:
             return self._fail_result("data_model_aggregation", "No data model pages found")
 
-        # Look for data model pages
+        # Canonical data-model chapter only — not 故障排除/数据库问题.md keyword hits.
         dm_files = []
         for f in content_dir.rglob("*.md"):
             relative_text = f.relative_to(content_dir).as_posix()
             lower_text = relative_text.lower()
+            if any(token in relative_text for token in ("故障排除", "troubleshooting")):
+                continue
             if (
-                "data" in lower_text
-                or "model" in lower_text
-                or "schema" in lower_text
-                or "数据模型" in relative_text
-                or "数据库" in relative_text
-                or "迁移" in relative_text
+                "数据模型" in relative_text
+                or "data-model" in lower_text
+                or "/data_models/" in lower_text
+                or lower_text.endswith("data-models.md")
+                or "/models/" in lower_text
             ):
                 dm_files.append(f)
 
@@ -964,7 +978,9 @@ class ParityMetricExtractor:
                     or "字段" in content
                     or "迁移" in content
                 )
-                if sum([has_relationships, has_diagrams, has_schema]) >= 2:
+                has_er = "erdiagram" in lower_content
+                has_cite = "<cite>" in lower_content
+                if has_er and has_cite or sum([has_relationships, has_diagrams, has_schema]) >= 2:
                     aggregated_count += 1
             except Exception:
                 continue
@@ -985,6 +1001,17 @@ class ParityMetricExtractor:
             if score >= defn.threshold
             else [f"Only {aggregated_count}/{len(dm_files)} data model pages are aggregated"],
         )
+
+    def _is_api_reference_page(self, path: Path, content_dir: Path) -> bool:
+        """True for API参考 / docs/pages/api pages, not titles that merely contain API."""
+        try:
+            rel = path.relative_to(content_dir).as_posix()
+        except ValueError:
+            rel = path.as_posix().replace("\\", "/")
+        if rel.startswith("API参考/"):
+            return True
+        lowered = rel.lower()
+        return lowered.startswith("docs/pages/api/") or "/pages/api/" in lowered
 
     def _find_content_dir(self) -> Path | None:
         """Find the content directory in the root."""

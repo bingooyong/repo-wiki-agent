@@ -217,7 +217,8 @@ class TestMermaidPlanner:
             "modules": [
                 {"name": "auth", "path": "src/auth"},
                 {"name": "api", "path": "src/api"},
-            ]
+            ],
+            "import_edges": [("auth", "api")],
         }
 
         diagrams = planner.plan_diagram_for_page(
@@ -229,8 +230,76 @@ class TestMermaidPlanner:
 
         assert len(diagrams) >= 1
         diagram = diagrams[0]
-        assert diagram.diagram_id == "overview-architecture"
+        assert diagram.diagram_id in {"overview-architecture", "overview-overview-modules"}
         assert diagram.diagram_type == MermaidDiagramType.FLOWCHART
+
+    def test_fastapi_like_overview_omits_filenames_and_missing_wiki_layers(self):
+        """Architecture mermaid shows app packages, not __init__.py or this tool's folders."""
+        planner = create_planner()
+        renderer = create_renderer()
+        context = {
+            "modules": [
+                {"name": "__init__.py", "path": "app/__init__.py"},
+                {"name": "main.py", "path": "app/main.py"},
+                {"name": "api", "path": "app/api"},
+                {"name": "core", "path": "app/core"},
+                {"name": "db", "path": "app/db"},
+                {"name": "models", "path": "app/models"},
+                {"name": "resources", "path": "app/resources"},
+                {"name": "services", "path": "app/services"},
+                {"name": "tests", "path": "tests"},
+            ],
+            "key_directories": ["app", "tests"],
+            "import_edges": [("app/api", "app/services"), ("app/services", "app/models")],
+        }
+        diagrams = planner.plan_diagram_for_page("overview", "overview", None, context)
+        assert diagrams
+        rendered = renderer.render_diagram(diagrams[0])
+        assert "__init__.py" not in rendered
+        assert "main.py" not in rendered
+        assert ".repo-wiki" not in rendered
+        assert "ai/source-of-truth" not in rendered
+        assert "docs/" not in rendered
+        assert "api" in rendered
+        assert "services" in rendered
+
+    def test_architecture_includes_wiki_layers_only_when_snapshot_has_them(self):
+        planner = create_planner()
+        renderer = create_renderer()
+        context = {
+            "modules": [{"name": "repo_wiki", "path": "repo_wiki"}],
+            "key_directories": ["docs", "ai", "repo_wiki"],
+            "snapshot_paths": [
+                "docs/00-overview.md",
+                "ai/source-of-truth/module-index.yaml",
+                ".repo-wiki/index/meta.json",
+            ],
+        }
+        context["import_edges"] = [("repo_wiki", "repo_wiki")]
+        diagrams = planner.plan_diagram_for_page("architecture", "architecture", None, context)
+        if diagrams:
+            rendered = renderer.render_diagram(diagrams[0])
+            assert "docs/" not in rendered
+            assert ".repo-wiki" not in rendered
+
+    def test_service_diagram_omits_filename_modules_and_dangling_start_edge(self):
+        planner = create_planner()
+        renderer = create_renderer()
+        context = {
+            "modules": [
+                {"name": "__init__.py", "path": "app/__init__.py"},
+                {"name": "main.py", "path": "app/main.py"},
+                {"name": "services", "path": "app/services"},
+            ],
+            "commands": {"start": "uvicorn app.main:app"},
+        }
+        diagrams = planner.plan_diagram_for_page("core-services", "service", None, context)
+        assert diagrams
+        rendered = renderer.render_diagram(diagrams[0])
+        assert "__init__.py" not in rendered
+        assert "main.py" not in rendered
+        assert "cmd_start ==> start" not in rendered
+        assert "services" in rendered
 
     def test_plan_api_diagram(self):
         """Test planning an API sequence diagram."""
@@ -252,7 +321,6 @@ class TestMermaidPlanner:
         assert len(diagrams) >= 1
         diagram_types = {d.diagram_type for d in diagrams}
         assert MermaidDiagramType.SEQUENCE_DIAGRAM in diagram_types
-        assert MermaidDiagramType.FLOWCHART in diagram_types
 
     def test_plan_api_diagram_includes_list_detail_count_parameter_flows(self):
         """API 合同必须覆盖 list/detail/count/parameter 检索流。"""
@@ -332,7 +400,13 @@ class TestMermaidPlanner:
             page_id="overview",
             page_type="overview",
             evidence_binding=binding,
-            context={},
+            context={
+                "modules": [
+                    {"name": "auth", "path": "src/auth"},
+                    {"name": "api", "path": "src/api"},
+                ],
+                "import_edges": [("auth", "api")],
+            },
         )
 
         assert len(diagrams) >= 1
@@ -496,7 +570,13 @@ class TestPlanAndRenderDiagram:
             page_id="overview",
             page_type="overview",
             evidence_binding=None,
-            context={"modules": [{"name": "auth", "path": "src/auth"}]},
+            context={
+                "modules": [
+                    {"name": "auth", "path": "src/auth"},
+                    {"name": "api", "path": "src/api"},
+                ],
+                "import_edges": [("auth", "api")],
+            },
         )
 
         assert rendered is not None

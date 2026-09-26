@@ -14,6 +14,7 @@ from repo_wiki.orchestration.eval_layout import (
     generate_manifest,
     get_eval_output_layout_contract,
     get_eval_profile,
+    override_eval_profile_root,
     reject_unsafe_output_root,
     resolve_revision_with_fallback,
     validate_eval_root_safety,
@@ -98,6 +99,23 @@ class TestEvalProfilesRegistry:
     def test_get_unknown_returns_default(self):
         profile = get_eval_profile("nonexistent")
         assert profile.name == "default"
+
+    def test_qoder_like_output_eval_root_keeps_runs_bucket(self):
+        """`--output .repo-agent-eval` is the isolation root, not a replacement for /runs."""
+        profile = override_eval_profile_root(get_eval_profile("qoder-like"), ".repo-agent-eval")
+        assert Path(profile.root).as_posix().replace("\\", "/").endswith(".repo-agent-eval/runs")
+        assert profile.content_subdir == "repowiki/zh/content"
+
+    def test_qoder_like_output_already_runs_does_not_double_nest(self):
+        profile = override_eval_profile_root(
+            get_eval_profile("qoder-like"), ".repo-agent-eval/runs"
+        )
+        assert Path(profile.root).as_posix().replace("\\", "/").endswith(".repo-agent-eval/runs")
+        assert not Path(profile.root).as_posix().replace("\\", "/").endswith("runs/runs")
+
+    def test_default_profile_output_does_not_force_runs(self):
+        profile = override_eval_profile_root(get_eval_profile("default"), ".repo-agent-eval")
+        assert Path(profile.root).as_posix().replace("\\", "/") == ".repo-agent-eval"
 
 
 class TestEvalManifestFile:

@@ -26,7 +26,7 @@ class TestLLMProviderConfig:
         assert config.model == "gpt-4o-mini"
         assert config.base_url is None
         assert config.api_key_env == "OPENAI_API_KEY"
-        assert config.max_tokens == 4096
+        assert config.max_tokens == 16384
         assert config.temperature == 0.7
         assert config.timeout == 60.0
         assert config.max_retries == 3

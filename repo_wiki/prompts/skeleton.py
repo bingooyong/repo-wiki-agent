@@ -198,6 +198,34 @@ OPS_HEADING_CONTRACT = HeadingContract(
     toc_depth=2,
 )
 
+# Handbook install / quick-start / setup page heading contract
+INSTALL_HEADING_CONTRACT = HeadingContract(
+    page_type="install",
+    sections=(
+        HeadingSection("这是什么", "## 这是什么", 2, required=True, min_prose_chars=80),
+        HeadingSection("环境要求", "## 环境要求", 2, required=True, min_prose_chars=40),
+        HeadingSection("安装步骤", "## 安装步骤", 2, required=True, min_prose_chars=80),
+        HeadingSection("启动与验证", "## 启动与验证", 2, required=True, min_prose_chars=50),
+        HeadingSection("常见问题", "## 常见问题", 2, required=True, min_prose_chars=40),
+    ),
+    toc_required=True,
+    toc_depth=2,
+)
+
+# Handbook project-overview page heading contract (not an install recipe)
+HANDBOOK_OVERVIEW_HEADING_CONTRACT = HeadingContract(
+    page_type="handbook-overview",
+    sections=(
+        HeadingSection("这是什么", "## 这是什么", 2, required=True, min_prose_chars=80),
+        HeadingSection("能做什么", "## 能做什么", 2, required=True, min_prose_chars=60),
+        HeadingSection("仓库怎么组织", "## 仓库怎么组织", 2, required=True, min_prose_chars=60),
+        HeadingSection("建议阅读顺序", "## 建议阅读顺序", 2, required=True, min_prose_chars=40),
+        HeadingSection("常见误解", "## 常见误解", 2, required=True, min_prose_chars=40),
+    ),
+    toc_required=True,
+    toc_depth=2,
+)
+
 # Development page heading contract
 DEVELOPMENT_HEADING_CONTRACT = HeadingContract(
     page_type="development",
@@ -223,6 +251,8 @@ HEADING_CONTRACTS: dict[str, HeadingContract] = {
     "entity": ENTITY_HEADING_CONTRACT,
     "ops": OPS_HEADING_CONTRACT,
     "development": DEVELOPMENT_HEADING_CONTRACT,
+    "install": INSTALL_HEADING_CONTRACT,
+    "handbook-overview": HANDBOOK_OVERVIEW_HEADING_CONTRACT,
 }
 
 
@@ -230,7 +260,7 @@ def get_heading_contract(page_type: str) -> HeadingContract:
     """Get heading contract for a page type.
 
     Args:
-        page_type: Page type string (overview, service, api, data, entity, ops, development)
+        page_type: Page type string (overview, service, api, data, entity, ops, development, install)
 
     Returns:
         HeadingContract for the page type
@@ -315,7 +345,7 @@ class SkeletonBuilder:
         """Initialize builder for a page type.
 
         Args:
-            page_type: The page type (overview, service, api, data, entity, ops, development)
+            page_type: The page type (overview, service, api, data, entity, ops, development, install)
         """
         self.page_type = page_type
         self._contract = get_heading_contract(page_type)
@@ -425,7 +455,7 @@ def build_skeleton(
     """Convenience function to build an article skeleton.
 
     Args:
-        page_type: Page type (overview, service, api, data, entity, ops, development)
+        page_type: Page type (overview, service, api, data, entity, ops, development, install)
         title: Article title
         **context: Template context
 

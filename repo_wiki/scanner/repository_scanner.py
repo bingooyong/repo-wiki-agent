@@ -29,13 +29,21 @@ from repo_wiki.core.security import (
 )
 from repo_wiki.scanner.artifacts import is_product_source_path, path_role_for
 from repo_wiki.scanner.fastapi_routes import extract_fastapi_endpoints
+from repo_wiki.scanner.go_routes import (
+    extract_go_data_models,
+    extract_go_endpoints,
+    extract_sql_foreign_keys,
+    go_quoted_imports,
+    handle_func_method,
+    is_go_test_path,
+)
 
 _CODE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".kt"}
 _MODEL_FILE_HINTS = ("model", "schema", "entity", "dto", "migration", "alembic")
 _MODULE_ROOT_HINTS = {"src", "app", "apps", "services", "modules", "internal", "cmd"}
-_HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
+_HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ANY")
 _HTTP_METHOD_LITERALS: dict[
-    str, Literal["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
+    str, Literal["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ANY"]
 ] = {
     "GET": "GET",
     "POST": "POST",
@@ -44,6 +52,7 @@ _HTTP_METHOD_LITERALS: dict[
     "DELETE": "DELETE",
     "OPTIONS": "OPTIONS",
     "HEAD": "HEAD",
+    "ANY": "ANY",
 }
 
 # Domain classification signals
@@ -53,9 +62,11 @@ _DOMAIN_SIGNALS: dict[str, tuple[frozenset[str], float]] = {
         frozenset({"repo_wiki", "core", "shared", "common", "base", "foundation"}),
         0.8,
     ),
-    # AI/ML services
+    # AI/ML services. "model"/"graph" are too broad (GORM packages, any graph) so omitted.
     "ai-services": (
-        frozenset({"ai", "ml", "model", "embedding", "vector", "indexer", "retrieval", "graph"}),
+        frozenset(
+            {"ai", "ml", "embedding", "vector", "indexer", "retrieval", "langchain", "llm", "rag"}
+        ),
         0.9,
     ),
     # API and HTTP handling
@@ -113,6 +124,17 @@ _RUNTIME_ROLE_SIGNALS: dict[str, tuple[frozenset[str], float]] = {
     "tooling": (frozenset({"script", "cli", "cmd", "bin", "main"}), 0.8),
     "test-harness": (frozenset({"test", "spec", "fixture", "mock", "assert"}), 0.8),
 }
+
+
+def _keyword_in_signals(keyword: str, signals: str) -> bool:
+    """Match long tokens as substrings; short tokens like ``ai`` as whole words."""
+    key = keyword.lower()
+    blob = signals.lower()
+    if not key:
+        return False
+    if len(key) <= 3:
+        return re.search(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", blob) is not None
+    return key in blob
 
 
 @dataclass
@@ -249,6 +271,9 @@ class RepositoryScanner:
             ".qoder",
             ".repo-agent-eval",
             ".repo-wiki",
+            ".trellis",
+            ".trae",
+            ".cursor",
             ".git",
             "node_modules",
             "target",
@@ -318,7 +343,9 @@ class RepositoryScanner:
     ) -> RepositoryInfo:
         name = self.config.project.name
         if name == "auto":
-            name = self.root.name
+            from repo_wiki.generator.compose_evidence import derive_product_name
+
+            name = derive_product_name(self.root) or self.root.name
         language = self._detect_language(scanned_files)
         framework = self._detect_framework(scanned_files)
         package_manager = self._detect_package_manager()
@@ -411,8 +438,14 @@ class RepositoryScanner:
                         commands[key] = f"make {key}"
 
         language = self._detect_language(files)
+        has_root_go_mod = any(file.path.as_posix() == "go.mod" for file in files)
+        if has_root_go_mod or language == "go":
+            go_commands = self._extract_go_commands(files, makefile)
+            for key, value in go_commands.items():
+                if value:
+                    commands[key] = value
         fallback = {
-            "python": {"start": "python -m app", "test": "pytest -q", "lint": "ruff check ."},
+            "python": {"test": "pytest -q", "lint": "ruff check ."},
             "typescript": {
                 "start": "npm run start",
                 "build": "npm run build",
@@ -425,17 +458,45 @@ class RepositoryScanner:
                 "test": "npm run test",
                 "lint": "npm run lint",
             },
-            "go": {
-                "start": "go run ./cmd/...",
-                "build": "go build ./...",
-                "test": "go test ./...",
-                "lint": "golangci-lint run",
-            },
         }.get(language, {})
         for key, value in fallback.items():
             if not commands[key]:
                 commands[key] = value
         return commands
+
+    def _extract_go_commands(
+        self, files: list[ScannedFile], makefile: ScannedFile | None
+    ) -> dict[str, str]:
+        """Use Makefile recipes and ``cmd/*/main.go`` only — never invent ``go run .``."""
+        found: dict[str, str] = {}
+        if makefile:
+            for raw in makefile.text.splitlines():
+                line = raw.split("#", 1)[0].strip()
+                if not line or line.endswith(":"):
+                    continue
+                if re.search(r"\bgo\s+build\b", line) and "build" not in found:
+                    found["build"] = " ".join(line.split())
+                if (
+                    re.search(r"\b(?:podman-compose|docker-compose|go\s+run)\b", line)
+                    and "start" not in found
+                ):
+                    found["start"] = " ".join(line.split())
+                if re.search(r"\bgo\s+test\b", line) and "test" not in found:
+                    found["test"] = " ".join(line.split())
+            if "build" not in found and re.search(r"^install:", makefile.text, re.M):
+                found["build"] = "make install"
+            if "start" not in found and re.search(r"^(?:up|run|start):", makefile.text, re.M):
+                found["start"] = (
+                    "make up" if re.search(r"^up:", makefile.text, re.M) else "make run"
+                )
+        if "build" not in found:
+            for file in files:
+                rel = file.path.as_posix()
+                if rel.startswith("cmd/") and file.path.name == "main.go":
+                    name = file.path.parent.name
+                    found["build"] = f"go build -o bin/{name} ./{rel}"
+                    break
+        return found
 
     def _detect_entry_points(self, files: list[ScannedFile], commands: dict[str, str]) -> list[str]:
         entries: set[str] = set()
@@ -526,20 +587,42 @@ class RepositoryScanner:
         ]
         fastapi_endpoints = extract_fastapi_endpoints(python_files)
         fastapi_files = {item.file_path for item in fastapi_endpoints}
-        for item in fastapi_endpoints:
-            method = _HTTP_METHOD_LITERALS.get(item.method.upper())
-            if method is None:
+        go_files = [
+            (file.path.as_posix(), file.text) for file in files if file.path.suffix.lower() == ".go"
+        ]
+        go_endpoints = extract_go_endpoints(go_files)
+        go_files_with_routes = {item.file_path for item in go_endpoints}
+        for item in go_endpoints:
+            method = item.method.upper()
+            method_lit = _HTTP_METHOD_LITERALS.get(method)
+            if method_lit is None:
                 continue
             module_path = self._choose_module_path(Path(item.file_path))
             module_name = modules[module_path].name if module_path in modules else module_path
             endpoints.append(
                 Endpoint(
-                    method=method,
+                    method=method_lit,
                     path=item.path,
                     module=module_name,
                     handler=item.handler,
                     file_path=item.file_path,
                     line_number=item.lineno,
+                )
+            )
+        for fastapi_item in fastapi_endpoints:
+            fastapi_method = _HTTP_METHOD_LITERALS.get(fastapi_item.method.upper())
+            if fastapi_method is None:
+                continue
+            module_path = self._choose_module_path(Path(fastapi_item.file_path))
+            module_name = modules[module_path].name if module_path in modules else module_path
+            endpoints.append(
+                Endpoint(
+                    method=fastapi_method,
+                    path=fastapi_item.path,
+                    module=module_name,
+                    handler=fastapi_item.handler,
+                    file_path=fastapi_item.file_path,
+                    line_number=fastapi_item.lineno,
                 )
             )
 
@@ -548,6 +631,11 @@ class RepositoryScanner:
             if suffix not in _CODE_SUFFIXES:
                 continue
             if not is_product_source_path(file.path.as_posix()):
+                continue
+            if suffix == ".go" and (
+                is_go_test_path(file.path.as_posix())
+                or file.path.as_posix() in go_files_with_routes
+            ):
                 continue
             module_path = self._choose_module_path(file.path)
             module_name = modules[module_path].name
@@ -601,12 +689,18 @@ class RepositoryScanner:
                         )
                     )
 
-            for path_expr, handler in re.findall(
+            for match in re.finditer(
                 r"http\.HandleFunc\(\s*[\"']([^\"']+)[\"']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)", text
             ):
+                path_expr, handler = match.group(1), match.group(2)
+                method_lit = _HTTP_METHOD_LITERALS.get(
+                    handle_func_method(text, match.start(), path_expr)
+                )
+                if method_lit is None:
+                    continue
                 endpoints.append(
                     Endpoint(
-                        method="GET",
+                        method=method_lit,
                         path=path_expr,
                         module=module_name,
                         handler=handler,
@@ -682,6 +776,7 @@ class RepositoryScanner:
         self, files: list[ScannedFile], modules: dict[str, Module]
     ) -> list[DataModel]:
         models: list[DataModel] = []
+        go_files: list[tuple[str, str, str]] = []
         for file in files:
             suffix = file.path.suffix.lower()
             module_path = self._choose_module_path(file.path)
@@ -723,15 +818,7 @@ class RepositoryScanner:
                             )
                         )
             elif suffix == ".go":
-                for name in re.findall(
-                    r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b", file.text, re.MULTILINE
-                ):
-                    if any(h in lower_path for h in _MODEL_FILE_HINTS):
-                        models.append(
-                            DataModel(
-                                name=name, type="go_struct", module=module_name, file_path=path_str
-                            )
-                        )
+                go_files.append((path_str, file.text, module_name))
             elif suffix in {".java", ".kt"}:
                 for name in re.findall(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)", file.text):
                     if any(h in lower_path for h in _MODEL_FILE_HINTS) or name.lower().endswith(
@@ -744,6 +831,12 @@ class RepositoryScanner:
                         )
 
             if "migration" in lower_path or "alembic" in lower_path:
+                fks_by_table: dict[str, list[str]] = {}
+                for src, _column, dest in extract_sql_foreign_keys(file.text):
+                    rel = f"belongs_to:{dest}"
+                    bucket = fks_by_table.setdefault(src.lower(), [])
+                    if rel not in bucket:
+                        bucket.append(rel)
                 for table in re.findall(
                     r"(?i)create\s+table\s+(?:if\s+not\s+exists\s+)?([A-Za-z_][A-Za-z0-9_]*)",
                     file.text,
@@ -754,13 +847,91 @@ class RepositoryScanner:
                             type="migration_table",
                             module=module_name,
                             file_path=path_str,
+                            relationships=list(fks_by_table.get(table.lower(), [])),
+                            table_name=table,
                         )
                     )
+                if suffix == ".py":
+                    from repo_wiki.generator.deterministic_sections import extract_alembic_tables
+
+                    for table_spec in extract_alembic_tables(file.text):
+                        raw_attrs = table_spec.get("attributes")
+                        raw_rels = table_spec.get("relationships")
+                        raw_types = table_spec.get("attribute_types")
+                        raw_pks = table_spec.get("primary_keys")
+                        models.append(
+                            DataModel(
+                                name=str(table_spec["name"]),
+                                type="migration_table",
+                                module=module_name,
+                                file_path=path_str,
+                                attributes=[str(attr) for attr in raw_attrs]
+                                if isinstance(raw_attrs, list)
+                                else [],
+                                relationships=[str(rel) for rel in raw_rels]
+                                if isinstance(raw_rels, list)
+                                else [],
+                                attribute_types=[str(item) for item in raw_types]
+                                if isinstance(raw_types, list)
+                                else [],
+                                primary_key=str(table_spec.get("primary_key") or ""),
+                                primary_keys=[str(item) for item in raw_pks]
+                                if isinstance(raw_pks, list)
+                                else [],
+                                table_name=str(table_spec.get("table_name") or table_spec["name"]),
+                            )
+                        )
+                        if isinstance(raw_pks, list):
+                            models[-1].primary_key = (
+                                str(raw_pks[0]) if len(raw_pks) == 1 else models[-1].primary_key
+                            )
+
+        if go_files:
+            module_by_path = {path: module for path, _text, module in go_files}
+            go_model_files = [(path, text) for path, text, _module in go_files]
+            for file in files:
+                if file.path.suffix.lower() == ".sql":
+                    go_model_files.append((file.path.as_posix(), file.text))
+            for item in extract_go_data_models(go_model_files):
+                models.append(
+                    DataModel(
+                        name=item.name,
+                        type=item.kind,
+                        module=module_by_path.get(item.file_path, item.file_path.split("/")[0]),
+                        file_path=item.file_path,
+                        attributes=list(item.attributes),
+                        primary_key=item.primary_key or "",
+                        primary_keys=list(item.primary_keys),
+                        relationships=list(item.relations),
+                        attribute_types=list(item.attribute_types),
+                        table_name=item.table_name or "",
+                    )
+                )
 
         dedup: dict[tuple[str, str, str], DataModel] = {}
         for model in models:
             dedup[(model.name, model.module, model.file_path)] = model
-        return list(dedup.values())
+        models = list(dedup.values())
+        if any(model.type in {"go_gorm", "go_struct_db"} for model in models):
+            models = [model for model in models if model.type in {"go_gorm", "go_struct_db"}]
+        table_to_model: dict[str, DataModel] = {
+            (model.table_name or "").lower(): model for model in models if model.table_name
+        }
+        for file in files:
+            if file.path.suffix.lower() != ".sql":
+                continue
+            lowered = file.path.as_posix().lower()
+            if "schema.sql" not in lowered and "migration" not in lowered:
+                continue
+            for from_table, _column, to_table in extract_sql_foreign_keys(file.text):
+                src_model = table_to_model.get(from_table.lower())
+                dest_model = table_to_model.get(to_table.lower())
+                if src_model is None or dest_model is None:
+                    continue
+                rel = f"belongs_to:{dest_model.name}"
+                if rel not in src_model.relationships:
+                    src_model.relationships.append(rel)
+        return models
 
     def _ensure_modules_cover_entities(
         self,
@@ -797,6 +968,23 @@ class RepositoryScanner:
             if module_path not in deps:
                 continue
             text = file.text
+            if file.path.suffix.lower() == ".go":
+                for candidate in go_quoted_imports(text):
+                    for known in known_paths:
+                        if known == module_path:
+                            continue
+                        if (
+                            candidate == known
+                            or candidate.endswith("/" + known)
+                            or f"/{known}/" in f"/{candidate}/"
+                        ):
+                            label = (
+                                known
+                                if known.startswith(("internal/", "cmd/", "pkg/"))
+                                else modules[known].name
+                            )
+                            deps[module_path].add(label)
+                continue
             candidates = set(
                 re.findall(r"^\s*from\s+([A-Za-z0-9_./]+)\s+import\b", text, re.MULTILINE)
             )
@@ -969,13 +1157,13 @@ class RepositoryScanner:
         best_reason = "No signals found, using fallback."
 
         for classification, (keywords, base_confidence) in classification_map.items():
-            score = sum(1 for keyword in keywords if keyword.lower() in signals.lower())
+            matched_keywords = [k for k in keywords if _keyword_in_signals(k, signals)]
+            score = len(matched_keywords)
             if score > 0:
                 adjusted_score = min(score * base_confidence, 1.0)
                 if adjusted_score > best_score:
                     best_score = adjusted_score
                     best_match = classification
-                    matched_keywords = [k for k in keywords if k.lower() in signals.lower()]
                     best_reason = f"Matched {len(matched_keywords)} keywords ({', '.join(matched_keywords[:3])}) with confidence {adjusted_score:.2f}"
 
         if best_score == 0.0:
@@ -1095,15 +1283,36 @@ class RepositoryScanner:
                 "PATCH",
             ) and not self._is_webhook_path(endpoint.path)
 
-            # Set common error codes
-            endpoint.error_codes = [400, 401, 403, 404, 500]
-
-            # Extract line number for handler citation
-            line_number = self._find_handler_line(
-                endpoint, file_contents.get(endpoint.file_path, "")
-            )
-            endpoint.line_number = line_number
-            endpoint.line_end = line_number + 10  # Approximate span
+            # Preserve extractor line numbers when the handler search misses.
+            content = file_contents.get(endpoint.file_path, "")
+            lines = content.splitlines() if content else []
+            start = max(0, int(endpoint.line_number or 1) - 1)
+            window = "\n".join(lines[start : start + 40])
+            found_codes = re.findall(r"\b(400|401|403|404|409|422|429|500)\b", window)
+            endpoint.error_codes = sorted({int(code) for code in found_codes}) or [
+                400,
+                401,
+                403,
+                404,
+                500,
+            ]
+            if endpoint.line_number > 1 and (
+                self._line_is_route_registration(content, endpoint.line_number)
+                or self._line_matches_handler(content, endpoint.line_number, endpoint.handler)
+            ):
+                if endpoint.line_end <= 0:
+                    endpoint.line_end = endpoint.line_number
+            else:
+                found = self._find_handler_line(endpoint, content)
+                if found > 0:
+                    endpoint.line_number = found
+                    endpoint.line_end = found + 10
+                elif endpoint.line_number > 0:
+                    if endpoint.line_end <= 0:
+                        endpoint.line_end = endpoint.line_number
+                else:
+                    endpoint.line_number = 0
+                    endpoint.line_end = 0
 
     def _is_webhook_path(self, path: str) -> bool:
         """Check if path looks like a webhook."""
@@ -1143,6 +1352,39 @@ class RepositoryScanner:
 
         return "bearer"  # Default for unknown
 
+    def _line_is_route_registration(self, file_content: str, line_number: int) -> bool:
+        if not file_content or line_number < 1:
+            return False
+        lines = file_content.splitlines()
+        if line_number > len(lines):
+            return False
+        line = lines[line_number - 1]
+        return bool(
+            re.search(
+                r"HandleFunc\(|\.Handle\(|\.(GET|POST|PUT|PATCH|DELETE|Any|Handle)\(|"
+                r"RegisterRawRoute\(|router\.(add|include)",
+                line,
+            )
+        )
+
+    def _line_matches_handler(self, file_content: str, line_number: int, handler: str) -> bool:
+        if not file_content or line_number < 1 or not handler or handler == "unknown":
+            return False
+        lines = file_content.splitlines()
+        if line_number > len(lines):
+            return False
+        line = lines[line_number - 1].strip()
+        method = handler.rsplit(".", 1)[-1]
+        receiver = handler.rsplit(".", 1)[0] if "." in handler else ""
+        if receiver:
+            return bool(
+                re.match(
+                    rf"^func\s+\(\s*\w+\s+\*?{re.escape(receiver)}\s*\)\s+{re.escape(method)}\s*\(",
+                    line,
+                )
+            )
+        return bool(method) and method in line
+
     def _find_handler_line(self, endpoint: Endpoint, file_content: str) -> int:
         """Find the line number where the handler function is defined."""
         if not file_content:
@@ -1152,16 +1394,26 @@ class RepositoryScanner:
         if not handler or handler == "unknown":
             return 0
 
-        # Search for function definition
-        patterns = [
-            rf"^def\s+{re.escape(handler)}\s*\(",
-            rf"^async\s+def\s+{re.escape(handler)}\s*\(",
-            rf"^function\s+{re.escape(handler)}\s*\(",
-            rf"^export\s+function\s+{re.escape(handler)}\s*\(",
-            rf"^export\s+const\s+{re.escape(handler)}\s*=",
-            rf"^\s*func\s+{re.escape(handler)}\s*\(",
-            rf"^\s*fun\s+{re.escape(handler)}\s*\(",
-        ]
+        method = handler.rsplit(".", 1)[-1]
+        receiver = handler.rsplit(".", 1)[0] if "." in handler else ""
+        patterns = []
+        if receiver:
+            patterns.append(
+                rf"^func\s+\(\s*\w+\s+\*?{re.escape(receiver)}\s*\)\s+{re.escape(method)}\s*\("
+            )
+        patterns.extend(
+            [
+                rf"^def\s+{re.escape(handler)}\s*\(",
+                rf"^async\s+def\s+{re.escape(handler)}\s*\(",
+                rf"^function\s+{re.escape(handler)}\s*\(",
+                rf"^export\s+function\s+{re.escape(handler)}\s*\(",
+                rf"^export\s+const\s+{re.escape(handler)}\s*=",
+                rf"^\s*func\s+{re.escape(handler)}\s*\(",
+                rf"^\s*fun\s+{re.escape(handler)}\s*\(",
+            ]
+        )
+        if not receiver:
+            patterns.append(rf"^func\s+\([^)]+\)\s+{re.escape(method)}\s*\(")
 
         lines = file_content.splitlines()
         for i, line in enumerate(lines, start=1):

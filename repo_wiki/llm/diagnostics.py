@@ -12,11 +12,13 @@ from repo_wiki.llm import (
     ValidationReason,
     get_api_key_from_env,
 )
+from repo_wiki.llm.cassette import CassetteLLMProvider
+from repo_wiki.llm.models import LLMProvider
 
 
 def create_provider_from_config(
     config: LLMProviderConfig,
-) -> OpenAICompatibleProvider | MinimaxProvider:
+) -> LLMProvider:
     """Create provider instance from config.
 
     Args:
@@ -25,10 +27,11 @@ def create_provider_from_config(
     Returns:
         Provider instance
     """
+    if str(config.provider or "").strip().lower() == "cassette":
+        return CassetteLLMProvider.from_env(config)
     if config.provider == "minimax":
         return MinimaxProvider(config)
-    else:
-        return OpenAICompatibleProvider(config)
+    return OpenAICompatibleProvider(config)
 
 
 def run_llm_diagnostics(

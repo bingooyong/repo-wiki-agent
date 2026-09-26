@@ -42,7 +42,7 @@ class Module(BaseModel):
 
 
 class Endpoint(BaseModel):
-    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ANY"]
     path: str
     module: str
     handler: str
@@ -67,6 +67,12 @@ class DataModel(BaseModel):
     type: str
     module: str
     file_path: str
+    attributes: list[str] = Field(default_factory=list)
+    primary_key: str = ""
+    primary_keys: list[str] = Field(default_factory=list)
+    relationships: list[str] = Field(default_factory=list)
+    attribute_types: list[str] = Field(default_factory=list)
+    table_name: str = ""
 
 
 class RepositoryStats(BaseModel):

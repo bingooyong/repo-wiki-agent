@@ -56,7 +56,7 @@ case $PROFILE in
       exit 1
     fi
     SCORE_THRESHOLD=0.85
-    SCORE_COMPARE=$(echo "$OVERALL_SCORE < $SCORE_THRESHOLD" | bc -l 2>/dev/null || echo "0")
+    SCORE_COMPARE=$(python3 -c "print(1 if float('$OVERALL_SCORE') < float('$SCORE_THRESHOLD') else 0)")
     if [ "$SCORE_COMPARE" = "1" ]; then
       echo "❌ REJECTED: score $OVERALL_SCORE < $SCORE_THRESHOLD"
       exit 1
@@ -74,7 +74,7 @@ case $PROFILE in
       exit 1
     fi
     SCORE_THRESHOLD=0.70
-    SCORE_COMPARE=$(echo "$OVERALL_SCORE < $SCORE_THRESHOLD" | bc -l 2>/dev/null || echo "0")
+    SCORE_COMPARE=$(python3 -c "print(1 if float('$OVERALL_SCORE') < float('$SCORE_THRESHOLD') else 0)")
     if [ "$SCORE_COMPARE" = "1" ]; then
       echo "⚠️ WARNING: score $OVERALL_SCORE < $SCORE_THRESHOLD"
     fi

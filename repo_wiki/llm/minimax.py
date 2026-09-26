@@ -92,6 +92,8 @@ class MinimaxProvider(LLMProvider):
                 "temperature": request.temperature,
                 "max_tokens": request.max_tokens,
             }
+            if request.extra_body:
+                payload.update(request.extra_body)
 
             # Make request
             response = await client.post("/text/chatcompletion_v2", json=payload)
@@ -159,11 +161,13 @@ class MinimaxProvider(LLMProvider):
             payload: dict[str, Any] = {
                 "model": request.model,
                 "messages": [self._format_message(m) for m in chat_messages],
-                "max_tokens": min(request.max_tokens, 2048),
+                "max_tokens": request.max_tokens,
                 "temperature": request.temperature,
             }
             if system_messages:
                 payload["system"] = "\n\n".join(system_messages)
+            if request.extra_body:
+                payload.update(request.extra_body)
 
             response = await client.post("/v1/messages", json=payload)
             if response.status_code == 401:
