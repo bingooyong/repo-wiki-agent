@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 _README_SAMPLE_LEAK = "".join(("README sample", ", not in code"))
@@ -1036,7 +1037,7 @@ def install_page_render_errors(markdown: str) -> list[str]:
     except Exception:
         tokens = []
 
-    def _walk(items: list[object]) -> None:
+    def _walk(items: Sequence[object]) -> None:
         for tok in items:
             kind = getattr(tok, "type", "")
             content = getattr(tok, "content", "") or ""
