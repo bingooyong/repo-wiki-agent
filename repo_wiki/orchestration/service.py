@@ -2203,6 +2203,21 @@ class RepoWikiService:
             )
 
             content = ensure_overview_names_framework(content, self.root)
+        from repo_wiki.generator.deterministic_sections import (
+            strip_dangling_colon_leads,
+            unstep_prose_backtick_items,
+        )
+        from repo_wiki.verifier.handbook_routes import (
+            drop_unmatched_handbook_routes,
+            iter_route_source_files,
+            upgrade_handbook_route_paths,
+        )
+
+        route_files = iter_route_source_files(self.root)
+        content = upgrade_handbook_route_paths(content, route_files)
+        content = drop_unmatched_handbook_routes(content, route_files)
+        content = unstep_prose_backtick_items(content)
+        content = strip_dangling_colon_leads(content)
         return content.strip() + "\n"
 
     def _write_raw_reply(self, page: Any, raw_markdown: str) -> None:

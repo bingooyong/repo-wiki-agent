@@ -937,7 +937,7 @@ def build_clone_section(root: Path) -> str:
 
 def unstep_prose_backtick_items(content: str) -> str:
     """A numbered prose item that starts with inline code is not a command step."""
-    return re.sub(r"^(\d+)\.\s+(`[^`]+`[ \t]+\S)", r"- \2", content or "", flags=re.M)
+    return re.sub(r"^(\d+)\.\s+(`[^` ]+`[ \t]+\S)", r"- \2", content or "", flags=re.M)
 
 
 def build_go_role_section(root: Path) -> str:
@@ -1420,11 +1420,7 @@ def rewrite_checkout_directory_name(content: str, root: Path) -> str:
 
 def build_verify_section(root: Path) -> str:
     """Emit compose healthcheck URLs plus real run commands. No invented probes."""
-    from repo_wiki.verifier.handbook import (
-        classify_shell_command,
-        collect_repo_install_commands,
-        collect_repo_run_commands,
-    )
+    from repo_wiki.verifier.handbook import collect_repo_run_commands
     from repo_wiki.verifier.source_facts import load_compose_healthcheck_urls
 
     urls = [
@@ -1433,11 +1429,7 @@ def build_verify_section(root: Path) -> str:
         if item.startswith(("http://", "https://", "curl "))
     ]
     runs = [item for item in collect_repo_run_commands(root) if item]
-    checks = [
-        item
-        for item in collect_repo_install_commands(root)
-        if classify_shell_command(item) == "verify"
-    ]
+    checks: list[str] = []
     if not urls and not runs and not checks:
         return ""
     documented = cite_readme_line(root, "/health") or cite_readme_line(root, "/healthz")

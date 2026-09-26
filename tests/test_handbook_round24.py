@@ -359,7 +359,7 @@ def test_4_verify_class_and_clone_only_quickstart(tmp_path: Path) -> None:
     assert "uvicorn" not in section
     verify = build_verify_section(tmp_path)
     assert "uvicorn" in verify
-    assert "```bash\ncurl http://127.0.0.1:9/ready\n```" in verify
+    assert "curl http://127.0.0.1:9/ready" not in verify
     service = RepoWikiService(RepoWikiConfig())
     service.root = tmp_path
     quick = WikiPagePlan(
