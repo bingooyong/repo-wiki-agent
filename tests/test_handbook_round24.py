@@ -297,7 +297,9 @@ def test_11_thresholds_and_version_stay_tight() -> None:
 
 
 def test_1_path_only_skips_action_words() -> None:
-    files = [("app.py", "app = FastAPI()\n@app.post('/wicks/ignite')\ndef ignite():\n    return {}\n")]
+    files = [
+        ("app.py", "app = FastAPI()\n@app.post('/wicks/ignite')\ndef ignite():\n    return {}\n")
+    ]
     prose = "# API\n\n动作名是 `/create`、`/list`、`/get/:id`，真正的表是：\n\n| 路径 |\n| --- |\n| `/ashes` |\n"
     found = extract_handbook_http_paths(prose, api_page=True)
     assert ("ANY", "/create") not in found
@@ -317,7 +319,9 @@ def test_1_upgrade_numeric_and_unique_suffix_keeps_braces() -> None:
             "def feed():\n    return {}\n",
         )
     ]
-    text = "# API\n\nPOST `/lamps/wick/activate/1`\nGET `/feed`\nPOST `/lamps/wick/activate/{wid}`\n"
+    text = (
+        "# API\n\nPOST `/lamps/wick/activate/1`\nGET `/feed`\nPOST `/lamps/wick/activate/{wid}`\n"
+    )
     upgraded = upgrade_handbook_route_paths(text, files)
     assert "/lamps/wick/activate/{wid}" in upgraded
     assert "/harbor/feed" in upgraded
@@ -328,7 +332,9 @@ def test_1_upgrade_numeric_and_unique_suffix_keeps_braces() -> None:
 def test_2_drop_unmatched_short_paths() -> None:
     from repo_wiki.verifier.handbook_routes import drop_unmatched_handbook_routes
 
-    files = [("app.py", "app = FastAPI()\n@app.get('/harbor/wicks')\ndef wicks():\n    return {}\n")]
+    files = [
+        ("app.py", "app = FastAPI()\n@app.get('/harbor/wicks')\ndef wicks():\n    return {}\n")
+    ]
     leftover = "# API\n\nGET `/harbor/wicks` 与 GET `/:slug` 与 POST `/login`。\n"
     cleaned = drop_unmatched_handbook_routes(upgrade_handbook_route_paths(leftover, files), files)
     assert "GET `/harbor/wicks`" in cleaned

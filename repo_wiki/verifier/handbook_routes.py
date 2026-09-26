@@ -479,10 +479,7 @@ def upgrade_handbook_route_paths(markdown: str, files: Sequence[tuple[str, str]]
             orig
             for sm, sn, orig in indexed
             if (sm == method or method == "ANY" or sm == "ANY")
-            and (
-                sn.endswith("/" + path.lstrip("/"))
-                or _path_shape(sn) == shape
-            )
+            and (sn.endswith("/" + path.lstrip("/")) or _path_shape(sn) == shape)
         ]
         uniq = list(dict.fromkeys(hits))
         return uniq[0] if len(uniq) == 1 else None
