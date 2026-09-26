@@ -296,6 +296,86 @@ def test_11_thresholds_and_version_stay_tight() -> None:
     assert re.fullmatch(r"handbook-r24-\d{8}", COMPOSER_GENERATOR_VERSION)
 
 
+def test_1_path_only_skips_action_words() -> None:
+    files = [("app.py", "app = FastAPI()\n@app.post('/wicks/ignite')\ndef ignite():\n    return {}\n")]
+    prose = "# API\n\n动作名是 `/create`、`/list`、`/get/:id`，真正的表是：\n\n| 路径 |\n| --- |\n| `/ashes` |\n"
+    found = extract_handbook_http_paths(prose, api_page=True)
+    assert ("ANY", "/create") not in found
+    assert ("ANY", "/list") not in found
+    assert ("ANY", "/get/:id") not in found
+    assert ("ANY", "/ashes") in found
+
+
+def test_1_upgrade_numeric_and_unique_suffix_keeps_braces() -> None:
+    files = [
+        (
+            "app.py",
+            "app = FastAPI()\n"
+            "@app.post('/lamps/wick/activate/{wid}')\n"
+            "def activate():\n    return {}\n"
+            "@app.get('/harbor/feed')\n"
+            "def feed():\n    return {}\n",
+        )
+    ]
+    text = "# API\n\nPOST `/lamps/wick/activate/1`\nGET `/feed`\nPOST `/lamps/wick/activate/{wid}`\n"
+    upgraded = upgrade_handbook_route_paths(text, files)
+    assert "/lamps/wick/activate/{wid}" in upgraded
+    assert "/harbor/feed" in upgraded
+    assert "/activate/1" not in upgraded
+    assert handbook_route_crosscheck_mismatches(upgraded, files, api_page=True) == []
+
+
+def test_2_drop_unmatched_short_paths() -> None:
+    from repo_wiki.verifier.handbook_routes import drop_unmatched_handbook_routes
+
+    files = [("app.py", "app = FastAPI()\n@app.get('/harbor/wicks')\ndef wicks():\n    return {}\n")]
+    leftover = "# API\n\nGET `/harbor/wicks` 与 GET `/:slug` 与 POST `/login`。\n"
+    cleaned = drop_unmatched_handbook_routes(upgrade_handbook_route_paths(leftover, files), files)
+    assert "GET `/harbor/wicks`" in cleaned
+    assert "/:slug" not in cleaned
+    assert "/login" not in cleaned
+    assert handbook_route_crosscheck_mismatches(cleaned, files, api_page=True) == []
+
+
+def test_4_verify_class_and_clone_only_quickstart(tmp_path: Path) -> None:
+    from repo_wiki.core.config import RepoWikiConfig
+    from repo_wiki.orchestration.service import RepoWikiService
+    from repo_wiki.planner.schema import WikiPagePlan, WikiTaxonomyCategory
+
+    _write(
+        tmp_path / "README.md",
+        "# Wick\n\n```bash\ngit clone https://example.invalid/wick.git\nuv sync\n"
+        "curl http://127.0.0.1:9/ready\nuvicorn wick.main:app --port 9\n```\n",
+    )
+    assert classify_shell_command("curl http://127.0.0.1:9/ready") == "verify"
+    section = build_install_section(tmp_path)
+    assert "curl" not in section
+    assert "uvicorn" not in section
+    verify = build_verify_section(tmp_path)
+    assert "uvicorn" in verify
+    assert "```bash\ncurl http://127.0.0.1:9/ready\n```" in verify
+    service = RepoWikiService(RepoWikiConfig())
+    service.root = tmp_path
+    quick = WikiPagePlan(
+        page_id="quick-start",
+        title="快速开始",
+        category=WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
+        output_path="docs/pages/quick-start.md",
+    )
+    satellite = service._rewrite_install_page_contract(
+        quick, "# 安装\n\n## 安装步骤\n\n1. leftover\n"
+    )
+    assert "git clone https://example.invalid/wick.git" in satellite
+    assert "uv sync" not in satellite
+    assert "leftover" not in satellite
+    from repo_wiki.generator.deterministic_sections import unstep_prose_backtick_items
+    from repo_wiki.verifier.handbook import install_page_render_errors
+
+    prose = "## 指南\n\n4. `docker-compose` 中主机名写错。\n"
+    assert "step-number-gap" in install_page_render_errors(prose)
+    assert install_page_render_errors(unstep_prose_backtick_items(prose)) == []
+
+
 def test_12_command_page_gate_is_not_title_only() -> None:
     page = "# 快速开始指南\n\n1. `git clone x`\n\n```bash\ngit clone x\n``` <cite>README.md:1-1</cite>\n"
     assert install_page_render_errors(page)

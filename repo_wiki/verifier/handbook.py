@@ -882,7 +882,9 @@ def classify_shell_command(command: str) -> str:
         text,
     ):
         return "destructive"
-    if re.search(r"\b(?:pytest|npm test|pnpm test|yarn test|go test|make test)\b", text):
+    if re.search(
+        r"\b(?:pytest|npm test|pnpm test|yarn test|go test|make test|go tool cover)\b", text
+    ):
         return "test"
     if re.search(r"\b(?:ruff|eslint|prettier|black|isort|gofmt|flake8|mypy)\b", text):
         return "lint"
@@ -893,6 +895,8 @@ def classify_shell_command(command: str) -> str:
         text,
     ):
         return "run"
+    if re.search(r"\bcurl\b", text):
+        return "verify"
     return "install"
 
 
@@ -1119,7 +1123,7 @@ def _collect_repo_commands(root: Path, *classes: str) -> list[str]:
 
 def collect_repo_install_commands(root: Path, limit: int | None = None) -> list[str]:
     """Collect install and run commands. No implicit cap; callers may still slice."""
-    commands = _collect_repo_commands(root, "install", "run")
+    commands = _collect_repo_commands(root, "install", "run", "verify")
     return commands if limit is None else commands[:limit]
 
 

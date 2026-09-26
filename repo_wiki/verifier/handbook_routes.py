@@ -83,6 +83,9 @@ _FRAMEWORK_MARK = re.compile(
     re.I,
 )
 _IDIOM_MARK = re.compile(r"add_resource\(|\.as_view\(|\.route\([^)]*\)\s*\.\s*(?:get|post)\(")
+_ACTION_SEGS = frozenset(
+    {"create", "delete", "list", "get", "update", "remove", "add", "edit", "show", "index", "new"}
+)
 ROUTE_COMPLETENESS_MIN = 0.5
 
 
@@ -149,14 +152,35 @@ def extract_handbook_http_paths(markdown: str, *, api_page: bool = False) -> set
         stripped = re.sub(r"```.*?```", " ", text, flags=re.S)
         for match in _PATH_ONLY_RE.finditer(stripped):
             path = _norm_path(match.group(1))
-            if "." in path.rsplit("/", 1)[-1]:
+            if "." in path.rsplit("/", 1)[-1] or not _path_only_is_route(path):
                 continue
             found.add(("ANY", path))
         for match in _TABLE_PATH_RE.finditer(stripped):
             path = _norm_path(match.group(1))
             if path.startswith("/") and path.strip("/").split("/", 1)[0].upper() not in _HTTP:
-                found.add(("ANY", path))
+                if _path_only_is_route(path) or "|" in match.group(0):
+                    found.add(("ANY", path))
     return found
+
+
+def _path_only_is_route(path: str) -> bool:
+    segs = [item for item in _norm_path(path).strip("/").split("/") if item]
+    static = [item for item in segs if not item.startswith((":", "{"))]
+    if not static:
+        return False
+    return not all(item.lower() in _ACTION_SEGS for item in static)
+
+
+def _path_shape(path: str) -> tuple[str, ...]:
+    shaped: list[str] = []
+    for seg in _norm_path(path).split("/"):
+        if not seg:
+            continue
+        if seg.startswith(":") or re.fullmatch(r"\d+", seg):
+            shaped.append("*")
+        else:
+            shaped.append(seg.lower())
+    return tuple(shaped)
 
 
 def _prefix_constants(files: Sequence[tuple[str, str]]) -> dict[str, str]:
@@ -438,40 +462,78 @@ def source_extraction_is_unsupported(files: Sequence[tuple[str, str]]) -> bool:
 
 
 def upgrade_handbook_route_paths(markdown: str, files: Sequence[tuple[str, str]]) -> str:
-    """Rewrite unique unprefixed handbook paths to the single full source path."""
-    source = [(_m, _norm_path(_p)) for _m, _p in extract_source_http_paths(files)]
-    if not source:
+    """Rewrite unique short/param-mismatched handbook paths to the source spelling."""
+    raw = list(extract_source_http_paths(files))
+    if not raw:
         return markdown or ""
+    indexed = [(method, _norm_path(path), path) for method, path in raw]
+    source = {(method, norm) for method, norm, _orig in indexed}
 
     def _full(method: str, path: str) -> str | None:
         path = _norm_path(path)
+        method = method.upper()
+        if _pair_matches(method, path, source):
+            return None
+        shape = _path_shape(path)
         hits = [
-            sp
-            for sm, sp in source
-            if (sm == method.upper() or method.upper() == "ANY" or sm == "ANY")
-            and (sp == path or sp.endswith("/" + path.lstrip("/")))
+            orig
+            for sm, sn, orig in indexed
+            if (sm == method or method == "ANY" or sm == "ANY")
+            and (
+                sn.endswith("/" + path.lstrip("/"))
+                or _path_shape(sn) == shape
+            )
         ]
         uniq = list(dict.fromkeys(hits))
         return uniq[0] if len(uniq) == 1 else None
 
-    def _repl(match: re.Match[str]) -> str:
+    def _verb_repl(match: re.Match[str]) -> str:
         full = _full(match.group(1), match.group(2))
-        if not full:
-            return match.group(0)
-        body = match.group(0)
-        return body.replace(match.group(2), full, 1)
+        return match.group(0) if not full else match.group(0).replace(match.group(2), full, 1)
 
-    return _HANDBOOK_ROUTE_RE.sub(_repl, markdown or "")
+    def _tick_repl(match: re.Match[str]) -> str:
+        if not _path_only_is_route(match.group(1)):
+            return match.group(0)
+        full = _full("ANY", match.group(1))
+        return match.group(0) if not full else match.group(0).replace(match.group(1), full, 1)
+
+    def _curl_repl(match: re.Match[str]) -> str:
+        raw = match.group(2)
+        path = raw.split("://", 1)[-1]
+        path = "/" + path.split("/", 1)[-1] if "/" in path else path
+        full = _full(match.group(1), path)
+        return match.group(0) if not full else match.group(0).replace(path, full, 1)
+
+    text = _HANDBOOK_ROUTE_RE.sub(_verb_repl, markdown or "")
+    text = _PATH_ONLY_RE.sub(_tick_repl, text)
+    return _CURL_RE.sub(_curl_repl, text)
 
 
 def drop_unmatched_handbook_routes(markdown: str, files: Sequence[tuple[str, str]]) -> str:
     source = {(_m, _norm_path(_p)) for _m, _p in extract_source_http_paths(files)}
     if not source:
         return markdown or ""
+
+    def _verb_drop(match: re.Match[str]) -> str:
+        if _pair_matches(match.group(1), match.group(2), source):
+            return match.group(0)
+        return ""
+
+    def _tick_drop(match: re.Match[str]) -> str:
+        if not _path_only_is_route(match.group(1)):
+            return match.group(0)
+        if _pair_matches("ANY", match.group(1), source):
+            return match.group(0)
+        return ""
+
+    text = _HANDBOOK_ROUTE_RE.sub(_verb_drop, markdown or "")
+    text = _PATH_ONLY_RE.sub(_tick_drop, text)
     kept: list[str] = []
-    for line in (markdown or "").splitlines():
+    for line in text.splitlines():
         hits = extract_handbook_http_paths(line, api_page=True)
         if hits and not any(_pair_matches(method, path, source) for method, path in hits):
+            continue
+        if re.fullmatch(r"[-*]\s*", line.strip()):
             continue
         kept.append(line)
     return "\n".join(kept)

@@ -1958,16 +1958,15 @@ class RepoWikiService:
 
         is_api_page = page.category == WikiTaxonomyCategory.API_REFERENCE
         is_data_model_page = page.category == WikiTaxonomyCategory.DATA_MODELS
-        if is_api_page or is_api_like_page:
-            from repo_wiki.verifier.handbook_routes import (
-                drop_unmatched_handbook_routes,
-                iter_route_source_files,
-                upgrade_handbook_route_paths,
-            )
+        from repo_wiki.verifier.handbook_routes import (
+            drop_unmatched_handbook_routes,
+            iter_route_source_files,
+            upgrade_handbook_route_paths,
+        )
 
-            route_files = iter_route_source_files(self.root)
-            content = upgrade_handbook_route_paths(content, route_files)
-            content = drop_unmatched_handbook_routes(content, route_files)
+        route_files = iter_route_source_files(self.root)
+        content = upgrade_handbook_route_paths(content, route_files)
+        content = drop_unmatched_handbook_routes(content, route_files)
         from repo_wiki.generator.deterministic_sections import leftover_compose_has_undeclared_env
 
         if (
@@ -2090,7 +2089,7 @@ class RepoWikiService:
             build_verify_section,
             dedupe_identical_fences,
             expand_truncated_build_commands,
-            is_command_owner_page,
+            is_install_owner_page,
             replace_h2_section,
             rewrite_checkout_directory_name,
             strip_empty_numbered_steps,
@@ -2098,6 +2097,7 @@ class RepoWikiService:
             strip_meta_instructions,
             strip_placeholder_ops_fences,
             strip_reader_unresolved_markers,
+            unstep_prose_backtick_items,
         )
 
         content = rewrite_checkout_directory_name(content, self.root)
@@ -2115,13 +2115,14 @@ class RepoWikiService:
         )
         if core:
             content = replace_h2_section(content, ("服务概述",), core)
-        if is_command_owner_page(
+        if is_install_owner_page(
             page_id=str(getattr(page, "page_id", "") or ""),
             title=str(getattr(page, "title", "") or ""),
         ):
             verify = build_verify_section(self.root)
             if verify:
                 content = replace_h2_section(content, ("启动与验证",), verify)
+        content = unstep_prose_backtick_items(content)
         content = dedupe_identical_fences(content)
         content = strip_dangling_colon_leads(content)
         content = self._fold_citation_only_lines(content)
@@ -2233,17 +2234,21 @@ class RepoWikiService:
     def _rewrite_install_page_contract(self, page: Any, content: str) -> str:
         """Replace install/quick-start steps with README fence commands."""
         from repo_wiki.generator.deterministic_sections import (
+            build_clone_section,
             build_install_section,
-            is_command_owner_page,
+            is_install_owner_page,
+            is_quickstart_page,
             replace_h2_section,
         )
 
-        if not is_command_owner_page(
-            page_id=str(getattr(page, "page_id", "") or ""),
-            title=str(getattr(page, "title", "") or ""),
-        ):
+        page_id = str(getattr(page, "page_id", "") or "")
+        title = str(getattr(page, "title", "") or "")
+        if is_install_owner_page(page_id=page_id, title=title):
+            section = build_install_section(self.root)
+        elif is_quickstart_page(page_id=page_id, title=title):
+            section = build_clone_section(self.root)
+        else:
             return content
-        section = build_install_section(self.root)
         if not section:
             return content
         return replace_h2_section(content, ("安装步骤", "快速开始"), section)
