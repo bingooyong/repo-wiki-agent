@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -122,6 +122,70 @@ class SecurityConfig(BaseModel):
     )
 
 
+AGENT_LOOP_PAGE_MAP: dict[str, str] = {
+    "project-overview": "overview",
+    "installation": "install",
+    "data-models-overview": "datamodel",
+    "api-overview": "api",
+}
+
+
+class AgentLoopConfig(BaseModel):
+    """Per-page agent loop (investigate -> verify -> write -> audit -> rework) for selected pages.
+
+    Off by default: every page keeps the composer path unless ``enabled`` is true (or the
+    ``REPO_WIKI_AGENT_LOOP`` environment variable is ``1``). Pages not mapped to an agent-loop page
+    type always keep the composer path. The existing handbook / strict gates stay the final gate.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    enabled: bool = False
+    page_types: list[str] = Field(
+        default_factory=lambda: ["overview", "install", "datamodel", "api"],
+        description="Agent-loop page types to run (subset of overview, install, datamodel, api).",
+    )
+    page_map: dict[str, str] = Field(
+        default_factory=lambda: dict(AGENT_LOOP_PAGE_MAP),
+        description="Handbook page_id -> agent-loop page type.",
+    )
+    max_iters: int = Field(
+        default=2, ge=0, le=5, description="Rework rounds after the first draft."
+    )
+    page_prompt_cap: int = Field(
+        default=300_000, ge=1, description="Prompt tokens per page (cached calls count)."
+    )
+    global_prompt_cap: int = Field(default=2_000_000, ge=1, description="Prompt tokens per run.")
+    budgets: dict[str, int] = Field(
+        default_factory=dict,
+        description="Tool-call budget overrides per role (see agent_loop.fact_page.Budgets).",
+    )
+    cassette_dir: str | None = Field(
+        default=None,
+        description="Response cassette directory (default: <project>/<index_dir>/agent-loop).",
+    )
+    cassette_mode: Literal["off", "record", "resume", "replay"] = "record"
+    allow_globs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Opt-in exceptions to security.deny_globs for agent-loop reads (e.g. '.env.example'). "
+            "Empty by default: the security deny list applies unchanged."
+        ),
+    )
+    model: str | None = None
+    base_url: str | None = None
+    api_key_env: str | None = None
+    chat_path: str = "/chat/completions"
+    temperature: float = 0.1
+    max_tokens: int = 8192
+    timeout: float = 240.0
+    max_retries: int = 3
+    extra_body: dict[str, Any] | None = Field(
+        default=None,
+        description="Extra request fields; None = provider default (MiniMax: thinking off).",
+    )
+
+
 class RepoWikiConfig(BaseModel):
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     scan: ScanConfig = Field(default_factory=ScanConfig)
@@ -130,6 +194,7 @@ class RepoWikiConfig(BaseModel):
     qoder_like: QoderLikeConfig = Field(default_factory=QoderLikeConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    agent_loop: AgentLoopConfig = Field(default_factory=AgentLoopConfig)
 
 
 def load_config(
