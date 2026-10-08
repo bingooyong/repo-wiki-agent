@@ -1586,7 +1586,11 @@ class RepoWikiService:
                 "reasons": reasons,
             }
 
+        agent_loop_pages = self._select_agent_loop_pages(page_entries)
+
         for page_idx, page in page_entries:
+            if page_idx in agent_loop_pages:
+                continue  # composed by the per-page agent loop below
             binding = evidence_bindings.get(page.page_id)
             input_data = build_composer_input(page, binding, context)
             input_hash = compute_composer_input_hash(
@@ -1723,10 +1727,25 @@ class RepoWikiService:
             worker_count = max(1, min(compose_concurrency, len(compose_jobs)))
             await asyncio.gather(*[worker() for _ in range(worker_count)])
 
+        agent_loop_results: dict[int, tuple[str, str]] = {}
+        if agent_loop_pages:
+            agent_loop_summary = await self._run_agent_loop_pages(
+                agent_loop_pages,
+                output_dir=output_dir,
+                evidence_bindings=evidence_bindings,
+                results=agent_loop_results,
+                page_metadata_by_idx=page_metadata_by_idx,
+                write_fallback=write_fallback,
+            )
+            llm_summary["agent_loop"] = agent_loop_summary
+
+        # Composer post-passes (planner mermaid, README prose padding, route rewriting) must not
+        # touch agent-loop pages: their content is exactly what was verified and audited.
         self._inject_planner_mermaid_in_page_order(
             pages_to_compose, page_results, evidence_bindings, context
         )
         self._dedupe_schema_summaries_in_page_order(pages_to_compose, page_results)
+        page_results.update(agent_loop_results)
 
         pages = [page_results[idx] for idx in sorted(page_results)]
         page_metadata = [page_metadata_by_idx[idx] for idx in sorted(page_metadata_by_idx)]
@@ -1779,6 +1798,95 @@ class RepoWikiService:
             "regenerated_pages": cache_stats.regenerated_pages,
             "llm": llm_summary,
         }
+
+    def _agent_loop_enabled(self) -> bool:
+        env = os.environ.get("REPO_WIKI_AGENT_LOOP", "").strip().lower()
+        if env in {"0", "false", "off", "no"}:
+            return False
+        return bool(self.config.agent_loop.enabled) or env in {"1", "true", "on", "yes"}
+
+    def _select_agent_loop_pages(
+        self, page_entries: list[tuple[int, Any]]
+    ) -> dict[int, tuple[Any, str]]:
+        """Pages diverted from the composer to the agent loop: {page_idx: (page, page_type)}."""
+        if not self._agent_loop_enabled():
+            return {}
+        cfg = self.config.agent_loop
+        enabled_types = set(cfg.page_types)
+        selected: dict[int, tuple[Any, str]] = {}
+        for page_idx, page in page_entries:
+            page_id = str(getattr(page, "page_id", "") or "")
+            page_type = cfg.page_map.get(page_id) or cfg.page_map.get(page_id.rsplit("/", 1)[-1])
+            if page_type and page_type in enabled_types:
+                selected[page_idx] = (page, page_type)
+        return selected
+
+    async def _run_agent_loop_pages(
+        self,
+        agent_pages: dict[int, tuple[Any, str]],
+        *,
+        output_dir: Path,
+        evidence_bindings: dict[str, Any],
+        results: dict[int, tuple[str, str]],
+        page_metadata_by_idx: dict[int, dict[str, Any]],
+        write_fallback: Any,
+    ) -> dict[str, Any]:
+        """Run the per-page agent loop sequentially. A passing page is shipped verbatim (READY); any
+        other outcome drops the page through the normal fallback path (never shipped)."""
+        from repo_wiki.agent_loop.llm import AgentLoopError
+        from repo_wiki.agent_loop.orchestrator import AgentLoopOrchestrator
+
+        cfg = self.config.agent_loop
+        if not cfg.cassette_dir:
+            cassette_dir = self.root / self.config.output.index_dir / "agent-loop" / "cassette"
+            cfg = cfg.model_copy(update={"cassette_dir": str(cassette_dir)})
+        summary: dict[str, Any] = {"pages": {}}
+        try:
+            orch = AgentLoopOrchestrator(
+                self.root,
+                cfg,
+                output_dir / "agent-loop",
+                security=self.config.security,
+                llm_section=self.config.llm.model_dump(),
+            )
+        except AgentLoopError as exc:
+            for page_idx, (page, _page_type) in sorted(agent_pages.items()):
+                binding = evidence_bindings.get(page.page_id)
+                write_fallback(page, binding, page_idx, f"agent_loop_unavailable: {str(exc)[:200]}")
+            summary["error"] = str(exc)[:300]
+            return summary
+        for page_idx, (page, page_type) in sorted(agent_pages.items()):
+            binding = evidence_bindings.get(page.page_id)
+            info(f"agent loop page started page_id={page.page_id} type={page_type}")
+            res = await asyncio.to_thread(orch.run_page, page_type)
+            status = str(res.get("status"))
+            markdown = str(res.get("page") or "")
+            summary["pages"][page.page_id] = {"type": page_type, "status": status}
+            info(f"agent loop page finished page_id={page.page_id} status={status}")
+            if status == "pass" and markdown.strip():
+                self._write_raw_reply(page, markdown)
+                results[page_idx] = (page.output_path, markdown)
+                page_metadata_by_idx[page_idx] = {
+                    "page_id": page.page_id,
+                    "source_path": page.output_path,
+                    "generation_mode": "agent_loop",
+                    "quality_state": "READY",
+                    "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
+                    "reasons": [f"agent_loop:{page_type}"],
+                }
+                continue
+            if res.get("page_draft"):
+                self._write_raw_reply(page, str(res["page_draft"]))
+            reason = str(res.get("aborted") or "")
+            if not reason:
+                hist = res.get("history") or []
+                issues = (hist[-1].get("accepted_findings") if hist else None) or []
+                reason = "; ".join(str(x) for x in issues[:3])
+            write_fallback(page, binding, page_idx, f"agent_loop_{status}: {reason[:300]}")
+        report = orch.write_report()
+        summary["report"] = str(report)
+        summary["totals"] = orch.report.get("totals")
+        return summary
 
     def _observe_composer_cache_hit(
         self,
