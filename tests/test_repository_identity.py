@@ -5,6 +5,7 @@ from pathlib import Path
 
 from repo_wiki.planner.identity import (
     _human_readable_name,
+    _is_markdown_badge_line,
     detect_language_and_framework,
     detect_package_manager,
     resolve_repository_identity,
@@ -225,3 +226,14 @@ class TestHumanReadableName:
         """Test single word names."""
         assert _human_readable_name("repo") == "Repo"
         assert _human_readable_name("WIKI") == "WIKI"
+
+
+def test_badge_line_matches_img_shields_host_not_path_substring() -> None:
+    """Badge detection must parse the URL host, not a raw img.shields.io substring."""
+    assert _is_markdown_badge_line(".. image:: https://img.shields.io/github/license/example.svg")
+    assert _is_markdown_badge_line(
+        "[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8)](https://go.dev/)"
+    )
+    assert not _is_markdown_badge_line(
+        "See https://evil.example/img.shields.io/badge/spoof for status."
+    )

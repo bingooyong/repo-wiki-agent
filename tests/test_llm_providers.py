@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+
+import httpx
 import pytest
 
 from repo_wiki.llm import (
@@ -225,3 +228,146 @@ class TestMockProviderWithProviders:
         asyncio.run(provider.chat(request))
 
         assert provider.call_count == 3
+
+
+def _openai_success_json(content: str = "hello") -> dict:
+    return {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+        "model": "MiniMax-M3",
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_forwards_extra_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, json=_openai_success_json("ok"))
+
+    config = LLMProviderConfig(
+        provider="openai",
+        model="MiniMax-M3",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+    )
+    provider = OpenAICompatibleProvider(config)
+    provider._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://example.test/v1",
+    )
+    response = await provider.chat(
+        ChatRequest(
+            messages=[ChatMessage(role="user", content="hi")],
+            model="MiniMax-M3",
+            max_tokens=16384,
+            extra_body={"thinking": {"type": "disabled"}, "reasoning_split": True},
+        )
+    )
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["thinking"] == {"type": "disabled"}
+    assert payload["reasoning_split"] is True
+    assert payload["max_tokens"] == 16384
+    assert response.content == "ok"
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_empty_content_does_not_use_reasoning_as_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "reasoning_content": "# Fake page\n\nThink-only dump, not wiki markdown.",
+                        },
+                        "finish_reason": "length",
+                    }
+                ],
+                "model": "MiniMax-M3",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 9000, "total_tokens": 9010},
+            },
+        )
+
+    config = LLMProviderConfig(
+        provider="openai",
+        model="MiniMax-M3",
+        base_url="https://example.test/v1",
+        api_key_env="OPENAI_API_KEY",
+    )
+    provider = OpenAICompatibleProvider(config)
+    provider._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://example.test/v1",
+    )
+    response = await provider.chat(
+        ChatRequest(
+            messages=[ChatMessage(role="user", content="hi")],
+            model="MiniMax-M3",
+            max_tokens=4096,
+        )
+    )
+    assert not str(response.content or "").strip()
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_minimax_anthropic_does_not_clamp_max_tokens_to_2048(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "content": [{"type": "text", "text": "ok"}],
+                "model": "MiniMax-M3",
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    config = LLMProviderConfig(
+        provider="minimax",
+        model="MiniMax-M3",
+        base_url="https://api.minimaxi.com/anthropic",
+        api_key_env="MINIMAX_API_KEY",
+    )
+    provider = MinimaxProvider(config)
+    provider._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://api.minimaxi.com/anthropic",
+    )
+    response = await provider.chat(
+        ChatRequest(
+            messages=[ChatMessage(role="user", content="hi")],
+            model="MiniMax-M3",
+            max_tokens=16384,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+    )
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["max_tokens"] == 16384
+    assert payload["max_tokens"] != 2048
+    assert payload.get("thinking") == {"type": "disabled"}
+    assert response.content == "ok"

@@ -56,7 +56,7 @@ class LLMProviderConfig(BaseModel):
         default=None, description="API base URL for OpenAI-compatible providers"
     )
     api_key_env: str = Field(default="OPENAI_API_KEY", description="Env var name for API key")
-    max_tokens: int = Field(default=4096, ge=1, le=128000, description="Max tokens in response")
+    max_tokens: int = Field(default=16384, ge=1, le=128000, description="Max tokens in response")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
     timeout: float = Field(default=60.0, gt=0.0, le=300.0, description="Request timeout in seconds")
     max_retries: int = Field(default=3, ge=0, le=10, description="Max retry attempts")
@@ -88,7 +88,7 @@ def resolve_llm_config(
         "model": "gpt-4o-mini",
         "base_url": None,
         "api_key_env": "OPENAI_API_KEY",
-        "max_tokens": 4096,
+        "max_tokens": 16384,
         "temperature": 0.7,
         "timeout": 60.0,
         "max_retries": 3,

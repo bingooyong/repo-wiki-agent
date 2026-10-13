@@ -5,8 +5,31 @@ from pathlib import Path
 
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.orchestration.eval_layout import EvalOutputProfile
-from repo_wiki.orchestration.quality_artifacts import build_evidence_index
+from repo_wiki.orchestration.quality_artifacts import (
+    _quality_state_for,
+    build_evidence_index,
+)
 from repo_wiki.orchestration.service import RepoWikiService
+
+
+def test_quality_warning_on_llm_page_is_pass_not_degraded() -> None:
+    """Citation/heading gaps stay PASS; only fallback is DEGRADED."""
+    state, reasons = _quality_state_for(
+        {"generation_mode": "llm", "quality_warning": True, "reasons": []},
+        {"mode": "real"},
+    )
+    assert state == "PASS"
+    assert "composer_quality_warning" in reasons
+
+    fallback, _fallback_reasons = _quality_state_for(
+        {
+            "generation_mode": "fallback",
+            "quality_warning": True,
+            "reasons": ["Empty LLM assistant content"],
+        },
+        {"mode": "real"},
+    )
+    assert fallback == "DEGRADED"
 
 
 def _write_small_repo(root: Path) -> None:
@@ -67,8 +90,13 @@ def test_qoder_like_generation_emits_quality_registry_and_conflict_artifacts(
     meta_dir = run_dir / "repowiki" / "zh" / "meta"
     reports_dir = run_dir / "reports"
 
-    content_pages = sorted(p.relative_to(content_dir).as_posix() for p in content_dir.rglob("*.md"))
-    assert content_pages
+    content_pages = (
+        sorted(p.relative_to(content_dir).as_posix() for p in content_dir.rglob("*.md"))
+        if content_dir.exists()
+        else []
+    )
+    assert content_pages == []
+    assert result["generate"]["llm"].get("dropped_page_count", 0) >= 3
 
     page_registry = json.loads((meta_dir / "page-registry.json").read_text(encoding="utf-8"))
     evidence_index = json.loads((meta_dir / "evidence-index.json").read_text(encoding="utf-8"))
@@ -78,11 +106,15 @@ def test_qoder_like_generation_emits_quality_registry_and_conflict_artifacts(
 
     assert registry_paths == set(content_pages)
     assert quality_paths == set(content_pages)
-    assert all(p["page_id"] and p["stable_page_id"] for p in page_registry["pages"])
-    assert {p["generation_mode"] for p in page_registry["pages"]} == {"fallback"}
-    assert {p["quality_state"] for p in page_registry["pages"]} == {"DEGRADED"}
-    assert quality_report["summary"]["degraded_count"] == len(content_pages)
+    from repo_wiki.verifier.qoder_strict_verifier import QoderLikeVerifierService
+
+    verifier = QoderLikeVerifierService(run_dir, strict=True)
+    _, quality_path_errors = verifier._collect_artifact_page_quality_states(
+        quality_report, containers=("page_quality", "pages")
+    )
+    assert not any("duplicate page entry" in err for err in quality_path_errors)
     assert quality_report["summary"]["ready_count"] == 0
+    assert quality_report["summary"].get("dropped_count", 0) >= 3
     assert evidence_index["schema_version"] == "repo_agent.evidence_index/1.0"
     assert evidence_index["run_id"] == "run-g005"
     assert all(span["page_relative_path"] in registry_paths for span in evidence_index["spans"])
@@ -90,6 +122,7 @@ def test_qoder_like_generation_emits_quality_registry_and_conflict_artifacts(
     rendered = "\n".join(p.read_text(encoding="utf-8") for p in content_dir.rglob("*.md"))
     assert "Bearer Token" not in rendered
     assert "/resources" not in rendered
+    assert "本页目前无法根据仓库内容写成可用的" not in rendered
 
     conflict_report = json.loads(
         (reports_dir / "source-docs-conflicts.json").read_text(encoding="utf-8")
