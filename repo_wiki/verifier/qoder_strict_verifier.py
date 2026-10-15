@@ -1249,6 +1249,7 @@ class QoderLikeVerifierService(VerifierService):
             "source-docs-conflicts.json"
         ) + self._candidate_artifact_paths("fact-conflicts.json")
         seen: set[Path] = set()
+        seen_payloads: set[str] = set()
         found_canonical_artifact = False
         unresolved: list[dict[str, Any]] = []
         for path in paths:
@@ -1270,6 +1271,10 @@ class QoderLikeVerifierService(VerifierService):
                     reason_code="QODER_CONFLICT_ARTIFACT_INVALID",
                     gate_type=GateType.HARD,
                 )
+            fingerprint = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+            if fingerprint in seen_payloads:
+                continue
+            seen_payloads.add(fingerprint)
             count = self._count_unresolved_conflicts(payload)
             if count:
                 unresolved.append({"path": str(path), "unresolved_count": count})

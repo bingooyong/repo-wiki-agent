@@ -302,6 +302,7 @@ def _specificity(text: str) -> float:
 
 
 _PLAUSIBLE_REL_PATH = re.compile(r"^[A-Za-z0-9_./\\-]+$")
+_ENV_FILE_NAME = re.compile(r"^\.env(?:\.[A-Za-z0-9_.-]+)?$", re.IGNORECASE)
 
 
 def _is_plausible_rel_path(value: str) -> bool:
@@ -313,6 +314,24 @@ def _is_plausible_rel_path(value: str) -> bool:
     if not _PLAUSIBLE_REL_PATH.fullmatch(value):
         return False
     return "/" in value or "\\" in value or "." in value
+
+
+def _is_source_file_claim(value: str) -> bool:
+    """Return True when a path-like token is a repo-relative source/config file.
+
+    HTTP routes such as ``/docs`` and local env files such as ``.env`` are
+    documented operational facts, not missing source artifacts.
+    """
+    text = value.strip().replace("\\", "/")
+    if not text:
+        return False
+    lowered = text.lower()
+    if lowered.startswith(("http://", "https://", "file:")):
+        return False
+    if text.startswith("/") or text.startswith("//"):
+        return False
+    name = Path(text).name
+    return not bool(_ENV_FILE_NAME.fullmatch(name))
 
 
 def _repo_path_exists(repo_root: Path, rel: str) -> bool:
@@ -329,7 +348,7 @@ def _extract_claims(text: str) -> tuple[set[str], set[str]]:
     service_like: set[str] = set()
     path_like: set[str] = set()
     for m in re.findall(r"`([^`]+)`", text):
-        if _is_plausible_rel_path(m):
+        if _is_plausible_rel_path(m) and _is_source_file_claim(m):
             path_like.add(m.lower())
         for token in re.findall(r"[A-Za-z_][A-Za-z0-9_-]{2,}", m):
             service_like.add(token.lower())
@@ -337,7 +356,7 @@ def _extract_claims(text: str) -> tuple[set[str], set[str]]:
         if token.lower().endswith(("service", "api", "model", "router")):
             service_like.add(token.lower())
     for p in re.findall(r"\b(?:src|app|repo_wiki|docs|tests)/[A-Za-z0-9_./-]+\b", text):
-        if _is_plausible_rel_path(p):
+        if _is_plausible_rel_path(p) and _is_source_file_claim(p):
             path_like.add(p.lower())
     return service_like, path_like
 
