@@ -1,6 +1,6 @@
 # FastAPI RealWorld wiki 质量对照 wrap
 
-**日期：** 2026-08-13–2026-08-14 CST  
+**日期：** 2026-08-13–2026-08-17 CST  
 **对照：** nsidnev/fastapi-realworld-example-app `029eb778` × MiniMax-M3  
 **CLI：** r1 `9cadf85`（#40）→ r2 `c2407979`（#42 空 content 重试 + #43 FastAPI 扫描）→ r3 `a3d58b4`（#45 导入 router 前缀拼接）→ r4 `9328896`（#50；含 #48 `api_prefix` + #49 circuit-break）→ r5 `8912c89`（#52 README/身份优先于 init stub 与 eval notes）→ r6 `b0a06f4`（#54 README.rst 解析 + pyproject fallback）→ r7 `2e3a3f0`（#56 identity.description 流入 overview）→ r8 `05bb3b8`（#58 去掉 citation `file:` 前缀）
 
@@ -13,7 +13,8 @@
 第七轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round7.md`。  
 第八轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round8.md`。  
 第九轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round9.md`。  
-第十轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round10.md`。
+第十轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round10.md`。  
+第十四轮评测见 `docs/eval/2026-08-17-fastapi-realworld-round14.md`。
 
 ## r1 vs r2
 
@@ -229,4 +230,31 @@ verify JSON：`docs/eval/2026-08-14-fastapi-realworld-round8-verify.json`。
 - taxonomy 幻觉页；泄漏 `<think>` 89 页。
 - coverage 42.28% 仍 << 95%；eval-layout HARD；API mermaid 缺 9 / ER 缺 5。
 - r8 verify：**12 HARD / 0 SOFT**（未放宽）。不要松阈值。
+
+## r13 vs r14
+
+评测正文：`docs/eval/2026-08-17-fastapi-realworld-round14.md`。  
+verify JSON：`docs/eval/2026-08-17-fastapi-realworld-round14-verify.json`。
+
+真实 MiniMax-M3 run `r14-2026-08-17`。CLI `278164e` = r13 栈 #72+#73+#74+#75+#82+#83 @ `3053586` + #85 `550782c`（本地 `r14-eval-local`；两处 keep-both；**未推送、未进 main**）。未叠到 #84。R13 正文在 #84。
+
+| 项 | r13 | **r14** |
+|---|---|---|
+| CLI | `3053586` / #72+#73+#74+#75+#82+#83（未进 main） | **`278164e`** / r13 栈 + #85（未进 main） |
+| generate | — | **EXIT=0；81/81；cache 0/81** |
+| LLM PASS / DEGRADED | — | **68 / 13** |
+| llm_call_count / tokens | — | **81 / 312531** |
+| fallback | — | **13**（全部 insufficient prose） |
+| 529 / circuit-break | — | **0 / false** |
+| MiniMax 1004 | — | **0** |
+| coverage | 65.08%；门仍是 95% | **64.44%**（928/1440）仍 << 95% |
+| HARD / SOFT | 7 / 0 | **5 / 0**（未放宽） |
+| Overview Conduit | HIT（两张 overview 页） | **HIT**（两张 overview 页） |
+| owner missing | 0 | **0** |
+| conflict（GitHub badges） | HARD | **PASS** |
+| API aggregation | HARD | **PASS 6/6** |
+| mermaid entity shape | HARD 证据 | **gone** |
+| #85 leftover code | `CRITICAL_FALSE_FACT`（mermaid entity） | **MISS**（仍 HARD；1 claim `DELETE /api/articles`，不是 R13 mermaid entity） |
+
+不要声称 #85 全部清掉 HARD。HARD 计数 7→5。不要松 HARD/SOFT。不要把这些产品 PR 合进 main。
 
