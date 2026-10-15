@@ -732,6 +732,26 @@ graph LR
         assert "QODER_PAGE_QUALITY_STATE_MISSING" in result.get("hard_gate_codes", [])
         assert expected_detail in json.dumps(quality_check["details"], ensure_ascii=False)
 
+    def test_quality_report_pages_alias_is_not_a_duplicate_coverage_error(self, tmp_path):
+        """Generate writes page_quality and pages as aliases; that is not missing coverage.
+
+        R1–R11 leftover QODER_PAGE_QUALITY_STATE_MISSING was 'duplicate page entry'
+        because the verifier walked both containers. Same path in both keys with the
+        same state must not trip the HARD gate. True duplicates inside one list still fail.
+        """
+        self._write_release_candidate(tmp_path)
+        meta_dir = tmp_path / "repowiki" / "zh" / "meta"
+        quality_path = meta_dir / "quality-report.json"
+        quality = json.loads(quality_path.read_text(encoding="utf-8"))
+        quality["pages"] = [dict(entry) for entry in quality["page_quality"]]
+        quality_path.write_text(json.dumps(quality), encoding="utf-8")
+
+        result = QoderLikeVerifierService(tmp_path, strict=True).verify(ci=True)
+        quality_check = next(c for c in result["checks"] if c["name"] == "qoder-quality-artifacts")
+
+        assert "QODER_PAGE_QUALITY_STATE_MISSING" not in result.get("hard_gate_codes", [])
+        assert "duplicate page entry" not in json.dumps(quality_check.get("details", {}))
+
     def test_release_candidate_corrupt_conflict_artifact_hard_fails(self, tmp_path):
         self._write_release_candidate(tmp_path)
         (tmp_path / "repowiki" / "zh" / "meta" / "source-docs-conflicts.json").write_text(

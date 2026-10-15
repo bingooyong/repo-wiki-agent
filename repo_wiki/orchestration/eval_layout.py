@@ -162,6 +162,26 @@ def get_eval_profile(name: str) -> EvalOutputProfile:
     return EVAL_PROFILES.get(name, EVAL_PROFILES["default"])
 
 
+def override_eval_profile_root(profile: EvalOutputProfile, output: str) -> EvalOutputProfile:
+    """Apply CLI `--output` while preserving the qoder-like `runs/` bucket.
+
+    `--output .repo-agent-eval` is the isolation root used by generate, verify,
+    and release-publish. The qoder-like profile stores candidate runs under
+    `<root>/runs/<run_id>/`. Replacing `profile.root` wholesale dropped `/runs`
+    and tripped `QODER_MANIFEST_PATH_INVALID` on the documented command.
+    """
+    root = Path(output)
+    if profile.name == "qoder-like" and root.name != "runs":
+        root = root / "runs"
+    return EvalOutputProfile(
+        name=profile.name,
+        root=str(root),
+        create_subdirs=profile.create_subdirs,
+        content_subdir=profile.content_subdir,
+        max_manifest_size_kb=profile.max_manifest_size_kb,
+    )
+
+
 def register_eval_profile(profile: EvalOutputProfile) -> None:
     """Register or update an eval profile."""
     EVAL_PROFILES[profile.name] = profile
