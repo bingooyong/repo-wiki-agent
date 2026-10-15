@@ -302,6 +302,11 @@ def _specificity(text: str) -> float:
 
 
 _PLAUSIBLE_REL_PATH = re.compile(r"^[A-Za-z0-9_./\\-]+$")
+_HTTP_URL = re.compile(r"https?://[^\s<>\]`'\"|]+", re.IGNORECASE)
+# Do not treat `example-app/blob/...` GitHub URL tails as repo path `app/blob/...`.
+_REPO_REL_PATH_PREFIX = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:src|app|repo_wiki|docs|tests)/[A-Za-z0-9_./-]+"
+)
 
 
 def _is_plausible_rel_path(value: str) -> bool:
@@ -328,15 +333,16 @@ def _repo_path_exists(repo_root: Path, rel: str) -> bool:
 def _extract_claims(text: str) -> tuple[set[str], set[str]]:
     service_like: set[str] = set()
     path_like: set[str] = set()
-    for m in re.findall(r"`([^`]+)`", text):
+    text_without_urls = _HTTP_URL.sub(" ", text)
+    for m in re.findall(r"`([^`]+)`", text_without_urls):
         if _is_plausible_rel_path(m):
             path_like.add(m.lower())
         for token in re.findall(r"[A-Za-z_][A-Za-z0-9_-]{2,}", m):
             service_like.add(token.lower())
-    for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_-]{2,}\b", text):
+    for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_-]{2,}\b", text_without_urls):
         if token.lower().endswith(("service", "api", "model", "router")):
             service_like.add(token.lower())
-    for p in re.findall(r"\b(?:src|app|repo_wiki|docs|tests)/[A-Za-z0-9_./-]+\b", text):
+    for p in _REPO_REL_PATH_PREFIX.findall(text_without_urls):
         if _is_plausible_rel_path(p):
             path_like.add(p.lower())
     return service_like, path_like

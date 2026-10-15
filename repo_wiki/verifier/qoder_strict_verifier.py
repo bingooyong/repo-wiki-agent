@@ -14,6 +14,22 @@ from repo_wiki.evidence.citation_renderer import (
 )
 from repo_wiki.verifier.service import CheckResult, GateType, SeverityThreshold, VerifierService
 
+_CODE_FENCE_LINE = re.compile(r"^\s*(```|~~~)")
+
+
+def _prose_without_fences(text: str) -> str:
+    """Drop fenced code/mermaid so diagram node ids are not inventory claims."""
+    lines: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if _CODE_FENCE_LINE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
 
 class QoderLikeSeverityThreshold(SeverityThreshold):
     """Strict severity thresholds for qoder-like profile."""
@@ -1369,7 +1385,7 @@ class QoderLikeVerifierService(VerifierService):
 
         offenders: list[dict[str, str]] = []
         for page in content_dir.rglob("*.md"):
-            text = page.read_text(encoding="utf-8", errors="ignore")
+            text = _prose_without_fences(page.read_text(encoding="utf-8", errors="ignore"))
             rel = page.relative_to(content_dir).as_posix()
             if inventories["apis"]:
                 for method, api_path in re.findall(
@@ -1877,25 +1893,27 @@ class QoderLikeVerifierService(VerifierService):
 
     def _extract_structured_name_claims(self, text: str, kind: str) -> set[str]:
         """Extract deterministic service/model identifiers from ordinary prose."""
+        prose = _prose_without_fences(text)
         if kind == "service":
+            # Same-line only: mermaid `entity\\n    service` is a node id pair, not a claim.
             patterns = (
-                r"\b[Ss]ervice\s+`([^`]+)`",
-                r"\b`([^`]+)`\s+service\b",
-                r"\b[Ss]ervice\s+([a-z][a-z0-9_-]{2,})\b",
-                r"\b([a-z][a-z0-9_-]{2,})\s+service\b",
+                r"\b[Ss]ervice[ \t]+`([^`]+)`",
+                r"\b`([^`]+)`[ \t]+service\b",
+                r"\b[Ss]ervice[ \t]+([a-z][a-z0-9_-]{2,})\b",
+                r"\b([a-z][a-z0-9_-]{2,})[ \t]+service\b",
             )
             generic = {"service", "services", "core", "public"}
         else:
             patterns = (
-                r"\b(?:Model|Entity)\s+`([^`]+)`",
-                r"\b`([^`]+)`\s+(?:model|entity)\b",
-                r"\b(?:Model|Entity)\s+([A-Za-z][A-Za-z0-9_-]{2,})\b",
-                r"\b([A-Za-z][A-Za-z0-9_-]{2,})\s+(?:model|entity)\b",
+                r"\b(?:Model|Entity)[ \t]+`([^`]+)`",
+                r"\b`([^`]+)`[ \t]+(?:model|entity)\b",
+                r"\b(?:Model|Entity)[ \t]+([A-Za-z][A-Za-z0-9_-]{2,})\b",
+                r"\b([A-Za-z][A-Za-z0-9_-]{2,})[ \t]+(?:model|entity)\b",
             )
             generic = {"model", "models", "entity", "entities", "data"}
         claims: set[str] = set()
         for pattern in patterns:
-            for value in re.findall(pattern, text):
+            for value in re.findall(pattern, prose):
                 claim = value.strip("`.,;:()[]{} ")
                 if claim and claim.lower() not in generic:
                     claims.add(claim)
