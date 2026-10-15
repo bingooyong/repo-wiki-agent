@@ -34,6 +34,7 @@ def test_stage0_exit_gate_is_explicit_in_ci() -> None:
         "tests/test_eval_manifest.py",
         "tests/test_release_meta_schema.py",
         "tests/test_cli_qoder_like.py",
+        "tests/test_host_loop_contract.py",
         "tests/test_secret_sentinel_artifacts.py",
         "tests/test_source_of_truth_contract.py",
     }

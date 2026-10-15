@@ -124,8 +124,9 @@ npx --yes @vscode/vsce package --out repo-wiki-browser-0.1.0.vsix
 **在编辑器里（推荐与文档一致）**
 
 - 侧栏按钮 **「更新 Wiki」**，或命令面板：`Repo Wiki: Update Wiki`。
-- 默认会在集成终端执行：**`uv run repo-wiki generate --profile qoder-like`**（与 CLI 文档一致）。
-- 若本机不用 `uv`，可在设置里修改 **`Repo Wiki › Generate Command`**（配置键 `repoWikiBrowser.generateCommand`），改成你能运行的命令，例如全局安装的 `repo-wiki generate --profile qoder-like`。
+- 默认会运行：**`uv run repo-wiki generate --profile qoder-like --output .repo-agent-eval`**（与 CLI 文档一致）。进度和失败原因显示在侧栏。
+- 验证通过后点 **「发布 READY」** 或命令 `Repo Wiki: Release Publish READY`。
+- 若本机不用 `uv`，可在设置里修改 **`Repo Wiki › Generate Command`**（配置键 `repoWikiBrowser.generateCommand`）。
 
 **在终端里**
 
@@ -208,7 +209,8 @@ After installation, the following commands are available:
 | `Repo Wiki: Open Wiki Viewer` | Open the wiki browser sidebar |
 | `Repo Wiki: Refresh Wiki Tree` | Refresh the wiki file tree |
 | `Repo Wiki: Run Verification (--ci)` | Run wiki verification in CI mode (configure CLI in extension if needed) |
-| `Repo Wiki: Update Wiki` | Run configured generate command in terminal (default: `uv run repo-wiki generate --profile qoder-like`; see `repoWikiBrowser.generateCommand`) |
+| `Repo Wiki: Update Wiki` | Run configured generate command with captured progress (default: `uv run repo-wiki generate --profile qoder-like --output .repo-agent-eval`; see `repoWikiBrowser.generateCommand`) |
+| `Repo Wiki: Release Publish READY` | Run `uv run repo-wiki release-publish --output .repo-agent-eval` |
 | `Repo Wiki: Sync Wiki` | Sync wiki with repository |
 
 ## Workflow Reference

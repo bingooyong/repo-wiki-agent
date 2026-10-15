@@ -200,12 +200,14 @@ modules:
     responsibility: VS Code/Cursor sidebar and viewer for published READY repo-wiki releases plus terminal command shortcuts.
     entry_points:
       - extensions/repo-wiki-browser/src/extension.ts
+      - extensions/repo-wiki-browser/src/hostLoop.ts
       - extensions/repo-wiki-browser/package.json
     extension_commands:
       - repoWikiBrowser.openViewer
       - repoWikiBrowser.refreshTree
       - repoWikiBrowser.runVerify
       - repoWikiBrowser.updateWiki
+      - repoWikiBrowser.releasePublish
       - repoWikiBrowser.syncWiki
     activation_events:
       - onView:repoWikiBrowser.sidebar
@@ -213,6 +215,7 @@ modules:
       - onCommand:repoWikiBrowser.refreshTree
       - onCommand:repoWikiBrowser.runVerify
       - onCommand:repoWikiBrowser.updateWiki
+      - onCommand:repoWikiBrowser.releasePublish
       - onCommand:repoWikiBrowser.syncWiki
       - onCommand:repoWikiBrowser.openPage
     release_contract:

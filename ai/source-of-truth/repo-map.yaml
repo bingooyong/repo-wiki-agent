@@ -73,6 +73,7 @@ extension_contract:
     - onCommand:repoWikiBrowser.refreshTree
     - onCommand:repoWikiBrowser.runVerify
     - onCommand:repoWikiBrowser.updateWiki
+    - onCommand:repoWikiBrowser.releasePublish
     - onCommand:repoWikiBrowser.syncWiki
     - onCommand:repoWikiBrowser.openPage
   commands:
@@ -80,12 +81,14 @@ extension_contract:
     - repoWikiBrowser.refreshTree
     - repoWikiBrowser.runVerify
     - repoWikiBrowser.updateWiki
+    - repoWikiBrowser.releasePublish
     - repoWikiBrowser.syncWiki
   default_manifest: .repo-agent-eval/repowiki/zh/manifest.json
   behavior:
     - Reads only the fixed READY release manifest by default.
     - Uses manifest navigation_tree for sidebar/page navigation.
-    - Sends the configured terminal command for wiki generation/update.
+    - Runs generate/verify/publish as tracked commands with sidebar progress and failure reason.
+    - Distinguishes missing READY: not generated, verify failed, or release-publish not run.
 
 stats:
   module_count: 7
