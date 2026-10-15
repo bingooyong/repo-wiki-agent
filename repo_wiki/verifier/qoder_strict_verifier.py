@@ -1755,6 +1755,35 @@ class QoderLikeVerifierService(VerifierService):
                             paths.append(self.root / raw)
         return paths
 
+    _RUNTIME_SERVICE_KINDS = frozenset(
+        {
+            "python_fastapi_app",
+            "python_flask_app",
+            "nodejs_express",
+            "go_main",
+            "spring_component",
+            "docker_compose_service",
+        }
+    )
+
+    @staticmethod
+    def _inventory_lists(data: dict[str, Any], *keys: str) -> list[Any]:
+        items: list[Any] = []
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, list):
+                items.extend(value)
+        return items
+
+    def _runtime_id_from_service(self, item: dict[str, Any]) -> str | None:
+        kind = item.get("kind")
+        if not isinstance(kind, str) or kind.strip() not in self._RUNTIME_SERVICE_KINDS:
+            return None
+        evidence = item.get("evidence_path")
+        if isinstance(evidence, str) and evidence.strip():
+            return evidence.strip()
+        return kind.strip()
+
     def _load_structured_inventory_sets(self) -> dict[str, Any]:
         meta = None
         payload = self._load_manifest_payload(self.root)
@@ -1778,10 +1807,7 @@ class QoderLikeVerifierService(VerifierService):
                     or data.get("schema_version") == "repo_agent.source_inventory/1.0"
                 ):
                     sources.add(path.name)
-                endpoints = data.get("endpoints", [])
-                if not isinstance(endpoints, list):
-                    endpoints = data.get("api_surfaces", [])
-                for item in endpoints if isinstance(endpoints, list) else []:
+                for item in self._inventory_lists(data, "endpoints", "api_surfaces", "apis"):
                     if (
                         isinstance(item, dict)
                         and isinstance(item.get("method"), str)
@@ -1793,22 +1819,28 @@ class QoderLikeVerifierService(VerifierService):
                         auth = self._endpoint_auth_value(item)
                         if auth is not None:
                             endpoint_auth[api_key] = auth
-                services_payload = data.get("services", [])
-                for item in services_payload if isinstance(services_payload, list) else []:
-                    if isinstance(item, dict):
-                        for key in ("service_id", "service", "name", "display_name"):
-                            value = item.get(key)
-                            if isinstance(value, str):
-                                services.add(value)
-                models_payload = data.get("models", [])
-                if not isinstance(models_payload, list):
-                    models_payload = data.get("data_models", [])
-                for item in models_payload if isinstance(models_payload, list) else []:
+                services_payload = self._inventory_lists(data, "services")
+                for item in services_payload:
+                    if not isinstance(item, dict):
+                        continue
+                    named = False
+                    for key in ("service_id", "service", "name", "display_name"):
+                        value = item.get(key)
+                        if isinstance(value, str) and value.strip():
+                            services.add(value.strip())
+                            named = True
+                    kind = item.get("kind")
+                    if not named and isinstance(kind, str) and kind.strip():
+                        services.add(kind.strip())
+                    runtime_id = self._runtime_id_from_service(item)
+                    if runtime_id:
+                        runtimes.add(runtime_id)
+                for item in self._inventory_lists(data, "models", "data_models"):
                     if isinstance(item, dict):
                         for key in ("model_id", "name", "display_name"):
                             value = item.get(key)
-                            if isinstance(value, str):
-                                models.add(value)
+                            if isinstance(value, str) and value.strip():
+                                models.add(value.strip())
                 for key in ("runtime_entrypoints", "entrypoints", "commands"):
                     runtime_payload = data.get(key, [])
                     for item in runtime_payload if isinstance(runtime_payload, list) else []:
