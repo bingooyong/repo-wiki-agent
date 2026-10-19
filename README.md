@@ -1,3 +1,5 @@
+
+
 # repo-wiki
 
 **Local-first repository wiki generator** — 无需 `.qoder` 目录即可为任意工程生成结构化 Wiki 文档。
@@ -109,7 +111,7 @@ shell profile，或保存 API Key。v1 不包含 MCP server；只有需要无 sh
 或进度 UI 时才考虑增加 MCP。
 
 完成上面的 CLI 安装后，在仓库根目录将本地 marketplace 加入 Codex。命令输出会显示
-marketplace 名称；在第二条命令中使用该名称：
+marketplace 名称（本仓为 `repo-wiki-local`）；在第二条命令中使用该名称：
 
 ```bash
 codex plugin marketplace add <repo-root>
