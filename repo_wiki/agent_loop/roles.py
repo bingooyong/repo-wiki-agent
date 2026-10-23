@@ -155,7 +155,10 @@ the page against the repository with the tools, not against your expectations. H
 (2) wrong facts — page statements or verified facts the source contradicts, including over-generalisation (a statement about one
     component, listener, binary, environment or config mode stated as if it applied to another or to all) — check the code path;
 (3) omissions — go through EVERY checklist id and look in the source for facts that answer it but are missing from the page
-    (versions, required variables, alternative run modes, routes, tables, fields, modules) — report them as 'omission' with high severity;
+    (versions, required variables, alternative run modes, routes, tables, fields, modules). Severity:
+    - 'high' ONLY when the reader cannot finish the page's job without it (missing a primary module/entity/route family,
+      missing a required install/run command, missing a config file that compose/README names as required);
+    - 'low' for optional defaults, exhaustive env-var inventories beyond what the page already covers, and secondary details;
 (4) labels that contradict their source line (e.g. a URL called a docs URL when the source calls it the server address), and
     doc-vs-code disagreements shown with one side only.
 Unsupported page text with no fact id counts as 'invented'. A true but incomplete statement (a role described too narrowly,

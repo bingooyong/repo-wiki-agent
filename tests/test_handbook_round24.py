@@ -29,6 +29,7 @@ from repo_wiki.verifier.handbook import (
 )
 from repo_wiki.verifier.handbook_routes import (
     ROUTE_COMPLETENESS_MIN,
+    _norm_path,
     extract_handbook_http_paths,
     extract_source_http_paths,
     handbook_route_crosscheck_mismatches,
@@ -409,3 +410,52 @@ def test_12_command_page_gate_is_not_title_only() -> None:
     assert install_page_render_errors(page)
     verifier = QoderLikeVerifierService
     assert hasattr(verifier, "_check_handbook_install_fence")
+
+
+def test_flask_converter_paths_normalize_to_bare_param_names() -> None:
+    """Werkzeug converters must not poison crosscheck: <string:x> and :x are the same."""
+    assert _norm_path("/user/<string:last_name>/<string:first_name>") == (
+        "/user/:last_name/:first_name"
+    )
+    assert _norm_path("/user/<int:id>") == "/user/:id"
+    assert _norm_path("/user/:string:last_name") == "/user/:last_name"
+    assert _norm_path("/user/:last_name/:first_name") == "/user/:last_name/:first_name"
+
+
+def test_flask_restful_api_ctor_add_resource_and_blueprint_prefix() -> None:
+    """holdout5-style Api(BLUEPRINT).add_resource(...) with register_blueprint prefix."""
+    files = [
+        (
+            "src/config.py",
+            'APPLICATION_ROOT = os.getenv("APPLICATION_APPLICATION_ROOT", "/application")\n',
+        ),
+        (
+            "src/routes/user.py",
+            "from flask import Blueprint\n"
+            "from flask_restful import Api\n"
+            'USER_BLUEPRINT = Blueprint("user", __name__)\n'
+            "Api(USER_BLUEPRINT).add_resource(\n"
+            '    UserResource, "/user/<string:last_name>/<string:first_name>"\n'
+            ")\n",
+        ),
+        (
+            "src/server.py",
+            "from flask import Flask\n"
+            "from flask.blueprints import Blueprint\n"
+            "import config, routes\n"
+            "server = Flask(__name__)\n"
+            "for blueprint in vars(routes).values():\n"
+            "    if isinstance(blueprint, Blueprint):\n"
+            "        server.register_blueprint(blueprint, url_prefix=config.APPLICATION_ROOT)\n",
+        ),
+    ]
+    source = extract_source_http_paths(files)
+    assert ("ANY", "/application/user/:last_name/:first_name") in source
+    page = (
+        "# API\n\n"
+        "GET `/application/user/:last_name/:first_name`\n"
+        "POST `/application/user/<last_name>/<first_name>`\n"
+        "PUT `/application/user/<string:last_name>/<string:first_name>`\n"
+    )
+    assert handbook_route_crosscheck_mismatches(page, files, api_page=True) == []
+    assert route_completeness_ratio(page, files) >= ROUTE_COMPLETENESS_MIN

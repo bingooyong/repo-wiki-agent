@@ -222,3 +222,47 @@ def test_render_tables_are_sentence_lines_with_ids() -> None:
     table = route_table(routes)
     assert "接口 `GET /a`，处理函数 `a`。 [R1]" in table and "[R2]" in table
     assert convert_ids("见 [R2]", [], routes) == "见 <cite>app.py:9</cite>"
+
+
+
+def test_accept_findings_drops_low_severity_omissions_keeps_high(tmp_path: Path) -> None:
+    """Low-severity omissions must not force rework; high ones with evidence still do."""
+    from repo_wiki.agent_loop.fact_page import accept_findings
+    from repo_wiki.agent_loop.repo import RepoView
+
+    root = make_demo_repo(tmp_path / "repo")
+    repo = RepoView(root, deny_globs=[], deny_dirs=[], allow_globs=[])
+    page = "安装依赖后启动服务。"
+    # Seed a real evidence line the finding can quote.
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    line_no = 1
+    for i, line in enumerate(readme.splitlines(), 1):
+        if line.strip():
+            line_no = i
+            quote = line.strip()
+            break
+    else:
+        quote = "demo"
+    ev = f"README.md:{line_no}: {quote}"
+    low = {"type": "omission", "severity": "low", "detail": "missing optional default", "ev": [ev]}
+    high = {
+        "type": "omission",
+        "severity": "high",
+        "detail": "missing required .env named by compose",
+        "ev": [ev],
+    }
+    accepted, dropped, _wrong = accept_findings(repo, [low, high], page)
+    assert any(a.startswith("[omission]") and "required .env" in a for a in accepted)
+    assert any("optional default" in d for d in dropped)
+    assert not any("optional default" in a for a in accepted)
+
+
+def test_auditor_prompt_limits_high_severity_omissions() -> None:
+    """Flask live acceptance: auditor marked every nit high → endless fail/rework."""
+    from repo_wiki.agent_loop.roles import ROLE_AUDITOR
+
+    text = ROLE_AUDITOR.format(title="安装与运行")
+    assert "low" in text
+    assert "high" in text
+    # Must NOT tell the model to report every omission as high.
+    assert "report them as 'omission' with high severity" not in text

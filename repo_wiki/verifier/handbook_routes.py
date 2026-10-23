@@ -8,7 +8,7 @@ from pathlib import Path
 
 _HTTP = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ANY"})
 _HANDBOOK_ROUTE_RE = re.compile(
-    r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|ANY)\b\s*`?(/(?:[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]|\{[^}]+\}|:[A-Za-z0-9_]+)+)",
+    r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|ANY)\b\s*`?(/(?:[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]|\{[^}]+\}|<[^>]+>|:[A-Za-z0-9_]+)+)",
     re.I,
 )
 _TABLE_ROW_RE = re.compile(
@@ -38,7 +38,16 @@ _PY_INCLUDE_RE = re.compile(
 _PREFIX_CONST_RE = re.compile(r"""(\w+)\s*(?::[^=\n]+)?=\s*['\"](/[^'\"]*)['\"]""")
 _IMPORT_RE = re.compile(r"from\s+([\w.]+)\s+import\s+(\([^)]+\)|[^\n#]+)", re.S)
 _ADD_RESOURCE_RE = re.compile(
-    r"""(\w+)\.add_resource\(\s*\w+\s*((?:,\s*['\"][^'\"]+['\"])+)""",
+    r"""(?:(?P<api>\w+)|Api\(\s*(?P<bp>\w+)\s*\))\.add_resource\(\s*\w+\s*(?P<paths>(?:,\s*['\"][^'\"]+['\"])+)""",
+    re.S,
+)
+_BLUEPRINT_ASSIGN_RE = re.compile(r"""(\w+)\s*=\s*Blueprint\s*\(""")
+_REGISTER_BP_RE = re.compile(
+    r"""\.register_blueprint\(\s*(\w+)\s*,[^)]*?url_prefix\s*=\s*(?:['\"](/[^'\"]*)['\"]|([\w.]+))""",
+    re.S,
+)
+_GETENV_DEFAULT_RE = re.compile(
+    r"""(\w+)\s*=\s*(?:os\.)?getenv\(\s*['\"][^'\"]+['\"]\s*,\s*['\"](/[^'\"]*)['\"]\s*\)"""
 )
 _AS_VIEW_RE = re.compile(
     r"""(?:path|re_path|url)\(\s*['\"]([^'\"]+)['\"]\s*,\s*\w+\.as_view\(""",
@@ -94,6 +103,13 @@ def _norm_path(path: str) -> str:
     text = (path or "").rstrip("。，、):")
     text = re.sub(r"\{([^}]+)\}", r":\1", text)
     text = re.sub(r"<([^>]+)>", r":\1", text)
+    # Werkzeug/Flask converters: :string:name / :int:id -> :name / :id
+    text = re.sub(
+        r":(?:string|int|float|path|uuid|any):([A-Za-z_][A-Za-z0-9_]*)",
+        r":\1",
+        text,
+        flags=re.I,
+    )
     if len(text) > 1:
         text = text.rstrip("/")
     return text or "/"
@@ -189,6 +205,8 @@ def _prefix_constants(files: Sequence[tuple[str, str]]) -> dict[str, str]:
     for _path, text in files:
         for match in _PREFIX_CONST_RE.finditer(text):
             found[match.group(1)] = match.group(2)
+        for match in _GETENV_DEFAULT_RE.finditer(text):
+            found.setdefault(match.group(1), match.group(2))
     return found
 
 
@@ -229,6 +247,9 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
     aliases: dict[tuple[str, str], tuple[str, str]] = {}
     type_methods: dict[str, list[tuple[str, str, str]]] = {}
     structs: dict[tuple[str, str], str] = {}
+    bp_paths: dict[str, list[str]] = {}
+    blueprint_names: set[str] = set()
+    register_prefixes: list[tuple[str, str]] = []
     for path, text in files:
         if path.endswith(".go") and not path.endswith("_test.go"):
             for match in _GO_TYPE_METHOD_RE.finditer(text):
@@ -278,9 +299,21 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
             for match in _PY_ROUTE_DECO_RE.finditer(text):
                 for method in _methods_from_blob(match.group(3)):
                     routes.append((path, match.group(1), method, match.group(2)))
+            for match in _BLUEPRINT_ASSIGN_RE.finditer(text):
+                blueprint_names.add(match.group(1))
             for match in _ADD_RESOURCE_RE.finditer(text):
-                for raw in re.findall(r"['\"]([^'\"]+)['\"]", match.group(2)):
-                    found.add(("ANY", _norm_path(concat_http_paths(raw))))
+                paths_blob = match.group("paths") or ""
+                bp = match.group("bp")
+                for raw in re.findall(r"['\"]([^'\"]+)['\"]", paths_blob):
+                    normed = _norm_path(concat_http_paths(raw))
+                    if bp:
+                        bp_paths.setdefault(bp, []).append(normed)
+                    else:
+                        found.add(("ANY", normed))
+            for match in _REGISTER_BP_RE.finditer(text):
+                pref = match.group(2) or _resolve_attr_prefix(match.group(3) or "", constants)
+                if pref:
+                    register_prefixes.append((match.group(1), _norm_path(pref)))
             for match in _AS_VIEW_RE.finditer(text):
                 found.add(("ANY", _norm_path(concat_http_paths(match.group(1)))))
             for match in _CHAIN_RE.finditer(text):
@@ -344,6 +377,23 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
                     found.add((method, concat_http_paths(match.group(2))))
         for match in _FETCH_RE.finditer(text):
             found.add(("ANY", _norm_path(concat_http_paths(match.group(1)))))
+    # Apply Flask Blueprint url_prefix to Api(blueprint).add_resource paths.
+    loop_prefs = [pref for name, pref in register_prefixes if name not in blueprint_names]
+    if loop_prefs:
+        pref = loop_prefs[0]
+        for _bp, paths in bp_paths.items():
+            for raw in paths:
+                found.add(("ANY", _norm_path(concat_http_paths(pref, raw))))
+    else:
+        for name, pref in register_prefixes:
+            if name in blueprint_names:
+                for raw in bp_paths.get(name, []):
+                    found.add(("ANY", _norm_path(concat_http_paths(pref, raw))))
+        if not register_prefixes:
+            for _bp, paths in bp_paths.items():
+                for raw in paths:
+                    found.add(("ANY", raw))
+
     by_name: dict[str, list[tuple[str, str]]] = {}
     for key in prefixes:
         by_name.setdefault(key[1], []).append(key)
