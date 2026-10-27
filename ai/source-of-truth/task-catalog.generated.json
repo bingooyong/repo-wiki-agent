@@ -4,7 +4,7 @@
     "config": "repo-wiki config --ci",
     "cost_estimate": "repo-wiki cost-estimate",
     "eval_layout_report": "repo-wiki eval-layout-report --output .repo-agent-eval",
-    "extension_update_default": "uv run repo-wiki generate --profile qoder-like",
+    "extension_update_default": "uv run repo-wiki generate --profile qoder-like --output .repo-agent-eval",
     "generate": "repo-wiki generate --profile qoder-like --output .repo-agent-eval",
     "graph": "repo-wiki graph <module>",
     "improve": "repo-wiki improve --profile qoder-like --output .repo-agent-eval",
@@ -113,6 +113,7 @@
         "repoWikiBrowser.refreshTree",
         "repoWikiBrowser.runVerify",
         "repoWikiBrowser.updateWiki",
+        "repoWikiBrowser.releasePublish",
         "repoWikiBrowser.syncWiki"
       ],
       "description": "Browse the stable READY release from VS Code/Cursor.",
@@ -122,7 +123,8 @@
       "name": "extension-browse-ready-release",
       "verifies": [
         "Sidebar reads the fixed release manifest and does not fall back to run directories.",
-        "Update Wiki sends the configured repoWikiBrowser.generateCommand in an integrated terminal."
+        "Update Wiki runs the configured generate command with captured progress and failure reason.",
+        "Sidebar distinguishes missing READY (not generated / verify failed / not published) and can run release-publish."
       ]
     }
   ]

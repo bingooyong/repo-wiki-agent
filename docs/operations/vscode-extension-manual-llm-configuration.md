@@ -237,10 +237,12 @@ uv run repo-wiki release-publish --output .repo-agent-eval
 插件默认执行：
 
 ```bash
-uv run repo-wiki generate --profile qoder-like
+uv run repo-wiki generate --profile qoder-like --output .repo-agent-eval
 ```
 
-它不会自动配置 LLM。请确保 VS Code 集成终端能看到：
+进度和失败原因会出现在侧栏与 **Repo Wiki** 输出通道。生成不会自动发布 READY；验证通过后使用 `Repo Wiki: Release Publish READY`（`uv run repo-wiki release-publish --output .repo-agent-eval`）。
+
+它不会自动配置 LLM。请确保 VS Code 集成终端/扩展进程能看到：
 
 - `repo-wiki.yaml`；
 - 真实 API Key 对应的环境变量；
@@ -256,7 +258,7 @@ uv run repo-wiki generate --profile qoder-like
 }
 ```
 
-当前插件的 Update Wiki 只发送一条命令；若你希望同时 verify / release-publish，建议先在终端手动执行，或后续把命令封装成脚本：
+当前插件的 Update Wiki 只发送一条生成命令；侧栏会单独提供验证和一键 `release-publish`。若你希望把整条链路封装成脚本，仍可覆盖 `generateCommand`：
 
 ```json
 {

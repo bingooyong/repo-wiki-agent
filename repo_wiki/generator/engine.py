@@ -3177,12 +3177,14 @@ class GenerationEngine:
                     "repoWikiBrowser.refreshTree",
                     "repoWikiBrowser.runVerify",
                     "repoWikiBrowser.updateWiki",
+                    "repoWikiBrowser.releasePublish",
                     "repoWikiBrowser.syncWiki",
                 ],
                 "inputs": [".repo-agent-eval/repowiki/zh/manifest.json"],
                 "verifies": [
                     "Sidebar reads the fixed release manifest and does not fall back to run directories.",
-                    "Update Wiki sends the configured repoWikiBrowser.generateCommand in an integrated terminal.",
+                    "Update Wiki runs the configured generate command with captured progress and failure reason.",
+                    "Sidebar distinguishes missing READY (not generated / verify failed / not published) and can run release-publish.",
                 ],
             },
         ]
