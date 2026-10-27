@@ -85,21 +85,18 @@ def generate_command(
     ci: bool = typer.Option(False, "--ci", help="Run in CI mode (strict verification)"),
 ) -> None:
     """Generate wiki content using specified eval profile."""
-    from repo_wiki.orchestration.eval_layout import get_eval_profile, reject_unsafe_output_root
+    from repo_wiki.orchestration.eval_layout import (
+        get_eval_profile,
+        override_eval_profile_root,
+        reject_unsafe_output_root,
+    )
 
     # Get the profile
     eval_profile = get_eval_profile(profile)
 
     # Override output root if specified
     if output:
-        from repo_wiki.orchestration.eval_layout import EvalOutputProfile
-
-        eval_profile = EvalOutputProfile(
-            name=profile,
-            root=output,
-            create_subdirs=eval_profile.create_subdirs,
-            content_subdir=eval_profile.content_subdir,
-        )
+        eval_profile = override_eval_profile_root(eval_profile, output)
         # Validate unsafe output roots
         reject_unsafe_output_root(output)
 
@@ -149,18 +146,12 @@ def improve_command(
         raise typer.BadParameter("improve currently supports --profile qoder-like only")
 
     from repo_wiki.orchestration.eval_layout import (
-        EvalOutputProfile,
         get_eval_profile,
+        override_eval_profile_root,
         reject_unsafe_output_root,
     )
 
-    eval_profile = get_eval_profile(profile)
-    eval_profile = EvalOutputProfile(
-        name=profile,
-        root=output,
-        create_subdirs=eval_profile.create_subdirs,
-        content_subdir=eval_profile.content_subdir,
-    )
+    eval_profile = override_eval_profile_root(get_eval_profile(profile), output)
     reject_unsafe_output_root(output)
 
     env_updates = {
