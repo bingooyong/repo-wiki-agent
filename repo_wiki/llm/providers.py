@@ -13,12 +13,18 @@ from repo_wiki.llm.models import (
     ProviderCapabilities,
 )
 
+_DEFAULT_MOCK_CONTENT = (
+    "This is a mock response. "
+    "The page continues with enough reader-facing detail about module boundaries, "
+    "call chains, persistence, and how operators verify the service after a change. " * 16
+)
+
 
 @dataclass
 class MockResponse:
     """Configurable mock response for testing."""
 
-    content: str = "This is a mock response."
+    content: str = _DEFAULT_MOCK_CONTENT
     usage: dict[str, int] | None = None
     finish_reason: str = "stop"
     delay: float = 0.0  # Simulated delay in seconds
@@ -136,7 +142,7 @@ class MockLLMProvider(LLMProvider):
 
 def create_mock_provider(
     config: LLMProviderConfig | None = None,
-    response_content: str = "This is a mock response.",
+    response_content: str = _DEFAULT_MOCK_CONTENT,
     delay: float = 0.0,
 ) -> MockLLMProvider:
     """Create a mock provider with custom response.

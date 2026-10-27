@@ -22,6 +22,13 @@ from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.orchestration.release_meta_schema import SCHEMA_VERSION_SOURCE_INVENTORY
 from repo_wiki.scanner.artifacts import is_product_source_path
 from repo_wiki.scanner.fastapi_routes import FastAPIEndpoint, extract_fastapi_endpoints
+from repo_wiki.scanner.go_routes import (
+    GoDataModel,
+    GoEndpoint,
+    extract_go_data_models,
+    extract_go_endpoints,
+    is_go_test_path,
+)
 from repo_wiki.scanner.repository_scanner import RepositoryScanner
 
 # ---------------------------------------------------------------------------
@@ -243,6 +250,54 @@ def _with_full_repo_fastapi_surfaces(
     return overlayed
 
 
+def _record_has_go_service(record: dict[str, Any]) -> bool:
+    return any(
+        item.get("kind") in {"go_main", "go_http", "go_gin"} for item in record.get("services", [])
+    ) or any(item.get("runtime") == "go" for item in record.get("api_surfaces", []))
+
+
+def _with_full_repo_go_surfaces(
+    cached_records: dict[str, dict[str, Any]],
+    go_files: list[tuple[str, str]],
+) -> dict[str, dict[str, Any]]:
+    """Replace per-file Go routes/models with one repo-wide extract."""
+    endpoints = extract_go_endpoints(go_files)
+    models = extract_go_data_models(go_files)
+    by_file_apis: dict[str, list[GoEndpoint]] = {}
+    for endpoint in endpoints:
+        by_file_apis.setdefault(endpoint.file_path, []).append(endpoint)
+    by_file_models: dict[str, list[GoDataModel]] = {}
+    for model in models:
+        by_file_models.setdefault(model.file_path, []).append(model)
+
+    overlayed: dict[str, dict[str, Any]] = {}
+    for path, record in cached_records.items():
+        if (
+            path not in by_file_apis
+            and path not in by_file_models
+            and not _record_has_go_service(record)
+        ):
+            overlayed[path] = record
+            continue
+        copied = dict(record)
+        copied["api_surfaces"] = [
+            item for item in record.get("api_surfaces", []) if item.get("runtime") != "go"
+        ]
+        copied["api_surfaces"].extend(
+            _go_surface(endpoint) for endpoint in by_file_apis.get(path, [])
+        )
+        copied["data_models"] = [
+            item
+            for item in record.get("data_models", [])
+            if item.get("kind") not in {"go_gorm", "go_struct_db"}
+        ]
+        copied["data_models"].extend(
+            _go_model_item(model) for model in by_file_models.get(path, [])
+        )
+        overlayed[path] = copied
+    return overlayed
+
+
 def _scan_js_ts(text: str, rel: str, record: FileScanRecord) -> None:
     if re.search(r"\bexpress\s*\(\s*\)", text, re.I) or re.search(
         r"require\s*\(\s*['\"]express['\"]\s*\)", text
@@ -289,30 +344,39 @@ def _scan_js_ts(text: str, rel: str, record: FileScanRecord) -> None:
         )
 
 
+def _go_surface(endpoint: GoEndpoint) -> dict[str, Any]:
+    return {
+        "runtime": "go",
+        "method": endpoint.method,
+        "path": endpoint.path,
+        "handler": endpoint.handler,
+        "kind": endpoint.kind,
+        "evidence_path": endpoint.file_path,
+        "line": endpoint.lineno,
+    }
+
+
+def _go_model_item(model: GoDataModel) -> dict[str, Any]:
+    item = {
+        "kind": model.kind,
+        "name": model.name,
+        "evidence_path": model.file_path,
+        "line": model.lineno,
+    }
+    if model.table_name:
+        item["table_name"] = model.table_name
+    return item
+
+
 def _scan_go(text: str, rel: str, record: FileScanRecord) -> None:
     if re.search(r"\bfunc\s+main\s*\(", text):
         record.services.append({"kind": "go_main", "evidence_path": rel})
-    for path_lit, handler in re.findall(
-        r"http\.HandleFunc\s*\(\s*[\"']([^\"']+)[\"']\s*,\s*(\w+)", text
-    ):
-        record.api_surfaces.append(
-            {
-                "runtime": "go",
-                "method": "GET",
-                "path": path_lit,
-                "handler": handler,
-                "evidence_path": rel,
-            }
-        )
-    for name, body in re.findall(r"type\s+(\w+)\s+struct\s*\{([^}]*)\}", text, re.DOTALL):
-        if re.search(r"`[^`]*db:", body):
-            record.data_models.append(
-                {
-                    "kind": "go_struct_db",
-                    "name": name,
-                    "evidence_path": rel,
-                }
-            )
+    if is_go_test_path(rel):
+        return
+    for endpoint in extract_go_endpoints([(rel, text)]):
+        record.api_surfaces.append(_go_surface(endpoint))
+    for model in extract_go_data_models([(rel, text)]):
+        record.data_models.append(_go_model_item(model))
 
 
 def _scan_openapi_yaml(text: str, rel: str, record: FileScanRecord) -> None:
@@ -513,6 +577,7 @@ class MultiRuntimeSourceScannerV3:
         current_paths: set[str] = set()
         current_hashes: dict[str, str] = {}
         python_files: list[tuple[str, str]] = []
+        go_files: list[tuple[str, str]] = []
 
         for batch in self._legacy.iter_file_batches(batch_size=batch_size):
             batches_processed += 1
@@ -526,6 +591,8 @@ class MultiRuntimeSourceScannerV3:
                 current_hashes[rel_s] = digest
                 if rel.suffix.lower() == ".py" and is_product_source_path(rel_s):
                     python_files.append((rel_s, text))
+                if rel.suffix.lower() == ".go":
+                    go_files.append((rel_s, text))
 
                 if incremental and hashes.get(rel_s) == digest and rel_s in cached_records:
                     record_dict = cached_records[rel_s]
@@ -581,7 +648,10 @@ class MultiRuntimeSourceScannerV3:
         frontend_callers: list[dict[str, Any]] = []
         deployment_assets: list[dict[str, Any]] = []
         tests: list[dict[str, Any]] = []
-        inventory_records = _with_full_repo_fastapi_surfaces(cached_records, python_files)
+        inventory_records = _with_full_repo_go_surfaces(
+            _with_full_repo_fastapi_surfaces(cached_records, python_files),
+            go_files,
+        )
 
         for _path, rec in sorted(inventory_records.items()):
             _merge_lists(services, rec.get("services", []))

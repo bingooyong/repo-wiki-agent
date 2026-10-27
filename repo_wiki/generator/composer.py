@@ -1,22 +1,8 @@
-"""LLM page composer pipeline for Qoder-style Markdown article generation.
-
-This module provides the core composer that integrates:
-- Page plan (WikiPagePlan) and evidence binding (PageEvidenceBinding)
-- Prompt contracts (PagePromptContract) and skeleton builder
-- Citation renderer for evidence preservation
-- Mock LLM provider for CI, optional real provider for smoke tests
-
-Phase 24 - Task 24.3: LLM page composer pipeline
-
-Key features:
-- Uses MockLLMProvider in CI and tests
-- Optional real-provider smoke when REAL_LLM_PROVIDER env exists
-- Preserves citations through normalization
-- Rejects pages that lose required evidence or headings
-"""
+"""LLM page composer pipeline."""
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from dataclasses import dataclass, field
@@ -28,12 +14,29 @@ from repo_wiki.evidence.citation_renderer import (
     normalize_citation_markup,
     unique_root_readme_name,
 )
-from repo_wiki.evidence.ranking import PageEvidenceBinding
+from repo_wiki.evidence.ranking import PageEvidenceBinding, wants_wide_evidence
+from repo_wiki.llm.cassette import (
+    prompt_hash_for_messages,
+    record_cassette_attempt,
+    set_cassette_call_context,
+)
 from repo_wiki.llm.config import LLMProviderConfig
-from repo_wiki.llm.models import ChatMessage, ChatRequest, ChatResponse, LLMProvider
+from repo_wiki.llm.models import (
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    ErrorCode,
+    LLMProvider,
+    RetryableError,
+)
 from repo_wiki.llm.providers import create_mock_provider
 from repo_wiki.llm.retry import chat_with_retry
-from repo_wiki.planner.schema import INVENTORY_SERVICE_API_PAGE_ID, WikiPagePlan
+from repo_wiki.planner.identity import has_img_shields_io_url
+from repo_wiki.planner.schema import (
+    INVENTORY_SERVICE_API_PAGE_ID,
+    WikiPagePlan,
+    WikiTaxonomyCategory,
+)
 from repo_wiki.prompts.contracts import (
     PagePromptContract,
     PagePromptType,
@@ -47,6 +50,208 @@ from repo_wiki.prompts.skeleton import (
     ArticleSkeleton,
     build_skeleton,
 )
+from repo_wiki.verifier.handbook import (
+    EMPTY_CONTENT_REJECTION,
+    EMPTY_SPAN_REJECTION,
+    EVIDENCE_META_REJECTION,
+    GENERATOR_META_REJECTION,
+    MIN_HANDBOOK_BODY_CHARS,
+    ROLE_CONTRADICTION_REJECTION,
+    TINY_OR_TRUNCATED_REJECTION,
+    UNCLOSED_FENCE_REJECTION,
+    contains_evidence_meta_talk,
+    contains_generator_meta,
+    handbook_page_body_len,
+    handbook_page_is_truncated,
+    has_unclosed_fence,
+    is_page_timeout_rejection,
+    is_rate_limit_error,
+    is_transient_server_error,
+    page_server_error_rejection,
+    page_timeout_rejection,
+)
+
+_PROSE_RECOVERY_REASONS = frozenset(
+    {
+        "Insufficient prose content",
+        EMPTY_CONTENT_REJECTION,
+        EMPTY_SPAN_REJECTION,
+        UNCLOSED_FENCE_REJECTION,
+        ROLE_CONTRADICTION_REJECTION,
+        EVIDENCE_META_REJECTION,
+        TINY_OR_TRUNCATED_REJECTION,
+    }
+)
+_KEEP_MARKDOWN_AFTER_RETRY = frozenset({ROLE_CONTRADICTION_REJECTION})
+EMPTY_CONTENT_REWRITE_MAX_TOKENS = 16384
+
+_HANDBOOK_OVERVIEW_PAGE_IDS = frozenset({"project-overview"})
+_HANDBOOK_INSTALL_PAGE_IDS = frozenset(
+    {
+        "installation",
+        "quick-start",
+        "quickstart",
+        "getting-started",
+        "local-setup",
+        "environment-setup",
+    }
+)
+_HANDBOOK_INSTALL_ID_TOKENS = (
+    "install",
+    "quick-start",
+    "quickstart",
+    "getting-started",
+)
+_HANDBOOK_INSTALL_TITLE_TOKENS = ("安装", "快速开始")
+_HANDBOOK_INSTALL_TAGS = frozenset(
+    {
+        "installation",
+        "quick-start",
+        "quickstart",
+        "getting-started",
+    }
+)
+_HANDBOOK_OVERVIEW_TITLES = frozenset({"项目概述", "项目概览", "project overview"})
+_SHIELD_LINE_RE = re.compile(
+    r"^\[!\[.*?\]\(https?://img\.shields\.io/[^)]+\)\]\([^)]*\)\s*$",
+    re.IGNORECASE,
+)
+_TEST_COUNT_FILLER_RE = re.compile(r"tests?\s+\d+\s*/\s*\d+\s+passing", re.IGNORECASE)
+
+
+def _strip_handbook_filler(markdown: str) -> str:
+    """Drop raw shields.io badges and repeated test-count filler from LLM pages."""
+    kept: list[str] = []
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if _SHIELD_LINE_RE.fullmatch(stripped):
+            continue
+        if stripped.startswith("!") and has_img_shields_io_url(stripped):
+            continue
+        if _TEST_COUNT_FILLER_RE.fullmatch(stripped):
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
+_HANDBOOK_INSTALL_HEADINGS = (
+    "## 这是什么",
+    "## 环境要求",
+    "## 安装步骤",
+    "## 启动与验证",
+    "## 常见问题",
+)
+_HANDBOOK_ONBOARDING_HEADINGS = _HANDBOOK_INSTALL_HEADINGS
+_HANDBOOK_OVERVIEW_HEADINGS = (
+    "## 这是什么",
+    "## 能做什么",
+    "## 仓库怎么组织",
+    "## 建议阅读顺序",
+    "## 常见误解",
+)
+_HANDBOOK_INSTALL_STRUCTURE = """推荐结构：
+## 这是什么
+用产品身份说明仓库是什么、读者按本页做完后能得到什么。不要用仓库 slug 或通用 api-server 表述代替产品名。
+
+## 环境要求
+列出仓库文档里出现的运行时、语言版本、包管理器和外部依赖。文档对不上的条目整段跳过。
+
+## 安装步骤
+使用编号步骤。每一步若涉及命令，必须给出可复制的 ```bash 或 ```sh 围栏，不要只把命令写在行内反引号里。命令必须使用仓库里真实存在的路径、二进制和 flag。
+
+## 启动与验证
+给出启动命令和如何确认服务已起来（同样优先围栏命令）。
+
+## 常见问题
+只写仓库证据里能核对的失败点或配置坑。不要写「详细分析」「性能考虑」「结论」。
+"""
+_HANDBOOK_ONBOARDING_STRUCTURE = _HANDBOOK_INSTALL_STRUCTURE
+_HANDBOOK_OVERVIEW_STRUCTURE = """推荐结构：
+## 这是什么
+用产品身份说明仓库是什么、给谁用。不要用仓库 slug 或通用 api-server 表述代替产品名。不要写成安装手册。
+
+## 能做什么
+概括仓库文档里已经出现的能力与边界。文档对不上的条目整段跳过。
+
+## 仓库怎么组织
+说明主要目录、模块或文档入口如何对应，不另画未出现在仓库里的架构。
+
+## 建议阅读顺序
+告诉读者先看概述、再看安装或快速开始、再进模块页。不要在本页展开安装命令。
+
+## 常见误解
+澄清本页不是安装步骤清单；环境、命令和验证在安装或快速开始页。不要写「详细分析」「性能考虑」「结论」。
+"""
+_ESSAY_RECOMMENDED_STRUCTURE = """推荐结构：
+## 简介
+说明本页主题在仓库中的职责和边界。
+
+## 项目结构
+说明相关目录、文件和模块如何组织。
+
+## 核心组件
+按证据列出关键类、函数、配置或 API。
+
+## 详细分析
+解释调用关系、数据流或模型关系。
+
+## 依赖关系分析
+说明上下游依赖与变更影响。
+
+## 性能考虑
+指出可能的性能、缓存、批处理或 IO 风险。
+
+## 故障排查指南
+给出基于源码位置的排查步骤。
+
+## 结论
+总结该页面对理解仓库的价值。
+"""
+
+
+def _handbook_page_id(page: WikiPagePlan) -> str:
+    return (page.page_id or "").lower()
+
+
+def _handbook_page_title(page: WikiPagePlan) -> str:
+    return (page.title or "").strip()
+
+
+def _handbook_page_tags(page: WikiPagePlan) -> set[str]:
+    return {str(tag).lower() for tag in (page.tags or [])}
+
+
+def _is_ide_config_page(page: WikiPagePlan) -> bool:
+    page_id = _handbook_page_id(page)
+    title = _handbook_page_title(page).lower()
+    return "ide" in page_id or "ide" in title or "ide配置" in title
+
+
+def is_handbook_install_page(page: WikiPagePlan) -> bool:
+    """True for install / quick-start / local or environment setup pages."""
+    if _is_ide_config_page(page):
+        return False
+    page_id = _handbook_page_id(page)
+    title = _handbook_page_title(page)
+    if page_id in _HANDBOOK_INSTALL_PAGE_IDS:
+        return True
+    if any(token in page_id for token in _HANDBOOK_INSTALL_ID_TOKENS):
+        return True
+    if any(token in title for token in _HANDBOOK_INSTALL_TITLE_TOKENS):
+        return True
+    return bool(_handbook_page_tags(page) & _HANDBOOK_INSTALL_TAGS)
+
+
+def is_handbook_overview_page(page: WikiPagePlan) -> bool:
+    """True for project-overview pages that must not use the install recipe."""
+    if is_handbook_install_page(page):
+        return False
+    page_id = _handbook_page_id(page)
+    title = _handbook_page_title(page)
+    if page_id in _HANDBOOK_OVERVIEW_PAGE_IDS or page_id.endswith("project-overview"):
+        return True
+    return title in _HANDBOOK_OVERVIEW_TITLES or title.lower() in _HANDBOOK_OVERVIEW_TITLES
+
 
 # =============================================================================
 # COMPOSER CONTRACTS AND RESULTS
@@ -67,6 +272,7 @@ class ComposerContext:
     commands: dict[str, str] = field(default_factory=dict)
     domain_groups_markdown: str = ""
     product_description: str | None = None
+    key_directories: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -98,6 +304,7 @@ class ComposerOutput:
     model: str = "mock-gpt"
     low_confidence: bool = False
     uncertainty_reasons: list[str] = field(default_factory=list)
+    raw_markdown: str = ""
 
 
 @dataclass
@@ -239,6 +446,7 @@ _UNCLOSED_THINK_PREFIX_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _LEADING_THINK_TAG_RE = re.compile(r"\A<think(?:ing)?>", re.IGNORECASE)
+EMPTY_COMPOSER_STUB_PHRASE = "LLM composer did not return content"
 
 
 def _strip_leaked_think_dumps(content: str) -> str:
@@ -249,6 +457,14 @@ def _strip_leaked_think_dumps(content: str) -> str:
     if _LEADING_THINK_TAG_RE.match(text):
         return ""
     return text
+
+
+def is_empty_composer_markdown(content: str) -> bool:
+    """True for empty, think-only, or the historic empty-composer stub."""
+    text = (content or "").strip()
+    if not text:
+        return True
+    return EMPTY_COMPOSER_STUB_PHRASE in text
 
 
 class LLMPageComposer:
@@ -318,54 +534,149 @@ class LLMPageComposer:
         page_id = input.page_plan.page_id
 
         try:
-            # Build prompt context
             context = self._build_context(input)
+            prompt = self._build_compose_prompt(input, context)
+            prompt_tokens = 0
+            completion_tokens = 0
+            total_tokens = 0
+            last_rejected: ComposerOutput | None = None
+            best_clean: ComposerOutput | None = None
+            best_clean_score = (-1, -1, -1)
+            best_attempt: ComposerOutput | None = None
+            best_score = (-1, -1, -1)
+            rewrite_max_tokens: int | None = None
+            rewrite_extra_body: dict[str, Any] | None = None
+            from repo_wiki.generator.composer_cache import compute_composer_input_hash
 
-            if self._use_compact_prompt():
-                prompt = self._build_compact_prompt(input, context)
-            else:
-                # Render prompt fragment
-                fragment_name = input.page_plan.category.value.lower().replace(" ", "-")
-                try:
-                    prompt = render_prompt_fragment(fragment_name, context)
-                except ValueError:
-                    # Fallback to system fragment
-                    prompt = get_prompt_fragment("system") + "\n\n" + context.get("content", "")
-
-                # Add evidence context to prompt
-                if input.evidence_binding and input.evidence_binding.candidates:
-                    evidence_context = self._build_evidence_context(input.evidence_binding)
-                    prompt = prompt + "\n\n## Evidence Context\n" + evidence_context
-
-                # Add skeleton guidance
-                skeleton_md = input.skeleton.render_skeleton_markdown()
-                prompt = prompt + "\n\n## Article Structure\n" + skeleton_md
-
-            # Call LLM
-            response = await self._call_llm(prompt, input.page_plan.title)
-            response_content = self._normalize_markdown_response(
-                response.content, input.page_plan.title
-            )
-            usage = response.usage or {}
-            prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
-            completion_tokens = int(usage.get("completion_tokens", 0) or 0)
-            total_tokens = int(usage.get("total_tokens", 0) or 0)
-
-            # Validate output
-            validation_result = self._validate_output(
-                response_content,
+            input_hash = compute_composer_input_hash(
                 input,
+                model_name=self.model_name,
+                temperature=self._llm_config.temperature,
+                max_tokens=self._resolve_request_max_tokens(),
             )
-            tokens_used = total_tokens or validation_result.tokens_used
 
-            if validation_result.rejected:
-                return ComposerOutput(
+            for attempt in range(3):
+                try:
+                    response = await asyncio.wait_for(
+                        self._call_llm(
+                            prompt,
+                            input.page_plan.title,
+                            max_tokens=rewrite_max_tokens,
+                            extra_body=(
+                                rewrite_extra_body or self._empty_content_rewrite_extra_body()
+                            ),
+                            page_id=page_id,
+                            attempt=attempt,
+                            input_hash=input_hash,
+                        ),
+                        timeout=self._resolve_page_timeout(),
+                    )
+                except TimeoutError:
+                    last_rejected = ComposerOutput(
+                        page_id=page_id,
+                        markdown="",
+                        citations_preserved=False,
+                        headings_preserved=False,
+                        evidence_count=0,
+                        rejected=True,
+                        rejection_reason=page_timeout_rejection(self._resolve_page_timeout()),
+                        tokens_used=total_tokens,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        low_confidence=False,
+                        uncertainty_reasons=[],
+                    )
+                    if attempt == 0:
+                        prompt = self._build_prose_recovery_prompt(input, context, "")
+                        continue
+                    return last_rejected
+                except RetryableError as exc:
+                    if getattr(exc, "code", None) == ErrorCode.EMPTY_CONTENT:
+                        last_rejected = ComposerOutput(
+                            page_id=page_id,
+                            markdown="",
+                            citations_preserved=False,
+                            headings_preserved=False,
+                            evidence_count=0,
+                            rejected=True,
+                            rejection_reason=EMPTY_CONTENT_REJECTION,
+                            tokens_used=total_tokens,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            provider=self.provider_name,
+                            model=self.model_name,
+                            low_confidence=False,
+                            uncertainty_reasons=[],
+                        )
+                        if attempt == 0:
+                            prompt = self._build_prose_recovery_prompt(input, context, "")
+                            rewrite_max_tokens = self._resolve_empty_content_rewrite_max_tokens()
+                            rewrite_extra_body = self._empty_content_rewrite_extra_body()
+                            continue
+                        return last_rejected
+                    if is_rate_limit_error(exc):
+                        if attempt < 2:
+                            await asyncio.sleep(0.4 * (2**attempt))
+                            continue
+                        last_rejected = ComposerOutput(
+                            page_id=page_id,
+                            markdown="",
+                            citations_preserved=False,
+                            headings_preserved=False,
+                            evidence_count=0,
+                            rejected=True,
+                            rejection_reason=page_server_error_rejection(exc),
+                            tokens_used=total_tokens,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            provider=self.provider_name,
+                            model=self.model_name,
+                            low_confidence=False,
+                            uncertainty_reasons=[],
+                        )
+                        return last_rejected
+                    if is_transient_server_error(exc):
+                        last_rejected = ComposerOutput(
+                            page_id=page_id,
+                            markdown="",
+                            citations_preserved=False,
+                            headings_preserved=False,
+                            evidence_count=0,
+                            rejected=True,
+                            rejection_reason=page_server_error_rejection(exc),
+                            tokens_used=total_tokens,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            provider=self.provider_name,
+                            model=self.model_name,
+                            low_confidence=False,
+                            uncertainty_reasons=[],
+                        )
+                        if attempt == 0:
+                            prompt = self._build_prose_recovery_prompt(input, context, "")
+                            continue
+                        return last_rejected
+                    raise
+
+                raw_reply = response.content or ""
+                response_content = self._normalize_markdown_response(
+                    raw_reply, input.page_plan.title
+                )
+                usage = response.usage or {}
+                prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
+                completion_tokens += int(usage.get("completion_tokens", 0) or 0)
+                total_tokens += int(usage.get("total_tokens", 0) or 0)
+                validation_result = self._validate_output(response_content, input)
+                tokens_used = total_tokens or validation_result.tokens_used
+                output = ComposerOutput(
                     page_id=page_id,
                     markdown=response_content,
                     citations_preserved=validation_result.citations_preserved,
                     headings_preserved=validation_result.headings_preserved,
                     evidence_count=validation_result.evidence_count,
-                    rejected=True,
+                    rejected=validation_result.rejected,
                     rejection_reason=validation_result.rejection_reason,
                     tokens_used=tokens_used,
                     prompt_tokens=prompt_tokens,
@@ -374,24 +685,59 @@ class LLMPageComposer:
                     model=self.model_name,
                     low_confidence=validation_result.low_confidence,
                     uncertainty_reasons=validation_result.uncertainty_reasons,
+                    raw_markdown=raw_reply,
                 )
+                score = self._attempt_structure_score(response_content)
+                worse_than_earlier = best_score[0] >= 0 and (
+                    score[0] < best_score[0] or score[1] < best_score[1] or score[2] < best_score[2]
+                )
+                still_dirty = bool(output.rejected)
+                if still_dirty or worse_than_earlier:
+                    last_rejected = output
+                    extra_retry = validation_result.rejection_reason in {
+                        EVIDENCE_META_REJECTION,
+                        TINY_OR_TRUNCATED_REJECTION,
+                    }
+                    can_retry = (
+                        validation_result.rejection_reason in _PROSE_RECOVERY_REASONS
+                        or is_page_timeout_rejection(validation_result.rejection_reason)
+                    ) and (attempt == 0 or (attempt == 1 and extra_retry))
+                    if still_dirty and can_retry and best_clean is None:
+                        prompt = self._build_prose_recovery_prompt(input, context, response_content)
+                        if validation_result.rejection_reason == EMPTY_CONTENT_REJECTION:
+                            rewrite_max_tokens = self._resolve_empty_content_rewrite_max_tokens()
+                            rewrite_extra_body = self._empty_content_rewrite_extra_body()
+                        continue
+                    if best_clean is not None:
+                        return best_clean
+                    break
+                if best_attempt is None or score >= best_score:
+                    best_attempt = output
+                    best_score = score
+                if not output.rejected:
+                    best_clean = output
+                    best_clean_score = score
+                    return output
+                last_rejected = output
+                extra_retry = validation_result.rejection_reason in {
+                    EVIDENCE_META_REJECTION,
+                    TINY_OR_TRUNCATED_REJECTION,
+                }
+                if (
+                    validation_result.rejection_reason in _PROSE_RECOVERY_REASONS
+                    or is_page_timeout_rejection(validation_result.rejection_reason)
+                ) and (attempt == 0 or (attempt == 1 and extra_retry)):
+                    prompt = self._build_prose_recovery_prompt(input, context, response_content)
+                    if validation_result.rejection_reason == EMPTY_CONTENT_REJECTION:
+                        rewrite_max_tokens = self._resolve_empty_content_rewrite_max_tokens()
+                        rewrite_extra_body = self._empty_content_rewrite_extra_body()
+                    continue
+                break
 
-            return ComposerOutput(
-                page_id=page_id,
-                markdown=response_content,
-                citations_preserved=validation_result.citations_preserved,
-                headings_preserved=validation_result.headings_preserved,
-                evidence_count=validation_result.evidence_count,
-                rejected=False,
-                rejection_reason=None,
-                tokens_used=tokens_used,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                provider=self.provider_name,
-                model=self.model_name,
-                low_confidence=validation_result.low_confidence,
-                uncertainty_reasons=validation_result.uncertainty_reasons,
-            )
+            if best_clean is not None:
+                return best_clean
+            chosen = last_rejected or best_attempt or output
+            return chosen
 
         except Exception as e:
             return ComposerOutput(
@@ -445,8 +791,147 @@ class LLMPageComposer:
             context["endpoints"] = ", ".join(sr.endpoints) if sr.endpoints else ""
             context["data_models"] = ", ".join(sr.data_models) if sr.data_models else ""
             context["commands"] = ", ".join(sr.commands) if sr.commands else ""
+        if self._page_needs_process_roles(page):
+            context["process_roles"] = self._process_role_facts()
 
         return context
+
+    def _page_needs_process_roles(self, page: WikiPagePlan) -> bool:
+        if not self._process_role_facts():
+            return False
+        if is_handbook_overview_page(page):
+            return True
+        if page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
+            return True
+        blob = f"{page.page_id} {page.title} {page.output_path}"
+        return "架构" in blob or "architecture" in blob.lower()
+
+    def _process_role_facts(self) -> str:
+        from repo_wiki.generator.process_roles import derive_process_role_facts
+
+        return derive_process_role_facts(self.workspace_root)
+
+    def _source_fact_block(self, page: WikiPagePlan | None = None) -> str:
+        from repo_wiki.verifier.source_facts import source_fact_prompt_block
+
+        return source_fact_prompt_block(
+            Path(self.workspace_root or "."),
+            page_id=str(getattr(page, "page_id", "") or ""),
+            title=str(getattr(page, "title", "") or ""),
+        )
+
+    def _build_compose_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
+        if self._use_compact_prompt():
+            return self._build_compact_prompt(input, context)
+        fragment_name = input.page_plan.category.value.lower().replace(" ", "-")
+        try:
+            prompt = render_prompt_fragment(fragment_name, context)
+        except ValueError:
+            prompt = get_prompt_fragment("system") + "\n\n" + context.get("content", "")
+        if input.evidence_binding and input.evidence_binding.candidates:
+            prompt = (
+                prompt
+                + "\n\n## Evidence Context\n"
+                + self._build_evidence_context(input.evidence_binding)
+            )
+        skeleton_md = input.skeleton.render_skeleton_markdown()
+        source_facts = self._source_fact_block(input.page_plan)
+        fact_tail = f"\n\n## 本页源码事实\n{source_facts}" if source_facts else ""
+        return prompt + "\n\n## Article Structure\n" + skeleton_md + fact_tail
+
+    def _strip_fenced_blocks(self, markdown: str) -> str:
+        lines: list[str] = []
+        in_fence = False
+        for line in markdown.splitlines():
+            if line.strip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if not in_fence:
+                lines.append(line)
+        return "\n".join(lines).strip()
+
+    def _binding_wants_wide_evidence(self, binding: PageEvidenceBinding | None) -> bool:
+        if binding is None:
+            return False
+        return wants_wide_evidence(
+            f"{getattr(binding, 'page_id', '')} {getattr(binding, 'doc_type', '')}"
+        )
+
+    def _page_wants_wide_evidence(self, page: WikiPagePlan | None) -> bool:
+        if page is None:
+            return False
+        return wants_wide_evidence(f"{page.page_id} {page.title} {page.category.value}")
+
+    def _build_compact_recovery_evidence(self, binding: PageEvidenceBinding | None) -> str:
+        """Short path+snippet list for rewrite. Full fence packs emptied the first call."""
+        if not binding or not binding.candidates:
+            return "（无）"
+        lines: list[str] = []
+        wide = self._binding_wants_wide_evidence(binding)
+        limit = 8 if wide else 4
+        snippet_chars = 140 if wide else 80
+        for candidate in binding.candidates[:limit]:
+            span = candidate.span
+            snippet = self._compact_snippet(
+                self._strip_fenced_blocks(getattr(span, "span_text", "") or ""),
+                max_chars=snippet_chars,
+            )
+            loc = f"{span.file_path}:{span.line_start}-{span.line_end}"
+            if snippet:
+                lines.append(f"- {loc}: {snippet}")
+            else:
+                lines.append(f"- {loc}")
+        return "\n".join(lines) if lines else "（无）"
+
+    def _build_prose_recovery_prompt(
+        self, input: ComposerInput, context: dict[str, Any], previous: str
+    ) -> str:
+        title = input.page_plan.title
+        compact_evidence = self._build_compact_recovery_evidence(input.evidence_binding)
+        previous_for_prompt = self._strip_fenced_blocks(previous)[:1200]
+        product = (context.get("product_description") or "").strip() or "（未解析到产品描述）"
+        if is_handbook_install_page(input.page_plan):
+            fence_rule = (
+                "禁止把源码证据原文整段放进 Markdown 代码围栏（```）；"
+                "安装/运行命令必须保留或补成可复制的 ```bash 或 ```sh 围栏，不要只写行内反引号；"
+                "禁止 mermaid 堆砌替代正文；围栏必须成对闭合。\n"
+                "安装步骤用编号列表；每一步若有命令，该步必须含独立围栏。"
+            )
+        elif is_handbook_overview_page(input.page_plan):
+            fence_rule = (
+                "禁止把源码证据原文整段放进 Markdown 代码围栏（```）；"
+                "禁止 mermaid 或围栏堆砌替代正文；围栏必须成对闭合。\n"
+                "本页是项目概述，不要补安装步骤或 ```bash / ```sh 命令围栏。"
+            )
+        else:
+            fence_rule = (
+                "禁止把证据原文整段放进 Markdown 代码围栏（```）；"
+                "禁止 mermaid 或围栏堆砌替代正文；围栏必须成对闭合。\n"
+                "列表只能作附录检查项，不能充当正文。"
+            )
+        role_facts = ""
+        if self._page_needs_process_roles(input.page_plan):
+            role_facts = f"{self._process_role_facts()}\n"
+        source_facts = self._source_fact_block(input.page_plan)
+        fact_block = f"本页源码事实：\n{source_facts}\n" if source_facts else ""
+        thin_rule = ""
+        if self._page_wants_wide_evidence(input.page_plan):
+            thin_rule = (
+                "专题页必须写满 900 字以上可核对段落，不要短页或回退成「这是什么」摘录。"
+                "能引用实现文件时不要只引用说明文档或 scaffold。"
+            )
+        return (
+            f"请重写 Wiki 页「{title}」为段落为主的中文 Markdown。\n"
+            f"产品身份：{product}\n"
+            f"{role_facts}{fact_block}"
+            "禁止空回复，不要返回空正文；必须写出至少两段可读段落，不能只回标题或空白。\n"
+            "不要评论手头材料齐不齐，缺的细节整段跳过；不要写过程句或自我介绍本页写给谁。\n"
+            f"{thin_rule}"
+            f"{fence_rule}"
+            "每个可核对事实句都要带 `<cite>`，写在该句同一行或下一行。不要解释过程。\n\n"
+            f"精简证据（仅路径与短摘录，不要复述源码围栏）：\n{compact_evidence}\n\n"
+            f"上次草稿（已去掉代码围栏与 mermaid）：\n{previous_for_prompt or '（空）'}\n"
+        )
 
     def _build_evidence_context(self, binding: PageEvidenceBinding) -> str:
         """Build evidence context string from binding."""
@@ -454,10 +939,16 @@ class LLMPageComposer:
             return "No evidence available."
 
         lines = ["Evidence spans:"]
-        for i, candidate in enumerate(binding.candidates[:8]):  # Limit to 8
+        page_blob = f"{getattr(binding, 'page_id', '')} {getattr(binding, 'doc_type', '')}"
+        wide = wants_wide_evidence(page_blob)
+        limit = 16 if wide else 8
+        snippet_chars = 900 if wide else 320
+        for i, candidate in enumerate(binding.candidates[:limit]):
             span = candidate.span
             symbol_info = f" (symbol: {span.symbol})" if span.symbol else ""
-            snippet = self._compact_snippet(getattr(span, "span_text", "") or "")
+            snippet = self._compact_snippet(
+                getattr(span, "span_text", "") or "", max_chars=snippet_chars
+            )
             if snippet:
                 lines.append(
                     f"- {span.file_path}:{span.line_start}-{span.line_end}{symbol_info}: {snippet}"
@@ -475,20 +966,146 @@ class LLMPageComposer:
         name = unique_root_readme_name(self.workspace_root)
         if name and name != "README.md":
             return (
-                f"- 本仓库根 README 是 `{name}`。引用时写 `<cite>{name}:1-3</cite>`，"
-                "不要写不存在的 README.md。"
+                f"- 仓库根说明文件的实际文件名是 `{name}`，不是 README.md。"
+                "事实句里的引用目标用该文件名加行号范围，不要指向不存在的 README.md。"
             )
         return (
-            "- 引用仓库根 README 时必须使用仓库中实际存在的文件名"
-            "（README.md / README.rst / README.txt / README），不要引用不存在的文件。"
+            "- 指向仓库根说明文件时必须使用仓库中实际存在的文件名"
+            "（README.md / README.rst / README.txt / README），不要指向不存在的文件。"
         )
+
+    def _evidence_route_layout(self, binding: PageEvidenceBinding | None) -> tuple[bool, bool]:
+        if binding is None:
+            return False, False
+        has_routes = False
+        has_go = False
+        for candidate in binding.candidates:
+            path = str(getattr(candidate.span, "file_path", "") or "").replace("\\", "/").lower()
+            if "api/routes" in path:
+                has_routes = True
+            if path.endswith(".go") and (
+                path.startswith("internal/") or path.startswith("cmd/") or "/internal/" in path
+            ):
+                has_go = True
+        return has_routes, has_go
+
+    def _handbook_cite_rules(self, input: ComposerInput) -> str:
+        page = input.page_plan
+        if is_handbook_install_page(page):
+            rules: list[str] = [
+                "- 每个事实句的 `<cite>` 必须写在该句同一行或下一行（同行 / 下一行），"
+                "不要把引用只堆在文末「源码引用」列表里。",
+                "- 正文必须用段落解释；安装步骤用编号列表，不要用子弹列表充当整页正文。"
+                "列表行不计入 prose 下限。",
+                "- 不要把源码证据原文整段放进 Markdown 代码围栏。"
+                "安装/运行命令必须写成可复制的 ```bash 或 ```sh 围栏，"
+                "禁止只把命令写在行内反引号里；围栏不能替代段落说明。",
+                "- 安装页：README 的 `<cite>` 必须覆盖快速开始/安装/启动章节，"
+                "禁止只引用徽章或标题行。命令必须使用仓库里真实存在的路径、二进制和 flag。",
+            ]
+        elif is_handbook_overview_page(page):
+            overview_roles = self._process_role_facts()
+            overview_extra = (
+                f"若仓库有多个 `cmd/` 二进制，不要写成单一 backend process。{overview_roles}"
+                if overview_roles
+                else "只写本仓库目录里实际存在的包与入口。"
+            )
+            rules = [
+                "- 每个事实句的 `<cite>` 必须写在该句同一行或下一行（同行 / 下一行），"
+                "不要把引用只堆在文末「源码引用」列表里。",
+                "- 正文必须用段落解释；不要把项目概述写成安装步骤清单。列表行不计入 prose 下限。",
+                "- 不要把源码证据原文整段放进 Markdown 代码围栏；本页不要求 ```bash / ```sh 安装命令围栏。",
+                "- 概述页：README 的 `<cite>` 必须覆盖快速开始/运行章节，不要只引用徽章行。"
+                f"{overview_extra}",
+            ]
+        else:
+            rules = [
+                "- 每个事实句的 `<cite>` 必须写在该句同一行或下一行（同行 / 下一行），"
+                "不要把引用只堆在文末「源码引用」列表里。",
+                "- 正文必须用段落解释；列表只用于核心组件或检查项。"
+                "列表行不计入 prose 下限，不要用子弹列表充当整页正文。",
+                "- 不要把证据原文整段放进 Markdown 代码围栏；围栏不能替代段落正文。",
+            ]
+        if page.category == WikiTaxonomyCategory.API_REFERENCE:
+            has_routes, has_go_handlers = self._evidence_route_layout(input.evidence_binding)
+            if has_routes:
+                rules.append(
+                    "- API 页：证据中已有 `api/routes` 文件时，正文必须至少有一条 `<cite>` "
+                    "指向该路由模块，不能只引用 models、db 或 tests。"
+                )
+            elif has_go_handlers:
+                rules.append(
+                    "- API 页：证据中已有 Go handler 文件时，正文必须至少有一条 `<cite>` "
+                    "指向该 handler，不能只引用 SQL、docs 或配置。"
+                )
+        if page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
+            root = Path(self.workspace_root or ".")
+            from repo_wiki.verifier.handbook import architecture_core_packages
+
+            cores = architecture_core_packages(root)
+            role_facts = self._process_role_facts()
+            shown = "、".join(f"`{item}`" for item in cores) if cores else "只写目录里有的包"
+            extra = role_facts
+            rules.append(
+                f"- 架构页：必须在正文中点名并引用下列按 import 图/路由所有权排序的核心包：{shown}。"
+                f"{extra}"
+                "只写 import 图里存在的依赖。"
+                "不要引用 `*_test.go`，不要声称从 `package main` 导入类型。"
+                "不要把示例/demo/scaffold 二进制当成系统架构。"
+                "用段落写清各核心包职责，不要只贴包名清单。"
+            )
+        if page.category == WikiTaxonomyCategory.DATA_MODELS:
+            rules.append(
+                "- 数据模型页：只写真实表（table=True / __tablename__ / 被 DB 使用的结构体 / CREATE TABLE）。"
+                "DTO/Schema 标明 DTO，不要发明字段。引用至少一份 up-migration 或 schema，不要要求 down-migration。"
+            )
+        if page.category == WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS:
+            rules.append(
+                "- 部署页：提到数据库监听端口时必须写出 compose 里的真实端口数字，"
+                "不要留下「在  暴露」这类空缺；句子末不要在「使用」和句号之间留空格。"
+                "不要单独成行只写 `<cite>`。"
+            )
+        blob = f"{page.page_id} {page.title}"
+        if "调试" in blob or "debug-guide" in blob.lower() or "debug-tools" in blob.lower():
+            rules.append(
+                "- 调试页：优先引用实现文件（pprof / trace / debug 脚本或入口），"
+                "不要只摘说明文档或 scaffold。"
+            )
+        if "git-workflow" in blob.lower() or "git工作流" in blob.lower():
+            rules.append(
+                "- Git 工作流页：只写 CONTRIBUTING 与 CI 工作流里实际出现的步骤和命令，"
+                "缺的协作规则整段跳过，不要写过程句。"
+            )
+        if "迁移" in blob or "migration" in blob.lower():
+            rules.append("- 数据库迁移页：按搜到的 up-migration / schema 写，不要猜工具或路径。")
+        source_facts = self._source_fact_block(page)
+        if source_facts:
+            rules.append("- 本页可核对的源码事实：\n" + source_facts)
+        return "\n".join(rules)
 
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         page = input.page_plan
-        required_headings = [
-            section.heading_text for section in input.skeleton.headings if section.required
-        ]
-        headings_text = "\n".join(f"- {heading}" for heading in required_headings[:6])
+        if is_handbook_install_page(page):
+            headings_text = "\n".join(f"- {heading}" for heading in _HANDBOOK_INSTALL_HEADINGS)
+            recommended_structure = _HANDBOOK_INSTALL_STRUCTURE
+            identity_slot = "「这是什么」"
+            list_rule = (
+                "- 使用段落解释为主；安装步骤必须用编号步骤，"
+                "每一步若有命令则该步必须含 ```bash 或 ```sh 围栏。"
+            )
+        elif is_handbook_overview_page(page):
+            headings_text = "\n".join(f"- {heading}" for heading in _HANDBOOK_OVERVIEW_HEADINGS)
+            recommended_structure = _HANDBOOK_OVERVIEW_STRUCTURE
+            identity_slot = "「这是什么」"
+            list_rule = "- 使用段落解释为主；本页是项目概述，不要写安装步骤或要求命令围栏。"
+        else:
+            required_headings = [
+                section.heading_text for section in input.skeleton.headings if section.required
+            ]
+            headings_text = "\n".join(f"- {heading}" for heading in required_headings[:6])
+            recommended_structure = _ESSAY_RECOMMENDED_STRUCTURE
+            identity_slot = "简介"
+            list_rule = "- 使用段落解释为主，列表只用于核心组件或检查项。"
         evidence_context = (
             self._build_evidence_context(input.evidence_binding)
             if input.evidence_binding and input.evidence_binding.candidates
@@ -500,13 +1117,34 @@ class LLMPageComposer:
         product_description = context.get("product_description") or "（未解析到产品描述）"
         repository_name = context.get("repository_name") or input.context.repository_name
         api_quality_rules = ""
-        if page.category.value == "api_reference":
+        if page.category == WikiTaxonomyCategory.API_REFERENCE:
             api_quality_rules = (
                 "\nAPI 页面附加要求：\n"
                 "- 正文必须 prose-first，禁止把端点清单作为主体。\n"
                 "- 端点表格只能放在附录且需限量（只列关键端点）。\n"
-                "- 每个关键结论必须配 `<cite>`；证据不足时必须显式写「待确认」。\n"
+                "- 每个关键结论必须配 `<cite>`；有证据时不要写「待确认」，"
+                "也不要粘贴 README 的英文 NOTE。\n"
             )
+        handbook_cite_rules = self._handbook_cite_rules(input)
+        if handbook_cite_rules:
+            handbook_cite_rules = handbook_cite_rules + "\n"
+        role_facts = ""
+        if self._page_needs_process_roles(page):
+            role_facts = f"进程角色：{self._process_role_facts()}\n"
+        source_facts = self._source_fact_block(page)
+        fact_block = f"本页源码事实：\n{source_facts}\n" if source_facts else ""
+        install_command_block = ""
+        if is_handbook_install_page(page):
+            from repo_wiki.verifier.handbook import collect_repo_install_commands
+
+            commands = collect_repo_install_commands(Path(self.workspace_root or "."))
+            if commands:
+                listed = "\n".join(f"- `{item}`" for item in commands)
+                install_command_block = (
+                    "仓库中可核对的安装/启动命令（必须原样写入 ```bash 围栏，"
+                    "不要改路径或 flag，不要编造不存在的 cmd/ 目录）：\n"
+                    f"{listed}\n"
+                )
 
         return f"""请基于源码证据生成一篇中文 Repo Wiki Markdown 页面。
 
@@ -514,22 +1152,26 @@ class LLMPageComposer:
 页面类型：{page.category.value}
 页面 ID：{page.page_id}
 仓库名称：{repository_name}
-产品身份（必须写入简介，优先于仓库 slug 或通用 api-server/core-platform 表述）：
+产品身份（必须写入{identity_slot}，优先于仓库 slug 或通用 api-server/core-platform 表述）：
 {product_description}
-相关模块：{modules}
+{role_facts}{fact_block}相关模块：{modules}
 相关 API：{endpoints}
 相关数据模型：{data_models}
 
 写作要求：
 - 输出完整 Markdown，不要解释你的过程。
+- 写给要改这个仓库的人看：用直陈句写代码里实际发生的事和调用关系，不要自我介绍本页写给谁。
+- 不要评论材料齐不齐或提示词有没有点名模块，缺了的细节整段跳过，也不要复述写作要求原文。
 - 必须以 `# {page.title}` 开头。
-- 正文控制在 900 到 1400 个中文字符之间，避免长篇泛化。
-- 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
+- 正文控制在 900 到 1400 个中文字符之间；Git 工作流、调试指南、性能、健康检查、核心服务等专题也必须写满可核对段落，不要短页或回退成「这是什么」摘录页。
+- 不允许编造不存在的模块、API 或版本。
+- 每个可核对事实句都要带 `<cite>`；能引用实现文件时不要只引用说明文档或 scaffold。
 - 至少保留 3 个 `<cite>` 引用，格式为仓库相对路径加行号范围，例如 `<cite>src/app.py:1-10</cite>`。
+- 写仓库里实际发生的调用和配置。不要写「证据表明」「材料是否充分」或「待确认」。
 {self._root_readme_cite_rule()}
-- 使用段落解释为主，列表只用于核心组件或检查项。
-- 如果证据不足，明确写”当前证据显示”，不要过度推断。
-- 简介必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
+{handbook_cite_rules}{list_rule}
+- 只写能在源码里对上的事实；对不上的细节整段跳过，改用空话补齐没有意义。
+- {identity_slot}必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
 {api_quality_rules}
 
 {self._build_low_confidence_guidance(input)}
@@ -540,30 +1182,8 @@ class LLMPageComposer:
 源码证据：
 {evidence_context}
 
-推荐结构：
-## 简介
-说明本页主题在仓库中的职责和边界。
-
-## 项目结构
-说明相关目录、文件和模块如何组织。
-
-## 核心组件
-按证据列出关键类、函数、配置或 API。
-
-## 详细分析
-解释调用关系、数据流或模型关系。
-
-## 依赖关系分析
-说明上下游依赖与变更影响。
-
-## 性能考虑
-指出可能的性能、缓存、批处理或 IO 风险。
-
-## 故障排查指南
-给出基于源码位置的排查步骤。
-
-## 结论
-总结该页面对理解仓库的价值。
+{install_command_block}
+{recommended_structure}
 """
 
     def _compact_snippet(self, text: str, max_chars: int = 180) -> str:
@@ -579,29 +1199,6 @@ class LLMPageComposer:
         When evidence is insufficient, inject explicit uncertainty guidance
         to prevent fabrication of implementation details.
         """
-        if not input.evidence_binding:
-            return (
-                "\n\n[待确认] 证据状态：无可用源码证据。\n"
-                "生成时必须：\n"
-                "- 明确标注「待确认」段落\n"
-                "- 避免声称任何具体实现细节\n"
-                "- 仅描述可以从不完整推断中确认的事实\n"
-            )
-
-        candidate_count = len(input.evidence_binding.candidates)
-        insufficient = input.evidence_binding.insufficient_evidence
-
-        if insufficient or candidate_count < 3:
-            return (
-                f"\n\n[待确认] 证据状态：证据不足（仅 {candidate_count} 条候选）"
-                f"{'（标记为insufficient_evidence）' if insufficient else ''}。\n"
-                "生成时必须：\n"
-                "- 对每一个依赖推断的结论标注「待确认」\n"
-                "- 不允许编造模块名、API 端点、版本号或配置\n"
-                "- 使用「当前证据显示」而非「系统使用」\n"
-                "- 保留所有 `<cite>` 引用，即使推断不确定\n"
-            )
-
         if input.page_plan.page_id == INVENTORY_SERVICE_API_PAGE_ID:
             return (
                 "\n\n[硬约束] API台账服务 API 页面证据要求：\n"
@@ -643,8 +1240,18 @@ class LLMPageComposer:
                 return True
         return False
 
-    async def _call_llm(self, prompt: str, title: str) -> ChatResponse:
-        """Call LLM provider with prompt."""
+    async def _call_llm(
+        self,
+        prompt: str,
+        title: str,
+        *,
+        max_tokens: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        page_id: str = "",
+        attempt: int = 0,
+        input_hash: str = "",
+    ) -> ChatResponse:
+        """Call LLM provider with prompt and optionally record the raw reply."""
         messages = [
             ChatMessage(
                 role="system",
@@ -655,16 +1262,55 @@ class LLMPageComposer:
             ),
             ChatMessage(role="user", content=prompt),
         ]
+        prompt_hash = prompt_hash_for_messages(messages)
+        from repo_wiki.generator.composer_cache import COMPOSER_GENERATOR_VERSION
+
+        set_cassette_call_context(
+            page_id=page_id,
+            attempt=attempt,
+            prompt_hash=prompt_hash,
+            input_hash=input_hash,
+            generator_version=COMPOSER_GENERATOR_VERSION,
+        )
 
         request = ChatRequest(
             messages=messages,
             model=self._llm_config.model,
             temperature=self._llm_config.temperature,
-            max_tokens=self._resolve_request_max_tokens(),
+            max_tokens=(
+                max_tokens if max_tokens is not None else self._resolve_request_max_tokens()
+            ),
             timeout=self._llm_config.timeout,
+            extra_body=dict(extra_body or {}),
         )
 
-        return await chat_with_retry(self._provider, request)
+        response = await chat_with_retry(self._provider, request)
+        record_cassette_attempt(
+            page_id=page_id,
+            attempt=attempt,
+            input_hash=input_hash,
+            prompt_hash=prompt_hash,
+            generator_version=COMPOSER_GENERATOR_VERSION,
+            model=self.model_name,
+            messages=messages,
+            raw_reply=response.content,
+            usage=response.usage,
+            finish_reason=response.finish_reason,
+            temperature=self._llm_config.temperature,
+            max_tokens=request.max_tokens,
+        )
+        return response
+
+    def _resolve_page_timeout(self) -> float:
+        """Per-call timeout for one LLM attempt. Rewrite uses a second call, not a longer budget."""
+        raw = os.environ.get("REPO_WIKI_LLM_PAGE_TIMEOUT_SECONDS")
+        if raw:
+            try:
+                return max(1.0, float(raw))
+            except ValueError:
+                pass
+        configured = float(getattr(self._llm_config, "timeout", 60.0) or 60.0)
+        return max(1.0, min(configured, 300.0))
 
     def _uses_compact_mock_token_cap(self) -> bool:
         """Keep the compact 1400 completion cap for mock/tests only.
@@ -688,20 +1334,65 @@ class LLMPageComposer:
                 value = int(raw)
             except ValueError:
                 value = 1400
-            return max(256, min(value, configured, provider_max))
+            # Honor the env even when it is below LlmConfig (improve --max-tokens 1000)
+            # or above it (user raised the budget). Cap only by the provider.
+            return max(256, min(value, provider_max))
         if self._use_compact_prompt() and self._uses_compact_mock_token_cap():
             return max(256, min(configured, 1400))
-        # Real providers: use configured llm.max_tokens, or at least 4096, still
-        # <= provider max. Compact prompt must not clamp these to 1400.
-        return max(256, min(max(configured, 4096), provider_max))
+        # Real providers: first compose already uses the 16384 rewrite floor so
+        # MiniMax-M3 thinking cannot empty message.content. Compact prompt must
+        # not clamp these to 1400. A higher configured/env value still wins.
+        return max(
+            256,
+            min(max(configured, EMPTY_CONTENT_REWRITE_MAX_TOKENS), provider_max),
+        )
+
+    def _resolve_empty_content_rewrite_max_tokens(self) -> int:
+        """Completion budget for one empty/think-only rewrite.
+
+        MiniMax-M3 can spend a starved first-call budget (improve's 1000, or
+        an explicit 4096 env) on hidden thinking and leave ``message.content``
+        blank. The rewrite must not reuse ``REPO_WIKI_LLM_COMPOSER_MAX_TOKENS``.
+        """
+        configured = int(getattr(self._llm_config, "max_tokens", 0) or 0)
+        provider_max = int(
+            getattr(self._provider.capabilities, "max_context_tokens", configured)
+            or configured
+            or EMPTY_CONTENT_REWRITE_MAX_TOKENS
+        )
+        return max(
+            256,
+            min(max(configured, EMPTY_CONTENT_REWRITE_MAX_TOKENS), provider_max),
+        )
+
+    def _looks_like_minimax(self) -> bool:
+        blob = " ".join(
+            [
+                str(self._llm_config.provider or ""),
+                str(self._llm_config.model or ""),
+                str(getattr(self._provider, "name", "") or ""),
+            ]
+        ).lower()
+        return "minimax" in blob
+
+    def _empty_content_rewrite_extra_body(self) -> dict[str, Any]:
+        """Disable MiniMax thinking on first compose and on empty-content rewrite."""
+        if not self._looks_like_minimax():
+            return {}
+        return {
+            "thinking": {"type": "disabled"},
+            "reasoning_split": True,
+        }
 
     def _normalize_markdown_response(self, content: str, title: str) -> str:
         """Ensure provider output is a readable Markdown page."""
         stripped = _strip_leaked_think_dumps(content).strip()
-        if not stripped:
-            return f"# {title}\n\nLLM composer did not return content."
-        if not stripped.startswith("#"):
+        if is_empty_composer_markdown(stripped):
+            # Empty / think-only must not become a titled stub that later PASSes.
+            return ""
+        if not re.match(r"^# [^#]", stripped):
             stripped = f"# {title}\n\n{stripped}"
+        stripped = _strip_handbook_filler(stripped)
         return normalize_citation_markup(stripped, self.workspace_root)
 
     @property
@@ -732,6 +1423,12 @@ class LLMPageComposer:
         """
         result = ValidationResult()
 
+        if is_empty_composer_markdown(content):
+            result.rejection_reason = EMPTY_CONTENT_REJECTION
+            result.rejected = True
+            result.tokens_used = len((content or "").split()) * 4
+            return result
+
         # Count citations in evidence
         original_citations = []
         candidate_count = 0
@@ -754,10 +1451,39 @@ class LLMPageComposer:
             preserved, missing = heading_validator.validate_preservation(content)
             result.headings_preserved = preserved
 
-        # Check prose minimum only for substantial content
-        # Skip this check for short content (may be from mock providers in tests)
-        if len(content) > 150 and self._count_prose_chars(content) < 100:
+        # Unclosed fences trap the rest of the page as code. Reject even when
+        # the opening paragraph already meets the 100-character prose floor.
+        if has_unclosed_fence(content):
+            result.rejection_reason = UNCLOSED_FENCE_REJECTION
+        else:
+            from repo_wiki.generator.code_safe import empty_inline_spans
+
+            if empty_inline_spans(content):
+                result.rejection_reason = EMPTY_SPAN_REJECTION
+        if (
+            not result.rejection_reason
+            and len(content) > 150
+            and self._count_prose_chars(content) < 100
+        ):
             result.rejection_reason = "Insufficient prose content"
+
+        if not result.rejection_reason and contains_generator_meta(content):
+            result.rejection_reason = GENERATOR_META_REJECTION
+
+        if not result.rejection_reason:
+            from repo_wiki.generator.compose_evidence import generator_role_contradictions
+
+            if generator_role_contradictions(content, input.page_plan, self.workspace_root):
+                result.rejection_reason = ROLE_CONTRADICTION_REJECTION
+
+        if not result.rejection_reason and contains_evidence_meta_talk(content or ""):
+            result.rejection_reason = EVIDENCE_META_REJECTION
+
+        if not result.rejection_reason and (
+            handbook_page_body_len(content or "") < MIN_HANDBOOK_BODY_CHARS
+            or handbook_page_is_truncated(content or "")
+        ):
+            result.rejection_reason = TINY_OR_TRUNCATED_REJECTION
 
         if (
             input.page_plan.page_id == INVENTORY_SERVICE_API_PAGE_ID
@@ -805,6 +1531,13 @@ class LLMPageComposer:
         result.tokens_used = len(content.split()) * 4
 
         return result
+
+    @staticmethod
+    def _attempt_structure_score(markdown: str) -> tuple[int, int, int]:
+        text = markdown or ""
+        headings = len(re.findall(r"^##\s+", text, flags=re.M))
+        cites = len(re.findall(r"<cite>", text, flags=re.I))
+        return (headings, cites, handbook_page_body_len(text))
 
     def _detect_unsupported_claims(self, content: str) -> bool:
         """Detect potential unsupported claims in content.
@@ -922,9 +1655,16 @@ def build_composer_input(
     doc_type = _category_to_doc_type(page_plan.category)
     contract = get_contract_for_page_type(PagePromptType(doc_type))
 
-    # Build skeleton
+    # Install / quick-start use the runnable handbook skeleton.
+    # Project overview uses a separate identity outline, not install steps.
+    if is_handbook_install_page(page_plan):
+        skeleton_type = "install"
+    elif is_handbook_overview_page(page_plan):
+        skeleton_type = "handbook-overview"
+    else:
+        skeleton_type = doc_type
     skeleton = build_skeleton(
-        doc_type,
+        skeleton_type,
         page_plan.title,
         repository_name=context.repository_name,
     )

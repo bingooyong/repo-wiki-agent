@@ -9,6 +9,7 @@ Output: deterministic page IDs, paths, parent links, and order.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from repo_wiki.core.contracts import Module, RepositorySnapshot
 from repo_wiki.planner.schema import (
@@ -23,6 +24,115 @@ from repo_wiki.planner.schema import (
     current_schema_version,
 )
 from repo_wiki.scanner.artifacts import is_product_source_path, is_product_wiki_module
+
+# Product service titles. Filename-like modules must not use the fallback capitalizer.
+_SERVICE_TITLE_OVERRIDES = {
+    "api-reference-agent": "API采集Agent",
+    "api-gateway": "API网关",
+    "doc-parser-service": "文档解析服务",
+    "tcsl-generator-service": "TCSL生成服务",
+    "nl-to-dsl-service": "自然语言转DSL服务",
+    "scenario-orchestrator-service": "场景编排服务",
+    "contract-service": "契约管理服务",
+    "diff-service": "差异分析服务",
+    "execution-service": "执行引擎服务",
+    "gate-service": "质量门禁服务",
+    "inventory-service": "API台账服务",
+    "knowledge-graph-service": "知识图谱服务",
+    "prd-reviewer": "PRD评审服务",
+    "script-generator-service": "脚本生成服务",
+    "security-audit-service": "安全审计服务",
+    "security-scan-mcp-service": "安全扫描MCP服务",
+    "test-data-factory-service": "测试数据工厂服务",
+    "zentao-mcp-service": "禅道MCP服务",
+    "jenkins-mcp-service": "Jenkins MCP服务",
+    "gitlab-mcp-service": "GitLab MCP服务",
+    "frontend": "前端应用",
+}
+
+_FILENAME_MODULE_LEAVES = frozenset(
+    {
+        "__init__",
+        "__init__.py",
+        "init",
+        "init.py",
+        "init.go",
+        "main",
+        "main.py",
+        "main.go",
+        "doc.go",
+    }
+)
+_SOURCE_FILENAME_SUFFIXES = (".py", ".pyc", ".go")
+_GENERIC_PACKAGE_LEAVES = frozenset(
+    {
+        "app",
+        "apps",
+        "api",
+        "cli",
+        "config",
+        "constants",
+        "controllers",
+        "core",
+        "crud",
+        "db",
+        "deps",
+        "dependencies",
+        "exceptions",
+        "helpers",
+        "helper",
+        "http",
+        "internal",
+        "lib",
+        "model",
+        "models",
+        "pkg",
+        "repositories",
+        "repository",
+        "routers",
+        "routes",
+        "schema",
+        "schemas",
+        "service",
+        "services",
+        "src",
+        "test",
+        "tests",
+        "types",
+        "util",
+        "utils",
+        "views",
+    }
+)
+_SERVICE_NAME_TOKENS = frozenset(
+    {
+        "agent",
+        "engine",
+        "gateway",
+        "orchestrator",
+        "runtime",
+        "server",
+        "service",
+        "services",
+        "worker",
+    }
+)
+
+
+def _module_leaf_name(name: str) -> str:
+    return name.replace("\\", "/").rstrip("/").split("/")[-1].strip()
+
+
+def _is_filename_like_module_name(name: str) -> bool:
+    leaf = _module_leaf_name(name).lower()
+    collapsed = re.sub(r"\s+", "", leaf)
+    if any(
+        collapsed.endswith(suffix) or suffix in collapsed for suffix in _SOURCE_FILENAME_SUFFIXES
+    ):
+        return True
+    stem = Path(leaf).stem.lower().strip("._")
+    return leaf in _FILENAME_MODULE_LEAVES or stem in {"init", "main"}
+
 
 # Category ordering for navigation
 _CATEGORY_ORDER = {
@@ -162,36 +272,34 @@ class RuleFirstPlanner:
         return combined or "unknown"
 
     def _humanize_service_title(self, name: str) -> str:
-        known = {
-            "api-reference-agent": "API采集Agent",
-            "api-gateway": "API网关",
-            "doc-parser-service": "文档解析服务",
-            "tcsl-generator-service": "TCSL生成服务",
-            "nl-to-dsl-service": "自然语言转DSL服务",
-            "scenario-orchestrator-service": "场景编排服务",
-            "contract-service": "契约管理服务",
-            "diff-service": "差异分析服务",
-            "execution-service": "执行引擎服务",
-            "gate-service": "质量门禁服务",
-            "inventory-service": "API台账服务",
-            "knowledge-graph-service": "知识图谱服务",
-            "prd-reviewer": "PRD评审服务",
-            "script-generator-service": "脚本生成服务",
-            "security-audit-service": "安全审计服务",
-            "security-scan-mcp-service": "安全扫描MCP服务",
-            "test-data-factory-service": "测试数据工厂服务",
-            "zentao-mcp-service": "禅道MCP服务",
-            "jenkins-mcp-service": "Jenkins MCP服务",
-            "gitlab-mcp-service": "GitLab MCP服务",
-            "frontend": "前端应用",
-        }
-        if name in known:
-            return known[name]
+        leaf = _module_leaf_name(name)
+        stem = Path(leaf).stem
+        for key in (name, leaf, stem):
+            if key in _SERVICE_TITLE_OVERRIDES:
+                return _SERVICE_TITLE_OVERRIDES[key]
         words = [part for part in re.split(r"[-_]+", name) if part]
         return " ".join(
             part.upper() if part.lower() in {"api", "mcp", "ai"} else part.capitalize()
             for part in words
         )
+
+    def _is_service_like_module_name(self, name: str) -> bool:
+        """Return whether a scanned module deserves its own handbook chapter."""
+        leaf = _module_leaf_name(name)
+        stem = Path(leaf).stem
+        for key in (name, leaf, stem):
+            if key in _SERVICE_TITLE_OVERRIDES:
+                return True
+        if _is_filename_like_module_name(name):
+            return False
+        tokens = [part for part in re.split(r"[-_]+", stem.lower().strip("._")) if part]
+        if not tokens:
+            return False
+        if len(tokens) == 1 and tokens[0] in _GENERIC_PACKAGE_LEAVES | {"init", "main"}:
+            return False
+        if any(token in _SERVICE_NAME_TOKENS for token in tokens):
+            return True
+        return len(tokens) >= 2
 
     def _include_endpoint_pages(self) -> bool:
         import os
@@ -247,31 +355,28 @@ class RuleFirstPlanner:
             source_requirements=SourceRequirement(
                 modules=[m.name for m in self.snapshot.modules],
                 commands=["start", "build", "test"],
+                files=self._existing_source_files("README.md", *self._cmd_main_files()),
             ),
             sort_order=0,
             tags=["overview", "index"],
         )
 
-        # README summary
-        self._add_page(
-            page_id=self._make_page_id("readme", WikiTaxonomyCategory.PROJECT_OVERVIEW),
-            title="自述文件",
-            category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
-            parent="project-overview",
-            source_requirements=SourceRequirement(files=["README.md"]),
-            sort_order=1,
-            tags=["readme", "introduction"],
-        )
-
-        # Project changelog
-        self._add_page(
-            page_id=self._make_page_id("changelog", WikiTaxonomyCategory.PROJECT_OVERVIEW),
-            title="更新日志",
-            category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
-            parent="project-overview",
-            sort_order=5,
-            tags=["changelog", "history"],
-        )
+        if self._existing_source_files(
+            "CHANGELOG.md", "CHANGELOG.rst", "CHANGES.rst", "CHANGES.md"
+        ):
+            self._add_page(
+                page_id=self._make_page_id("changelog", WikiTaxonomyCategory.PROJECT_OVERVIEW),
+                title="更新日志",
+                category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
+                parent="project-overview",
+                source_requirements=SourceRequirement(
+                    files=self._existing_source_files(
+                        "CHANGELOG.md", "CHANGELOG.rst", "CHANGES.rst", "CHANGES.md"
+                    )
+                ),
+                sort_order=5,
+                tags=["changelog", "history"],
+            )
 
         # Quick start guide
         self._add_page(
@@ -279,7 +384,10 @@ class RuleFirstPlanner:
             title="快速开始",
             category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
             parent="project-overview",
-            source_requirements=SourceRequirement(commands=["start"]),
+            source_requirements=SourceRequirement(
+                files=["README.md", "QUICKSTART.md"],
+                commands=["start"],
+            ),
             sort_order=2,
             tags=["quickstart", "getting-started"],
         )
@@ -290,6 +398,10 @@ class RuleFirstPlanner:
             title="安装指南",
             category=WikiTaxonomyCategory.PROJECT_OVERVIEW,
             parent="project-overview",
+            source_requirements=SourceRequirement(
+                files=["README.md", "QUICKSTART.md"],
+                commands=["start", "build"],
+            ),
             sort_order=3,
             tags=["installation", "setup"],
         )
@@ -317,7 +429,21 @@ class RuleFirstPlanner:
                     m.name
                     for m in self.snapshot.modules
                     if m.domain in ("core-platform", "ai-services")
-                ]
+                    or str(m.path or "").startswith("internal/")
+                ],
+                files=[
+                    path
+                    for path in (
+                        *self._cmd_main_files(),
+                        *self._cmd_dir_names(),
+                        *self._core_package_files(),
+                    )
+                    if any(
+                        (m.path or "").startswith(path) or path in (m.doc_path or "")
+                        for m in self.snapshot.modules
+                    )
+                    or Path(self.identity.root_path, path).exists()
+                ],
             ),
             sort_order=0,
             tags=["architecture", "design"],
@@ -421,6 +547,38 @@ class RuleFirstPlanner:
     def _product_modules(self) -> list[Module]:
         return [module for module in self.snapshot.modules if self._is_product_module(module)]
 
+    def _repo_has_kubernetes(self) -> bool:
+        """True only when the repo actually contains Kubernetes/Helm assets."""
+        needles = ("k8s", "kubernetes", "helm", "kustomization")
+        for module in self._product_modules():
+            blob = f"{module.name} {module.path}".lower()
+            if any(token in blob for token in needles):
+                return True
+        for directory in getattr(self.snapshot.repository, "key_directories", None) or []:
+            if any(token in str(directory).lower() for token in needles):
+                return True
+        root = Path(self.identity.root_path)
+        if not root.is_dir():
+            return False
+        for name in ("Chart.yaml", "kustomization.yaml", "kustomization.yml"):
+            if (root / name).is_file():
+                return True
+        for folder in ("k8s", "kubernetes", "helm", "charts"):
+            if (root / folder).is_dir():
+                return True
+        return False
+
+    def _repo_is_python_primary(self) -> bool:
+        language = (self.snapshot.repository.language or self.identity.language or "").lower()
+        framework = (self.snapshot.repository.framework or self.identity.framework or "").lower()
+        return language == "python" or framework in {"fastapi", "flask"}
+
+    def _has_api_routes_layout(self) -> bool:
+        return any(
+            "api/routes" in (endpoint.file_path or "").replace("\\", "/").lower()
+            for endpoint in self.snapshot.endpoints
+        )
+
     def _has_surface_token(self, *tokens: str) -> bool:
         needles = tuple(token.lower() for token in tokens if token)
         if not needles:
@@ -441,14 +599,24 @@ class RuleFirstPlanner:
         """Generate module category pages."""
         product_modules = self._product_modules()
 
-        # Core services index
+        # Core services index. Filename-like packages are folded here, not emitted as chapters.
+        index_modules: list[str] = []
+        seen_index_modules: set[str] = set()
+        for module in product_modules:
+            if module.domain == "core-platform" or not self._is_service_like_module_name(
+                module.name
+            ):
+                if module.name not in seen_index_modules:
+                    index_modules.append(module.name)
+                    seen_index_modules.add(module.name)
         self._add_page(
             page_id=self._make_page_id("core-services-index", WikiTaxonomyCategory.CORE_SERVICES),
             title="核心服务",
             category=WikiTaxonomyCategory.CORE_SERVICES,
             parent=None,
             source_requirements=SourceRequirement(
-                modules=[m.name for m in product_modules if m.domain == "core-platform"]
+                modules=index_modules,
+                files=self._core_package_files(),
             ),
             sort_order=0,
             tags=["index", "services"],
@@ -467,8 +635,10 @@ class RuleFirstPlanner:
                 tags=["ai", "machine-learning"],
             )
 
-        # Individual module pages
+        # Individual module pages. Skip filename / one-token package dumps.
         for idx, module in enumerate(sorted(product_modules, key=lambda m: m.path)):
+            if not self._is_service_like_module_name(module.name):
+                continue
             module_page_id = self._make_page_id(module.name, WikiTaxonomyCategory.CORE_SERVICES)
             self._add_page(
                 page_id=module_page_id,
@@ -539,10 +709,13 @@ class RuleFirstPlanner:
             (
                 "python-service-apis",
                 "Python服务API",
-                lambda module_name, endpoints: any(
-                    "python" in getattr(e, "service_family", "")
-                    or self._module_runtime(module_name) in {"python", "fastapi"}
-                    for e in endpoints
+                lambda module_name, endpoints: (
+                    self._repo_is_python_primary()
+                    and any(
+                        "python" in getattr(e, "service_family", "")
+                        or self._module_runtime(module_name) in {"python", "fastapi"}
+                        for e in endpoints
+                    )
                 ),
             ),
             (
@@ -573,6 +746,10 @@ class RuleFirstPlanner:
                     grouped_modules.append(module_name)
                     grouped_endpoints.extend(f"{e.method} {e.path}" for e in endpoints)
             if not grouped_modules:
+                continue
+            if page_id_base == "core-service-apis" and not (
+                self._has_api_routes_layout() or self._repo_is_python_primary()
+            ):
                 continue
             self._add_page(
                 page_id=self._make_page_id(page_id_base, WikiTaxonomyCategory.API_REFERENCE),
@@ -622,9 +799,15 @@ class RuleFirstPlanner:
             tags=["api", "errors", "status-codes"],
         )
 
+        _SKIP_THIN_API_LEAVES = frozenset(
+            {"example", "demo", "scaffold", "hello", "agent", "sample"}
+        )
         # Per-service API articles are useful, but individual endpoint pages are not.
         for idx, (module_name, endpoints) in enumerate(sorted(by_module.items())):
-            if not endpoints:
+            if not endpoints or not self._is_service_like_module_name(module_name):
+                continue
+            leaf = _module_leaf_name(module_name).lower()
+            if leaf in _SKIP_THIN_API_LEAVES or leaf.startswith("custom"):
                 continue
             self._add_page(
                 page_id=self._make_page_id(
@@ -643,6 +826,8 @@ class RuleFirstPlanner:
 
         if self._include_endpoint_pages():
             for module_name, endpoints in sorted(by_module.items()):
+                if not self._is_service_like_module_name(module_name):
+                    continue
                 module_api_id = self._make_page_id(
                     f"{module_name}-endpoints", WikiTaxonomyCategory.API_REFERENCE
                 )
@@ -659,107 +844,233 @@ class RuleFirstPlanner:
                     tags=["api", "endpoint-index"],
                 )
 
+    def _snapshot_rel_paths(self) -> list[str]:
+        paths: list[str] = []
+        for module in self.snapshot.modules:
+            paths.append(module.path)
+        for model in self.snapshot.data_models:
+            paths.append(model.file_path)
+        for endpoint in self.snapshot.endpoints:
+            paths.append(endpoint.file_path)
+        paths.extend(self.snapshot.repository.key_directories)
+        return [path for path in paths if path]
+
+    def _cmd_dir_names(self) -> tuple[str, ...]:
+        cmd = Path(self.identity.root_path) / "cmd"
+        if not cmd.is_dir():
+            return ()
+        return tuple(f"cmd/{child.name}" for child in sorted(cmd.iterdir()) if child.is_dir())
+
+    def _cmd_main_files(self) -> tuple[str, ...]:
+        return tuple(f"{rel}/main.go" for rel in self._cmd_dir_names())
+
+    def _existing_source_files(self, *candidates: str) -> list[str]:
+        found: list[str] = []
+        for path in candidates:
+            if path and Path(self.identity.root_path, path).exists():
+                found.append(path)
+        return found
+
+    def _topic_source_files(self, *needles: str, skip_scaffold: bool = False) -> list[str]:
+        """Relative files whose path/name matches any needle (repo-agnostic)."""
+        root = Path(self.identity.root_path)
+        skip = {".git", ".repo-agent-eval", "vendor", "node_modules", "__pycache__", ".venv"}
+        found: list[tuple[int, int, str]] = []
+        lowered = tuple(item.lower() for item in needles if item)
+        if not lowered or not root.is_dir():
+            return []
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if any(part in skip for part in path.parts):
+                continue
+            if path.suffix.lower() not in {
+                ".go",
+                ".py",
+                ".md",
+                ".rst",
+                ".yml",
+                ".yaml",
+                ".toml",
+                ".sh",
+            }:
+                continue
+            rel = path.relative_to(root).as_posix()
+            blob = rel.lower()
+            if skip_scaffold and (
+                "scaffold" in blob or "/demo/" in blob or blob.startswith("demo/")
+            ):
+                continue
+            hits = sum(1 for needle in lowered if needle in blob)
+            if not hits:
+                continue
+            impl = 0 if path.suffix.lower() in {".go", ".py", ".sh"} else 1
+            found.append((impl, -hits, rel))
+        found.sort()
+        return [rel for _impl, _hits, rel in found[:12]]
+
+    def _core_package_files(self) -> list[str]:
+        try:
+            from repo_wiki.verifier.handbook import architecture_core_packages
+
+            return architecture_core_packages(Path(self.identity.root_path))
+        except Exception:
+            return []
+
+    def _data_model_source_files(self) -> list[str]:
+        try:
+            from repo_wiki.verifier.handbook import data_model_required_sources
+
+            files = data_model_required_sources(Path(self.identity.root_path))
+        except Exception:
+            files = []
+        for model in self.snapshot.data_models:
+            path = str(getattr(model, "file_path", "") or "")
+            if path and path not in files:
+                files.append(path)
+        for path in self._database_evidence_files():
+            if path not in files:
+                files.append(path)
+        return files[:24]
+
+    def _database_evidence_files(self) -> list[str]:
+        matches: list[str] = []
+        seen: set[str] = set()
+        for path in self._snapshot_rel_paths():
+            lower = path.replace("\\", "/").lower()
+            parts = [part for part in lower.split("/") if part]
+            if lower.endswith(".sql") or any(
+                part in {"alembic", "migrations", "migration"} for part in parts
+            ):
+                if path not in seen:
+                    seen.add(path)
+                    matches.append(path)
+        return matches
+
+    def _has_database_architecture_evidence(self) -> bool:
+        return bool(self._database_evidence_files())
+
+    def _core_data_model_names(self) -> list[str]:
+        tokens = ("entity", "apiatom", "contract", "workflow", "audit", "execution")
+        return [
+            model.name
+            for model in self.snapshot.data_models
+            if any(token in model.name.lower() for token in tokens)
+        ]
+
+    def _service_data_model_groups(self) -> list[tuple[str, list]]:
+        by_module: dict[str, list] = {}
+        for data_model in self.snapshot.data_models:
+            by_module.setdefault(data_model.module, []).append(data_model)
+        return [
+            (module_name, models)
+            for module_name, models in sorted(by_module.items())
+            if self._is_service_like_module_name(module_name) and models
+        ]
+
     def _generate_data_model_pages(self) -> None:
-        """Generate Qoder-like data model pages without raw DTO/entity dumps."""
+        """Generate one 数据模型 chapter unless distinct evidence warrants children."""
         self._add_page(
             page_id=self._make_page_id("data-models-overview", WikiTaxonomyCategory.DATA_MODELS),
             title="数据模型",
             category=WikiTaxonomyCategory.DATA_MODELS,
             parent=None,
             source_requirements=SourceRequirement(
-                data_models=[dm.name for dm in self.snapshot.data_models]
+                data_models=[dm.name for dm in self.snapshot.data_models],
+                files=self._data_model_source_files(),
             ),
             sort_order=0,
             tags=["models", "schemas"],
         )
 
-        by_module: dict[str, list] = {}
-        for dm in self.snapshot.data_models:
-            if dm.module not in by_module:
-                by_module[dm.module] = []
-            by_module[dm.module].append(dm)
+        all_names = [dm.name for dm in self.snapshot.data_models]
+        core_names = self._core_data_model_names()
+        has_distinct_core = bool(core_names) and set(core_names) != set(all_names)
+        service_groups = self._service_data_model_groups()
+        has_db_evidence = self._has_database_architecture_evidence()
 
-        core_names = [
-            model.name
-            for model in self.snapshot.data_models
-            if any(
-                token in model.name.lower()
-                for token in ["entity", "apiatom", "contract", "workflow", "audit", "execution"]
-            )
-        ]
-        self._add_page(
-            page_id=self._make_page_id("core-data-models", WikiTaxonomyCategory.DATA_MODELS),
-            title="核心数据模型",
-            category=WikiTaxonomyCategory.DATA_MODELS,
-            parent="data-models-overview",
-            source_requirements=SourceRequirement(data_models=sorted(set(core_names))[:120]),
-            sort_order=10,
-            tags=["models", "core-entities"],
-        )
-        self._add_page(
-            page_id=self._make_page_id("service-data-models", WikiTaxonomyCategory.DATA_MODELS),
-            title="服务数据模型",
-            category=WikiTaxonomyCategory.DATA_MODELS,
-            parent="data-models-overview",
-            source_requirements=SourceRequirement(
-                data_models=[dm.name for dm in self.snapshot.data_models]
-            ),
-            sort_order=11,
-            tags=["models", "service-models"],
-        )
-        self._add_page(
-            page_id=self._make_page_id("database-architecture", WikiTaxonomyCategory.DATA_MODELS),
-            title="数据库架构",
-            category=WikiTaxonomyCategory.DATA_MODELS,
-            parent="data-models-overview",
-            source_requirements=SourceRequirement(files=["db", "sql", "migrations"]),
-            sort_order=12,
-            tags=["database", "schema"],
-        )
-        self._add_page(
-            page_id=self._make_page_id(
-                "database-migration-strategy", WikiTaxonomyCategory.DATA_MODELS
-            ),
-            title="数据迁移策略",
-            category=WikiTaxonomyCategory.DATA_MODELS,
-            parent="database-architecture",
-            source_requirements=SourceRequirement(files=["migration", "migrations", "sql"]),
-            sort_order=13,
-            tags=["database", "migration"],
-        )
-
-        for idx, (module_name, models) in enumerate(sorted(by_module.items())):
-            module_models_id = self._make_page_id(
-                f"{module_name}-data-models", WikiTaxonomyCategory.DATA_MODELS
-            )
+        if has_distinct_core:
             self._add_page(
-                page_id=module_models_id,
-                title=f"{self._humanize_service_title(module_name)} 数据模型",
+                page_id=self._make_page_id("core-data-models", WikiTaxonomyCategory.DATA_MODELS),
+                title="核心数据模型",
                 category=WikiTaxonomyCategory.DATA_MODELS,
-                parent="service-data-models",
-                source_requirements=SourceRequirement(data_models=[m.name for m in models]),
-                sort_order=100 + idx,
-                tags=["models", "service-model", module_name],
+                parent="data-models-overview",
+                source_requirements=SourceRequirement(
+                    data_models=sorted(set(core_names))[:120],
+                    files=self._data_model_source_files(),
+                ),
+                sort_order=10,
+                tags=["models", "core-entities"],
             )
 
-            if not self._include_raw_model_pages():
-                continue
-            for model_idx, model in enumerate(sorted(models, key=lambda m: m.name)):
-                model_id = self._make_page_id(
-                    f"{module_name}-{model.name}", WikiTaxonomyCategory.DATA_MODELS
+        if len(service_groups) >= 2 or (len(service_groups) == 1 and has_distinct_core):
+            self._add_page(
+                page_id=self._make_page_id("service-data-models", WikiTaxonomyCategory.DATA_MODELS),
+                title="服务数据模型",
+                category=WikiTaxonomyCategory.DATA_MODELS,
+                parent="data-models-overview",
+                source_requirements=SourceRequirement(
+                    data_models=[model.name for _, models in service_groups for model in models]
+                ),
+                sort_order=11,
+                tags=["models", "service-models"],
+            )
+            for idx, (module_name, models) in enumerate(service_groups):
+                module_models_id = self._make_page_id(
+                    f"{module_name}-data-models", WikiTaxonomyCategory.DATA_MODELS
                 )
                 self._add_page(
-                    page_id=model_id,
-                    title=model.name,
+                    page_id=module_models_id,
+                    title=f"{self._humanize_service_title(module_name)} 数据模型",
                     category=WikiTaxonomyCategory.DATA_MODELS,
-                    parent=module_models_id,
-                    source_requirements=SourceRequirement(
-                        data_models=[model.name],
-                        files=[model.file_path],
-                    ),
-                    sort_order=200 + model_idx,
-                    tags=["raw-model", model.type],
+                    parent="service-data-models",
+                    source_requirements=SourceRequirement(data_models=[m.name for m in models]),
+                    sort_order=100 + idx,
+                    tags=["models", "service-model", module_name],
                 )
+                if not self._include_raw_model_pages():
+                    continue
+                for model_idx, model in enumerate(sorted(models, key=lambda item: item.name)):
+                    model_id = self._make_page_id(
+                        f"{module_name}-{model.name}", WikiTaxonomyCategory.DATA_MODELS
+                    )
+                    self._add_page(
+                        page_id=model_id,
+                        title=model.name,
+                        category=WikiTaxonomyCategory.DATA_MODELS,
+                        parent=module_models_id,
+                        source_requirements=SourceRequirement(
+                            data_models=[model.name],
+                            files=[model.file_path],
+                        ),
+                        sort_order=200 + model_idx,
+                        tags=["raw-model", model.type],
+                    )
+
+        if has_db_evidence:
+            db_files = self._database_evidence_files()
+            self._add_page(
+                page_id=self._make_page_id(
+                    "database-architecture", WikiTaxonomyCategory.DATA_MODELS
+                ),
+                title="数据库架构",
+                category=WikiTaxonomyCategory.DATA_MODELS,
+                parent="data-models-overview",
+                source_requirements=SourceRequirement(files=db_files[:20]),
+                sort_order=12,
+                tags=["database", "schema"],
+            )
+            self._add_page(
+                page_id=self._make_page_id(
+                    "database-migration-strategy", WikiTaxonomyCategory.DATA_MODELS
+                ),
+                title="数据迁移策略",
+                category=WikiTaxonomyCategory.DATA_MODELS,
+                parent="database-architecture",
+                source_requirements=SourceRequirement(files=db_files[:20]),
+                sort_order=13,
+                tags=["database", "migration"],
+            )
 
     def _generate_ops_pages(self) -> None:
         """Generate deployment and operations pages."""
@@ -831,17 +1142,17 @@ class RuleFirstPlanner:
             tags=["docker", "containers"],
         )
 
-        # Kubernetes deployment
-        self._add_page(
-            page_id=self._make_page_id(
-                "kubernetes-deployment", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS
-            ),
-            title="Kubernetes部署",
-            category=WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
-            parent="deployment-overview",
-            sort_order=6,
-            tags=["kubernetes", "k8s"],
-        )
+        if self._repo_has_kubernetes():
+            self._add_page(
+                page_id=self._make_page_id(
+                    "kubernetes-deployment", WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS
+                ),
+                title="Kubernetes部署",
+                category=WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
+                parent="deployment-overview",
+                sort_order=6,
+                tags=["kubernetes", "k8s"],
+            )
 
         # CI/CD pipeline
         self._add_page(
@@ -934,6 +1245,10 @@ class RuleFirstPlanner:
             title="调试指南",
             category=WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
             parent="development-guide",
+            source_requirements=SourceRequirement(
+                files=self._topic_source_files("pprof", "debug", "trace", "dlv", skip_scaffold=True)
+                or self._existing_source_files("Makefile", "CONTRIBUTING.md"),
+            ),
             sort_order=5,
             tags=["debug", "troubleshooting"],
         )
@@ -946,6 +1261,12 @@ class RuleFirstPlanner:
             title="性能优化",
             category=WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
             parent="development-guide",
+            source_requirements=SourceRequirement(
+                files=self._topic_source_files(
+                    "pool", "timeout", "cache", "worker", "concurrency", "benchmark"
+                )
+                or self._existing_source_files("Makefile", "go.mod", "pyproject.toml"),
+            ),
             sort_order=6,
             tags=["performance", "optimization"],
         )
@@ -966,6 +1287,17 @@ class RuleFirstPlanner:
             title="Git工作流",
             category=WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
             parent="development-guide",
+            source_requirements=SourceRequirement(
+                files=self._existing_source_files(
+                    "CONTRIBUTING.md",
+                    "CONTRIBUTING.rst",
+                    ".github/CONTRIBUTING.md",
+                    "Makefile",
+                    ".github/workflows",
+                    ".gitlab-ci.yml",
+                )
+                or self._topic_source_files("contribut", "pull_request", "workflow"),
+            ),
             sort_order=8,
             tags=["git", "workflow"],
         )
@@ -993,8 +1325,8 @@ class RuleFirstPlanner:
         )
 
     def _generate_security_pages(self) -> None:
-        """Generate security and compliance pages."""
-        # Security overview
+        """Generate only security pages that have code evidence; fold the rest."""
+        kinds = self._security_evidence_kinds()
         self._add_page(
             page_id=self._make_page_id(
                 "security-overview", WikiTaxonomyCategory.SECURITY_COMPLIANCE
@@ -1005,102 +1337,56 @@ class RuleFirstPlanner:
             sort_order=0,
             tags=["security", "compliance"],
         )
+        if "auth" in kinds:
+            self._add_page(
+                page_id=self._make_page_id(
+                    "authentication", WikiTaxonomyCategory.SECURITY_COMPLIANCE
+                ),
+                title="身份认证",
+                category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
+                parent="security-overview",
+                sort_order=1,
+                tags=["auth", "authentication"],
+            )
+        if "authz" in kinds:
+            self._add_page(
+                page_id=self._make_page_id(
+                    "authorization", WikiTaxonomyCategory.SECURITY_COMPLIANCE
+                ),
+                title="权限管理",
+                category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
+                parent="security-overview",
+                sort_order=2,
+                tags=["authz", "authorization"],
+            )
+        if "encryption" in kinds and "auth" not in kinds:
+            self._add_page(
+                page_id=self._make_page_id("encryption", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
+                title="加密策略",
+                category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
+                parent="security-overview",
+                sort_order=3,
+                tags=["encryption", "security"],
+            )
 
-        # Authentication
-        self._add_page(
-            page_id=self._make_page_id("authentication", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="身份认证",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=1,
-            tags=["auth", "authentication"],
-        )
-
-        # Authorization
-        self._add_page(
-            page_id=self._make_page_id("authorization", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="权限管理",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=2,
-            tags=["authz", "authorization"],
-        )
-
-        # Data protection
-        self._add_page(
-            page_id=self._make_page_id("data-protection", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="数据保护",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=3,
-            tags=["data", "protection"],
-        )
-
-        # Encryption
-        self._add_page(
-            page_id=self._make_page_id("encryption", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="加密策略",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=4,
-            tags=["encryption", "security"],
-        )
-
-        # API security
-        self._add_page(
-            page_id=self._make_page_id("api-security", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="API安全",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=5,
-            tags=["api", "security"],
-        )
-
-        # Audit logging
-        self._add_page(
-            page_id=self._make_page_id("audit-logging", WikiTaxonomyCategory.SECURITY_COMPLIANCE),
-            title="审计日志",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=6,
-            tags=["audit", "logging"],
-        )
-
-        # Compliance frameworks
-        self._add_page(
-            page_id=self._make_page_id(
-                "compliance-frameworks", WikiTaxonomyCategory.SECURITY_COMPLIANCE
-            ),
-            title="合规框架",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=7,
-            tags=["compliance", "standards"],
-        )
-
-        # Security best practices
-        self._add_page(
-            page_id=self._make_page_id(
-                "security-best-practices", WikiTaxonomyCategory.SECURITY_COMPLIANCE
-            ),
-            title="安全最佳实践",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=8,
-            tags=["best-practices", "security"],
-        )
-
-        # Vulnerability management
-        self._add_page(
-            page_id=self._make_page_id(
-                "vulnerability-management", WikiTaxonomyCategory.SECURITY_COMPLIANCE
-            ),
-            title="漏洞管理",
-            category=WikiTaxonomyCategory.SECURITY_COMPLIANCE,
-            parent="security-overview",
-            sort_order=9,
-            tags=["vulnerability", "security"],
-        )
+    def _security_evidence_kinds(self) -> set[str]:
+        kinds: set[str] = set()
+        root = Path(self.identity.root_path)
+        files: list[str] = []
+        if root.is_dir():
+            files = [path.as_posix() for path in root.rglob("*") if path.is_file()]
+        for raw in files:
+            low = raw.replace("\\", "/").lower()
+            name = Path(low).name
+            if any(token in name for token in ("jwt", "auth")) or "/security.py" in low:
+                kinds.add("auth")
+            if any(token in low for token in ("rbac", "permission", "authorize")):
+                kinds.add("authz")
+            if any(token in low for token in ("encrypt", "crypto", "password", "hash")) and (
+                "jwt" not in name and "auth" not in name
+            ):
+                kinds.add("encryption")
+        return kinds
 
     def _generate_troubleshooting_pages(self) -> None:
         """Generate troubleshooting pages."""
@@ -1242,6 +1528,16 @@ class RuleFirstPlanner:
             title="健康检查",
             category=WikiTaxonomyCategory.TROUBLESHOOTING,
             parent="troubleshooting-overview",
+            source_requirements=SourceRequirement(
+                files=self._existing_source_files(
+                    "README.md",
+                    "README.rst",
+                    "docker-compose.yml",
+                    "docker-compose.yaml",
+                    "compose.yaml",
+                )
+                + self._topic_source_files("health", "readyz", "livez", "heartbeat"),
+            ),
             sort_order=13,
             tags=["health", "monitoring"],
         )

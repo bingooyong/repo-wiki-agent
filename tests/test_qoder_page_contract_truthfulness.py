@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import re
+
 from repo_wiki.core.config import RepoWikiConfig
 from repo_wiki.generator.composer import ComposerContext
 from repo_wiki.orchestration.service import RepoWikiService
 from repo_wiki.planner.schema import SourceRequirement, WikiPagePlan, WikiTaxonomyCategory
+from repo_wiki.verifier.qoder_strict_verifier import QoderLikeVerifierService
 
 
 def _service(tmp_path):
@@ -54,15 +57,22 @@ def test_qoder_page_contract_does_not_emit_unsupported_generic_api_claims(tmp_pa
     assert "/resources" not in rendered
     assert '"auth": "Bearer token"' not in rendered
     assert "需要 Bearer Token" not in rendered
-    assert "UNRESOLVED_API_AUTH" in rendered
-    assert "UNRESOLVED_API_ENDPOINTS" in rendered
-    assert "UNRESOLVED_API_FLOW" in rendered
+    assert "UNRESOLVED_API_AUTH" not in rendered
+    assert "UNRESOLVED_API_ENDPOINTS" not in rendered
+    assert "UNRESOLVED_API_FLOW" not in rendered
+    assert "本组接口见 API参考" in rendered
+    assert "unspecified" in rendered
     assert "API网关" not in rendered
     assert "路由并鉴权" not in rendered
 
 
 def test_qoder_page_contract_preserves_evidence_backed_endpoint_data(tmp_path):
     service = _service(tmp_path)
+    (tmp_path / "src" / "inventory").mkdir(parents=True)
+    (tmp_path / "src" / "inventory" / "api.py").write_text(
+        "\n".join(f"line {i}" for i in range(1, 50)),
+        encoding="utf-8",
+    )
     context = ComposerContext(
         repository_name="repo",
         primary_language="python",
@@ -77,7 +87,8 @@ def test_qoder_page_contract_preserves_evidence_backed_endpoint_data(tmp_path):
                 "file_path": "src/inventory/api.py",
                 "line_number": 42,
                 "auth_type": "api-key",
-                "response_type": "json",
+                "request_body": True,
+                "response_type": "application/xml",
                 "error_codes": [404],
             }
         ],
@@ -93,9 +104,10 @@ def test_qoder_page_contract_preserves_evidence_backed_endpoint_data(tmp_path):
 
     assert "GET /inventory/items" in rendered
     assert "handler `list_items`" in rendered
-    assert "`src/inventory/api.py`:42" in rendered
+    assert "<cite>src/inventory/api.py:42</cite>" in rendered
     assert "认证: api-key" in rendered
-    assert "response_type=json" in rendered
+    assert "request_body=true" in rendered
+    assert "response_type=application/xml" in rendered
     assert "error_codes=[404]" in rendered
     assert "/resources" not in rendered
     assert "Bearer token" not in rendered
@@ -158,3 +170,126 @@ def test_qoder_api_page_does_not_empty_state_when_product_endpoints_exist(tmp_pa
     assert "POST /login" in rendered
     assert "GET /feed" in rendered
     assert "GET /{slug}" in rendered
+
+
+def _error_codes_page() -> WikiPagePlan:
+    return WikiPagePlan(
+        page_id="error-codes",
+        title="错误码参考",
+        category=WikiTaxonomyCategory.TROUBLESHOOTING,
+        output_path="docs/pages/troubleshooting/error-codes.md",
+    )
+
+
+def test_error_code_page_drops_test_only_wrong_path_api_claim(tmp_path):
+    """Test 404 fixtures must not ship as product APIs after page contract."""
+    service = _service(tmp_path)
+    context = ComposerContext(
+        repository_name="conduit",
+        primary_language="python",
+        framework="fastapi",
+        repository_root=str(tmp_path),
+        endpoints=[
+            {
+                "method": "GET",
+                "path": "/api/articles",
+                "module": "articles",
+                "handler": "list_articles",
+                "file_path": "app/api/routes/articles.py",
+                "line_number": 18,
+            },
+            {
+                "method": "POST",
+                "path": "/api/users/login",
+                "module": "authentication",
+                "handler": "login",
+                "file_path": "app/api/routes/authentication.py",
+                "line_number": 12,
+            },
+        ],
+    )
+    markdown = """# 错误码参考
+
+## 404 Not Found
+
+客户端访问 GET /wrong_path/asd 会得到 404，这不是产品路由。
+真实文章列表是 GET /api/articles。
+登录也可写为 POST /users/login。
+"""
+
+    rendered = service._enforce_qoder_page_contract(
+        page=_error_codes_page(),
+        markdown=markdown,
+        binding=None,
+        add_mermaid=False,
+        composition_context=context,
+    )
+
+    assert "GET /wrong_path/asd" not in rendered
+    assert "/wrong_path/asd" not in rendered
+    assert "GET /api/articles" in rendered
+    assert "POST /users/login" in rendered
+
+
+def test_error_code_page_without_test_fixture_does_not_trip_critical_false_fact(tmp_path):
+    """After contract, unmatched test paths are gone so CRITICAL_FALSE_FACT stays quiet."""
+    service = _service(tmp_path)
+    context = ComposerContext(
+        repository_name="conduit",
+        primary_language="python",
+        framework="fastapi",
+        repository_root=str(tmp_path),
+        endpoints=[
+            {
+                "method": "GET",
+                "path": "/api/articles",
+                "handler": "list_articles",
+            }
+        ],
+    )
+    markdown = """# 错误码参考
+
+## 常见状态码
+
+GET /wrong_path/asd 被测试当成 404 夹具。
+产品接口 GET /api/articles 返回文章列表。
+"""
+    rendered = service._enforce_qoder_page_contract(
+        page=_error_codes_page(),
+        markdown=markdown,
+        binding=None,
+        add_mermaid=False,
+        composition_context=context,
+    )
+
+    apis = {("GET", "/api/articles")}
+    verifier = QoderLikeVerifierService(tmp_path, strict=True)
+    leftover = []
+    for method, api_path in re.findall(
+        r"\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(/[-A-Za-z0-9_./{}:]+)",
+        rendered,
+    ):
+        if not verifier._api_claim_in_inventory(method.upper(), api_path, apis):
+            leftover.append(f"{method.upper()} {api_path}")
+    assert leftover == []
+
+
+def test_fold_citation_only_line_appends_to_previous_prose(tmp_path):
+    service = _service(tmp_path)
+    folded = service._fold_citation_only_lines(
+        "产品接口返回文章列表。\n<cite>app/api/routes/articles.py:18</cite>\n"
+    )
+    assert folded == "产品接口返回文章列表。 <cite>app/api/routes/articles.py:18</cite>"
+
+
+def test_fold_citation_only_line_keeps_mixed_prose(tmp_path):
+    service = _service(tmp_path)
+    content = "说明\n正文 <cite>app/main.py:1</cite> 继续\n"
+    assert service._fold_citation_only_lines(content) == content.rstrip()
+
+
+def test_fold_citation_only_line_is_linear_on_repeated_cite_tabs(tmp_path):
+    service = _service(tmp_path)
+    line = "<cite>;</cite>\t" * 80
+    folded = service._fold_citation_only_lines("前文。\n" + line + "\n")
+    assert folded.startswith("前文。")

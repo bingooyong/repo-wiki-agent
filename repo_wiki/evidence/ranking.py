@@ -30,6 +30,36 @@ WEIGHT_API = 1.8
 WEIGHT_DATA_MODEL = 1.8
 WEIGHT_FILE_PROXIMITY = 1.2
 WEIGHT_CATEGORY = 1.0
+WEIGHT_ONBOARDING_README = 3.0
+WEIGHT_ONBOARDING_SETTINGS = 2.5
+WEIGHT_ONBOARDING_ENTRY = 2.5
+WEIGHT_SECURITY_AUTH_FILE = 4.0
+WEIGHT_API_ROUTES_FILE = 3.0
+
+
+def _span_is_readme_run_section(span: EvidenceSpanRecord) -> bool:
+    from repo_wiki.verifier.handbook import _heading_is_run_usage, _text_has_install_clue
+
+    symbol = str(getattr(span, "symbol", "") or "")
+    text = str(getattr(span, "span_text", "") or "")
+    return _heading_is_run_usage(symbol) or _text_has_install_clue(text)
+
+
+def _span_is_readme_badge_header(span: EvidenceSpanRecord) -> bool:
+    from repo_wiki.verifier.handbook import _text_is_badge_header
+
+    return _text_is_badge_header(str(getattr(span, "span_text", "") or ""))
+
+
+_ONBOARDING_OVERVIEW_INSTALL_IDS = frozenset(
+    {
+        "project-overview",
+        "installation",
+        "quick-start",
+        "quickstart",
+        "getting-started",
+    }
+)
 
 
 @dataclass
@@ -192,22 +222,20 @@ def _score_by_api_match(page: WikiPagePlan, span: EvidenceSpanRecord) -> float:
     sr = page.source_requirements
     if not sr or not sr.endpoints:
         return 0.0
-    if not span.symbol:
-        return 0.0
-
-    symbol_lower = span.symbol.lower()
+    symbol_lower = (span.symbol or "").lower()
+    span_path = _normalized_span_path(span)
+    best = 0.0
     for endpoint in sr.endpoints:
         # endpoint format: "METHOD /path" or just "path"
         path = endpoint.split()[-1] if " " in endpoint else endpoint
         path_lower = _normalize_for_matching(path)
-        # Check symbol against path segments
-        if path_lower in symbol_lower or symbol_lower in path_lower:
-            return WEIGHT_API
-        # Check path keyword overlap
-        path_keywords = set(path_lower.split())
-        if path_lower in symbol_lower:
-            return WEIGHT_API * 0.7
-    return 0.0
+        if symbol_lower and (path_lower in symbol_lower or symbol_lower in path_lower):
+            best = max(best, WEIGHT_API)
+            continue
+        parts = [part for part in path.split("/") if part and not part.startswith((":", "{", "*"))]
+        if len(parts) >= 2 and all(part.lower() in span_path for part in parts[-2:]):
+            best = max(best, WEIGHT_API)
+    return best
 
 
 def _score_by_data_model_match(page: WikiPagePlan, span: EvidenceSpanRecord) -> float:
@@ -256,9 +284,10 @@ def _score_by_category_relevance(page: WikiPagePlan, span: EvidenceSpanRecord) -
 
     # Categories that prefer certain languages
     language_preference = {
-        WikiTaxonomyCategory.DATA_MODELS: ["sql", "python", "java"],
-        WikiTaxonomyCategory.API_REFERENCE: ["typescript", "python", "java"],
-        WikiTaxonomyCategory.CORE_SERVICES: ["python", "java", "typescript"],
+        WikiTaxonomyCategory.DATA_MODELS: ["go", "sql", "python", "java"],
+        WikiTaxonomyCategory.API_REFERENCE: ["go", "typescript", "python", "java"],
+        WikiTaxonomyCategory.CORE_SERVICES: ["go", "python", "java", "typescript"],
+        WikiTaxonomyCategory.ARCHITECTURE_DESIGN: ["go", "python", "typescript"],
         WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS: ["yaml", "python", "shell"],
         WikiTaxonomyCategory.DEVELOPMENT_GUIDE: ["markdown", "python"],
     }
@@ -270,6 +299,279 @@ def _score_by_category_relevance(page: WikiPagePlan, span: EvidenceSpanRecord) -
     if span.language in preferred_langs:
         return WEIGHT_CATEGORY
     return 0.0
+
+
+def _normalized_span_path(span: EvidenceSpanRecord) -> str:
+    return str(getattr(span, "file_path", "") or "").replace("\\", "/").lower()
+
+
+def _is_overview_or_install_page(page: WikiPagePlan) -> bool:
+    page_id = (page.page_id or "").lower()
+    tags = {str(tag).lower() for tag in (page.tags or [])}
+    if page_id in _ONBOARDING_OVERVIEW_INSTALL_IDS:
+        return True
+    if page.category in {
+        WikiTaxonomyCategory.PROJECT_OVERVIEW,
+        WikiTaxonomyCategory.DEVELOPMENT_GUIDE,
+        WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS,
+    } and any(
+        token in page_id for token in ("overview", "install", "quick-start", "quickstart", "setup")
+    ):
+        return True
+    return bool(tags & {"installation", "setup", "quick-start", "quickstart", "getting-started"})
+
+
+def _is_security_onboarding_page(page: WikiPagePlan) -> bool:
+    page_id = (page.page_id or "").lower()
+    if page.category == WikiTaxonomyCategory.SECURITY_COMPLIANCE:
+        return True
+    return "security" in page_id or "auth" in page_id
+
+
+def _is_ops_config_page(page: WikiPagePlan) -> bool:
+    page_id = (page.page_id or "").lower()
+    if page_id in {"configuration", "environment-setup", "logging"}:
+        return True
+    if page.category == WikiTaxonomyCategory.DEPLOYMENT_OPERATIONS:
+        return True
+    return any(token in page_id for token in ("config", "logging", "environment"))
+
+
+def _is_database_troubleshooting_page(page: WikiPagePlan) -> bool:
+    page_id = (page.page_id or "").lower()
+    if page_id == "database-issues":
+        return True
+    return page.category == WikiTaxonomyCategory.TROUBLESHOOTING and "database" in page_id
+
+
+THIN_TOPIC_TOKENS = (
+    "git-workflow",
+    "git工作流",
+    "performance",
+    "性能",
+    "health-check",
+    "健康检查",
+    "core-services",
+    "核心服务",
+    "debug-guide",
+    "debug-tools",
+    "调试指南",
+    "调试工具",
+)
+WIDE_EVIDENCE_TOKENS = THIN_TOPIC_TOKENS + ("migration", "迁移")
+
+
+def is_thin_topic_blob(blob: str) -> bool:
+    lowered = (blob or "").lower()
+    return any(token in lowered for token in THIN_TOPIC_TOKENS)
+
+
+def wants_wide_evidence(blob: str) -> bool:
+    lowered = (blob or "").lower()
+    return any(token in lowered for token in WIDE_EVIDENCE_TOKENS)
+
+
+def _is_thin_topic_page(page: WikiPagePlan) -> bool:
+    return is_thin_topic_blob(f"{page.page_id} {page.title}")
+
+
+def _score_thin_topic_evidence(
+    page: WikiPagePlan, path: str, name: str, symbol: str, text: str
+) -> tuple[float, list[str]]:
+    blob = f"{page.page_id} {page.title}".lower()
+    score = 0.0
+    signals: list[str] = []
+    if "git" in blob:
+        if name in {"contributing.md", "contributing.rst", "makefile"} or ".github" in path:
+            score += WEIGHT_ONBOARDING_SETTINGS + 1.0
+            signals.append("thin_git_workflow")
+    if "debug" in blob or "调试" in blob:
+        if (
+            any(
+                token in path or token in text or token in symbol
+                for token in ("pprof", "debug", "trace", "dlv", "breakpoint")
+            )
+            and "scaffold" not in path
+        ):
+            score += WEIGHT_ONBOARDING_ENTRY + 1.5
+            signals.append("thin_debug_source")
+            if path.endswith((".go", ".py", ".sh")):
+                score += 1.0
+                signals.append("thin_debug_impl")
+        if "scaffold" in path:
+            score -= 4.0
+            signals.append("thin_debug_scaffold")
+    if "performance" in blob or "性能" in blob:
+        if any(token in path or token in text for token in ("pool", "timeout", "cache", "worker")):
+            score += WEIGHT_ONBOARDING_SETTINGS + 1.0
+            signals.append("thin_performance")
+    if "health" in blob or "健康" in blob:
+        if any(
+            token in path or token in text or token in symbol
+            for token in ("health", "readyz", "livez")
+        ):
+            score += WEIGHT_ONBOARDING_ENTRY + 1.0
+            signals.append("thin_health")
+        if name.startswith("readme"):
+            score += WEIGHT_ONBOARDING_README
+            signals.append("thin_health_readme")
+    if "核心服务" in blob or "core-service" in blob:
+        if path.startswith("app/") or path.startswith("internal/") or path.startswith("cmd/"):
+            score += WEIGHT_ONBOARDING_SETTINGS + 1.5
+            signals.append("thin_core_service")
+    return score, signals
+
+
+def _score_onboarding_evidence(
+    page: WikiPagePlan, span: EvidenceSpanRecord
+) -> tuple[float, list[str]]:
+    """Boost README / settings / entry files for onboarding pages only.
+
+    API pages must not receive a global README boost.
+    """
+    path = _normalized_span_path(span)
+    name = Path(path).name.lower()
+    symbol = str(getattr(span, "symbol", "") or "").lower()
+    text = str(getattr(span, "span_text", "") or "").lower()
+    score = 0.0
+    signals: list[str] = []
+
+    if page.category == WikiTaxonomyCategory.API_REFERENCE:
+        if "api/routes" in path:
+            score += WEIGHT_API_ROUTES_FILE
+            signals.append("api_routes_file")
+        if path.endswith(".go") and not name.endswith("_test.go"):
+            if path.startswith("internal/") or "/internal/" in path:
+                score += WEIGHT_API_ROUTES_FILE + 1.5
+                signals.append("go_internal_handler")
+            elif name.endswith(".pb.go") or name.endswith("_grpc.pb.go"):
+                score -= 2.0
+                signals.append("go_generated_api")
+            else:
+                score += WEIGHT_API_ROUTES_FILE * 0.4
+                signals.append("go_api_source")
+            if name in {"main.go", "config.go"} and (
+                path.startswith("cmd/") or path.count("/") == 0
+            ):
+                score -= 2.0
+                signals.append("go_entrypoint_not_handler")
+        return score, signals
+
+    if page.category == WikiTaxonomyCategory.CORE_SERVICES:
+        from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+
+        blob = f"{page.page_id} {page.title}".lower()
+        from repo_wiki.generator.process_roles import cmd_dir_name
+
+        cmd_name = cmd_dir_name(path)
+        if cmd_name and (cmd_name.lower() in blob or cmd_name.replace("-", " ").lower() in blob):
+            score += WEIGHT_ONBOARDING_ENTRY + 3.0
+            signals.append("core_named_cmd")
+        if path_looks_like_example_cmd(path):
+            score -= 8.0
+            signals.append("core_demote_example_cmd")
+        elif path.startswith("app/") or path.startswith("internal/") or path.startswith("cmd/"):
+            score += WEIGHT_ONBOARDING_SETTINGS + 1.5
+            signals.append("thin_core_service")
+        return score, signals
+
+    if _is_overview_or_install_page(page):
+        if name == "readme.md":
+            score += WEIGHT_ONBOARDING_README + 1.5
+            signals.append("onboarding_primary_readme")
+            if _span_is_readme_run_section(span):
+                score += WEIGHT_ONBOARDING_README + 2.5
+                signals.append("onboarding_readme_run")
+            elif _span_is_readme_badge_header(span):
+                score -= 2.5
+                signals.append("onboarding_readme_badge")
+        elif name.startswith("readme") and not any(
+            marker in name for marker in ("scaffold", "template", "boilerplate")
+        ):
+            score += WEIGHT_ONBOARDING_README
+            signals.append("onboarding_readme")
+        elif name.startswith("readme"):
+            score -= 1.5
+            signals.append("onboarding_secondary_readme")
+        if name in {"makefile", "quickstart.md", "go.mod"}:
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("onboarding_build_clue")
+        if "settings" in path or "database_url" in symbol or "database_url" in text:
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("onboarding_settings")
+        if name in {"main.py", "main.go"}:
+            score += WEIGHT_ONBOARDING_ENTRY
+            signals.append("onboarding_entry")
+        if path.startswith("cmd/") and name == "main.go":
+            score += WEIGHT_ONBOARDING_ENTRY + 1.0
+            signals.append("onboarding_cmd_main")
+    elif page.category == WikiTaxonomyCategory.ARCHITECTURE_DESIGN:
+        if path.endswith(".go") and (path.startswith("internal/") or "/internal/" in path):
+            score += WEIGHT_ONBOARDING_SETTINGS + 2.0
+            signals.append("arch_go_internal")
+            if any(
+                token in path
+                for token in (
+                    "/control/",
+                    "/services/",
+                    "/repository/",
+                    "/exporter/",
+                    "/agent/",
+                    "/probe/",
+                )
+            ):
+                score += 2.0
+                signals.append("arch_go_core")
+        if path.startswith("cmd/") and name == "main.go":
+            from repo_wiki.generator.process_roles import path_looks_like_example_cmd
+
+            if path_looks_like_example_cmd(path) or any(
+                token in path for token in ("example", "demo", "scaffold")
+            ):
+                score -= 4.0
+                signals.append("arch_demo_cmd")
+            else:
+                score += WEIGHT_ONBOARDING_ENTRY + 2.0
+                signals.append("arch_cmd_core")
+        if any(part in {"routes", "routers", "models"} for part in Path(path).parts):
+            score += WEIGHT_ONBOARDING_SETTINGS + 2.0
+            signals.append("arch_core_models_or_routes")
+    elif _is_ops_config_page(page) or _is_database_troubleshooting_page(page):
+        if "settings" in path or "database_url" in symbol or "database_url" in text:
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("onboarding_settings")
+        if "docker-compose" in path or name in {"docker-compose.yml", "docker-compose.yaml"}:
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("onboarding_compose")
+        if "logging" in path or "logging" in page.page_id.lower():
+            if "log" in path or "logging" in symbol or "logging" in text:
+                score += WEIGHT_ONBOARDING_ENTRY
+                signals.append("onboarding_logging")
+    elif page.category == WikiTaxonomyCategory.DATA_MODELS:
+        if "/models/" in path or name in {"models.py", "model.py"}:
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("data_model_file")
+        if path.endswith(".go") and (
+            "gorm:" in text or "tablename" in symbol or "/models/" in path
+        ):
+            score += WEIGHT_ONBOARDING_SETTINGS + 1.0
+            signals.append("go_gorm_model")
+        if path.replace("\\", "/").endswith("db/schema.sql") or path.endswith("schema.sql"):
+            score += WEIGHT_ONBOARDING_SETTINGS + 2.0
+            signals.append("schema_sql")
+        if "alembic" in path.replace("\\", "/"):
+            score += WEIGHT_ONBOARDING_SETTINGS
+            signals.append("alembic_migration")
+    elif _is_security_onboarding_page(page):
+        if "authentication.py" in path or path.endswith("/authentication.py"):
+            score += WEIGHT_SECURITY_AUTH_FILE
+            signals.append("security_auth_file")
+    elif _is_thin_topic_page(page):
+        extra, extra_signals = _score_thin_topic_evidence(page, path, name, symbol, text)
+        score += extra
+        signals.extend(extra_signals)
+
+    return score, signals
 
 
 def score_evidence_for_page(
@@ -323,6 +625,23 @@ def score_evidence_for_page(
         score += cat_score
         signals.append("category_relevance")
 
+    onboarding_score, onboarding_signals = _score_onboarding_evidence(page, span)
+    if onboarding_score != 0:
+        score += onboarding_score
+        signals.extend(onboarding_signals)
+
+    path = _normalized_span_path(span)
+    name = Path(path).name.lower()
+    if path.startswith("internal/") or "/internal/" in path:
+        score += 2.0
+        signals.append("internal_product_source")
+    if name.endswith(".pb.go") or name.endswith("_grpc.pb.go"):
+        score -= 3.0
+        signals.append("generated_pb_go")
+    if name.endswith("_test.go") or name.startswith("test_") or name.endswith("_test.py"):
+        score -= 2.0
+        signals.append("test_source")
+
     return score, signals
 
 
@@ -361,7 +680,82 @@ def rank_evidence_for_page(
             )
         )
 
-    return results[:MIN_CANDIDATES_PER_PAGE]
+    return _pin_required_file_candidates(page, available_spans, results[:MIN_CANDIDATES_PER_PAGE])
+
+
+def _span_matches_required_file(span: EvidenceSpanRecord, req: str) -> bool:
+    path = _normalized_span_path(span)
+    req_n = req.replace("\\", "/").lower().rstrip("/")
+    if not req_n:
+        return False
+    if path == req_n or path.endswith("/" + req_n):
+        return True
+    if path.startswith(req_n + "/"):
+        return True
+    req_name = Path(req_n).name
+    return "." in req_name and Path(path).name == req_name
+
+
+def _pin_required_file_candidates(
+    page: WikiPagePlan,
+    available_spans: list[EvidenceSpanRecord],
+    results: list[EvidenceCandidate],
+) -> list[EvidenceCandidate]:
+    """Keep required files (especially README) on overview/install pages."""
+    required = list((page.source_requirements.files if page.source_requirements else []) or [])
+    if _is_overview_or_install_page(page) and not any(
+        Path(item).name.lower() == "readme.md" for item in required
+    ):
+        required.append("README.md")
+    if not required:
+        return results
+    present = {_normalized_span_path(candidate.span) for candidate in results}
+    extras: list[EvidenceCandidate] = []
+    pinned_paths: set[str] = set()
+    required_spans = [
+        span
+        for span in available_spans
+        if any(_span_matches_required_file(span, req) for req in required)
+    ]
+    required_spans.sort(
+        key=lambda span: (
+            0 if _span_is_readme_run_section(span) else 1,
+            0 if not _span_is_readme_badge_header(span) else 1,
+        )
+    )
+    for span in required_spans:
+        path = _normalized_span_path(span)
+        if path in present and path in pinned_paths:
+            continue
+        extras.append(
+            EvidenceCandidate(
+                evidence_id=int(getattr(span, "id", 0) or 0),
+                span=span,
+                score=WEIGHT_ONBOARDING_README
+                + (4.0 if _span_is_readme_run_section(span) else 2.0),
+                match_signals=["required_file", "required_run_section"]
+                if _span_is_readme_run_section(span)
+                else ["required_file"],
+                citation_order=0,
+            )
+        )
+        present.add(path)
+        pinned_paths.add(path)
+    if not extras:
+        return results
+    merged = extras + results
+    pinned: list[EvidenceCandidate] = []
+    for index, candidate in enumerate(merged[:MIN_CANDIDATES_PER_PAGE]):
+        pinned.append(
+            EvidenceCandidate(
+                evidence_id=candidate.evidence_id,
+                span=candidate.span,
+                score=candidate.score,
+                match_signals=candidate.match_signals,
+                citation_order=index,
+            )
+        )
+    return pinned
 
 
 def _infer_service_name_from_page(page: WikiPagePlan) -> str | None:

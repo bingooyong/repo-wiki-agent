@@ -89,6 +89,38 @@ def is_product_wiki_module(
     return runtime_role not in _NON_PRODUCT_WIKI_ROLES
 
 
+def has_python_wiki_surface(modules: Any, *, language: str = "", framework: str = "") -> bool:
+    """True when the repo has a real Python/FastAPI surface, not a stray helper."""
+    lang = (language or "").lower()
+    framework_l = (framework or "").lower()
+    pythonish: list[Any] = []
+    for module in modules or []:
+        path = str(getattr(module, "path", "") or "")
+        name = str(getattr(module, "name", "") or "")
+        domain = str(getattr(module, "domain", "") or "")
+        runtime_role = str(getattr(module, "runtime_role", "") or "")
+        service_family = str(getattr(module, "service_family", "") or "")
+        if not is_product_wiki_module(path, name=name, domain=domain, runtime_role=runtime_role):
+            continue
+        blob = f"{service_family} {runtime_role} {path} {name}".lower()
+        if "python" in blob or "fastapi" in blob or "flask" in blob or path.endswith(".py"):
+            pythonish.append(module)
+    if not pythonish:
+        return False
+    if lang in {"go", "java", "kotlin", "typescript", "javascript"} and framework_l not in {
+        "fastapi",
+        "flask",
+    }:
+        return any(
+            "fastapi"
+            in f"{getattr(module, 'service_family', '')} {getattr(module, 'runtime_role', '')}".lower()
+            or "flask"
+            in f"{getattr(module, 'service_family', '')} {getattr(module, 'runtime_role', '')}".lower()
+            for module in pythonish
+        )
+    return True
+
+
 def has_frontend_wiki_surface(modules: Any) -> bool:
     """Return whether inventory has a real frontend surface (not an empty taxonomy slot)."""
     for module in modules or []:
