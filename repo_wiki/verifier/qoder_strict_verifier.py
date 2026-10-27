@@ -439,7 +439,11 @@ class QoderLikeVerifierService(VerifierService):
 
         This ensures that citations don't bind evidence to the wrong service:
         - A billing page should not cite authentication implementation files
-        - An API reference page should not cite data model files unrelated to that API
+        - An unrelated service page should not cite another service's implementation
+
+        Same-app architectural layers (API, database/query, data-model/schema) are
+        sibling evidence, not high-confidence wrong-service binds. FastAPI pages
+        routinely cite ``app/db/queries``, ``app/models``, and schema tests.
 
         High-confidence mismatches are HARD failures in strict profile.
         Ambiguous cases that could be shared infrastructure are WARN only.
@@ -476,7 +480,10 @@ class QoderLikeVerifierService(VerifierService):
             "third_party/",
         ]
 
-        # Map page filename keywords to expected service/module patterns
+        # Map page filename keywords to expected service/module patterns.
+        # Domain services (auth, billing) are distinct product areas.
+        # Layer labels (api, data-model, database) are the same app's
+        # HTTP / persistence / schema files, not competing services.
         PAGE_SERVICE_MAP = {
             "auth": ["auth", "login", "session", "token", "oauth", "sso"],
             "billing": ["billing", "invoice", "payment", "subscription", "price"],
@@ -484,6 +491,7 @@ class QoderLikeVerifierService(VerifierService):
             "data-model": ["model", "schema", "entity", "dto", "migration"],
             "database": ["db", "database", "repo", "query", "sql"],
         }
+        SIBLING_LAYER_SERVICES = frozenset({"api", "data-model", "database"})
 
         for page in md_files:
             try:
@@ -526,6 +534,13 @@ class QoderLikeVerifierService(VerifierService):
                 other_services = [k for k in PAGE_SERVICE_MAP if k != page_service]
 
                 for other_service in other_services:
+                    if (
+                        page_service in SIBLING_LAYER_SERVICES
+                        and other_service in SIBLING_LAYER_SERVICES
+                    ):
+                        # API ↔ query/db ↔ domain model/schema is related
+                        # evidence in FastAPI-style apps, not a HARD mismatch.
+                        continue
                     other_keywords = PAGE_SERVICE_MAP[other_service]
                     # High confidence mismatch: page name suggests service A
                     # but citation path contains strong indicators of service B
