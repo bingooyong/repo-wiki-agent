@@ -17,9 +17,28 @@ def test_api_diagram_contract_produces_sequence_and_flowchart() -> None:
         evidence_binding=None,
         context={
             "endpoints": [
-                {"path": "/endpoints", "method": "GET", "service": "inventory-service"},
-                {"path": "/endpoints/count", "method": "GET", "service": "inventory-service"},
-            ]
+                {
+                    "path": "/endpoints",
+                    "method": "GET",
+                    "service": "inventory-service",
+                    "file_path": "app/api/routes/endpoints.py",
+                },
+                {
+                    "path": "/endpoints/count",
+                    "method": "GET",
+                    "service": "inventory-service",
+                    "file_path": "app/services/inventory.py",
+                },
+                {
+                    "path": "/endpoints/{id}",
+                    "method": "GET",
+                    "file_path": "app/models/domain/endpoint.py",
+                },
+            ],
+            "import_edges": [
+                ("app/api/routes", "app/services"),
+                ("app/services", "app/models/domain"),
+            ],
         },
     )
     kinds = {d.diagram_type for d in diagrams}

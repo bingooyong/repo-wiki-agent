@@ -40,7 +40,7 @@ class LlmConfig(BaseModel):
     model: str | None = None
     base_url: str | None = None
     api_key_env: str | None = None
-    max_tokens: int = 4096
+    max_tokens: int = 16384
     temperature: float = 0.7
     timeout: float = 60.0
     max_retries: int = 3
@@ -108,6 +108,8 @@ class SecurityConfig(BaseModel):
             ".opencode",
             ".tmp",
             ".cursor",
+            ".trellis",
+            ".trae",
             ".vscode",
             "node_modules",
             "dist",

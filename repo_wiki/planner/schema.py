@@ -173,6 +173,9 @@ class RepositoryIdentity(BaseModel):
     description: str | None = Field(None, description="Project description from README")
     entry_points: list[str] = Field(default_factory=list, description="Entry point commands")
     source_digest: str | None = Field(None, description="Hash of source state for change detection")
+    identity_sources: dict[str, str] = Field(
+        default_factory=dict, description="Provenance of name/display_name/version/description"
+    )
 
 
 def current_schema_version() -> str:

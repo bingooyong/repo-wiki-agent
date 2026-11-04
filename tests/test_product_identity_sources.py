@@ -464,25 +464,33 @@ def test_overview_core_context_includes_identity_description_not_just_slug(
     identity = resolve_repository_identity(tmp_path)
     assert identity.name == "fastapi-realworld-example-app"
     assert identity.description
-    assert "Conduit" in identity.description
+    assert "NOTE" not in identity.description
+    assert "not actively maintained" not in identity.description
+    _assert_identity_is_realworld_product(identity)
 
     engine = GenerationEngine(tmp_path, template_root=_REPO_ROOT / "templates")
     context = engine._build_core_context(_overview_snapshot(tmp_path))
     product_description = str(context.get("product_description") or "")
     assert product_description == identity.description
-    assert "Conduit" in product_description
+    assert "NOTE" not in product_description
+    assert any(
+        marker in product_description
+        for marker in ("Conduit", "RealWorld", "realworld", "gothinkster")
+    )
     assert identity.name == "fastapi-realworld-example-app"
 
 
 def test_overview_composer_prompt_includes_identity_description_not_just_slug(
     tmp_path: Path,
 ) -> None:
-    """Composer/overview prompt must include the Conduit sentence, not only the slug."""
+    """Composer/overview prompt must include product prose, not the NOTE or slug."""
     _write_fastapi_realworld_overview_fixture(tmp_path)
     identity = resolve_repository_identity(tmp_path)
     assert identity.description
-    assert "Conduit" in identity.description
-    assert "RealWorld" in identity.description or "testsuite" in identity.description
+    assert "NOTE" not in identity.description
+    assert "not actively maintained" not in identity.description
+    _assert_identity_is_realworld_product(identity)
+    assert "RealWorld" in identity.description or "gothinkster" in identity.description
 
     composer = LLMPageComposer(workspace_root=tmp_path)
     context = ComposerContext(
@@ -515,5 +523,6 @@ def test_overview_composer_prompt_includes_identity_description_not_just_slug(
     blob = f"{prompt}\n{prompt_ctx}"
 
     assert identity.description in blob
-    assert "Conduit" in blob
+    assert "NOTE" not in identity.description
+    assert any(marker in blob for marker in ("Conduit", "RealWorld", "realworld", "gothinkster"))
     assert identity.name == "fastapi-realworld-example-app"

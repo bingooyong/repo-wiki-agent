@@ -17,6 +17,11 @@ from repo_wiki.llm.cache import (
     LLMCache,
     create_cache,
 )
+from repo_wiki.llm.cassette import (
+    CassetteLLMProvider,
+    load_cassette_rows,
+    record_cassette_attempt,
+)
 from repo_wiki.llm.config import (
     LLMProviderConfig,
     ValidationReason,
@@ -64,7 +69,10 @@ __all__ = [
     "NonRetryableError",
     "ProviderCapabilities",
     "MockLLMProvider",
+    "CassetteLLMProvider",
     "create_mock_provider",
+    "load_cassette_rows",
+    "record_cassette_attempt",
     "OpenAICompatibleProvider",
     "MinimaxProvider",
     "create_minimax_provider",

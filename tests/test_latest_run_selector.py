@@ -15,12 +15,22 @@ def _write_manifest(run_dir: Path, run_id: str) -> None:
     )
 
 
-def test_select_run_prefers_lexicographic_run_id_without_mtime(tmp_path: Path) -> None:
+def test_select_run_prefers_newest_mtime_over_lexicographic_run_id(tmp_path: Path) -> None:
+    import os
+
     eval_root = tmp_path / ".repo-agent-eval"
-    _write_manifest(eval_root / "run-a", "run-100")
-    _write_manifest(eval_root / "run-b", "run-200")
+    older = eval_root / "runs" / "r16-eval-local"
+    newer = eval_root / "runs" / "handbook-eval-local"
+    _write_manifest(older, "r16-eval-local")
+    _write_manifest(newer, "handbook-eval-local")
+    older_mtime = 1_700_000_000.0
+    newer_mtime = 1_800_000_000.0
+    os.utime(older, (older_mtime, older_mtime))
+    os.utime(older / "manifest.json", (older_mtime, older_mtime))
+    os.utime(newer, (newer_mtime, newer_mtime))
+    os.utime(newer / "manifest.json", (newer_mtime, newer_mtime))
     selected = select_run(eval_root)
-    assert selected.name == "run-b"
+    assert selected.name == "handbook-eval-local"
 
 
 def test_select_run_explicit_override(tmp_path: Path) -> None:

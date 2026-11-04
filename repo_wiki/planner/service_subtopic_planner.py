@@ -184,9 +184,16 @@ class ServiceSubtopicPlanner:
         return page
 
     def _is_python_service(self, module: Module) -> bool:
-        """Check if a module is a Python service."""
+        """Check if a module is a Python service, not a stray helper in a Go repo."""
         combined = f"{module.runtime_role} {module.service_family}".lower()
-        return "python" in combined or "fastapi" in combined
+        if "fastapi" in combined or "flask" in combined:
+            return True
+        if "python" not in combined:
+            return False
+        language = (self.snapshot.repository.language or "").lower()
+        if language in {"go", "java", "kotlin", "typescript", "javascript"}:
+            return False
+        return True
 
     def _humanize_service_title(self, name: str) -> str:
         """Convert service name to human-readable Chinese title."""

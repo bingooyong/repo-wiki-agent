@@ -26,6 +26,27 @@ _CITE_TARGET_PATTERN = re.compile(
 )
 _URI_SCHEME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _READY_STATES = {"READY", "PASS"}
+_CORE_PAGE_IDS = frozenset(
+    {
+        "project-overview",
+        "installation",
+        "quick-start",
+        "quickstart",
+        "api-overview",
+        "api-reference",
+        "data-models-overview",
+        "data-model",
+        "data-models",
+    }
+)
+_CORE_TITLE_RE = re.compile(r"^(项目概述|安装与配置|安装指南|快速开始|API参考|数据模型)$")
+
+
+def _is_core_handbook_page(page_id: str, title: str = "") -> bool:
+    pid = (page_id or "").lower().rsplit("/", 1)[-1]
+    if pid in _CORE_PAGE_IDS:
+        return True
+    return bool(_CORE_TITLE_RE.search((title or "").strip()))
 
 
 def _now_iso() -> str:
@@ -72,6 +93,8 @@ def _read_text(path: Path) -> str:
 def _quality_state_for(meta: dict[str, Any], llm_summary: dict[str, Any]) -> tuple[str, list[str]]:
     reasons = [str(v) for v in meta.get("reasons", []) if str(v)]
     mode = str(meta.get("generation_mode") or "").lower()
+    if mode == "dropped":
+        return "DROPPED", reasons or ["dropped_unclean_page"]
     if mode == "fallback":
         return "DEGRADED", reasons or ["fallback_generation"]
     if mode == "rule":
@@ -79,6 +102,9 @@ def _quality_state_for(meta: dict[str, Any], llm_summary: dict[str, Any]) -> tup
             return "DEGRADED", reasons + ["mock_llm_missing_api_key"]
         return "PASS", reasons or ["rule_or_mock_generated"]
     if mode == "llm":
+        # Citation/heading gaps on a real LLM page stay PASS. Empty or
+        # think-only composer output must not reach this branch: those
+        # pages are rejected as EMPTY_CONTENT and written as fallback.
         if meta.get("quality_warning"):
             return "PASS", reasons + ["composer_quality_warning"]
         return "READY", reasons
@@ -173,11 +199,27 @@ def build_generation_quality_documents(
     counts = Counter(str(p["quality_state"]) for p in quality_pages)
     fallback_or_degraded = counts.get("FALLBACK", 0) + counts.get("DEGRADED", 0)
     unidentified = counts.get("UNIDENTIFIED", 0)
+    dropped_ids = [
+        str(item.get("page_id") or "")
+        for item in failed_pages
+        if isinstance(item, dict) and (item.get("dropped") or item.get("page_id"))
+    ]
+    dropped_ids.extend(str(item) for item in (llm_summary.get("dropped_page_ids") or []) if item)
+    unique_dropped = sorted({item for item in dropped_ids if item})
+    dropped_core_ids = [item for item in unique_dropped if _is_core_handbook_page(item)]
+    written_ids = {
+        str(item.get("page_id") or "")
+        for item in quality_pages
+        if str(item.get("quality_state") or "") not in {"DROPPED"}
+    }
+    unreplaced_dropped = [item for item in unique_dropped if item not in written_ids]
     all_ready = bool(quality_pages) and all(
         p["quality_state"] in _READY_STATES for p in quality_pages
     )
     grade = (
-        "PASS"
+        "FAIL"
+        if dropped_core_ids or unreplaced_dropped
+        else "PASS"
         if all_ready
         else "FALLBACK"
         if fallback_or_degraded
@@ -210,6 +252,11 @@ def build_generation_quality_documents(
             "pass_count": counts.get("PASS", 0),
             "fallback_count": counts.get("FALLBACK", 0),
             "degraded_count": counts.get("DEGRADED", 0),
+            "dropped_count": len(unique_dropped),
+            "dropped_page_ids": unique_dropped,
+            "dropped_core_count": len(dropped_core_ids),
+            "dropped_core_page_ids": dropped_core_ids,
+            "reask_counts_by_page_type": dict(llm_summary.get("reask_counts_by_page_type") or {}),
             "unidentified_count": counts.get("UNIDENTIFIED", 0),
             "llm_mode": llm_summary.get("mode"),
             "fallback_page_count": llm_summary.get("fallback_page_count", 0),
@@ -219,6 +266,11 @@ def build_generation_quality_documents(
             "checks_pass": sum(1 for p in quality_pages if p["quality_state"] in _READY_STATES),
             "evidence_total": sum(int(p["evidence_count"]) for p in quality_pages),
             "citation_total": sum(int(p["citation_count"]) for p in quality_pages),
+            **(
+                {"cassette_prompt_mismatch": llm_summary.get("cassette_prompt_mismatch")}
+                if llm_summary.get("cassette_prompt_mismatch")
+                else {}
+            ),
         },
         "aggregate_summary": {"quality_states": dict(counts)},
         "page_quality": quality_pages,

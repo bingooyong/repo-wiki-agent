@@ -1,6 +1,7 @@
 """Tests for content layout writer and Qoder-compatible output."""
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -14,6 +15,17 @@ from repo_wiki.orchestration.content_layout_writer import (
     write_qoder_like_content,
 )
 from repo_wiki.orchestration.eval_layout import EvalOutputProfile, get_eval_profile
+
+
+def _page_labels(nodes: list[dict]) -> list[str]:
+    labels: list[str] = []
+    for node in nodes:
+        if node.get("type") == "page":
+            labels.append(str(node.get("label", "")))
+        children = node.get("children")
+        if isinstance(children, list):
+            labels.extend(_page_labels(children))
+    return labels
 
 
 class TestComputeStableSlug:
@@ -374,6 +386,118 @@ class TestWriteQoderLikeContent:
             category_dir = writer.content_dir / category
             category_file = writer.content_dir / f"{category}.md"
             assert category_dir.exists() or category_file.exists()
+
+    def test_catalog_leaves_use_chinese_product_titles_when_body_starts_at_h2(self, tmp_path):
+        """Sidebar and filenames must be planner Chinese titles, not English slugs."""
+        profile = EvalOutputProfile(
+            name="qoder-like",
+            root=str(tmp_path / ".repo-agent-eval"),
+            create_subdirs=True,
+            content_subdir="content",
+        )
+        writer = ContentLayoutWriter(profile, "test-run")
+        pages = [
+            ("docs/pages/deployment/logging.md", "## 请求日志\n\n应用记录每个请求的状态码。\n"),
+            ("docs/pages/deployment/cicd-pipeline.md", "## 流水线阶段\n\n合并后构建并发布镜像。\n"),
+            (
+                "docs/pages/development/testing-guide.md",
+                "## 单测与集成\n\npytest 覆盖路由与仓储。\n",
+            ),
+            (
+                "docs/pages/development/performance-optimization.md",
+                "## 热点路径\n\n缓存重复查询结果。\n",
+            ),
+            (
+                "docs/pages/security/security-best-practices.md",
+                "## 密钥管理\n\n密钥只放环境变量。\n",
+            ),
+            ("docs/pages/troubleshooting/build-failures.md", "## 依赖冲突\n\n锁定传递依赖版本。\n"),
+            (
+                "docs/pages/troubleshooting/debug-tools.md",
+                "## 日志定位\n\n用 access log 追请求。\n",
+            ),
+        ]
+        written, _ = writer.write_markdown_pages(pages)
+        expected = {
+            "部署运维/日志管理.md",
+            "部署运维/CI／CD流水线.md",
+            "开发指南/测试指南.md",
+            "开发指南/性能优化.md",
+            "安全合规/安全最佳实践.md",
+            "故障排除/构建失败.md",
+            "故障排除/调试工具.md",
+        }
+        assert expected <= set(written)
+        english_stems = {
+            "logging.md",
+            "cicd pipeline.md",
+            "cicd-pipeline.md",
+            "testing guide.md",
+            "testing-guide.md",
+            "performance optimization.md",
+            "performance-optimization.md",
+            "security best practices.md",
+            "security-best-practices.md",
+            "build failures.md",
+            "build-failures.md",
+            "debug tools.md",
+            "debug-tools.md",
+        }
+        assert not any(Path(path).name.lower() in english_stems for path in written)
+
+        tree = build_navigation_tree(written, writer.content_dir)
+        labels = _page_labels(tree)
+        for title in (
+            "日志管理",
+            "CI/CD流水线",
+            "测试指南",
+            "性能优化",
+            "安全最佳实践",
+            "构建失败",
+            "调试工具",
+        ):
+            assert title in labels, labels
+        assert not any(label.lower() in english_stems for label in labels)
+        assert "cicd pipeline" not in {label.lower() for label in labels}
+        assert "logging" not in labels
+
+    def test_duplicate_troubleshooting_overviews_write_one_page(self, tmp_path):
+        profile = EvalOutputProfile(
+            name="qoder-like",
+            root=str(tmp_path / ".repo-agent-eval"),
+            create_subdirs=True,
+            content_subdir="content",
+        )
+        writer = ContentLayoutWriter(profile, "test-run")
+        written, _ = writer.write_markdown_pages(
+            [
+                (
+                    "docs/pages/troubleshooting/troubleshooting-overview.md",
+                    "# 故障排除\n\n常见故障与回滚路径。\n",
+                ),
+                (
+                    "docs/pages/troubleshooting/troubleshooting-maintenance-overview.md",
+                    "# 故障排除与维护\n\n维护窗口与健康检查。\n",
+                ),
+            ]
+        )
+
+        assert written == ["故障排除.md"]
+        leftover = [
+            path
+            for path in written
+            if re.search(r"故障排除-.*-2\.md$", path) or "troubleshooting" in path
+        ]
+        assert leftover == []
+        assert not (writer.content_dir / "故障排除-troubleshooting-maintena-2.md").exists()
+
+        tree = build_navigation_tree(written, writer.content_dir)
+        root_paths = [node.get("path") for node in tree if node.get("type") == "page"]
+        assert "故障排除.md" in root_paths
+        assert not any(
+            isinstance(path, str) and ("-2.md" in path or "troubleshooting" in path)
+            for path in root_paths
+        )
 
 
 class TestEvalProfileContentDir:

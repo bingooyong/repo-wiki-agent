@@ -45,13 +45,9 @@ class _RouterDef:
 
 
 def join_http_paths(*parts: str) -> str:
-    """Join mount prefixes and a handler path into a single HTTP path."""
     segments: list[str] = []
     for part in parts:
-        text = str(part).strip()
-        if not text or text == "/":
-            continue
-        segments.extend(segment for segment in text.split("/") if segment)
+        segments.extend(segment for segment in str(part).strip().split("/") if segment)
     return "/" + "/".join(segments) if segments else "/"
 
 
@@ -144,7 +140,7 @@ def extract_fastapi_endpoints(files: Sequence[tuple[str, str]]) -> list[FastAPIE
         if node_id in mounted or router.is_app:
             continue
         if router.mounts:
-            walk(node_id, router.constructor_prefix)
+            walk(node_id, "")
             continue
         local_prefix = router.constructor_prefix
         for method, path, handler, lineno in router.routes:
@@ -494,7 +490,7 @@ def _factory_return_class(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str |
             names.add(named)
     if len(names) == 1:
         return next(iter(names))
-    # RealWorld: `-> AppSettings` plus `return config()` is not unique; keep the
+    # Settings injection: `-> AppSettings` plus `return config()` is not unique; keep the
     # annotation. Prefix lookup later succeeds only if that class has a string
     # constant attr (e.g. api_prefix="/api"); otherwise no prefix is invented.
     if annotated and annotated not in _ROUTER_CTORS:

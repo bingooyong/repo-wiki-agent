@@ -15,6 +15,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 from repo_wiki.planner.schema import RepositoryIdentity
 
@@ -27,10 +28,50 @@ _README_CANDIDATE_NAMES = (
     "README_CN.md",
     "README_en.md",
 )
-_GENERIC_README_TITLES = frozenset({"readme", "overview", "index", "documentation", "docs"})
+_GENERIC_README_TITLES = frozenset(
+    {
+        "readme",
+        "overview",
+        "index",
+        "documentation",
+        "docs",
+        "quickstart",
+        "installation",
+        "install",
+        "usage",
+    }
+)
+_README_COMMAND_RE = re.compile(
+    r"^(export |docker |podman |poetry |alembic |uvicorn |touch |echo |mysql |git |go |\$ )"
+)
+_SECONDARY_README_MARKERS = (
+    "scaffold",
+    "template",
+    "boilerplate",
+    "podman",
+    "docker",
+    "contrib",
+)
 _RST_DECORATION_RE = re.compile(r"^[=\-`:.'\"~^_*+#]{3,}$")
 _RST_FIELD_LIST_RE = re.compile(r"^:[a-zA-Z][-a-zA-Z0-9_]*:")
+_HTTP_URL_RE = re.compile(r"https?://[^\s)<>\"'\]]+", re.IGNORECASE)
+_IMG_SHIELDS_HOST = "img.shields.io"
+
+
+def has_img_shields_io_url(text: str) -> bool:
+    """True only when a URL hostname is exactly img.shields.io."""
+    for raw in _HTTP_URL_RE.findall(text):
+        hostname = (urlparse(raw).hostname or "").lower()
+        if hostname == _IMG_SHIELDS_HOST:
+            return True
+    return False
+
+
 _RST_SUBSTITUTION_LINE_RE = re.compile(r"^(\|[^|]+\|\s*)+$")
+_README_NOTE_RE = re.compile(
+    r"More modern and relevant examples can be found in",
+    re.IGNORECASE,
+)
 _PYPROJECT_STRING_FIELD_RE = re.compile(
     r'^\s*(name|version|description)\s*=\s*"([^"]+)"', re.MULTILINE
 )
@@ -43,8 +84,12 @@ def _iter_readme_files(root: Path) -> list[Path]:
         if path.is_file():
             found[path.name] = path
     for path in sorted(root.glob("README*")):
-        if path.is_file() and path.name not in found:
-            found[path.name] = path
+        if not path.is_file() or path.name in found:
+            continue
+        lowered = path.name.lower()
+        if any(marker in lowered for marker in _SECONDARY_README_MARKERS):
+            continue
+        found[path.name] = path
     ordered: list[Path] = []
     for name in _README_CANDIDATE_NAMES:
         candidate = found.get(name)
@@ -63,8 +108,16 @@ def _pyproject_string_fields(content: str) -> dict[str, str]:
     return fields
 
 
+def _is_markdown_badge_line(stripped: str) -> bool:
+    if stripped.startswith("[![") or stripped.startswith("![]("):
+        return True
+    return has_img_shields_io_url(stripped)
+
+
 def _is_rst_noise_line(stripped: str) -> bool:
     if not stripped or stripped.startswith("<!--") or stripped.startswith(".. "):
+        return True
+    if _is_markdown_badge_line(stripped):
         return True
     if stripped in {"|", ".."}:
         return True
@@ -83,15 +136,34 @@ def _is_product_sentence(text: str | None) -> bool:
     stripped = text.strip()
     if not stripped:
         return False
+    if stripped.casefold() in _GENERIC_README_TITLES:
+        return False
+    if _README_COMMAND_RE.match(stripped):
+        return False
     if ":target:" in stripped or ":alt:" in stripped:
         return False
+    if _is_markdown_badge_line(stripped):
+        return False
     if _RST_FIELD_LIST_RE.match(stripped) or _RST_SUBSTITUTION_LINE_RE.fullmatch(stripped):
+        return False
+    if re.match(r"^(?:desc|description)\s*:", stripped, flags=re.I):
+        return False
+    if re.search(
+        r"more modern|other repositories|can be found in|changelog|release[- ]notes?"
+        r"|^(?:first,|then |run |set environment|create database|for example using|a stray \d)",
+        stripped,
+        flags=re.I,
+    ):
         return False
     return True
 
 
 def _looks_like_heading(line: str) -> bool:
     if line.lower() in _GENERIC_README_TITLES:
+        return False
+    if _is_rst_noise_line(line) or _RST_SUBSTITUTION_LINE_RE.fullmatch(line):
+        return False
+    if line.startswith("|") and line.endswith("|"):
         return False
     if len(line) > 80 or line.endswith("."):
         return False
@@ -111,64 +183,144 @@ def _readme_title_and_description(root: Path) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
-    substantial: list[str] = []
-    for line in content.splitlines():
-        stripped = line.strip()
-        if _is_rst_noise_line(stripped):
+def _trim_identity_description(text: str, limit: int = 200) -> str:
+    """Keep a complete sentence/word. Never emit a mid-word stump like ``in oth``."""
+    stripped = (text or "").strip()
+    if len(stripped) <= limit:
+        return stripped
+    cut = stripped[:limit]
+    sentence = max(cut.rfind("。"), cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    if sentence >= 40:
+        return cut[: sentence + 1].strip()
+    space = cut.rfind(" ")
+    if space >= 40:
+        return cut[:space].rstrip(" ,;:") + "."
+    return cut.rstrip()
+
+
+_HTML_H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+_HTML_ALIGN_P_RE = re.compile(r"<p[^>]*align[^>]*>.*?</p>", re.IGNORECASE | re.DOTALL)
+_HTML_TAG_RE = re.compile(r"</?[^>]+>")
+_NOTE_LINE_RE = re.compile(
+    r"^(?:\*\*)?(?:NOTE|WARNING|IMPORTANT|CAUTION)\b",
+    re.IGNORECASE,
+)
+_CHANGELOG_BULLET_RE = re.compile(r"^[-*]\s+v?\d+")
+_ARCHIVED_LINE_RE = re.compile(r"\barchiv|\bunmaintained|no longer maintained", re.I)
+_NUMBERED_HEADING_RE = re.compile(r"^\d+\.\s+\S")
+_VERSION_BULLET_RE = re.compile(
+    r"^(?:[-*]\s+)?(?:\*\*)?v\d+(?:\.\d+)*(?:\*\*)?\s*[:：]",
+    re.IGNORECASE,
+)
+
+
+def _flatten_h1(match: re.Match[str]) -> str:
+    title = " ".join(_HTML_TAG_RE.sub(" ", match.group(1)).split()).strip()
+    return f"# {title}\n" if title else ""
+
+
+def _readme_visible_lines(content: str) -> list[str]:
+    text = _HTML_ALIGN_P_RE.sub("", content or "")
+    text = _HTML_H1_RE.sub(_flatten_h1, text)
+    text = _HTML_TAG_RE.sub(" ", text)
+    lines: list[str] = []
+    in_note_block = False
+    for raw in text.splitlines():
+        stripped = " ".join(raw.split()).strip()
+        if not stripped or re.fullmatch(r"#+", stripped):
+            in_note_block = False
             continue
-        if stripped.startswith("#"):
-            stripped = stripped.lstrip("#").strip()
-            if not stripped or _is_rst_noise_line(stripped):
+        if (
+            stripped.startswith(">")
+            or _NOTE_LINE_RE.match(stripped)
+            or _README_NOTE_RE.search(stripped)
+        ):
+            in_note_block = True
+            continue
+        if in_note_block:
+            continue
+        if (
+            _ARCHIVED_LINE_RE.search(stripped)
+            or _CHANGELOG_BULLET_RE.match(stripped)
+            or re.match(r"^(?:desc|description)\s*:", stripped, flags=re.I)
+            or re.match(
+                r"^#+\s*(?:changelog|change\s*log|release[- ]notes?)\b", stripped, flags=re.I
+            )
+        ):
+            continue
+        heading = stripped.lstrip("#").strip()
+        if heading and (
+            _is_rst_noise_line(heading)
+            or _RST_SUBSTITUTION_LINE_RE.fullmatch(heading)
+            or _NUMBERED_HEADING_RE.match(heading)
+            or _VERSION_BULLET_RE.match(heading)
+        ):
+            continue
+        if _VERSION_BULLET_RE.match(stripped) or _NUMBERED_HEADING_RE.match(
+            stripped.lstrip("#").strip()
+        ):
+            continue
+        if (
+            _is_rst_noise_line(stripped)
+            or _README_COMMAND_RE.match(stripped)
+            or _is_markdown_badge_line(stripped)
+            or stripped.startswith(("- ", "* ", "+ "))
+        ):
+            continue
+        lines.append(stripped)
+    return lines
+
+
+def _parse_readme_identity(content: str) -> tuple[str | None, str | None]:
+    lines = _readme_visible_lines(content)
+    title: str | None = None
+    body: list[str] = []
+    for line in lines:
+        heading = line.lstrip("#").strip() if line.startswith("#") else ""
+        if heading:
+            if heading.casefold() in _GENERIC_README_TITLES:
+                break
+            if (
+                _is_rst_noise_line(heading)
+                or _NUMBERED_HEADING_RE.match(heading)
+                or _VERSION_BULLET_RE.match(heading)
+                or not _looks_like_heading(heading)
+            ):
                 continue
-        substantial.append(stripped)
-        if len(substantial) >= 4:
+            if title is None:
+                title = heading
+            continue
+        if line.casefold() in _GENERIC_README_TITLES:
             break
-    if not substantial:
-        return None, None
-    first = substantial[0]
-    title: str | None = first if _looks_like_heading(first) else None
-    body_parts = substantial[1:] if title else substantial
-    if not body_parts and title:
-        description: str | None = title
-    else:
-        joined = " ".join(body_parts).strip()
-        description = joined or title
+        if _VERSION_BULLET_RE.match(line) or _NUMBERED_HEADING_RE.match(line):
+            continue
+        if _looks_like_heading(line) and title is None:
+            title = line
+            continue
+        if _is_product_sentence(line):
+            body.append(line)
+            break
+    description = body[0] if body else title
     if description:
-        description = description[:200]
+        description = _trim_identity_description(description)
     if not _is_product_sentence(description):
         description = None
     return title, description
 
 
 def resolve_repository_identity(root: Path) -> RepositoryIdentity:
-    """Resolve repository identity from metadata files.
-
-    This function reads multiple sources to build a complete picture
-    of the repository identity, preferring explicit metadata over
-    generic workspace names.
-
-    Args:
-        root: The repository root path
-
-    Returns:
-        RepositoryIdentity with resolved metadata
-    """
+    """Resolve identity from README h1, then package manifests, then directory name."""
     name_candidates: list[tuple[str, str | None]] = []
 
-    # 1. Read package.json if exists
     package_json = root / "package.json"
     if package_json.exists():
         try:
             data = json.loads(package_json.read_text(encoding="utf-8"))
             if name := data.get("name"):
                 name_candidates.append((name, "package.json"))
-            if data.get("version"):
-                pass  # handled below
         except (json.JSONDecodeError, OSError):
             pass
 
-    # 2. Read pyproject.toml if exists ([project] or [tool.poetry])
     pyproject = root / "pyproject.toml"
     pyproject_fields: dict[str, str] = {}
     if pyproject.exists():
@@ -177,18 +329,13 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         if name := pyproject_fields.get("name"):
             name_candidates.append((name, "pyproject.toml"))
 
-    # 3. Read pom.xml if exists
     pom_xml = root / "pom.xml"
     if pom_xml.exists():
         content = pom_xml.read_text(encoding="utf-8", errors="ignore")
         match = re.search(r"<artifactId>([^<]+)</artifactId>", content)
         if match:
             name_candidates.append((match.group(1), "pom.xml"))
-        match = re.search(r"<version>([^<]+)</version>", content)
-        if match and match.group(1) != "${project.version}":
-            pass  # handled below
 
-    # 4. Try git remote for name
     git_root = root / ".git"
     if git_root.exists():
         try:
@@ -201,7 +348,6 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
             )
             if remote_url.returncode == 0:
                 url = remote_url.stdout.strip()
-                # Extract repo name from URL
                 if match := re.search(r"/([^/]+?)(?:\.git)?$", url):
                     git_name = match.group(1)
                     name_candidates.append((git_name, "git-remote"))
@@ -212,15 +358,13 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
     if readme_title:
         name_candidates.append((readme_title, "readme"))
 
-    # 5. Fallback to directory name
     name_candidates.append((root.name, "directory-name"))
 
-    # Select the best name (prefer explicit metadata, then README title, then git/directory)
     name_priority = [
+        "readme",
         "package.json",
         "pyproject.toml",
         "pom.xml",
-        "readme",
         "git-remote",
         "directory-name",
     ]
@@ -239,28 +383,36 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         best_name = "unknown"
         best_source = "fallback"
 
-    # Read description from package.json first (explicit metadata)
+    package_name = next(
+        (
+            candidate
+            for candidate, src in name_candidates
+            if src in {"package.json", "pyproject.toml", "pom.xml"}
+        ),
+        None,
+    )
+
     description: str | None = None
+    description_source = ""
     version: str | None = None
-    if package_json.exists():
+    version_source = ""
+    if _is_product_sentence(readme_description):
+        description = (readme_description or "")[:200]
+        description_source = "readme"
+    if not description and package_json.exists():
         try:
             data = json.loads(package_json.read_text(encoding="utf-8"))
             if desc := data.get("description"):
                 description = desc[:200]
+                description_source = "package.json"
         except (json.JSONDecodeError, OSError):
             pass
-
-    # Then try README prose if package.json had no product sentence. Skip RST
-    # badge junk. Fall back to pyproject description. Never use AGENTS.md,
-    # init stubs, or eval reports as product identity.
-    if not _is_product_sentence(description) and _is_product_sentence(readme_description):
-        description = (readme_description or "")[:200]
     if not _is_product_sentence(description):
         pyproject_description = pyproject_fields.get("description")
         if _is_product_sentence(pyproject_description):
             description = (pyproject_description or "")[:200]
+            description_source = "pyproject.toml"
 
-    # Read version from various sources.
     for metadata_path in [package_json, pyproject, pom_xml]:
         if metadata_path.exists():
             content = metadata_path.read_text(encoding="utf-8", errors="ignore")
@@ -269,21 +421,29 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
                     data = json.loads(content)
                     if v := data.get("version"):
                         version = str(v)
+                        version_source = "package.json"
                         break
                 except json.JSONDecodeError:
                     continue
             elif metadata_path.name == "pyproject.toml":
                 if v := pyproject_fields.get("version"):
                     version = v
+                    version_source = "pyproject.toml"
                     break
             elif metadata_path.name == "pom.xml":
                 match = re.search(r"<version>([^<]+)</version>", content)
                 if match and match.group(1) != "${project.version}":
                     version = match.group(1)
+                    version_source = "pom.xml"
                     break
 
+    if not version:
+        version = _latest_product_version(root)
+        if version:
+            version_source = "git-tag"
+
     return RepositoryIdentity(
-        name=best_name,
+        name=package_name or best_name,
         display_name=best_name if best_source == "readme" else _human_readable_name(best_name),
         root_path=str(root.resolve()),
         language="unknown",
@@ -293,7 +453,41 @@ def resolve_repository_identity(root: Path) -> RepositoryIdentity:
         description=description,
         entry_points=[],
         source_digest=None,
+        identity_sources={
+            "name": str(
+                next(
+                    (
+                        src
+                        for candidate, src in name_candidates
+                        if candidate == (package_name or best_name) and src
+                    ),
+                    best_source,
+                )
+                or ""
+            ),
+            "display_name": "readme" if best_source == "readme" else (best_source or ""),
+            "version": version_source,
+            "description": description_source,
+        },
     )
+
+
+def _latest_product_version(root: Path) -> str | None:
+    """Git tag only. Never read README/changelog prose or go.mod toolchain lines."""
+    try:
+        tagged = subprocess.run(
+            ["git", "-C", str(root), "describe", "--tags", "--abbrev=0"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if tagged.returncode == 0:
+            hit = re.search(r"v?(\d+\.\d+(?:\.\d+)?)", tagged.stdout.strip())
+            if hit:
+                return hit.group(1)
+    except OSError:
+        return None
+    return None
 
 
 def _human_readable_name(name: str) -> str:

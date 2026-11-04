@@ -244,19 +244,198 @@ def _flatten_source_tokens(source_inventory: dict[str, Any]) -> tuple[set[str], 
         for item in bucket:
             if not isinstance(item, dict):
                 continue
-            for field in ("name", "service", "service_id", "handler", "path", "evidence_path"):
+            for field in (
+                "name",
+                "service",
+                "service_id",
+                "handler",
+                "path",
+                "kind",
+                "evidence_path",
+            ):
                 val = item.get(field)
                 if isinstance(val, str) and val.strip():
                     token = val.strip()
                     if "/" in token or "." in token:
                         paths.add(token.lower())
-                    for piece in re.findall(r"[A-Za-z_][A-Za-z0-9_-]{2,}", token):
-                        names.add(piece.lower())
+                    names.update(_iter_name_tokens(token))
     return names, paths
 
 
+_NAME_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{2,}")
+_GENERIC_FACT_CLAIM_TOKENS = frozenset(
+    {
+        "api",
+        "service",
+        "model",
+        "router",
+        "payment-api",
+        "google-api",
+        "test-service",
+        "example-api",
+        "sample-api",
+        "registerservice",
+        "openapi",
+        "newservice",
+        "test-api",
+        "external_api",
+        "partner-api",
+        "user-api",
+        "httpservice",
+        "scheduledservice",
+        "target-service",
+    }
+)
+_ENV_FILE_NAME = re.compile(r"^\.env(?:\.[A-Za-z0-9_.-]+)?$", re.IGNORECASE)
+_PLACEHOLDER_PATH_NAMES = frozenset({"xxx", "todo", "placeholder", "example"})
+
+
+def _iter_name_tokens(value: str) -> set[str]:
+    tokens: set[str] = set()
+    for piece in _NAME_TOKEN.findall(value):
+        lowered = piece.lower()
+        tokens.add(lowered)
+        for part in re.split(r"[_-]+", lowered):
+            if len(part) >= 3:
+                tokens.add(part)
+    return tokens
+
+
+_PLANNING_FILENAMES = frozenset({"handoff.md", "verification-report.md"})
+_PLANNING_DIR_PARTS = frozenset(
+    {
+        ".omc",
+        ".superpowers",
+        "superpowers",
+        "sdd",
+        ".trellis",
+        ".trae",
+        ".cursor",
+        ".claude",
+        ".codex",
+        ".windsurf",
+        ".qoder",
+    }
+)
+_TUTORIAL_PLACEHOLDER_TOKENS = frozenset(
+    {
+        "user-service",
+        "order-service",
+        "weather-service",
+        "example-service",
+        "sample-service",
+        "payment-api",
+        "google-api",
+        "test-service",
+        "example-api",
+        "sample-api",
+        "registerservice",
+        "openapi",
+        "newservice",
+        "test-api",
+        "external_api",
+        "partner-api",
+        "user-api",
+        "httpservice",
+        "scheduledservice",
+        "target-service",
+    }
+)
+_CAMEL_INVENTORY_NAME = re.compile(r"[A-Z][A-Za-z0-9]*(?:Service|Model|API|Api|Router)$")
+_SNAKE_KEBAB_INVENTORY_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*[-_](?:service|api|router)$")
+# Whole-token libraries whose names happen to end with API/Model (not *Service).
+_LIBRARY_INVENTORY_TOKENS = frozenset({"fastapi", "sqlmodel"})
+_SOURCE_DIR_PREFIXES = ("src/", "app/", "repo_wiki/", "docs/", "tests/")
+_SOURCE_FILE_EXTS = frozenset(
+    {
+        ".py",
+        ".pyi",
+        ".pyx",
+        ".md",
+        ".markdown",
+        ".rst",
+        ".txt",
+        ".adoc",
+        ".asciidoc",
+        ".json",
+        ".yml",
+        ".yaml",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".conf",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".mjs",
+        ".cjs",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".kts",
+        ".c",
+        ".h",
+        ".cc",
+        ".cpp",
+        ".hpp",
+        ".cs",
+        ".rb",
+        ".php",
+        ".swift",
+        ".sql",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".xml",
+        ".html",
+        ".css",
+        ".scss",
+        ".vue",
+        ".svelte",
+        ".proto",
+        ".graphql",
+        ".lock",
+    }
+)
+_NON_SOURCE_FILE_EXTS = frozenset(
+    {
+        ".env",
+        ".db",
+        ".sqlite",
+        ".sqlite3",
+        ".svg",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".ico",
+        ".pdf",
+        ".zip",
+        ".log",
+        ".pid",
+        ".sock",
+    }
+)
+_GIT_REMOTE_FIRST = frozenset({"origin", "upstream", "head"})
+
+
+def _is_planning_doc_path(rel: str) -> bool:
+    """True for agent/planning trees that are not current product docs."""
+    r = _normalize_rel_path(rel).lower()
+    name = Path(r).name
+    if name in _PLANNING_FILENAMES:
+        return True
+    parts = Path(r).parts
+    return any(part in _PLANNING_DIR_PARTS for part in parts)
+
+
 def _classify_doc_type(rel: str, text: str) -> str:
-    r = rel.lower()
+    r = rel.lower().replace("\\", "/")
+    if _is_planning_doc_path(rel):
+        return "planning"
     if Path(rel).name.lower().startswith("readme"):
         return "readme"
     if "changelog" in r or "release-notes" in r:
@@ -276,6 +455,58 @@ def _classify_doc_type(rel: str, text: str) -> str:
     if re.search(r"^#\s*api\b", text, flags=re.I | re.M):
         return "api"
     return "overview"
+
+
+def _is_inventory_shaped_name(token: str) -> bool:
+    """True for product service/API/model/router names, not library identifiers."""
+    t = token.strip()
+    if len(t) < 4:
+        return False
+    if t.casefold() in _LIBRARY_INVENTORY_TOKENS:
+        return False
+    if t.casefold() in _TUTORIAL_PLACEHOLDER_TOKENS:
+        return False
+    if _CAMEL_INVENTORY_NAME.search(t):
+        return True
+    return _SNAKE_KEBAB_INVENTORY_NAME.search(t) is not None
+
+
+def _is_source_file_claim(value: str) -> bool:
+    """True when a claim looks like a repo-relative source/doc file, not a slug/ref."""
+    raw = value.strip().replace("\\", "/")
+    if not raw or not _is_plausible_rel_path(raw):
+        return False
+    if raw.startswith("/") or raw.startswith("~") or "://" in raw:
+        return False
+    if ".." in raw:
+        return False
+    parts = [p for p in raw.split("/") if p]
+    if not parts or all(p.isdigit() for p in parts):
+        return False
+    if parts[0].lower() in _GIT_REMOTE_FIRST:
+        return False
+    name = Path(parts[-1]).name
+    if name.endswith(("_", "-")):
+        return False
+    if _ENV_FILE_NAME.fullmatch(name):
+        return False
+    if name.lower() in _PLACEHOLDER_PATH_NAMES:
+        return False
+    suffix = Path(parts[-1]).suffix.lower()
+    if suffix in _NON_SOURCE_FILE_EXTS:
+        return False
+    lowered = raw.lower()
+    if (
+        lowered in {"app/config.yaml", "app/config.yml"}
+        or lowered == "app/logs"
+        or lowered.startswith("app/logs/")
+    ):
+        return False
+    if any(lowered.startswith(prefix) for prefix in _SOURCE_DIR_PREFIXES):
+        return True
+    if "/" not in raw:
+        return suffix in _SOURCE_FILE_EXTS
+    return suffix in _SOURCE_FILE_EXTS
 
 
 def _authority_for_type(doc_type: str) -> tuple[str, float]:
@@ -302,6 +533,11 @@ def _specificity(text: str) -> float:
 
 
 _PLAUSIBLE_REL_PATH = re.compile(r"^[A-Za-z0-9_./\\-]+$")
+_HTTP_URL = re.compile(r"https?://[^\s<>\]`'\"|]+", re.IGNORECASE)
+# Do not treat `example-app/blob/...` GitHub URL tails as repo path `app/blob/...`.
+_REPO_REL_PATH_PREFIX = re.compile(
+    r"(?<![A-Za-z0-9_/-])(?:src|app|repo_wiki|docs|tests)/[A-Za-z0-9_./-]+"
+)
 
 
 def _is_plausible_rel_path(value: str) -> bool:
@@ -310,9 +546,38 @@ def _is_plausible_rel_path(value: str) -> bool:
         return False
     if "\0" in value or "\n" in value or "\r" in value:
         return False
+    if value.startswith("/") or value.startswith("\\"):
+        return False
+    if ".." in value:
+        return False
     if not _PLAUSIBLE_REL_PATH.fullmatch(value):
         return False
     return "/" in value or "\\" in value or "." in value
+
+
+def _repo_path_exists_casefold(repo_root: Path, rel: str) -> bool:
+    """Walk path components case-insensitively; ambiguous matches are missing."""
+    current = repo_root
+    for part in Path(rel).parts:
+        if not current.is_dir():
+            return False
+        try:
+            children = list(current.iterdir())
+        except OSError:
+            return False
+        exact = [child for child in children if child.name == part]
+        if len(exact) == 1:
+            current = exact[0]
+            continue
+        folded = part.casefold()
+        matches = [child for child in children if child.name.casefold() == folded]
+        if len(matches) != 1:
+            return False
+        current = matches[0]
+    try:
+        return current.exists()
+    except OSError:
+        return False
 
 
 def _repo_path_exists(repo_root: Path, rel: str) -> bool:
@@ -320,24 +585,157 @@ def _repo_path_exists(repo_root: Path, rel: str) -> bool:
     if not _is_plausible_rel_path(rel):
         return False
     try:
-        return (repo_root / rel).exists()
+        if (repo_root / rel).exists():
+            return True
     except OSError:
         return False
+    try:
+        if _repo_path_exists_casefold(repo_root, rel):
+            return True
+    except OSError:
+        return False
+    return _repo_basename_exists(repo_root, rel)
+
+
+def _repo_basename_exists(repo_root: Path, rel: str) -> bool:
+    """Resolve a bare filename against the whole tree (not only repo root)."""
+    name = Path(rel).name
+    if not name or name in {".", ".."}:
+        return False
+    # Slash paths still try a docs/ + case-insensitive basename lookup.
+    if "/" in rel or "\\" in rel:
+        docs = repo_root / "docs"
+        if docs.is_dir() and _basename_exists_casefold(docs, name, repo_root):
+            return True
+        return False
+    skip = DocumentationScanner._SKIP_DIRS
+    docs = repo_root / "docs"
+    if docs.is_dir() and _basename_exists_casefold(docs, name, repo_root):
+        return True
+    return _basename_exists_casefold(repo_root, name, repo_root, skip=skip)
+
+
+def _basename_exists_casefold(
+    start: Path, name: str, repo_root: Path, skip: frozenset[str] | None = None
+) -> bool:
+    folded = name.casefold()
+    skip_parts = skip or frozenset()
+    for path in start.rglob("*"):
+        if not path.is_file() or path.name.casefold() != folded:
+            continue
+        try:
+            parts = path.relative_to(repo_root).parts
+        except ValueError:
+            continue
+        if any(part in skip_parts for part in parts):
+            continue
+        return True
+    return False
+
+
+_PORT_CLAIM_DOC_NAMES = frozenset(
+    {
+        "readme.md",
+        "readme.rst",
+        "readme.txt",
+        "readme",
+        "quickstart.md",
+        "quickstart.rst",
+        "install.md",
+        "installation.md",
+    }
+)
+_PORT_EXCLUDE_PARTS = frozenset(
+    {
+        "progress",
+        "history",
+        "changelog",
+        "archive",
+        "test",
+        "tests",
+        "testdata",
+        "fixtures",
+    }
+)
+_STALE_SUGGESTION_MARKERS = (
+    "建议",
+    "consider",
+    "should add",
+    "可增加",
+    "example.com",
+    "your-repo",
+    "e.g.",
+    "例如",
+    "scaffold",
+    "template",
+)
+_STALE_MISSING_MARKERS = ("缺失", "n/a", "不存在", "todo", "—")
+
+
+def _is_current_system_run_doc(rel: str) -> bool:
+    """True for docs that describe running the current product, not history/tests."""
+    path = Path(rel)
+    parts = [part.lower() for part in path.parts]
+    name = path.name.lower()
+    if any(part in _PORT_EXCLUDE_PARTS for part in parts[:-1] if parts[:-1]):
+        return False
+    if any(part in {"progress", "history", "changelog", "archive"} for part in parts):
+        return False
+    if name in _PORT_CLAIM_DOC_NAMES:
+        return len(parts) == 1 or parts[0] in {"docs", "doc"}
+    return any(token in name for token in ("install", "deploy", "setup", "runbook"))
+
+
+def _claim_context_lines(text: str, claim: str) -> list[str]:
+    needle = claim.lower()
+    return [line for line in text.splitlines() if needle in line.lower()]
+
+
+def _is_non_blocking_stale_claim(rel: str, text: str, claim: str) -> bool:
+    lowered_rel = rel.lower().replace("\\", "/")
+    if any(token in lowered_rel for token in ("scaffold", "example", "template")):
+        return True
+    lines = _claim_context_lines(text, claim)
+    if not lines:
+        return False
+    blob = "\n".join(lines).lower()
+    if any(marker in blob for marker in _STALE_SUGGESTION_MARKERS):
+        return True
+    if any(marker in blob for marker in _STALE_MISSING_MARKERS):
+        return True
+    if any(line.lstrip().startswith("|") and "missing" in line.lower() for line in lines):
+        return True
+    return False
+
+
+def _listen_port_conflicts(repo_root: Path, rel: str, text: str) -> list[str]:
+    """Flag doc localhost ports that disagree with config/compose listen ports."""
+    if not _is_current_system_run_doc(rel):
+        return []
+    from repo_wiki.verifier.handbook import collect_doc_listen_ports, collect_source_listen_ports
+
+    source_ports = collect_source_listen_ports(repo_root)
+    if not source_ports:
+        return []
+    stale = collect_doc_listen_ports(text) - source_ports
+    return [f"listen-port:{port}" for port in sorted(stale)]
 
 
 def _extract_claims(text: str) -> tuple[set[str], set[str]]:
     service_like: set[str] = set()
     path_like: set[str] = set()
-    for m in re.findall(r"`([^`]+)`", text):
-        if _is_plausible_rel_path(m):
+    text_without_urls = _HTTP_URL.sub(" ", text)
+    for m in re.findall(r"`([^`]+)`", text_without_urls):
+        if _is_source_file_claim(m):
             path_like.add(m.lower())
         for token in re.findall(r"[A-Za-z_][A-Za-z0-9_-]{2,}", m):
+            if _is_inventory_shaped_name(token):
+                service_like.add(token.lower())
+    for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_-]{2,}\b", text_without_urls):
+        if _is_inventory_shaped_name(token):
             service_like.add(token.lower())
-    for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_-]{2,}\b", text):
-        if token.lower().endswith(("service", "api", "model", "router")):
-            service_like.add(token.lower())
-    for p in re.findall(r"\b(?:src|app|repo_wiki|docs|tests)/[A-Za-z0-9_./-]+\b", text):
-        if _is_plausible_rel_path(p):
+    for p in _REPO_REL_PATH_PREFIX.findall(text_without_urls):
+        if _is_source_file_claim(p):
             path_like.add(p.lower())
     return service_like, path_like
 
@@ -371,6 +769,9 @@ def is_init_generated_doc(rel: str, text: str) -> bool:
 
 _AGENT_INSTRUCTION_NAMES = frozenset({"AGENTS.md", "CLAUDE.md", "GEMINI.md"})
 _EVAL_REPORT_NAME_RE = re.compile(r"^round\d+-report\.md$", re.IGNORECASE)
+_AGENT_TOOL_DIR_PARTS = frozenset(
+    {".trellis", ".trae", ".cursor", ".claude", ".codex", ".windsurf", ".qoder"}
+)
 
 
 def is_eval_or_agent_instruction_doc(rel: str) -> bool:
@@ -380,6 +781,8 @@ def is_eval_or_agent_instruction_doc(rel: str) -> bool:
         return False
     parts = Path(rel_n).parts
     if any(part == ".repo-agent-eval" for part in parts):
+        return True
+    if any(part in _AGENT_TOOL_DIR_PARTS for part in parts):
         return True
     name = Path(rel_n).name
     if name in _AGENT_INSTRUCTION_NAMES:
@@ -450,7 +853,22 @@ class DocumentationScanner:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self.cache_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    _SKIP_DIRS = frozenset({".git", ".repo-agent-eval", ".repo-wiki", "node_modules", ".venv"})
+    _SKIP_DIRS = frozenset(
+        {
+            ".git",
+            ".repo-agent-eval",
+            ".repo-wiki",
+            "node_modules",
+            ".venv",
+            ".trellis",
+            ".trae",
+            ".cursor",
+            ".claude",
+            ".codex",
+            ".windsurf",
+            ".qoder",
+        }
+    )
 
     def _is_skipped_path(self, path: Path) -> bool:
         try:
@@ -580,15 +998,24 @@ class DocumentationScanner:
                 [
                     p
                     for p in claim_paths
-                    if p not in paths and not _repo_path_exists(self.repo_root, p)
+                    if p not in paths
+                    and _is_source_file_claim(p)
+                    and not _repo_path_exists(self.repo_root, p)
+                    and not _is_non_blocking_stale_claim(rel, text, p)
                 ]
             )
             conflicting_claims = sorted(
                 [
                     n
                     for n in claim_names
-                    if n not in names and n.endswith(("service", "api", "model"))
+                    if n not in names
+                    and n.endswith(("service", "api", "model"))
+                    and n.casefold() not in _TUTORIAL_PLACEHOLDER_TOKENS
+                    and n not in _GENERIC_FACT_CLAIM_TOKENS
                 ]
+            )
+            conflicting_claims = sorted(
+                set(conflicting_claims) | set(_listen_port_conflicts(self.repo_root, rel, text))
             )
             freshness = max(0.0, 1.0 - (0.2 * len(stale_refs) + 0.15 * len(conflicting_claims)))
 
