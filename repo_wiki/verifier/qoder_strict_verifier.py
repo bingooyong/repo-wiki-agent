@@ -247,6 +247,39 @@ def count_qoder_list_metrics(content: str) -> tuple[int, int, float]:
     return prose_lines, list_items, ratio
 
 
+_RELATION_TOKENS = (
+    "relationship",
+    "relations",
+    "关联",
+    "关系",
+    "foreign key",
+    "外键",
+    "join",
+    "belongs to",
+    "has many",
+    "references",
+    "引用",
+)
+_NO_RELATION_RE = re.compile(
+    r"没有|不存在|并无|无(?:任何)?(?:外键|关联|关系|引用)|未(?:定义|声明|发现)|不包含|\bno\b|\bnone\b|\bnot\b|\bwithout\b",
+    re.I,
+)
+
+
+def page_asserts_relations(markdown: str) -> bool:
+    """Does the page claim relationships between entities? Headings alone ('## 关系') and
+    sentences that state there are none ('不存在外键', 'no foreign keys') are not claims — a
+    data-model page with no relations needs no ER diagram, it needs to say so."""
+    for line in (markdown or "").splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for sentence in re.split(r"[。；;.!?！？\n]", line):
+            low = sentence.lower()
+            if any(t in low for t in _RELATION_TOKENS) and not _NO_RELATION_RE.search(sentence):
+                return True
+    return False
+
+
 def is_qoder_page_dump(
     content: str,
     *,
@@ -739,24 +772,13 @@ class QoderLikeVerifierService(VerifierService):
         if not model_pages:
             return self._skip_check("data-model-er-mermaid-presence", "No data-model directory")
 
-        relation_tokens = (
-            "relationship",
-            "relations",
-            "关联",
-            "关系",
-            "foreign key",
-            "join",
-            "belongs to",
-            "has many",
-            "references",
-        )
         relation_pages: list[Path] = []
         for page in model_pages:
             try:
                 content = read_text(page).lower()
             except Exception:
                 continue
-            if any(token in content for token in relation_tokens):
+            if page_asserts_relations(content):
                 relation_pages.append(page)
         if not relation_pages:
             return self._skip_check(

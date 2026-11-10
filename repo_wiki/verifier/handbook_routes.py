@@ -16,7 +16,10 @@ _TABLE_ROW_RE = re.compile(
     re.I | re.M,
 )
 _CURL_RE = re.compile(
-    r"\bcurl\b[^\n]*?(?:-X|--request)\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b[^\n]*?(https?://[^\s`]+|/[\w:.{}/-]*)",
+    # the path is a URL or a bare path token — never the "/json" inside a header value such as
+    # -H "Content-Type: application/json"
+    r"\bcurl\b[^\n]*?(?:-X|--request)\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b[^\n]*?"
+    r"(https?://[^\s`'\"]+|(?<![\w.:/-])/[\w:.{}/-]*)",
     re.I,
 )
 _PATH_ONLY_RE = re.compile(r"`(/[A-Za-z0-9._~:/{}\-]+)`")

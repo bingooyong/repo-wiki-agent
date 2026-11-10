@@ -111,6 +111,23 @@ def load_compose_services_by_file(root: Path) -> dict[str, set[str]]:
     return found
 
 
+_COMPOSE_IMAGE_RE = re.compile(r"^\s*image:\s*['\"]?([^\s'\"#]+)", re.M)
+
+
+def load_compose_image_names(root: Path) -> set[str]:
+    """Image names used by compose services (``busybox``, ``postgres`` from ``postgres:9.4``,
+    ``redis`` from ``docker.io/library/redis:7``) — a page that names the image a service runs is
+    not inventing a service."""
+    names: set[str] = set()
+    for path in iter_compose_files(root):
+        for ref in _COMPOSE_IMAGE_RE.findall(path.read_text(encoding="utf-8", errors="ignore")):
+            base = ref.split("@", 1)[0].rsplit("/", 1)[-1].split(":", 1)[0].lower()
+            if base:
+                names.add(base)
+                names.add(ref.lower())
+    return names
+
+
 def load_compose_service_names(root: Path) -> set[str]:
     names: set[str] = set()
     for parsed in load_compose_services_by_file(root).values():
@@ -236,6 +253,16 @@ def load_cli_flags_by_cmd(root: Path) -> dict[str, dict[str, str]]:
     return found
 
 
+_IDENT_SUFFIXES = frozenset(
+    {
+        ".go", ".py", ".sql", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte",
+        ".java", ".kt", ".rb", ".rs", ".cs", ".php", ".swift", ".scala",
+    }
+)
+# HTTP method words are protocol vocabulary, never repository identifiers to invent.
+_HTTP_WORDS = frozenset({"OPTIONS", "DELETE", "CONNECT", "PATCH", "TRACE"})
+
+
 def load_source_identifiers(root: Path) -> set[str]:
     names: set[str] = set()
     skip = _SKIP_DIRS
@@ -247,7 +274,10 @@ def load_source_identifiers(root: Path) -> set[str]:
             continue
         names.add(path.name)
         names.add(path.stem)
-        if path.suffix.lower() not in {".go", ".py", ".sql"}:
+        container = path.name.lower().startswith(("dockerfile", "containerfile")) or path.suffix.lower() in {
+            ".dockerfile"
+        }
+        if path.suffix.lower() not in _IDENT_SUFFIXES and not container:
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
         names.update(simple.findall(text))
@@ -473,7 +503,7 @@ def _flag_target_mismatches(
 def _ident_offenders(text: str, idents: set[str], readme: str) -> list[str]:
     hits: list[str] = []
     for name in _TYPE_RE.findall(text or ""):
-        if name in _GENERIC_TYPES or name in idents:
+        if name in _GENERIC_TYPES or name in idents or name in _HTTP_WORDS:
             continue
         window = _sentence_window(text, text.find(f"`{name}`"))
         if name in readme and _SAMPLE_QUALIFIER_RE.search(window):
@@ -571,6 +601,7 @@ def handbook_source_fact_offenders(
         return {}
     services_by_file = load_compose_services_by_file(repo_root)
     services = set().union(*services_by_file.values()) if services_by_file else set()
+    images = load_compose_image_names(repo_root)
     tables = load_database_tables(repo_root)
     flags_by_cmd = load_cli_flags_by_cmd(repo_root)
     idents = load_source_identifiers(repo_root)
@@ -591,6 +622,7 @@ def handbook_source_fact_offenders(
                         allowed.update(names)
             if not allowed:
                 allowed = set(services)
+            allowed |= images
             hits.extend(f"compose:{name}" for name in sorted(invented - allowed)[:8])
         migration_page = any(
             token in f"{path.name} {text[:240]}" for token in ("迁移", "表", "migration")
