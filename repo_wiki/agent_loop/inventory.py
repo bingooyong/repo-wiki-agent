@@ -425,6 +425,74 @@ def config_inventory(repo: RepoView) -> list[Item]:
     return items
 
 
+# ------------------------------------------------------------------ reader essentials
+_START_RX = re.compile(
+    r"(?i)\b(start|run|up|serve|server|daemon|dev)\b|^\./|uvicorn|gunicorn|flask run|manage\.py runserver"
+)
+_ENV_TEMPLATE_RX = re.compile(r"^\.env\.(example|sample|template|dist|tpl|default)$")
+
+
+def compose_env_files(repo: RepoView) -> list[Item]:
+    """``env_file:`` entries of the root compose files (the env file a reader must provide)."""
+    items: list[Item] = []
+    for f in repo.files():
+        name = f.rsplit("/", 1)[-1]
+        if f.count("/") or not re.match(r"(docker|podman)-compose[^/]*\.ya?ml$|compose\.ya?ml$", name):
+            continue
+        ls = repo.lines(f) or []
+        for i, ln in enumerate(ls, 1):
+            m = re.match(r"^\s*env_file\s*:\s*(.*)$", ln)
+            if not m:
+                continue
+            vals = [m.group(1).strip()] if m.group(1).strip() else []
+            for nxt in ls[i : i + 5]:
+                mm = re.match(r"^\s*-\s*(\S+)", nxt)
+                if not mm:
+                    break
+                vals.append(mm.group(1))
+            text = f"env_file: {' '.join(v.strip('\'\"') for v in vals)}".strip()
+            items.append({"file": f, "line": i, "text": text[:160], "kind": "env_file"})
+    return items
+
+
+def reader_essentials(repo: RepoView) -> dict[str, list[Item]]:
+    """What a reader needs to get the project running, when the repository has it: the env file
+    it must provide, the default listen port, and a start command. Deterministic; the install
+    page must establish each present kind with a verified fact."""
+    env: list[Item] = compose_env_files(repo)
+    for f in repo.files():
+        if f.count("/") == 0 and _ENV_TEMPLATE_RX.match(f):
+            env.append({"file": f, "line": 1, "text": f"{f} (template env file)", "kind": "env_file"})
+    for f in repo.files():
+        if not is_src(f) or TEST_RX.search(f):
+            continue
+        for i, ln in enumerate(repo.lines(f) or [], 1):
+            if re.search(r"load_dotenv\(|dotenv\.config\(|require\(['\"]dotenv['\"]\)|env_file\s*=\s*['\"]\.env", ln):
+                env.append({"file": f, "line": i, "text": ln.strip()[:160], "kind": "env_file"})
+                break
+    docs = doc_files(repo)[:3]
+    cmds = [c for d in docs for c in doc_commands(repo, d)]
+    env += [c for c in cmds if re.search(r"(^|[\s/])\.env\b", c["text"])]
+    port = [c for c in config_inventory(repo) if c["kind"] == "default"]
+    build = build_inventory(repo)
+    port += [
+        x
+        for x in build
+        if (x["kind"] == "compose" and re.search(r"\d+:\d+", x["text"]))
+        or (x["kind"] == "docker" and re.match(r"\s*EXPOSE\b", x["text"]))
+    ]
+    start = [c for c in cmds if _START_RX.search(c["text"])]
+    start += [
+        x
+        for x in build
+        if (x["kind"] == "make" and _START_RX.search(x["text"].split(":", 1)[0]))
+        or (x["kind"] == "pkg" and re.match(r'\s*"(start|dev|serve)"\s*:', x["text"]))
+        or (x["kind"] == "docker" and re.match(r"\s*(CMD|ENTRYPOINT)\b", x["text"]))
+        or (x["kind"] == "compose" and re.search(r"\bcommand:", x["text"]))
+    ]
+    return {"env_file": env, "port": port, "start": start}
+
+
 # ------------------------------------------------------------------ data model
 DM_RX: list[tuple[str, re.Pattern[str], tuple[str, ...]]] = [
     ("ddl", re.compile(r"(?i)^\s*CREATE\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?[`\"]?(\w+)"), (".sql",)),

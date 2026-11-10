@@ -38,6 +38,141 @@ def has_junk(text: str) -> bool:
     return bool(JUNK_RX.search(text or "")) or len(text or "") > MAX_PAGE_CHARS
 
 
+# ------------------------------------------------------------------ generation-process text
+# Words about how the page was produced (budgets, rejected tool calls, evidence formats, the
+# auditor, "verified facts") are a generation log, never reader content.
+PROCESS_RX = re.compile(
+    r"(?i)预算(?:已)?(?:耗尽|不足|用完|用尽)|\bbudget\b[^。\n]{0,12}(?:exhaust|ran out|left|cap)"
+    r"|\btoken (?:budget|cap)|tool[- ]?call|工具调用"
+    r"|(?:程序|校验器|验证器|审计|verifier|validator)[^。\n]{0,10}(?:拒绝|驳回|rejected|refused)"
+    r"|(?:两次|再次)尝试记录|记录(?:的)?\s*(?:module\s*)?(?:模块)?事实"
+    r"|\brecord_(?:facts|routes)\b|\bsubmit_(?:audit|profile|mechanisms|attribution)\b|\bdismiss_sites\b"
+    r"|FILE:LINE|exact quote|证据格式|已验证(?:的)?事实|\bverified facts?\b|事实编号"
+    r"|\bauditor\b|审计员|审计发现|checklist (?:item|id)|生成过程|未能确认其职责（"
+)
+
+
+def _prose_lines(text: str) -> list[tuple[bool, str]]:
+    out, in_code = [], False
+    for ln in (text or "").splitlines():
+        if ln.strip().startswith("```"):
+            in_code = not in_code
+            out.append((True, ln))
+            continue
+        out.append((in_code, ln))
+    return out
+
+
+def process_leak_issues(text: str) -> list[str]:
+    """Lines of the page that talk about the generation process instead of the project."""
+    hits = [ln.strip() for in_code, ln in _prose_lines(text) if not in_code and PROCESS_RX.search(ln)]
+    return [f"page contains generation-process text: {h[:120]!r}" for h in hits[:5]]
+
+
+def strip_process_lines(prose: str) -> tuple[str, list[str]]:
+    """Writer output sanitizer: drop process/log lines (removal never invents)."""
+    kept, dropped = [], []
+    for in_code, ln in _prose_lines(prose):
+        if not in_code and PROCESS_RX.search(ln):
+            dropped.append(ln.strip())
+            continue
+        kept.append(ln)
+    return "\n".join(kept), dropped
+
+
+def remap_prev_ids(prose: str, old: list[Fact], new: list[Fact]) -> str:
+    """A previous draft cites [Fn] by the OLD live list. After a retraction the numbers shift, so
+    a copied sentence would silently cite another fact (Nov 9: '写入 server.log [F13]' ended up
+    citing setproctitle). Re-number ids to the new list; drop lines citing a retracted fact."""
+    pos = {id(f): i for i, f in enumerate(new)}
+
+    def new_id(ident: str) -> str | None:
+        if not ident.startswith("F"):
+            return ident
+        idx = int(ident[1:]) - 1
+        if not 0 <= idx < len(old) or id(old[idx]) not in pos:
+            return None
+        return f"F{pos[id(old[idx])] + 1}"
+
+    out: list[str] = []
+    for in_code, ln in _prose_lines(prose):
+        if in_code:
+            out.append(ln)
+            continue
+        groups = ID_GROUP_RX.findall(ln)
+        mapped = [[new_id(i) for i in re.findall(r"[FR]\d+", g)] for g in groups]
+        if any(None in m for m in mapped):
+            continue
+        it = iter(mapped)
+        out.append(ID_GROUP_RX.sub(lambda _m: "[" + ", ".join(next(it)) + "]", ln))  # type: ignore[arg-type]
+    return "\n".join(out)
+
+
+# ------------------------------------------------------------------ defaults
+DEFAULT_WORD_RX = re.compile(
+    r"(?i)默认|缺省|未设置|未配置|若未|如未|未指定|可由|可通过|覆盖|override|default|fallback|回退"
+)
+
+
+def default_wording_issues(prose: str, facts: list[Fact]) -> list[str]:
+    """A value that is only the fallback of an overridable setting must be stated as a default:
+    checked on lines that cite a fact read from a default (``getenv("X", "v")``)."""
+    issues: list[str] = []
+    for in_code, ln in _prose_lines(prose):
+        if in_code or DEFAULT_WORD_RX.search(ln):
+            continue
+        pairs = set()
+        for ident in cited_ids(ln):
+            idx = int(ident[1:]) - 1
+            if ident.startswith("F") and 0 <= idx < len(facts):
+                pairs |= {
+                    (var, dv)
+                    for var, dv in (facts[idx].get("defaults") or [])
+                    if len(dv) >= 3 or dv.isdigit()
+                }
+        for var, dv in sorted(pairs):
+            if re.search(rf"(?<![\w.]){re.escape(dv)}(?![\w])", ln):
+                issues.append(
+                    f"default stated as fixed behaviour: `{dv}` is only the default of `{var}` — write "
+                    f"“默认 `{dv}`，可由 `{var}` 覆盖”: {ln.strip()[:100]!r}"
+                )
+    return sorted(set(issues))[:10]
+
+
+# ------------------------------------------------------------------ reader essentials
+def essentials_issues(facts: list[Fact], essentials: dict[str, list[Item]]) -> list[str]:
+    """Install page: what a reader needs to run the project — the env file the repo requires, the
+    listen port, a start command — must be established by facts whenever the repo has them."""
+
+    def refs(kind: str) -> str:
+        return ", ".join(f"{x['file']}:{x['line']}: {str(x['text'])[:60]}" for x in essentials[kind][:3])
+
+    def says_env(f: Fact) -> bool:
+        return any(".env" in str(s) for s in [f["value"], f["claim"], *f.get("quotes", [])])
+
+    issues: list[str] = []
+    if essentials.get("env_file") and not any(
+        f["slot"] in ("config_file", "env", "command", "note", "service") and says_env(f)
+        for f in facts
+    ):
+        issues.append(
+            "reader essential missing: the repository requires an env file (`.env`) — "
+            f"{refs('env_file')}; record a config_file fact (value = the file path, e.g. .env) "
+            "citing that line and say whether the repo ships it or the reader must create it"
+        )
+    if essentials.get("port") and not any(f["slot"] == "port" for f in facts):
+        issues.append(
+            f"reader essential missing: the default listen port — {refs('port')}; record a port fact"
+        )
+    if essentials.get("start") and not any(
+        f["slot"] == "command" and f.get("item") == "run" for f in facts
+    ):
+        issues.append(
+            f"reader essential missing: the start command — {refs('start')}; record it as a run command"
+        )
+    return issues
+
+
 def checklist_id_of(entry: object) -> str:
     return str(entry).split(":")[0].strip()
 
@@ -424,7 +559,7 @@ def needs_investigation(issue: str) -> bool:
     if issue.startswith("existing gate"):
         return any(code in issue for code in _FACT_GATE_CODES)
     return not issue.startswith(
-        ("page contains", "citation [", "code line", "inline code", "port ")
+        ("page contains", "citation [", "code line", "inline code", "port ", "default stated")
     )
 
 

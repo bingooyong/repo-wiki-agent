@@ -128,6 +128,8 @@ def build_page_inventory(repo: RepoView, page_type: str, shard_lines: int = 240)
                 r'\s*"(scripts|engines)"\s*:', x["text"]
             ):
                 d.oblig[f"{x['file']}:{x['line']}"] = x
+        for x in inv.compose_env_files(repo):  # the env file compose requires is reader-critical
+            d.oblig[f"{x['file']}:{x['line']}"] = x
         cfg = inv.config_inventory(repo)
         env_files: dict[str, int] = defaultdict(int)
         for c in cfg:
@@ -304,6 +306,7 @@ class FactPageLoop:
         self.dismissed = {k: v for k, v in self.dismissed.items() if k in self.invd.oblig}
         self.unresolved: list[str] = []
         self.mod_unres: dict[str, str] = {}
+        self.essentials = inv.reader_essentials(repo) if spec.page_type == "install" else {}
         slots = spec.slot_help + (
             " | note (value=checklist id; an evidenced 'not applicable' for that item) | conflict (value=subject; "
             "two sources disagree — cite BOTH lines, from different files)"
@@ -485,6 +488,7 @@ class FactPageLoop:
         ids = spec.ids
         history: list[dict[str, Any]] = []
         status, page_text, final_md, prose = "failed", "", "", ""
+        prev_live: list[Fact] = []
         writer_sys = ROLE_WRITER.format(
             title=spec.title, tables=spec.table_desc, placeholder=spec.placeholder
         )
@@ -502,8 +506,10 @@ class FactPageLoop:
                 f"Verified facts:\n{facts_block(live, self.unresolved)}"
             )
             if history and history[-1]["accepted_findings"]:
-                clean_prev = "\n".join(
-                    ln for ln in prose.splitlines() if not gates.JUNK_RX.search(ln)
+                clean_prev = gates.remap_prev_ids(
+                    "\n".join(ln for ln in prose.splitlines() if not gates.JUNK_RX.search(ln)),
+                    prev_live,
+                    live,
                 )[:8000]
                 wr += (
                     "\n\nThe previous draft had these problems; fix them:\n"
@@ -521,12 +527,18 @@ class FactPageLoop:
                     "Markdown page, no tool calls, no XML.",
                     it,
                 )
+            prev_live = list(live)
             prose = gates.keep_declared_unresolved(prose, self.unresolved)
+            prose, dropped_process = gates.strip_process_lines(prose)
             prose, dropped_code = gates.drop_unverified_code(prose, live)
             tables = render_tables(spec.page_type, live, self.mod_unres) + render_conflicts(live)
             ph = spec.placeholder
             page_text = prose.replace(ph, tables, 1) if ph in prose else prose + "\n\n" + tables
             det = gates.page_checks(prose.replace(ph, ""), live, ids, self.unresolved)
+            det += gates.process_leak_issues(page_text)
+            det += gates.default_wording_issues(prose.replace(ph, ""), live)
+            if self.essentials:
+                det += gates.essentials_issues(live, self.essentials)
             self.mod_unres = {
                 k: v
                 for k, v in self.mod_unres.items()
@@ -580,6 +592,7 @@ class FactPageLoop:
                     "retracted": retracted,
                     "conflicts_made": n_conf,
                     "dropped_code_lines": dropped_code,
+                    "dropped_process_lines": dropped_process,
                     "deterministic_issues": det,
                     "accepted_findings": acc_all,
                     "dropped_auditor_findings": dropped,

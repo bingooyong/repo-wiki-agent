@@ -128,6 +128,9 @@ Rules:
 - keep the source's own label: describe a value with the words its source line uses (e.g. a URL the source calls the server
   address is not a docs URL); a computed/derived object (view, join result, response/aggregate type) is not a stored table.
 - when two sources disagree (docs vs code default, doc path vs flag default), record BOTH and a 'conflict' fact citing both lines.
+  NOT a conflict: a default and the variable that overrides it, a host name vs a port mapping, a local variable vs the
+  exported object it is assigned to (`application = FastAPI()` returned as `app`), a compose service vs the command that
+  starts it. Record such values as normal facts (a default goes in the claim as 默认…，可由 VAR 覆盖).
 - a checklist item that genuinely does not apply: record a 'note' fact (value = the checklist id) with evidence showing why.
 - record_facts answers immediately with the program's verdict; fix and re-record rejected facts in your next turn.
 - you get an OUTLINE, not whole files; read narrow ranges only when needed. When the outline suffices, record, dismiss and finish
@@ -146,6 +149,9 @@ ROLE_WRITER = """You are the Writer of the page "{title}" (Chinese Markdown). Us
   duplicate that content in your own tables.
 - use each source's own label for a value (the fact's quote shows it); never relabel (e.g. a server address as a docs URL).
 - 'conflict' facts are shown by the program in a 来源不一致 section; never present only one side of a conflict as the answer.
+  Never write your own "来源不一致/不一致" claims: equivalent names, a default vs its override, a host vs a port are not conflicts.
+- a fact marked [默认值: ...] is a fallback: write “默认 X，可由 VAR 覆盖”, never as fixed behaviour.
+- never mention how the page was produced (budgets, rejected records, tools, evidence formats, auditor, “已验证事实”).
 - never present a computed/derived object (view, join, response/aggregate type) as a stored table.
 - only for items listed under 'Unresolved checklist items' write one short line “未能从源码确认：<item>”; never add such lines for anything else.
 - concise and useful, ordered for the reader; no meta talk. Output only the page."""
@@ -161,6 +167,9 @@ the page against the repository with the tools, not against your expectations. H
     - 'low' for optional defaults, exhaustive env-var inventories beyond what the page already covers, and secondary details;
 (4) labels that contradict their source line (e.g. a URL called a docs URL when the source calls it the server address), and
     doc-vs-code disagreements shown with one side only.
+A page saying “默认 X，可由 VAR 覆盖” for a fallback value is correct, not 'wrong'. Two names for the same thing is not a conflict:
+a local variable vs the module-level object it is returned/assigned to, a host name vs a port mapping, a default vs
+its override — do not report those as 'wrong' or ask for a conflict.
 Unsupported page text with no fact id counts as 'invented'. A true but incomplete statement (a role described too narrowly,
 a list that misses items) is an 'omission', NOT 'wrong' — 'wrong' means the source contradicts it.
 'wrong'/'omission' findings MUST carry evidence ('FILE:LINE: exact quote'); 'invented' MUST quote the page text; every 'wrong'
@@ -345,4 +354,6 @@ A complete route table is rendered by a program from the verified routes and ins
 - routes are grouped by server; state each server's routes and counts separately and never attribute a route to a server other
   than the one given for it.
 - 'conflict' facts are shown by the program in a 来源不一致 section; never present only one side of a conflict.
+- a fact marked [默认值: ...] is a fallback: write “默认 X，可由 VAR 覆盖”, never as fixed behaviour.
+- never mention how the page was produced (budgets, rejected records, tools, evidence formats, auditor, “已验证事实”).
 - do not write your own route tables or long route lists; describe groups, auth and conventions. No meta talk. Output only the page."""

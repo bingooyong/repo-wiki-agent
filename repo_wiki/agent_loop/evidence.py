@@ -128,6 +128,37 @@ def claim_tokens(text: str) -> set[str]:
     return {t.strip().rstrip(".,;:)") for t in toks if len(t.strip()) >= 2}
 
 
+# ------------------------------------------------------------------ defaults with overrides
+_DEFAULT_RXS = (
+    re.compile(
+        r"""(?:getenv|Getenv|environ\.get|env\.get|env|config)\(\s*['"]([A-Z][A-Z0-9_]{1,})['"]\s*,"""
+        r"""\s*(?:default\s*=\s*)?(?:['"]([^'"]*)['"]|([\w.\-/]+))\s*\)"""
+    ),
+    re.compile(
+        r"""environ\.get\(\s*['"]([A-Z][A-Z0-9_]{1,})['"]\s*\)\s*or\s*(?:['"]([^'"]*)['"]|([\w.\-/]+))"""
+    ),
+    re.compile(
+        r"""process\.env\.([A-Z][A-Z0-9_]{1,})\s*(?:\|\||\?\?)\s*(?:['"`]([^'"`]*)['"`]|([\w.\-/]+))"""
+    ),
+    re.compile(r"""\$\{([A-Z][A-Z0-9_]{1,}):?-([^}]*)\}"""),
+    re.compile(r'env:"([A-Z][A-Z0-9_]{1,})"[^`\n]*?(?:envDefault|default):"([^"]*)"'),
+)
+
+
+def default_overrides(quote: str) -> list[tuple[str, str]]:
+    """``(VAR, default)`` pairs when a source line reads VAR and falls back to a literal default
+    (``os.getenv("SERVICE_LOG", "server.log")``, ``process.env.PORT || 3000``, ``${PORT:-8080}``,
+    ``env:"SERVER_PORT" envDefault:"8080"``). The default is not fixed behaviour."""
+    out: list[tuple[str, str]] = []
+    for rx in _DEFAULT_RXS:
+        for m in rx.finditer(quote or ""):
+            groups = [g for g in m.groups()[1:] if g is not None]
+            val = (groups[0] if groups else "").strip()
+            if val and val not in ("None", "null", "undefined") and (m.group(1), val) not in out:
+                out.append((m.group(1), val))
+    return out
+
+
 # .txt manifests / build files are code-side sources, not documentation
 NOT_DOC_RX = re.compile(r"(?i)(^|/)(requirements[^/]*|constraints[^/]*|CMakeLists|robots)\.txt$")
 

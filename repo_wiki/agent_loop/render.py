@@ -28,6 +28,10 @@ def facts_block(facts: list[Fact], unresolved: list[str]) -> str:
     lines = [
         f"[F{i + 1}] ({f['item']}/{f['slot']}) value={f['value']!r} — {f['claim']}  "
         f"(evidence: {', '.join(f['evidence'])})"
+        + "".join(
+            f" [默认值: {dv!r} 只是 {var} 未设置时的默认值，可由 {var} 覆盖；写成“默认…，可由 {var} 覆盖”]"
+            for var, dv in (f.get("defaults") or [])
+        )
         for i, f in enumerate(facts)
     ]
     out = "\n".join(lines)
@@ -47,12 +51,24 @@ def render_tables(
     if page_type == "overview":
         return _render_overview(facts, mod_unresolved or {})
     if page_type == "install":
+        cfgs = sorted((f for f in facts if f["slot"] == "config_file"), key=lambda x: x["value"])
         envs = sorted((f for f in facts if f["slot"] == "env"), key=lambda x: x["value"])
-        if not envs:
-            return ""
-        return "### 环境变量\n\n" + "\n\n".join(
-            f"环境变量 {_code(f['value'])}：{f['claim']} [{fid(facts, f)}]" for f in envs
-        )
+        parts: list[str] = []
+        if cfgs:
+            parts.append(
+                "### 配置文件\n\n"
+                + "\n\n".join(
+                    f"配置文件 {_code(f['value'])}：{f['claim']} [{fid(facts, f)}]" for f in cfgs
+                )
+            )
+        if envs:
+            parts.append(
+                "### 环境变量\n\n"
+                + "\n\n".join(
+                    f"环境变量 {_code(f['value'])}：{f['claim']} [{fid(facts, f)}]" for f in envs
+                )
+            )
+        return "\n\n".join(parts)
     if page_type == "datamodel":
         return _render_datamodel(facts)
     return ""
@@ -68,9 +84,11 @@ def _render_overview(facts: list[Fact], mod_unresolved: dict[str, str]) -> str:
     if mods or mod_unresolved:
         out.append("### 模块一览")
         out += [f"模块 {_code(f['value'])}：{f['claim']} [{fid(facts, f)}]" for f in mods]
+        # the reason an investigator gave up (rejections, budget) is a generation log, never page
+        # text; it stays in the run report (modules_unresolved)
         out += [
-            f"模块 {_code(k.split(' ', 1)[0])}：未能确认其职责（{str(v).split(':', 2)[-1].strip()[:100]}）。"
-            for k, v in sorted(mod_unresolved.items())
+            f"模块 {_code(k.split(' ', 1)[0].rstrip('/'))}：未能从源码确认其职责。"
+            for k, _v in sorted(mod_unresolved.items())
         ]
     if len(mods) >= 2:
         nodes = ["```mermaid", "flowchart LR", '    repo["仓库"]']

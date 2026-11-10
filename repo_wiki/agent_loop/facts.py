@@ -7,7 +7,7 @@ from collections import defaultdict
 from typing import Any
 
 from repo_wiki.agent_loop.checklists import PageSpec
-from repo_wiki.agent_loop.evidence import is_doc_evidence, norm
+from repo_wiki.agent_loop.evidence import default_overrides, is_doc_evidence, norm
 from repo_wiki.agent_loop.verifier import Fact, FactVerifier
 
 RUN_RX = re.compile(
@@ -66,6 +66,9 @@ class FactStore:
             if res.ok and res.fact is not None:
                 nf = res.fact
                 nf["item"] = norm_item(self.verifier.spec, nf)
+                dfl = fact_defaults(nf)
+                if dfl:
+                    nf["defaults"] = dfl
                 key = (nf["slot"], norm(nf["value"]))
                 if not any((x["slot"], norm(x["value"])) == key for x in self.live()):
                     self.ok.append(nf)
@@ -90,7 +93,24 @@ class FactStore:
         return True
 
 
+def fact_defaults(fact: Fact) -> list[list[str]]:
+    """[[VAR, default], ...] read from the fact's quotes when the fact is about that VAR or that
+    default value: the value is a fallback the reader can override, not fixed behaviour."""
+    text = norm(f"{fact.get('value', '')} {fact.get('claim', '')}")
+    out: list[list[str]] = []
+    for q in fact.get("quotes") or []:
+        for var, dv in default_overrides(str(q)):
+            if (norm(var) in text or norm(dv) in text) and [var, dv] not in out:
+                out.append([var, dv])
+    return out
+
+
 # ------------------------------------------------------------------ conflicts
+_NUM_RX = re.compile(r"(?<![\w.])\d{2,5}(?![\w])")
+
+
+def _nums(text: str) -> set[str]:
+    return set(_NUM_RX.findall(text or ""))
 def conflict_fact(subject: str, ev1: str, q1: str, ev2: str, q2: str, item: str) -> Fact:
     return {
         "item": item,
@@ -105,10 +125,22 @@ def conflict_fact(subject: str, ev1: str, q1: str, ev2: str, q2: str, item: str)
 
 def make_conflict(store: FactStore, fact: Fact, evs: list[dict[str, Any]]) -> int:
     """An accepted 'wrong' finding about a fact where exactly one side is documentation: keep both
-    sides on the page as an explicit conflict instead of silently dropping one."""
+    sides on the page as an explicit conflict instead of silently dropping one.
+
+    Only a real value disagreement becomes a conflict: the fact's value is a number (port,
+    version) that its own quote shows, and the auditor's line shows a DIFFERENT number. An
+    auditor line that merely points somewhere ('ports:', 'Deployment with Docker', a compose
+    service header, a README sentence saying 'localhost') is no competing value: the wrong fact is
+    retracted, and no '来源不一致' is invented."""
+    own = _nums(str(fact.get("value", "")))
+    if not own or not (own & _nums(" ".join(fact.get("quotes") or []))):
+        return 0
     for e in evs:
         e_s = f"{e['file']}:{e['line']}"
         if e_s in fact["evidence"] or is_doc_evidence(fact["evidence"]) == is_doc_evidence([e_s]):
+            continue
+        other = _nums(str(e.get("quote", "")))
+        if not other or other & own:
             continue
         cf = conflict_fact(
             fact["value"], fact["evidence"][0], fact["quotes"][0], e_s, e["quote"], fact["item"]

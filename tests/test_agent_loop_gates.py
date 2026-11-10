@@ -198,7 +198,7 @@ def test_render_tables_are_sentence_lines_with_ids() -> None:
         _fact("entry", "entry", "app.py", "app.py:14"),
     ]
     out = render_tables("overview", facts, {"web": "role not established"})
-    assert "模块 `shop`" in out and "[F1]" in out and "未能确认" in out
+    assert "模块 `shop`" in out and "[F1]" in out and "模块 `web`：未能从源码确认其职责。" in out
     assert "|" not in out.replace("||", "")
     assert "flowchart" in out
     routes = [

@@ -138,7 +138,11 @@ class FactVerifier:
         if slot in PATH_SLOTS:
             target = norm_rel(val).rstrip("/") or "."
             if not repo.exists(target):
-                reasons.append(f"path {val!r} does not exist")
+                # an env/config file the repo tells the reader to create (compose env_file,
+                # README 'create .env') is usually not committed: accept it when the evidence
+                # lines name it literally
+                if not (slot == "config_file" and has(val)):
+                    reasons.append(f"path {val!r} does not exist")
             elif (
                 slot == "module"
                 and target != "."

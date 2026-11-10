@@ -477,6 +477,7 @@ class ApiPageLoop:
         history: list[dict[str, Any]] = []
         status, page, final_md, prose = "failed", "", "", ""
         unacc_prev: list[str] = []
+        prev_facts: list[Any] = []
         hint = ""
         ids = SPEC.ids
         for it in range(self.max_iters + 1):
@@ -505,8 +506,10 @@ class ApiPageLoop:
                 f"{api_facts_block(facts, routes, self.unresolved)}"
             )
             if history and history[-1]["accepted_findings"]:
-                clean_prev = "\n".join(
-                    ln for ln in prose.splitlines() if not gates.JUNK_RX.search(ln)
+                clean_prev = gates.remap_prev_ids(
+                    "\n".join(ln for ln in prose.splitlines() if not gates.JUNK_RX.search(ln)),
+                    prev_facts,
+                    facts,
                 )[:8000]
                 wr += (
                     "\n\nThe previous draft had these problems; fix them:\n"
@@ -524,7 +527,9 @@ class ApiPageLoop:
                     "Markdown page, no tool calls, no XML.",
                     it,
                 )
+            prev_facts = list(facts)
             prose = gates.keep_declared_unresolved(prose, self.unresolved)
+            prose, dropped_process = gates.strip_process_lines(prose)
             prose, dropped_code = gates.drop_unverified_code(prose, facts)
             table = (route_table(routes) if routes else NO_ROUTES) + render_conflicts(facts)
             ph = SPEC.placeholder
@@ -534,6 +539,8 @@ class ApiPageLoop:
                 else prose + "\n\n## 接口清单\n\n" + table
             )
             det = gates.api_page_checks(page, facts, routes)
+            det += gates.process_leak_issues(page)
+            det += gates.default_wording_issues(prose.replace(SPEC.placeholder, ""), facts)
             covered_ids = {f["item"] for f in facts} | (
                 {"routes"} | self.by_routes if routes else set()
             )
@@ -584,6 +591,7 @@ class ApiPageLoop:
                     "retracted": retracted,
                     "conflicts_made": n_conf,
                     "dropped_code_lines": dropped_code,
+                    "dropped_process_lines": dropped_process,
                     "deterministic_issues": det,
                     "accepted_findings": acc_all,
                     "dropped_auditor_findings": dropped,
