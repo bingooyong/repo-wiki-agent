@@ -264,3 +264,41 @@ def test_flasgger_routes_are_library_routes_allowed_on_the_page() -> None:
 def test_fastapi_default_docs_routes_are_library_routes() -> None:
     lib = library_http_paths(FASTAPI_FILES)
     assert {("GET", "/docs"), ("GET", "/openapi.json")} <= lib
+
+
+STAR_FILES = [
+    (
+        "src/app.js",
+        "const express = require('express');\n"
+        "const cors = require('cors');\n"
+        "const app = express();\n"
+        "app.use(cors());\n"
+        "app.options('*', cors());\n"
+        "app.get('/health', (req, res) => res.send('ok'));\n"
+        "module.exports = app;\n",
+    )
+]
+
+
+def test_express_star_path_is_a_source_route() -> None:
+    # Nov 10: app.options('*', cors()) was missed because only '/...' paths were read.
+    src = extract_source_http_paths(STAR_FILES)
+    assert ("OPTIONS", "/*") in src
+    assert ("GET", "/health") in src
+
+
+def test_page_listing_express_star_route_passes_crosscheck() -> None:
+    page = "## 接口清单\n\n- `OPTIONS /*` 由 `cors()` 处理。\n- `GET /health` 健康检查。\n"
+    assert handbook_route_crosscheck_mismatches(page, STAR_FILES, api_page=True) == []
+
+
+def test_star_route_does_not_whitelist_other_paths_or_methods() -> None:
+    page = "## 接口清单\n\n- `OPTIONS /*`\n- `GET /health`\n- `GET /admin/secret`\n- `DELETE /*`\n"
+    mism = handbook_route_crosscheck_mismatches(page, STAR_FILES, api_page=True)
+    assert "GET /admin/secret" in mism and "DELETE /*" in mism
+
+
+def test_star_route_on_page_without_source_still_fails() -> None:
+    files = [("src/app.js", "const app = require('express')();\napp.get('/health', h);\n")]
+    page = "## 接口清单\n\n- `OPTIONS /*`\n- `GET /health`\n"
+    assert handbook_route_crosscheck_mismatches(page, files, api_page=True) == ["OPTIONS /*"]

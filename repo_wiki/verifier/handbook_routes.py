@@ -81,7 +81,8 @@ _REG_RAW_RE = re.compile(
 _HANDLE_FUNC_RE = re.compile(r"""HandleFunc\(\s*['\"](?:([A-Z]+)\s+)?(/[^'\"]+)['\"]""")
 _SKIP_REFLECT = frozenset({"Init", "Register", "ServeHTTP"})
 _JS_ROUTE_RE = re.compile(
-    r"""(\w+)\s*\.\s*(get|post|put|patch|delete|options|head|all)\(\s*['\"](/[^'\"]*)['\"]""",
+    # path: '/...' or Express's bare '*' wildcard (app.options('*', cors())), read as '/*'
+    r"""(\w+)\s*\.\s*(get|post|put|patch|delete|options|head|all)\(\s*['\"](/[^'\"]*|\*)['\"]""",
     re.I,
 )
 _JS_ROUTER_RE = re.compile(r"""(?:const|let|var)\s+(\w+)\s*=\s*(?:Router|express)\s*\(""")
@@ -410,8 +411,9 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
                 if match.group(1) not in js_router:
                     continue
                 method = match.group(2).upper()
+                raw = "/*" if match.group(3) == "*" else match.group(3)
                 js_routes.append(
-                    (path, "ANY" if method == "ALL" else method, concat_http_paths(match.group(3)))
+                    (path, "ANY" if method == "ALL" else method, concat_http_paths(raw))
                 )
             for match in _CHAIN_RE.finditer(text):
                 if match.group(1) not in js_router:
