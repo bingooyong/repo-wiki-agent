@@ -49,7 +49,8 @@ from repo_wiki.agent_loop.roles import (
     SUBMIT_AUDIT,
     SUBMIT_MECH,
 )
-from repo_wiki.agent_loop.runner import AgentRunner
+from repo_wiki.agent_loop.runner import AgentResult, AgentRunner, PageBudget
+from repo_wiki.agent_loop.llm import BudgetExceeded
 from repo_wiki.agent_loop.tools import READ_GREP
 from repo_wiki.agent_loop.verifier import (
     UNATTRIBUTED,
@@ -135,6 +136,22 @@ class ApiPageLoop:
         self.unresolved: list[str] = []
         self.by_routes: set[str] = set()
         self.log: dict[str, Any] = {"scanner_hypotheses": len(self.seeds)}
+        self.pb = PageBudget(runner.session)
+        self.slots_left = 6
+        self.history: list[dict[str, Any]] = []
+        self.page = ""
+
+    def _run_agent(self, role: str, *args: Any, **kw: Any) -> AgentResult:
+        """runner.run with this page's token slice; skipped once only the write/audit reserve is left."""
+        allowance = self.pb.allowance(self.slots_left)
+        self.slots_left = max(self.slots_left - 1, 1)
+        if allowance == 0:
+            self.pb.skipped.append(role)
+            return AgentResult()
+        res = self.runner.run(role, *args, token_allowance=allowance, **kw)
+        if res.token_limited:
+            self.pb.limited.append(role)
+        return res
 
     # ------------------------------------------------------------ handlers
     def _record_routes(self, args: dict[str, Any]) -> tuple[str, int]:
@@ -189,7 +206,7 @@ class ApiPageLoop:
                 "\nYou may also record non-route facts with record_facts ('<checklist id> | <slot> | <value> | "
                 f"<claim> | FILE:LINE: exact quote'); slots: {SPEC.slot_help}."
             )
-        self.runner.run(
+        self._run_agent(
             f"api-{role}", system, user, tools, budget, ["finish"], iteration, handlers=handlers
         )
 
@@ -289,7 +306,8 @@ class ApiPageLoop:
                 + ", ".join(f"{f} ({n})" for f, n in sorted(sf.items(), key=lambda x: -x[1])[:30])
             )
         user += f"\n\nTool-call budget: {b.mechanism}."
-        res = self.runner.run(
+        self.slots_left = 4  # mechanism gets a quarter; shards are planned after it
+        res = self._run_agent(
             "api-mechanism",
             ROLE_MECH,
             user,
@@ -349,6 +367,8 @@ class ApiPageLoop:
                 "shards": [[f for f, _ in sh] for sh in self.shards],
             }
         )
+        # shards + repair + sweep + attribution + facts
+        self.slots_left = len(self.shards) + 4
         for si, sh in enumerate(self.shards):
             files = [f for f, _ in sh]
             site_lines = "\n".join(
@@ -404,7 +424,7 @@ class ApiPageLoop:
         )
         srv = "\n".join(f"- {s.get('name')} (entry {s.get('entry_file')})" for s in self.servers)
         u = f"Servers:\n{srv}\n\nRegistration files:\n{lst}\n\nTool-call budget: {self.budgets.attribution}."
-        res = self.runner.run(
+        res = self._run_agent(
             "api-attribution",
             ROLE_ATTR,
             u,
@@ -453,7 +473,7 @@ class ApiPageLoop:
             f"{json.dumps(self.profile, ensure_ascii=False)}\n\nRoutes already established:\n{routes_summary(routes, 15)}\n"
             f"Servers: {json.dumps(self.servers, ensure_ascii=False)}\n\nTool-call budget: {self.budgets.api_facts}."
         )
-        res = self.runner.run(
+        res = self._run_agent(
             "api-facts",
             ROLE_API_FACTS.format(slots=SPEC.slot_help),
             u,
@@ -469,18 +489,68 @@ class ApiPageLoop:
 
     # ------------------------------------------------------------ loop
     def run(self) -> dict[str, Any]:
+        try:
+            return self._run()
+        except BudgetExceeded as exc:
+            # Keep the work: verified routes still make a usable (unpublished) draft.
+            routes, bad_routes = self.routes()
+            facts = self.store.live()
+            draft = self.page or (
+                f"# {SPEC.title}\n\n## 接口清单\n\n"
+                + (route_table(routes) if routes else NO_ROUTES)
+                + render_conflicts(facts)
+            )
+            self.log["budget"] = self.pb.log()
+            return self._result("aborted", self.history, routes, bad_routes, draft, "", str(exc))
+
+    def _result(
+        self,
+        status: str,
+        history: list[dict[str, Any]],
+        routes: list[Route],
+        bad_routes: list[Route],
+        page: str,
+        final_md: str,
+        aborted: str = "",
+    ) -> dict[str, Any]:
+        out = {
+            "page_type": "api",
+            "status": status,
+            "iterations": len(history),
+            "history": history,
+            "facts": self.store.live(),
+            "facts_rejected": self.store.bad[-60:],
+            "routes": routes,
+            "routes_rejected": bad_routes[-80:],
+            "unresolved": self.unresolved,
+            "dismissed": {f"{f}:{ln}": r for (f, ln), r in self.dismissed.items()},
+            "log": self.log,
+            "page_draft": page,
+            "page": final_md if status == "pass" else "",
+        }
+        if aborted:
+            out["aborted"] = aborted
+        return out
+
+    def _run(self) -> dict[str, Any]:
         self.discover_routes()
         self.attribute_servers()
         routes, bad_routes = self.routes()
         self.log["routes_after_discovery"] = len(routes)
         self.investigate_facts(routes)
-        history: list[dict[str, Any]] = []
+        history = self.history
         status, page, final_md, prose = "failed", "", "", ""
+        it_cost = 0
         unacc_prev: list[str] = []
         prev_facts: list[Any] = []
         hint = ""
         ids = SPEC.ids
         for it in range(self.max_iters + 1):
+            if it and not self.pb.can_afford(it_cost):
+                self.log["budget_stopped_before_iter"] = it
+                break
+            it_start = self.runner.session.stats.prompt_tokens
+            self.slots_left = len(self.shards) + 1
             if it > 0 and unacc_prev:
                 self.repair_pass("iter-repair", it)
             if it > 0 and hint:
@@ -538,6 +608,7 @@ class ApiPageLoop:
                 if ph in prose
                 else prose + "\n\n## 接口清单\n\n" + table
             )
+            self.page = page
             det = gates.api_page_checks(page, facts, routes)
             det += gates.process_leak_issues(page)
             det += gates.default_wording_issues(prose.replace(SPEC.placeholder, ""), facts)
@@ -573,6 +644,9 @@ class ApiPageLoop:
             final_md = finalize_page(SPEC.title, page, facts, routes)
             det += gates.existing_gate_issues("api", final_md, self.repo.root)
             accepted, dropped, wrong = self._audit(prose, facts, routes, it)
+            it_cost = self.runner.session.stats.prompt_tokens - it_start
+            if self.pb.enabled:  # repair/rediscover may only spend what the next write+audit won't need
+                self.pb.reserve = it_cost
             retracted = n_conf = 0
             for f_, evs in wrong:
                 for r_ in gates.finding_ids(f_):
@@ -606,21 +680,8 @@ class ApiPageLoop:
                 + [d for d in det if d.startswith(("checklist item", "no verified"))]
             )
         routes, bad_routes = self.routes()
-        return {
-            "page_type": "api",
-            "status": status,
-            "iterations": len(history),
-            "history": history,
-            "facts": self.store.live(),
-            "facts_rejected": self.store.bad[-60:],
-            "routes": routes,
-            "routes_rejected": bad_routes[-80:],
-            "unresolved": self.unresolved,
-            "dismissed": {f"{f}:{ln}": r for (f, ln), r in self.dismissed.items()},
-            "log": self.log,
-            "page_draft": page,
-            "page": final_md if status == "pass" else "",
-        }
+        self.log["budget"] = self.pb.log()
+        return self._result(status, history, routes, bad_routes, page, final_md)
 
     def _audit(
         self, prose: str, facts: list[Any], routes: list[Route], it: int

@@ -40,7 +40,8 @@ from repo_wiki.agent_loop.roles import (
     ROLE_WRITER,
     SUBMIT_AUDIT,
 )
-from repo_wiki.agent_loop.runner import AgentResult, AgentRunner
+from repo_wiki.agent_loop.llm import BudgetExceeded
+from repo_wiki.agent_loop.runner import AgentResult, AgentRunner, PageBudget
 from repo_wiki.agent_loop.tools import READ_GREP, READ_TOOLS
 from repo_wiki.agent_loop.verifier import Fact, FactVerifier
 
@@ -318,6 +319,8 @@ class FactPageLoop:
             "inventory_obligations": len(self.invd.oblig),
             "shards": len(self.invd.shards),
         }
+        self.pb = PageBudget(runner.session)
+        self.slots_left = 1
 
     # -------------------------------------------------------------- tool handlers
     def _record(self, args: dict[str, Any]) -> tuple[str, int]:
@@ -364,6 +367,12 @@ class FactPageLoop:
         finish_check: Any = None,
         system: str | None = None,
     ) -> AgentResult:
+        allowance = self.pb.allowance(self.slots_left)
+        self.slots_left = max(self.slots_left - 1, 1)
+        name = f"{self.spec.page_type}-{role}"
+        if allowance == 0:  # nothing left above the write/audit reserve
+            self.pb.skipped.append(name)
+            return AgentResult()
         res = self.runner.run(
             f"{self.spec.page_type}-{role}",
             system or self.role,
@@ -374,7 +383,10 @@ class FactPageLoop:
             iteration,
             handlers=self._handlers(),
             finish_check=finish_check,
+            token_allowance=allowance,
         )
+        if res.token_limited:
+            self.pb.limited.append(name)
         self._absorb(res)
         return res
 
@@ -430,6 +442,8 @@ class FactPageLoop:
         cl_text = spec.checklist_text()
         prof = json.dumps(self.profile, ensure_ascii=False)
         n = len(self.invd.shards)
+        n_mods = sum(1 for k in self.invd.oblig if self.invd.oblig[k].get("module"))
+        self.slots_left = n + 2 + min(n_mods, 10)  # shards + repair + gap + module closers
         for si, (outline, keys) in enumerate(self.invd.shards):
             items = f"Inventory items to account for:\n{self.ob_text(keys)}\n\n" if keys else ""
             u = (
@@ -483,16 +497,66 @@ class FactPageLoop:
 
     # -------------------------------------------------------------- write / check / audit
     def run(self) -> dict[str, Any]:
+        self.history: list[dict[str, Any]] = []
+        self.page_text = ""
+        try:
+            return self._run()
+        except BudgetExceeded as exc:
+            # Never lose the work: return the last draft (or a program-rendered one).
+            live = self.store.live()
+            draft = self.page_text or (
+                f"# {self.spec.title}\n\n"
+                + render_tables(self.spec.page_type, live, self.mod_unres)
+                + render_conflicts(live)
+            )
+            self.log["budget"] = self.pb.log()
+            return self._result("aborted", self.history, live, draft, "", aborted=str(exc))
+
+    def _result(
+        self,
+        status: str,
+        history: list[dict[str, Any]],
+        live: list[Fact],
+        page_text: str,
+        final_md: str,
+        aborted: str = "",
+    ) -> dict[str, Any]:
+        out = {
+            "page_type": self.spec.page_type,
+            "status": status,
+            "iterations": len(history),
+            "history": history,
+            "facts": live,
+            "modules_unresolved": self.mod_unres,
+            "facts_rejected": self.store.bad[-60:],
+            "retracted": [self.store.ok[i] for i in sorted(self.store.retracted)],
+            "unresolved": self.unresolved,
+            "dismissed": self.dismissed,
+            "log": self.log,
+            "page_draft": page_text,
+            "page": final_md if status == "pass" else "",
+        }
+        if aborted:
+            out["aborted"] = aborted
+        return out
+
+    def _run(self) -> dict[str, Any]:
         spec, b = self.spec, self.budgets
         self.discover()
         ids = spec.ids
-        history: list[dict[str, Any]] = []
+        history = self.history
         status, page_text, final_md, prose = "failed", "", "", ""
         prev_live: list[Fact] = []
+        it_cost = 0
         writer_sys = ROLE_WRITER.format(
             title=spec.title, tables=spec.table_desc, placeholder=spec.placeholder
         )
         for it in range(self.max_iters + 1):
+            if it and not self.pb.can_afford(it_cost):
+                # Another write+audit round would hit the cap: stop with the draft we have.
+                self.log["budget_stopped_before_iter"] = it
+                break
+            it_start = self.runner.session.stats.prompt_tokens
             add_doc_code_conflicts(self.store)
             live = self.store.live()
             have = {f["item"] for f in live}
@@ -534,6 +598,7 @@ class FactPageLoop:
             tables = render_tables(spec.page_type, live, self.mod_unres) + render_conflicts(live)
             ph = spec.placeholder
             page_text = prose.replace(ph, tables, 1) if ph in prose else prose + "\n\n" + tables
+            self.page_text = page_text
             det = gates.page_checks(prose.replace(ph, ""), live, ids, self.unresolved)
             det += gates.process_leak_issues(page_text)
             det += gates.default_wording_issues(prose.replace(ph, ""), live)
@@ -575,6 +640,9 @@ class FactPageLoop:
             final_md = finalize_page(spec.title, page_text, live, [])
             det += gates.existing_gate_issues(spec.page_type, final_md, self.repo.root)
             accepted, dropped, retract = self._audit(page_text, live, it)
+            it_cost = self.runner.session.stats.prompt_tokens - it_start
+            if self.pb.enabled:  # rework may only spend what the next write+audit won't need
+                self.pb.reserve = it_cost
             n_conf = 0
             retracted = 0
             for f_, evs in retract:
@@ -603,23 +671,11 @@ class FactPageLoop:
                 break
             if it == self.max_iters:
                 break
+            self.slots_left = 1 + min(6, len(self.mod_unres) + 1)
             self._rework(accepted, det, it)
         live = self.store.live()
-        return {
-            "page_type": spec.page_type,
-            "status": status,
-            "iterations": len(history),
-            "history": history,
-            "facts": live,
-            "modules_unresolved": self.mod_unres,
-            "facts_rejected": self.store.bad[-60:],
-            "retracted": [self.store.ok[i] for i in sorted(self.store.retracted)],
-            "unresolved": self.unresolved,
-            "dismissed": self.dismissed,
-            "log": self.log,
-            "page_draft": page_text,
-            "page": final_md if status == "pass" else "",
-        }
+        self.log["budget"] = self.pb.log()
+        return self._result(status, history, live, page_text, final_md)
 
     def _audit(
         self, page_text: str, live: list[Fact], it: int

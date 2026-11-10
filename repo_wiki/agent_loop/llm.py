@@ -290,6 +290,16 @@ class LLMSession:
         self.page_prompt_cap = prompt_cap
         self._page_start = self.stats.prompt_tokens
 
+    def page_used(self) -> int:
+        return self.stats.prompt_tokens - self._page_start
+
+    def page_remaining(self) -> int | None:
+        """Prompt tokens left before this page (or the global cap) aborts; None = unbounded."""
+        left = self.global_prompt_cap - self.stats.prompt_tokens
+        if self.page_prompt_cap is not None:
+            left = min(left, self.page_prompt_cap - self.page_used())
+        return max(left, 0)
+
     def body(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": self.settings.model,

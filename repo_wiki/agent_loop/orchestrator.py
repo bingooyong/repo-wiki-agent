@@ -238,6 +238,11 @@ class AgentLoopOrchestrator:
         self.report["pages"][page_type] = res
         self.out_dir.mkdir(parents=True, exist_ok=True)
         (self.out_dir / f"page-{page_type}.md").write_text(res.get("page") or "", encoding="utf-8")
+        draft = self.out_dir / f"page-{page_type}.draft.md"
+        if res.get("page_draft") and not res.get("page"):
+            draft.write_text(str(res["page_draft"]), encoding="utf-8")
+        elif draft.exists():
+            draft.unlink()
         self.write_report()
 
     def write_report(self) -> Path:

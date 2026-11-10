@@ -32,6 +32,7 @@ class AgentResult:
     submits: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     steps: int = 0
     exhausted: bool = False
+    token_limited: bool = False
     text: str = ""
 
     def first(self, name: str) -> dict[str, Any] | None:
@@ -77,8 +78,13 @@ class AgentRunner:
         iteration: int = 0,
         handlers: Mapping[str, RecordHandler] | None = None,
         finish_check: FinishCheck | None = None,
+        token_allowance: int | None = None,
     ) -> AgentResult:
+        """``token_allowance`` caps the prompt tokens this agent may spend; once
+        reached it stops exploring and goes straight to the record wrap-up, so a
+        large repo is explored in bounded slices instead of hitting the page cap."""
         handlers = handlers or {}
+        spent0 = self.session.stats.prompt_tokens
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -88,6 +94,13 @@ class AgentRunner:
         stopped = guard_used = False
         pending = 0
         while not stopped and res.steps < budget:
+            if (
+                token_allowance is not None
+                and res.steps
+                and self.session.stats.prompt_tokens - spent0 >= token_allowance
+            ):
+                res.token_limited = True
+                break
             data = self.session.chat(messages, tools, role, iteration, res.steps)
             msg = first_message(data)
             calls = list(iter_tool_calls(msg))
@@ -218,3 +231,46 @@ class AgentRunner:
                 "out_chars": 0,
             }
         )
+
+
+class PageBudget:
+    """Shares what is left of a page's prompt-token cap between its agents.
+
+    A reserve (``RESERVE`` of the cap) is kept back for writing and auditing;
+    exploration agents (shards, repair, module closers, gap, rediscover) each get
+    an equal slice of the rest, recomputed per call so unspent slices roll over.
+    When nothing is left above the reserve, exploration is skipped (logged) so a
+    large repository still ends with a written, audited draft instead of an
+    abort. Disabled when the page has no prompt cap.
+    """
+
+    RESERVE = 0.3
+
+    def __init__(self, session: Any) -> None:
+        self.session = session
+        cap = getattr(session, "page_prompt_cap", None)
+        self.enabled = cap is not None
+        # page_remaining() is min(page cap, what is left of the global cap)
+        self.reserve = int(session.page_remaining() * self.RESERVE) if cap is not None else 0
+        self.skipped: list[str] = []
+        self.limited: list[str] = []
+
+    def remaining(self) -> int | None:
+        return self.session.page_remaining() if self.enabled else None
+
+    def allowance(self, slots_left: int) -> int | None:
+        """Token allowance for the next exploration agent; 0 = skip it."""
+        rem = self.remaining()
+        if rem is None:
+            return None
+        avail = rem - self.reserve
+        if avail <= 0:
+            return 0
+        return max(avail // max(slots_left, 1), 1)
+
+    def can_afford(self, cost: int) -> bool:
+        rem = self.remaining()
+        return rem is None or rem >= cost
+
+    def log(self) -> dict[str, Any]:
+        return {"reserve": self.reserve, "skipped": self.skipped, "token_limited": self.limited}
