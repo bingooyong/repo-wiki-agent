@@ -1,6 +1,6 @@
 # FastAPI RealWorld wiki 质量对照 wrap
 
-**日期：** 2026-08-13–2026-08-14 CST  
+**日期：** 2026-08-13–2026-08-18 CST  
 **对照：** nsidnev/fastapi-realworld-example-app `029eb778` × MiniMax-M3  
 **CLI：** r1 `9cadf85`（#40）→ r2 `c2407979`（#42 空 content 重试 + #43 FastAPI 扫描）→ r3 `a3d58b4`（#45 导入 router 前缀拼接）→ r4 `9328896`（#50；含 #48 `api_prefix` + #49 circuit-break）→ r5 `8912c89`（#52 README/身份优先于 init stub 与 eval notes）→ r6 `b0a06f4`（#54 README.rst 解析 + pyproject fallback）→ r7 `2e3a3f0`（#56 identity.description 流入 overview）→ r8 `05bb3b8`（#58 去掉 citation `file:` 前缀）
 
@@ -13,7 +13,8 @@
 第七轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round7.md`。  
 第八轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round8.md`。  
 第九轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round9.md`。  
-第十轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round10.md`。
+第十轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round10.md`。  
+第十六轮评测见 `docs/eval/2026-08-18-fastapi-realworld-round16.md`。
 
 ## r1 vs r2
 
@@ -229,4 +230,29 @@ verify JSON：`docs/eval/2026-08-14-fastapi-realworld-round8-verify.json`。
 - taxonomy 幻觉页；泄漏 `<think>` 89 页。
 - coverage 42.28% 仍 << 95%；eval-layout HARD；API mermaid 缺 9 / ER 缺 5。
 - r8 verify：**12 HARD / 0 SOFT**（未放宽）。不要松阈值。
+
+## r15 vs r16
+
+评测正文：`docs/eval/2026-08-18-fastapi-realworld-round16.md`。  
+verify JSON：`docs/eval/2026-08-18-fastapi-realworld-round16-verify.json`。
+
+真实 MiniMax-M3 run `r16-2026-08-18`。CLI `c8a30a6` = r15-eval-local `6b966d4`（r14 `278164e` + #87 `e1073f6`）+ #89 `025d7d2`（本地 `r16-eval-local`；auto-merge，无需 keep-both；**未推送、未进 main**）。未叠到 #88。R15 正文在 #88。
+
+| 项 | r15 | **r16** |
+|---|---|---|
+| CLI | `6b966d4` / r14 栈 + #87（未进 main） | **`c8a30a6`** / r15 栈 + #89（未进 main） |
+| generate | EXIT=0；81/81；cache 0/81 | **EXIT=0；81/81；cache 0/81** |
+| LLM PASS / DEGRADED | 70 / 11 | **77 / 4** |
+| llm_call_count / tokens | 81 / 302995 | **81 / 323357** |
+| fallback | 11（全部 insufficient prose） | **4**（insufficient prose 3 + http 529 1） |
+| 529 / circuit-break | 0 / false | **1 / false** |
+| MiniMax 1004 | 0 | **0** |
+| coverage | 67.02%（951/1419）；门仍是 95% | **68.76%**（940/1367）仍 << 95% |
+| HARD / SOFT | 4 / 0 | **3 / 0**（未放宽） |
+| owner missing | 0 | **0** |
+| conflict | PASS | **PASS** |
+| API aggregation | PASS 6/6 | **PASS 6/6** |
+| #89 leftover code | `CITATION_RELEVANCE_MISMATCH`（message 25 / details 20） | **HIT**（PASS；mismatches n=0） |
+
+不要声称 leftover HARD 已清。HARD 计数 4→3。不要松 HARD/SOFT。不要把这些产品 PR 合进 main。
 
