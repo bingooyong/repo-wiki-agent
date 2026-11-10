@@ -254,16 +254,31 @@ class PageBudget:
         self.reserve = int(session.page_remaining() * self.RESERVE) if cap is not None else 0
         self.skipped: list[str] = []
         self.limited: list[str] = []
+        self.cap = cap
+        # tokens held back for essential steps that run after exploration (e.g. the API page's
+        # server/auth/conventions facts): exploration may not spend them
+        self.held: dict[str, int] = {}
 
     def remaining(self) -> int | None:
         return self.session.page_remaining() if self.enabled else None
 
-    def allowance(self, slots_left: int) -> int | None:
-        """Token allowance for the next exploration agent; 0 = skip it."""
+    def hold(self, name: str, frac: float) -> None:
+        """Keep ``frac`` of the page cap for the essential step ``name`` until it runs."""
+        if self.enabled and self.cap is not None:
+            self.held[name] = int(self.cap * frac)
+
+    def allowance(self, slots_left: int, essential: str | None = None) -> int | None:
+        """Token allowance for the next agent; 0 = skip it. Optional exploration may not touch the
+        write/audit reserve nor what is held for essential steps; an essential step releases its
+        hold and gets everything above the reserve (so it runs unless the reserve itself is hit)."""
         rem = self.remaining()
         if rem is None:
             return None
-        avail = rem - self.reserve
+        if essential is not None:
+            self.held.pop(essential, None)  # its share becomes available to it alone
+            avail = rem - self.reserve - sum(self.held.values())
+            return max(avail, 0)
+        avail = rem - self.reserve - sum(self.held.values())
         if avail <= 0:
             return 0
         return max(avail // max(slots_left, 1), 1)
@@ -273,4 +288,9 @@ class PageBudget:
         return rem is None or rem >= cost
 
     def log(self) -> dict[str, Any]:
-        return {"reserve": self.reserve, "skipped": self.skipped, "token_limited": self.limited}
+        return {
+            "reserve": self.reserve,
+            "skipped": self.skipped,
+            "token_limited": self.limited,
+            "held": dict(self.held),
+        }

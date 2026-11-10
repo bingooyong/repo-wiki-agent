@@ -108,6 +108,9 @@ def _parse_site_dismissal(x: object) -> tuple[Site, str] | None:
     return (f.strip(), int(ln)), reason.strip()
 
 
+ESSENTIAL_FACTS_SHARE = 0.12
+
+
 class ApiPageLoop:
     def __init__(
         self,
@@ -137,14 +140,19 @@ class ApiPageLoop:
         self.by_routes: set[str] = set()
         self.log: dict[str, Any] = {"scanner_hypotheses": len(self.seeds)}
         self.pb = PageBudget(runner.session)
+        # the server / auth / conventions facts answer half of the reader's question: their step
+        # runs after route exploration, so its share is held back from the start (large repos)
+        self.pb.hold("api-facts", ESSENTIAL_FACTS_SHARE)
         self.slots_left = 6
         self.history: list[dict[str, Any]] = []
         self.page = ""
 
-    def _run_agent(self, role: str, *args: Any, **kw: Any) -> AgentResult:
-        """runner.run with this page's token slice; skipped once only the write/audit reserve is left."""
-        allowance = self.pb.allowance(self.slots_left)
-        self.slots_left = max(self.slots_left - 1, 1)
+    def _run_agent(self, role: str, *args: Any, essential: bool = False, **kw: Any) -> AgentResult:
+        """runner.run with this page's token slice; optional steps are skipped once only the
+        write/audit reserve (and held essential shares) are left, essential steps always run."""
+        allowance = self.pb.allowance(self.slots_left, essential=role if essential else None)
+        if not essential:
+            self.slots_left = max(self.slots_left - 1, 1)
         if allowance == 0:
             self.pb.skipped.append(role)
             return AgentResult()
@@ -368,7 +376,7 @@ class ApiPageLoop:
             }
         )
         # shards + repair + sweep + attribution + facts
-        self.slots_left = len(self.shards) + 4
+        self.slots_left = len(self.shards) + 3  # shards + repair + sweep + attribution
         for si, sh in enumerate(self.shards):
             files = [f for f, _ in sh]
             site_lines = "\n".join(
@@ -482,6 +490,7 @@ class ApiPageLoop:
             ["finish"],
             handlers={"record_facts": self._record_facts},
             finish_check=guard,
+            essential=True,
         )
         fin = res.first("finish") or {}
         self.unresolved = salvage_strings(fin.get("unresolved"))

@@ -429,6 +429,11 @@ def config_inventory(repo: RepoView) -> list[Item]:
 _START_RX = re.compile(
     r"(?i)\b(start|run|up|serve|server|daemon|dev)\b|^\./|uvicorn|gunicorn|flask run|manage\.py runserver"
 )
+MIGRATE_RX = re.compile(
+    r"(?i)\bmigrat\w*|\balembic\b[^\n]*\bupgrade\b|\bdb:(?:migrate|push)\b|\bprisma\s+(?:migrate|db\s+push)"
+    r"|\bflyway\b|\bliquibase\b|\bgoose\b[^\n]*\bup\b|\bsyncdb\b"
+)
+DEV_RX = re.compile(r"(?i)\b(?:yarn|pnpm|bun)\s+(?:run\s+)?dev\b|\bnpm\s+run\s+dev\b|\bmake\s+dev\b")
 _ENV_TEMPLATE_RX = re.compile(r"^\.env\.(example|sample|template|dist|tpl|default)$")
 
 
@@ -490,7 +495,22 @@ def reader_essentials(repo: RepoView) -> dict[str, list[Item]]:
         or (x["kind"] == "docker" and re.match(r"\s*(CMD|ENTRYPOINT)\b", x["text"]))
         or (x["kind"] == "compose" and re.search(r"\bcommand:", x["text"]))
     ]
-    return {"env_file": env, "port": port, "start": start}
+    # database preparation the reader must run (migrations), wherever the repo states it
+    migrate = [c for c in cmds if MIGRATE_RX.search(c["text"])]
+    migrate += [
+        x
+        for x in build
+        if MIGRATE_RX.search(x["text"])
+        and (
+            x["kind"] in ("make", "pkg")
+            or (x["kind"] == "docker" and re.match(r"\s*(CMD|ENTRYPOINT|RUN)\b", x["text"]))
+            or (x["kind"] == "compose" and re.search(r"\bcommand:", x["text"]))
+        )
+    ]
+    # the development start script a reader uses locally (package "dev" script, documented `yarn dev`)
+    dev = [c for c in cmds if DEV_RX.search(c["text"])]
+    dev += [x for x in build if x["kind"] == "pkg" and re.match(r'\s*"dev"\s*:', x["text"])]
+    return {"env_file": env, "port": port, "start": start, "migrate": migrate, "dev": dev}
 
 
 # ------------------------------------------------------------------ data model
@@ -697,6 +717,14 @@ _SLASH_LIT = re.compile(r"""["'`](?:(?:""" + VERBS + r""")\s+)?/[A-Za-z0-9_:{}<>
 SITE_LITERAL = re.compile(r"""["'`](?:(?:""" + VERBS + r""")\s+)?(/[^"'`\s]*)["'`]""")
 
 
+_EXTRA_SITE_SHAPE = re.compile(
+    r"""["'`](?:/[^"'`\s]*|\*)["'`]"""
+    r"|(?:^|[.\s@])(?:get|post|put|patch|delete|options|head|all|any|route|handle|handlefunc|"
+    r"group|add_api_route|add_url_rule|add_resource|api_route|websocket)\s*\(",
+    re.I,
+)
+
+
 def source_files(repo: RepoView) -> list[str]:
     return [f for f in repo.files() if is_src(f) and "/node_modules/" not in f]
 
@@ -724,7 +752,9 @@ def find_sites(repo: RepoView, extra_patterns: Iterable[str] = ()) -> dict[tuple
                     hit = True
             if not hit and PREFIX_LIT.search(ln):
                 hit = True
-            if not hit and any(rx.search(ln) for rx in extra):
+            if not hit and any(rx.search(ln) for rx in extra) and _EXTRA_SITE_SHAPE.search(ln):
+                # a mechanism-proposed pattern only adds lines that look like a registration (a path
+                # literal or an HTTP-verb call) — not middleware (app.use(helmet())) or bare braces
                 hit = True
             if hit:
                 sites[(rel, i)] = s[:200]
@@ -852,4 +882,102 @@ def stack_facts(repo: RepoView) -> dict[str, Any]:
         "manifest_lines": manifests[:200],
         "entry_like_files": entries[:40],
         "top_level": dict(sorted(tree.items())),
+    }
+
+
+# ------------------------------------------------------------------ data model: reader essentials
+_DM_FIELD_RX = {
+    "orm": re.compile(
+        r"^\s+(\w+)\s*(?::\s*Mapped\[[^\]]*\]\s*)?=\s*(?:db\.|sa\.|sqlalchemy\.)?"
+        r"(?:Column|mapped_column|models\.\w+Field|Field)\("
+    ),
+    "alembic": re.compile(r"""sa\.Column\(\s*["'](\w+)["']"""),
+    "gorm": re.compile(r"""^\s+[A-Z]\w*\s+[^\s`]+\s+`[^`]*\b(?:db|gorm:"column):?"?(\w+)"""),
+}
+_DDL_COL_RX = re.compile(r"^\s+[`\"]?([a-z_][a-z0-9_]*)[`\"]?\s+[A-Za-z]")
+_DDL_NOT_COL = frozenset({"primary", "constraint", "foreign", "unique", "key", "index", "check"})
+_MONGOOSE_FIELD_RX = re.compile(r"^(\s+)(\w+)\s*:\s*(?:\{|\[|String\b|Number\b|Boolean\b|Date\b|Schema\b|mongoose\b)")
+TIMESTAMP_RX = re.compile(
+    r"timestamps\s*:\s*true|\bcreated_?at\b|\bupdated_?at\b|\bCreatedAt\b|\bUpdatedAt\b|auto_now(?:_add)?"
+    r"|@CreateDateColumn|@UpdateDateColumn|server_default=[^\n]*now\(|DEFAULT\s+(?:CURRENT_TIMESTAMP|now\(\))",
+    re.I,
+)
+ENUM_RX = re.compile(
+    r"\benum\s*:|\b(?:sa|db|sqlalchemy)\.Enum\(|\bEnum\(|models\.(?:Text|Integer)Choices|\bAS\s+ENUM\b"
+    r"|^\s*enum\s+\w+\s*\{|type:\s*['\"]enum['\"]",
+)
+
+
+def _block(ls: list[str], start: int, span: int = 80) -> range:
+    depth, end = 0, min(len(ls), start + span)
+    for j in range(start, end + 1):
+        t = ls[j - 1]
+        depth += t.count("(") + t.count("{") - t.count(")") - t.count("}")
+        if j > start and depth <= 0:
+            return range(start, j + 1)
+    return range(start, end + 1)
+
+
+def datamodel_essentials(repo: RepoView) -> dict[str, list[Item]]:
+    """What a reader of the data-model page needs, deterministically from the definitions: every
+    declared field (with its constraints — required/private/unique/default), whether the schema
+    has timestamps and enum types, the relation status, and a classification of every type in
+    model/entity directories (persisted or not)."""
+    sites = dm_inventory(repo)
+    fields: list[Item] = []
+    seen: set[tuple[str, str]] = set()
+    marks: dict[str, list[Item]] = {"timestamps": [], "enums": []}
+
+    def add_field(f: str, i: int, name: str, text: str) -> None:
+        if (f, name.lower()) not in seen and name.lower() not in ("type", "id_seq"):
+            seen.add((f, name.lower()))
+            fields.append({"file": f, "line": i, "field": name, "text": text.strip()[:120]})
+
+    by_file: dict[str, list[Item]] = defaultdict(list)
+    for s in sites:
+        by_file[s["file"]].append(s)
+    for f, ss in by_file.items():
+        ls = repo.lines(f) or []
+        kinds = {s.get("kind") for s in ss}
+        for i, ln in enumerate(ls, 1):
+            if TIMESTAMP_RX.search(ln):
+                marks["timestamps"].append({"file": f, "line": i, "text": ln.strip()[:120]})
+            if ENUM_RX.search(ln):
+                marks["enums"].append({"file": f, "line": i, "text": ln.strip()[:120]})
+            for k, rx in _DM_FIELD_RX.items():
+                if k in kinds or (k == "orm" and "alembic" in kinds):
+                    m = rx.search(ln)
+                    if m:
+                        add_field(f, i, m.group(1), ln)
+        if "ddl" in kinds:
+            for s in ss:
+                for j in _block(ls, s["line"]):
+                    m = _DDL_COL_RX.match(ls[j - 1])
+                    if j != s["line"] and m and m.group(1) not in _DDL_NOT_COL:
+                        add_field(f, j, m.group(1), ls[j - 1])
+        if "mongoose" in kinds:
+            for s in ss:
+                if "Schema(" not in (ls[s["line"] - 1] if s["line"] <= len(ls) else ""):
+                    continue
+                blk = [j for j in _block(ls, s["line"], 160) if _MONGOOSE_FIELD_RX.match(ls[j - 1])]
+                if not blk:
+                    continue
+                top = min(len(_MONGOOSE_FIELD_RX.match(ls[j - 1]).group(1)) for j in blk)
+                for j in blk:
+                    m = _MONGOOSE_FIELD_RX.match(ls[j - 1])
+                    if len(m.group(1)) == top:
+                        add_field(f, j, m.group(2), ls[j - 1])
+    types = []
+    for t in model_type_inventory(repo, cap=200):
+        m = re.search(r"\b(?:type|class|interface|record)\s+([A-Z]\w*)", t["text"])
+        if m:
+            types.append({**t, "name": m.group(1), "persisted": has_persist_marker(repo, t)})
+    if len(types) > 25:  # large models: only the look-alikes without a persistence marker
+        types = [t for t in types if not t["persisted"]][:25]
+    return {
+        "fields": fields[:80],
+        "timestamps": marks["timestamps"][:5],
+        "enums": marks["enums"][:5],
+        "types": types,
+        "relations": sites[:1],
     }

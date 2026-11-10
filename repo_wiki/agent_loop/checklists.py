@@ -104,12 +104,13 @@ PAGES: dict[str, PageSpec] = {
             ),
             ChecklistItem(
                 "run",
-                "start commands incl. database preparation/migrations and container option (verbatim)",
+                "start commands incl. the local dev script (package 'dev' script / documented `yarn dev`), "
+                "database preparation/migrations (the exact migrate command) and container option (verbatim)",
                 ("command", "service"),
             ),
             ChecklistItem(
                 "port",
-                "default listen port/address from source/config (and conflicts with docs, if any)",
+                "default listen port NUMBER/address from source/config, what overrides it (and conflicts with docs, if any)",
                 ("port",),
             ),
             ChecklistItem(
@@ -144,7 +145,8 @@ PAGES: dict[str, PageSpec] = {
             ChecklistItem("entities", "every persisted table/collection/entity", ("entity",)),
             ChecklistItem(
                 "fields",
-                "fields of each entity with type/constraints (PK, unique, nullable, default)",
+                "EVERY declared field of each entity with type/constraints (PK, unique, nullable/required, default, "
+                "private/hidden, enum values) incl. timestamp fields (createdAt/updatedAt, timestamps: true)",
                 ("field", "key"),
             ),
             ChecklistItem(

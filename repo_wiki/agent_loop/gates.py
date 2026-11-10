@@ -160,15 +160,95 @@ def essentials_issues(facts: list[Fact], essentials: dict[str, list[Item]]) -> l
             f"{refs('env_file')}; record a config_file fact (value = the file path, e.g. .env) "
             "citing that line and say whether the repo ships it or the reader must create it"
         )
-    if essentials.get("port") and not any(f["slot"] == "port" for f in facts):
+    if essentials.get("port") and not any(
+        f["slot"] == "port" and re.search(r"\d", str(f["value"])) for f in facts
+    ):
         issues.append(
-            f"reader essential missing: the default listen port — {refs('port')}; record a port fact"
+            f"reader essential missing: the default listen port number — {refs('port')}; record a port "
+            "fact whose value is the default number (and what overrides it)"
         )
     if essentials.get("start") and not any(
         f["slot"] == "command" and f.get("item") == "run" for f in facts
     ):
         issues.append(
             f"reader essential missing: the start command — {refs('start')}; record it as a run command"
+        )
+    def says(rx: Any) -> bool:
+        return any(
+            f["slot"] == "command" and (rx.search(str(f["value"])) or rx.search(str(f["claim"])))
+            for f in facts
+        )
+
+    from repo_wiki.agent_loop.inventory import DEV_RX, MIGRATE_RX
+
+    if essentials.get("migrate") and not says(MIGRATE_RX):
+        issues.append(
+            "reader essential missing: the database migration step — "
+            f"{refs('migrate')}; record the migration command as a run command (verbatim)"
+        )
+    if essentials.get("dev") and not says(DEV_RX):
+        issues.append(
+            f"reader essential missing: the dev start script — {refs('dev')}; record it as a run command"
+        )
+    return issues
+
+
+def datamodel_essentials_issues(facts: list[Fact], ess: dict[str, list[Item]]) -> list[str]:
+    """Data-model page: every declared field, the timestamps and enum types the schema has, the
+    relation status (relations or an evidenced 'none'), and every type in model/entity directories
+    classified as persisted or not — each established by a fact whenever the repository has it."""
+
+    def text_of(f: Fact) -> str:
+        return " ".join(str(x) for x in [f["value"], f["claim"], *f.get("quotes", [])])
+
+    def ref(xs: list[Item]) -> str:
+        return ", ".join(f"{x['file']}:{x['line']}" for x in xs[:3])
+
+    issues: list[str] = []
+    named = {
+        re.split(r"[.:]", str(f["value"]).strip())[-1].strip().lower()
+        for f in facts
+        if f["slot"] in ("field", "key")
+    }
+    missing = [x for x in ess.get("fields", []) if x["field"].lower() not in named]
+    if missing:
+        issues.append(
+            "data-model essential missing: declared fields without a field fact (value 'entity.field', "
+            "type and constraints such as required/unique/private/default in the claim): "
+            + ", ".join(f"{x['field']} ({x['file']}:{x['line']})" for x in missing[:12])
+        )
+    if ess.get("timestamps") and not any(
+        re.search(r"(?i)timestamp|created|updated|时间戳|创建时间|更新时间", text_of(f)) for f in facts
+    ):
+        issues.append(
+            "data-model essential missing: the schema has timestamps — "
+            f"{ref(ess['timestamps'])}; record the timestamp fields (createdAt/updatedAt or columns)"
+        )
+    if ess.get("enums") and not any(re.search(r"(?i)\benum|枚举", text_of(f)) for f in facts):
+        issues.append(
+            f"data-model essential missing: enum-typed fields — {ref(ess['enums'])}; record each enum field "
+            "with its allowed values"
+        )
+    if ess.get("relations") and not any(f["slot"] in ("relation", "no_relation") for f in facts):
+        issues.append(
+            "data-model essential missing: the relation status — record each relation (FK/ref) or a "
+            "no_relation fact per entity citing its definition"
+        )
+    classified = {
+        str(f["value"]).strip().lower()
+        for f in facts
+        if f["slot"] in ("code_type", "not_entity", "entity")
+    }
+    unclassified = [
+        t for t in ess.get("types", [])
+        if t["name"].lower() not in classified
+        and not any(t["name"].lower() in c.split(".")[-1] for c in classified)
+    ]
+    if unclassified:
+        issues.append(
+            "data-model essential missing: types in model/entity directories not classified as persisted "
+            "(code_type) or NOT persisted (not_entity): "
+            + ", ".join(f"{t['name']} ({t['file']}:{t['line']})" for t in unclassified[:10])
         )
     return issues
 
@@ -564,20 +644,9 @@ def needs_investigation(issue: str) -> bool:
 
 
 # ------------------------------------------------------------------ existing handbook gates (pre-check)
-_RELATION_TOKENS = (
-    "relationship",
-    "relations",
-    "关联",
-    "关系",
-    "foreign key",
-    "join",
-    "belongs to",
-    "has many",
-    "references",
-)
-
-
-def existing_gate_issues(page_type: str, markdown: str, repo_root: Path) -> list[str]:
+def existing_gate_issues(
+    page_type: str, markdown: str, repo_root: Path, has_relations: bool | None = None
+) -> list[str]:
     """Run the repository's own per-page handbook gates on the final page inside the loop, so a page
     that the final gate would reject is reworked (or marked failed) instead of shipped. This only
     adds failure reasons; the gates themselves are unchanged and still run afterwards."""
@@ -654,8 +723,12 @@ def existing_gate_issues(page_type: str, markdown: str, repo_root: Path) -> list
                 "existing gate QODER_HANDBOOK_DATA_MODEL_SOURCE: every model class / schema source must be "
                 f"named and cited at its definition; offenders: {', '.join(offenders[:8]) or 'source files'}"
             )
-        low = markdown.lower()
-        if any(t in low for t in _RELATION_TOKENS) and "erdiagram" not in low:
+        from repo_wiki.verifier.qoder_strict_verifier import page_asserts_relations
+
+        # an ER diagram is required when entities are related (verified relation facts, when the
+        # loop knows them), not when the page says there are no relations
+        related = page_asserts_relations(markdown) if has_relations is None else has_relations
+        if related and "erdiagram" not in markdown.lower():
             issues.append(
                 "existing gate QODER_DATA_MODEL_ER_MERMAID_MISSING: the page discusses relationships but has "
                 "no ER diagram (only verified relation facts produce one)"

@@ -285,6 +285,9 @@ def accept_findings(
     return accepted, dropped, wrong
 
 
+ESSENTIAL_GAP_SHARE = 0.08
+
+
 class FactPageLoop:
     def __init__(
         self,
@@ -308,6 +311,7 @@ class FactPageLoop:
         self.unresolved: list[str] = []
         self.mod_unres: dict[str, str] = {}
         self.essentials = inv.reader_essentials(repo) if spec.page_type == "install" else {}
+        self.dm_essentials = inv.datamodel_essentials(repo) if spec.page_type == "datamodel" else {}
         slots = spec.slot_help + (
             " | note (value=checklist id; an evidenced 'not applicable' for that item) | conflict (value=subject; "
             "two sources disagree — cite BOTH lines, from different files)"
@@ -320,6 +324,9 @@ class FactPageLoop:
             "shards": len(self.invd.shards),
         }
         self.pb = PageBudget(runner.session)
+        # the checklist-gap step (facts the reader's question needs that shards did not find) runs
+        # after all exploration: hold its share so a large repo cannot starve it
+        self.pb.hold(f"{spec.page_type}-gap", ESSENTIAL_GAP_SHARE)
         self.slots_left = 1
 
     # -------------------------------------------------------------- tool handlers
@@ -366,10 +373,12 @@ class FactPageLoop:
         iteration: int = 0,
         finish_check: Any = None,
         system: str | None = None,
+        essential: bool = False,
     ) -> AgentResult:
-        allowance = self.pb.allowance(self.slots_left)
-        self.slots_left = max(self.slots_left - 1, 1)
         name = f"{self.spec.page_type}-{role}"
+        allowance = self.pb.allowance(self.slots_left, essential=name if essential else None)
+        if not essential:
+            self.slots_left = max(self.slots_left - 1, 1)
         if allowance == 0:  # nothing left above the write/audit reserve
             self.pb.skipped.append(name)
             return AgentResult()
@@ -443,7 +452,7 @@ class FactPageLoop:
         prof = json.dumps(self.profile, ensure_ascii=False)
         n = len(self.invd.shards)
         n_mods = sum(1 for k in self.invd.oblig if self.invd.oblig[k].get("module"))
-        self.slots_left = n + 2 + min(n_mods, 10)  # shards + repair + gap + module closers
+        self.slots_left = n + 1 + min(n_mods, 10)  # shards + repair + module closers
         for si, (outline, keys) in enumerate(self.invd.shards):
             items = f"Inventory items to account for:\n{self.ob_text(keys)}\n\n" if keys else ""
             u = (
@@ -493,7 +502,8 @@ class FactPageLoop:
                 + f"\n\nRepository profile:\n{prof}\n\nTool-call budget: {b.gap}."
             )
             system = ROLE_GAP.format(title=spec.title, question=spec.question, slots=self.slots)
-            self._agent("gap", u, b.gap, finish_check=guard, system=system)
+            self._agent("gap", u, b.gap, finish_check=guard, system=system, essential=True)
+        self.pb.held.pop(f"{spec.page_type}-gap", None)  # no gaps: release the share
 
     # -------------------------------------------------------------- write / check / audit
     def run(self) -> dict[str, Any]:
@@ -637,8 +647,18 @@ class FactPageLoop:
             det += gates.doc_only_port_issues(live)
             if spec.page_type == "datamodel":
                 det += gates.entity_field_issues(live)
+                det += gates.datamodel_essentials_issues(live, self.dm_essentials)
             final_md = finalize_page(spec.title, page_text, live, [])
-            det += gates.existing_gate_issues(spec.page_type, final_md, self.repo.root)
+            det += gates.existing_gate_issues(
+                spec.page_type,
+                final_md,
+                self.repo.root,
+                has_relations=(
+                    any(f["slot"] == "relation" for f in live)
+                    if spec.page_type == "datamodel"
+                    else None
+                ),
+            )
             accepted, dropped, retract = self._audit(page_text, live, it)
             it_cost = self.runner.session.stats.prompt_tokens - it_start
             if self.pb.enabled:  # rework may only spend what the next write+audit won't need
