@@ -53,7 +53,7 @@ _AS_VIEW_RE = re.compile(
     r"""(?:path|re_path|url)\(\s*['\"]([^'\"]+)['\"]\s*,\s*\w+\.as_view\(""",
 )
 _CHAIN_RE = re.compile(
-    r"""(\w+)\.route\(\s*['\"]([^'\"]+)['\"]\s*\)((?:\s*\.\s*(?:get|post|put|patch|delete|options|head)\([^;]*)+)""",
+    r"""(\w+)\s*\.\s*route\(\s*['\"]([^'\"]+)['\"]\s*\)((?:\s*\.\s*(?:get|post|put|patch|delete|options|head)\([^;]*)+)""",
     re.I,
 )
 _GROUP_RE = re.compile(r"""(\w+)\s*:?=\s*(\w+)\.Group\(\s*['\"]([^'\"]+)['\"]""")
@@ -81,10 +81,33 @@ _REG_RAW_RE = re.compile(
 _HANDLE_FUNC_RE = re.compile(r"""HandleFunc\(\s*['\"](?:([A-Z]+)\s+)?(/[^'\"]+)['\"]""")
 _SKIP_REFLECT = frozenset({"Init", "Register", "ServeHTTP"})
 _JS_ROUTE_RE = re.compile(
-    r"""(\w+)\.(get|post|put|patch|delete|options|head)\(\s*['\"](/[^'\"]+)['\"]""",
+    r"""(\w+)\s*\.\s*(get|post|put|patch|delete|options|head|all)\(\s*['\"](/[^'\"]*)['\"]""",
     re.I,
 )
 _JS_ROUTER_RE = re.compile(r"""(?:const|let|var)\s+(\w+)\s*=\s*(?:Router|express)\s*\(""")
+_JS_REQUIRE_RE = re.compile(
+    r"""(?:const|let|var)\s+(\w+)\s*=\s*require\(\s*['"](\.{1,2}/[^'"]*)['"]\s*\)"""
+    r"""|import\s+(\w+)\s+from\s+['"](\.{1,2}/[^'"]*)['"]"""
+)
+_JS_USE_MOUNT_RE = re.compile(
+    r"""(\w+)\s*\.\s*use\(\s*['"](/[^'"]*)['"]\s*,(?:[^;]*?,)?\s*(\w+)\s*\)"""
+)
+_JS_TABLE_MOUNT_RE = re.compile(
+    r"""path\s*:\s*['"](/[^'"]*)['"]\s*,\s*route\s*:\s*(\w+)"""
+)
+_JS_TABLE_USE_RE = re.compile(r"\.use\(\s*\w+\.path\s*,\s*\w+\.route\s*\)")
+_GO_PKG_RE = re.compile(r"^package\s+(\w+)", re.M)
+_GO_GROUP_PARAM_FUNC_RE = re.compile(
+    r"func\s+(?:\([^)]*\)\s*)?(\w+)\s*\(\s*(\w+)\s+\*?(?:\w+\.)?"
+    r"(?:RouteGroup|RouterGroup|Group|Router|ServeMux|Mux|Echo|App)\b"
+)
+_GO_PASS_GROUP_RE = re.compile(
+    r"""(\w+)\.(\w+)\(\s*(\w+)(?:\s*\.\s*Group\(\s*['"]([^'"]*)['"]\s*\))?\s*[,)]"""
+)
+_FLASGGER_RE = re.compile(r"\bSwagger\(\s*\w+")
+_SPEC_ROUTE_RE = re.compile(r"""['"]route['"]\s*:\s*['"](/[^'"]+)['"]""")
+_SPECS_ROUTE_RE = re.compile(r"""['"]specs_route['"]\s*:\s*['"](/[^'"]*)['"]""")
+_FASTAPI_APP_RE = re.compile(r"\bFastAPI\(([^)]*)\)")
 _FETCH_RE = re.compile(r"""fetch\(\s*['"](/[^'"]+)['"]""")
 _UNSUPPORTED_ROUTE_SUFFIXES = frozenset({".rb", ".java", ".php", ".rs", ".kt"})
 _FRAMEWORK_MARK = re.compile(
@@ -250,6 +273,10 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
     bp_paths: dict[str, list[str]] = {}
     blueprint_names: set[str] = set()
     register_prefixes: list[tuple[str, str]] = []
+    go_groups: dict[str, tuple[dict[str, str], dict[str, str], set[str]]] = {}
+    go_routes: list[tuple[str, str, str, str]] = []
+    js_routes: list[tuple[str, str, str]] = []
+    js_mounts: list[tuple[str, str, str]] = []
     for path, text in files:
         if path.endswith(".go") and not path.endswith("_test.go"):
             for match in _GO_TYPE_METHOD_RE.finditer(text):
@@ -321,20 +348,33 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
                     routes.append((path, match.group(1), method, match.group(2)))
         if path.endswith(".go") and not path.endswith("_test.go"):
             group: dict[str, str] = {}
+            parent: dict[str, str] = {}
             routers = set(_GO_CTOR_RE.findall(text))
             for match in _GROUP_RE.finditer(text):
                 group[match.group(1)] = concat_http_paths(
                     group.get(match.group(2), ""), match.group(3)
                 )
+                parent[match.group(1)] = match.group(2)
                 routers.add(match.group(1))
                 routers.add(match.group(2))
+            go_groups[path] = (group, parent, routers)
+
+            def _root(var: str, parent: dict[str, str] = parent) -> str:
+                seen_vars: set[str] = set()
+                while var in parent and var not in seen_vars:
+                    seen_vars.add(var)
+                    var = parent[var]
+                return var
+
             for match in _GO_METHOD_RE.finditer(text):
                 if match.group(1) in _NON_ROUTE_RECV:
                     continue
                 if routers and match.group(1) not in routers and match.group(1) not in group:
                     continue
-                found.add(
+                go_routes.append(
                     (
+                        path,
+                        _root(match.group(1)),
                         match.group(2).upper(),
                         concat_http_paths(group.get(match.group(1), ""), match.group(3)),
                     )
@@ -343,7 +383,7 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
                 route = concat_http_paths(group.get(match.group(1), ""), match.group(3))
                 for method in (item.strip().upper() for item in match.group(2).split(",")):
                     if method in _HTTP:
-                        found.add((method, route))
+                        go_routes.append((path, _root(match.group(1)), method, route))
             for match in _REG_SVC_RE.finditer(text):
                 base = match.group(1)
                 kind = match.group(2) or match.group(3) or ""
@@ -364,19 +404,40 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
                 )
             for match in _HANDLE_FUNC_RE.finditer(text):
                 found.add(((match.group(1) or "ANY").upper(), concat_http_paths(match.group(2))))
-        if path.endswith((".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx")):
+        if path.endswith(_JS_SUFFIXES):
             js_router = set(_JS_ROUTER_RE.findall(text)) | {"app", "router", "server"}
             for match in _JS_ROUTE_RE.finditer(text):
                 if match.group(1) not in js_router:
                     continue
-                found.add((match.group(2).upper(), concat_http_paths(match.group(3))))
+                method = match.group(2).upper()
+                js_routes.append(
+                    (path, "ANY" if method == "ALL" else method, concat_http_paths(match.group(3)))
+                )
             for match in _CHAIN_RE.finditer(text):
                 if match.group(1) not in js_router:
                     continue
                 for method in _methods_from_blob(match.group(3)):
-                    found.add((method, concat_http_paths(match.group(2))))
+                    js_routes.append((path, method, concat_http_paths(match.group(2))))
+            req: dict[str, str] = {}
+            for match in _JS_REQUIRE_RE.finditer(text):
+                var, rel = (match.group(1), match.group(2)) if match.group(1) else (
+                    match.group(3),
+                    match.group(4),
+                )
+                dest = _js_resolve(path, rel, file_set)
+                if dest:
+                    req[var] = dest
+            for match in _JS_USE_MOUNT_RE.finditer(text):
+                if match.group(3) in req:
+                    js_mounts.append((path, match.group(2), req[match.group(3)]))
+            if _JS_TABLE_USE_RE.search(text):
+                for match in _JS_TABLE_MOUNT_RE.finditer(text):
+                    if match.group(2) in req:
+                        js_mounts.append((path, match.group(1), req[match.group(2)]))
         for match in _FETCH_RE.finditer(text):
             found.add(("ANY", _norm_path(concat_http_paths(match.group(1)))))
+    _apply_go_group_params(files, go_groups, go_routes, found)
+    _apply_js_mounts(js_routes, js_mounts, found)
     # Apply Flask Blueprint url_prefix to Api(blueprint).add_resource paths.
     loop_prefs = [pref for name, pref in register_prefixes if name not in blueprint_names]
     if loop_prefs:
@@ -450,6 +511,136 @@ def extract_source_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str
     return found
 
 
+_JS_SUFFIXES = (".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx")
+
+
+def _js_resolve(from_file: str, rel: str, file_set: set[str]) -> str | None:
+    base = from_file.rsplit("/", 1)[0] if "/" in from_file else ""
+    parts = [p for p in base.split("/") if p]
+    for seg in rel.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(seg)
+    stem = "/".join(parts)
+    for cand in [stem] + [stem + s for s in _JS_SUFFIXES] + [stem + "/index" + s for s in _JS_SUFFIXES]:
+        if cand in file_set:
+            return cand
+    return None
+
+
+def _apply_js_mounts(
+    js_routes: list[tuple[str, str, str]],
+    js_mounts: list[tuple[str, str, str]],
+    found: set[tuple[str, str]],
+) -> None:
+    """Express ``app.use('/v1', routes)`` / ``{ path: '/auth', route: authRoute }`` tables: a route
+    registered in a mounted router file gets every mount prefix chain that leads to it."""
+    parents: dict[str, list[tuple[str, str]]] = {}
+    for parent_file, prefix, child in js_mounts:
+        if child != parent_file:
+            parents.setdefault(child, []).append((parent_file, prefix))
+
+    def prefixes(f: str, seen: frozenset[str]) -> set[str]:
+        if f not in parents or f in seen:
+            return {""}
+        out: set[str] = set()
+        for parent_file, prefix in parents[f]:
+            for up in prefixes(parent_file, seen | {f}):
+                out.add(concat_http_paths(up, prefix))
+        return out or {""}
+
+    for f, method, route in js_routes:
+        for pref in prefixes(f, frozenset()):
+            found.add((method, concat_http_paths(pref, route)))
+
+
+def _apply_go_group_params(
+    files: Sequence[tuple[str, str]],
+    go_groups: dict[str, tuple[dict[str, str], dict[str, str], set[str]]],
+    go_routes: list[tuple[str, str, str, str]],
+    found: set[tuple[str, str]],
+) -> None:
+    """Go: ``album.RegisterHandlers(rg.Group(""), ...)`` where ``rg := router.Group("/v1")`` and
+    ``func RegisterHandlers(r *routing.RouteGroup, ...)`` registers ``r.Get("/albums")`` in another
+    package -> the routes registered on the parameter carry the caller's group prefix."""
+    pkg_of: dict[str, str] = {}
+    funcs: dict[str, list[tuple[str, str, str]]] = {}
+    for path, text in files:
+        if not path.endswith(".go") or path.endswith("_test.go"):
+            continue
+        m = _GO_PKG_RE.search(text)
+        pkg_of[path] = m.group(1) if m else ""
+        for fm in _GO_GROUP_PARAM_FUNC_RE.finditer(text):
+            funcs.setdefault(fm.group(1), []).append((pkg_of[path], path, fm.group(2)))
+    ext: dict[tuple[str, str], set[str]] = {}
+    for path, text in files:
+        if path not in go_groups:
+            continue
+        group, _parent, routers = go_groups[path]
+        for cm in _GO_PASS_GROUP_RE.finditer(text):
+            qual, fname, var, inner = cm.group(1), cm.group(2), cm.group(3), cm.group(4)
+            if var not in group and var not in routers:
+                continue
+            cands = funcs.get(fname) or []
+            hits = [c for c in cands if c[0] == qual] or (cands if len(cands) == 1 else [])
+            pref = concat_http_paths(group.get(var, ""), inner or "")
+            for _pkg, callee, param in hits:
+                if callee != path:
+                    ext.setdefault((callee, param), set()).add(pref)
+    for f, root_var, method, route in go_routes:
+        prefs = ext.get((f, root_var))
+        if prefs:
+            for pref in prefs:
+                found.add((method, concat_http_paths(pref, route)))
+        else:
+            found.add((method, route))
+
+
+def library_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str, str]]:
+    """Routes a library adds by itself (API docs / spec endpoints). The page may name them; they
+    are never required business routes (completeness counts only extracted source routes)."""
+    found: set[tuple[str, str]] = set()
+    for path, text in files:
+        if not path.endswith(".py"):
+            continue
+        if "flasgger" in text and _FLASGGER_RE.search(text):
+            specs = _SPECS_ROUTE_RE.search(text)
+            found.add(("GET", _norm_path(specs.group(1) if specs else "/apidocs")))
+            routes = [m.group(1) for m in _SPEC_ROUTE_RE.finditer(text)]
+            for r in routes or ["/apispec_1.json"]:
+                found.add(("GET", _norm_path(r)))
+        for m in _FASTAPI_APP_RE.finditer(text):
+            if "fastapi" not in text.lower():
+                continue
+            args = m.group(1)
+            for kw, default in (
+                ("docs_url", "/docs"),
+                ("redoc_url", "/redoc"),
+                ("openapi_url", "/openapi.json"),
+            ):
+                if re.search(rf"{kw}\s*=\s*None", args):
+                    continue
+                lit = re.search(rf"{kw}\s*=\s*['\"](/[^'\"]*)['\"]", args)
+                found.add(("GET", _norm_path(lit.group(1) if lit else default)))
+    return found
+
+
+def _is_mount_prefix(path: str, source: set[tuple[str, str]]) -> bool:
+    """A bare path mention (no method) that is a whole-segment prefix of a source route, e.g.
+    ``/api`` or ``/v1`` for ``/v1/albums``: a truthful prefix, not a missing route."""
+    segs = _path_shape(path)
+    if not segs:
+        return False
+    return any(
+        len(_path_shape(sp)) > len(segs) and _path_shape(sp)[: len(segs)] == segs
+        for _sm, sp in source
+    )
+
+
 def _pair_matches(method: str, path: str, source: set[tuple[str, str]]) -> bool:
     path = _norm_path(path)
     method = method.upper()
@@ -460,14 +651,24 @@ def _pair_matches(method: str, path: str, source: set[tuple[str, str]]) -> bool:
     return ("ANY", path) in source
 
 
+def allowed_http_paths(files: Sequence[tuple[str, str]]) -> set[tuple[str, str]]:
+    """Source routes plus library-generated routes: what a page may name."""
+    return {
+        (_m, _norm_path(_p)) for _m, _p in extract_source_http_paths(files) | library_http_paths(files)
+    }
+
+
 def handbook_route_crosscheck_mismatches(
     markdown: str, files: Sequence[tuple[str, str]], *, api_page: bool = False
 ) -> list[str]:
-    source = {(_m, _norm_path(_p)) for _m, _p in extract_source_http_paths(files)}
+    source = allowed_http_paths(files)
     bad: list[str] = []
     for method, path in extract_handbook_http_paths(markdown, api_page=api_page):
-        if not _pair_matches(method, path, source):
-            bad.append(f"{method} {path}")
+        if _pair_matches(method, path, source):
+            continue
+        if method == "ANY" and _is_mount_prefix(path, source):
+            continue
+        bad.append(f"{method} {path}")
     return sorted(bad)
 
 
@@ -560,7 +761,9 @@ def upgrade_handbook_route_paths(markdown: str, files: Sequence[tuple[str, str]]
 
 
 def drop_unmatched_handbook_routes(markdown: str, files: Sequence[tuple[str, str]]) -> str:
-    source = {(_m, _norm_path(_p)) for _m, _p in extract_source_http_paths(files)}
+    if not extract_source_http_paths(files):
+        return markdown or ""
+    source = allowed_http_paths(files)
     if not source:
         return markdown or ""
 
@@ -572,7 +775,7 @@ def drop_unmatched_handbook_routes(markdown: str, files: Sequence[tuple[str, str
     def _tick_drop(match: re.Match[str]) -> str:
         if not _path_only_is_route(match.group(1)):
             return match.group(0)
-        if _pair_matches("ANY", match.group(1), source):
+        if _pair_matches("ANY", match.group(1), source) or _is_mount_prefix(match.group(1), source):
             return match.group(0)
         return ""
 
@@ -581,7 +784,11 @@ def drop_unmatched_handbook_routes(markdown: str, files: Sequence[tuple[str, str
     kept: list[str] = []
     for line in text.splitlines():
         hits = extract_handbook_http_paths(line, api_page=True)
-        if hits and not any(_pair_matches(method, path, source) for method, path in hits):
+        if hits and not any(
+            _pair_matches(method, path, source)
+            or (method == "ANY" and _is_mount_prefix(path, source))
+            for method, path in hits
+        ):
             continue
         if re.fullmatch(r"[-*]\s*", line.strip()):
             continue
