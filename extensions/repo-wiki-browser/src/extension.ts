@@ -4,7 +4,17 @@ import yaml from 'js-yaml';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-const DEFAULT_GENERATE_COMMAND = 'uv run repo-wiki generate --profile qoder-like';
+import {
+    DEFAULT_GENERATE_COMMAND,
+    DEFAULT_PUBLISH_COMMAND,
+    DEFAULT_VERIFY_COMMAND,
+    diagnoseReadyGap,
+    pickReleaseReadyString,
+    readyGapCopy,
+    summarizeCliOutput,
+    type ReadyGapDiagnosis,
+} from './hostLoop';
+
 const SECRET_LLM_API_KEY = 'repoWikiBrowser.llm.apiKey';
 const DEFAULT_LLM_API_KEY_ENV = 'REPO_WIKI_LLM_API_KEY';
 const DEFAULT_LLM_SOURCE: LlmSource = 'extension';
@@ -140,7 +150,18 @@ interface LlmDisplayInfo {
     settings: LlmEffectiveConfig;
 }
 
+interface HostJobStatus {
+    state: 'idle' | 'running' | 'succeeded' | 'failed';
+    title: string;
+    command: string;
+    progressText?: string;
+    failureReason?: string;
+    exitCode?: number;
+}
+
 let sidebarProvider: RepoWikiSidebarProvider;
+let activeCli: childProcess.ChildProcess | undefined;
+let repoWikiOutput: vscode.OutputChannel | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     sidebarProvider = new RepoWikiSidebarProvider(context.extensionUri, context.secrets);
@@ -149,8 +170,9 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.registerWebviewViewProvider('repoWikiBrowser.sidebar', sidebarProvider),
         vscode.commands.registerCommand('repoWikiBrowser.openViewer', () => sidebarProvider.openDefaultPage()),
         vscode.commands.registerCommand('repoWikiBrowser.refreshTree', () => sidebarProvider.refresh()),
-        vscode.commands.registerCommand('repoWikiBrowser.runVerify', () => runTerminalCommand('Repo Wiki Verify', 'repo-wiki verify --ci')),
+        vscode.commands.registerCommand('repoWikiBrowser.runVerify', () => runTrackedCliCommand('Repo Wiki Verify', DEFAULT_VERIFY_COMMAND)),
         vscode.commands.registerCommand('repoWikiBrowser.updateWiki', () => runUpdateWiki(context.secrets)),
+        vscode.commands.registerCommand('repoWikiBrowser.releasePublish', () => runTrackedCliCommand('Repo Wiki Release Publish', DEFAULT_PUBLISH_COMMAND)),
         vscode.commands.registerCommand('repoWikiBrowser.syncWiki', () => runTerminalCommand('Repo Wiki Sync', 'repo-wiki sync')),
         vscode.commands.registerCommand('repoWikiBrowser.configureLlm', () => configureLlmSettings(context.secrets)),
         vscode.commands.registerCommand('repoWikiBrowser.setApiKey', () => setLlmApiKey(context.secrets)),
@@ -175,6 +197,8 @@ class RepoWikiSidebarProvider implements vscode.WebviewViewProvider {
     private fileById = new Map<string, WikiFile>();
     private locale = 'zh-CN';
     private selectedRunKey?: string;
+    private jobStatus: HostJobStatus = { state: 'idle', title: '', command: '' };
+    private jobRefreshTimer?: ReturnType<typeof setTimeout>;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
@@ -202,6 +226,12 @@ class RepoWikiSidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'update':
                     runUpdateWiki(this.secrets);
+                    break;
+                case 'verify':
+                    runTrackedCliCommand('Repo Wiki Verify', DEFAULT_VERIFY_COMMAND);
+                    break;
+                case 'publish':
+                    runTrackedCliCommand('Repo Wiki Release Publish', DEFAULT_PUBLISH_COMMAND);
                     break;
                 case 'sync':
                     runTerminalCommand('Repo Wiki Sync', 'repo-wiki sync');
@@ -232,6 +262,20 @@ class RepoWikiSidebarProvider implements vscode.WebviewViewProvider {
         this.refresh();
     }
 
+    setJobStatus(status: HostJobStatus, refreshNow = true): void {
+        this.jobStatus = status;
+        if (refreshNow) {
+            void this.refresh();
+            return;
+        }
+        if (!this.jobRefreshTimer) {
+            this.jobRefreshTimer = setTimeout(() => {
+                this.jobRefreshTimer = undefined;
+                void this.refresh();
+            }, 400);
+        }
+    }
+
     async refresh(): Promise<void> {
         const workspaceRoot = getWorkspaceRoot();
         if (!this.view) {
@@ -244,6 +288,7 @@ class RepoWikiSidebarProvider implements vscode.WebviewViewProvider {
         }
 
         const llmInfo = await loadLlmDisplayInfo(workspaceRoot, this.secrets);
+        const diagnosis = diagnoseReadyGap(workspaceRoot);
         this.source = discoverWikiSource(workspaceRoot, this.selectedRunKey);
         this.selectedRunKey = this.source?.runKey;
         this.fileById.clear();
@@ -254,12 +299,12 @@ class RepoWikiSidebarProvider implements vscode.WebviewViewProvider {
         }
 
         if (!this.source) {
-            this.view.webview.html = this.renderNoWikiRuns(workspaceRoot, llmInfo);
+            this.view.webview.html = this.renderNoWikiRuns(workspaceRoot, llmInfo, diagnosis);
             return;
         }
 
         const gitStatus = getGitStatus(workspaceRoot, this.source);
-        this.view.webview.html = this.renderSidebar(this.source, gitStatus, llmInfo);
+        this.view.webview.html = this.renderSidebar(this.source, gitStatus, llmInfo, diagnosis);
     }
 
     openDefaultPage(): void {
@@ -303,34 +348,27 @@ class RepoWikiSidebarProvider implements vscode.WebviewViewProvider {
         `);
     }
 
-    private renderNoWikiRuns(workspaceRoot: string, llmInfo: LlmDisplayInfo): string {
+    private renderNoWikiRuns(workspaceRoot: string, llmInfo: LlmDisplayInfo, diagnosis: ReadyGapDiagnosis): string {
         const releaseManifestPath = path.join(workspaceRoot, '.repo-agent-eval', 'repowiki', 'zh', 'manifest.json');
         return baseHtml(`
             <section class="panel">
                 <h1>REPO WIKI</h1>
-                <p class="muted">未检测到已发布的 READY Wiki。</p>
-                <p class="muted">请先发布：<code>.repo-agent-eval/repowiki/zh/manifest.json</code></p>
+                ${renderReadyGapPanel(diagnosis, this.locale)}
+                ${renderJobPanel(this.jobStatus, this.locale)}
                 <p class="muted">插件只读取 release manifest 的 <code>navigation_tree</code>，不回退扫描 run 目录或 <code>docs/</code>。</p>
                 <p class="muted">查找文件：<code>${escapeHtml(releaseManifestPath)}</code></p>
                 ${renderLlmPanel(llmInfo, this.locale)}
-                <div class="actions">
-                    <button class="primary" data-command="update">更新 Wiki</button>
-                    <button data-command="sync">同步</button>
-                    <button class="icon" title="刷新" data-command="refresh">↻</button>
-                </div>
+                ${renderHostActions(diagnosis, this.locale)}
             </section>
         `);
     }
 
-    private renderSidebar(source: WikiSource, gitStatus: GitStatus, llmInfo: LlmDisplayInfo): string {
+    private renderSidebar(source: WikiSource, gitStatus: GitStatus, llmInfo: LlmDisplayInfo, diagnosis: ReadyGapDiagnosis): string {
         const treeHtml = source.navigationTree.length > 0
             ? renderNavigationTree(source.navigationTree, source.files)
             : '<p class="muted">No navigation_tree found in manifest.</p>';
 
         const statusClass = gitStatus.isStale ? 'notice stale' : 'notice';
-        const updateButton = gitStatus.isStale
-            ? '<button class="primary" data-command="update">更新</button>'
-            : '<button class="primary" data-command="update">更新 Wiki</button>';
 
         const llmPanel = renderLlmPanel(llmInfo, this.locale);
         const runOptions = source.availableRuns
@@ -349,6 +387,8 @@ class RepoWikiSidebarProvider implements vscode.WebviewViewProvider {
             </header>
 
             ${llmPanel}
+            ${renderReadyGapPanel(diagnosis, this.locale)}
+            ${renderJobPanel(this.jobStatus, this.locale)}
 
             <section class="run-panel">
                 <div class="run-panel-title">Release</div>
@@ -361,11 +401,7 @@ class RepoWikiSidebarProvider implements vscode.WebviewViewProvider {
 
             <section class="${statusClass}">
                 <p>${escapeHtml(gitStatus.message)}</p>
-                <div class="actions">
-                    ${updateButton}
-                    <button data-command="sync">同步</button>
-                    <button class="icon" title="刷新" data-command="refresh">↻</button>
-                </div>
+                ${renderHostActions(diagnosis, this.locale)}
             </section>
 
             <nav class="tree" aria-label="Repo Wiki navigation">
@@ -380,21 +416,72 @@ function pickString(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 }
 
-/** Match Python `create_viewer_for_workspace_release` READY detection (manifest fields). */
-function pickReleaseReadyString(manifest: Record<string, unknown>): string | undefined {
-    const direct =
-        pickString(manifest.release_status) ??
-        pickString(manifest.readiness_state) ??
-        pickString(manifest.readiness);
-    if (direct) {
-        return direct;
+function renderReadyGapPanel(diagnosis: ReadyGapDiagnosis, locale: string): string {
+    if (diagnosis.kind === 'ready') {
+        return '';
     }
-    const nested = manifest.readiness;
-    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-        const r = nested as Record<string, unknown>;
-        return pickString(r.readiness_state) ?? pickString(r.status);
+    const copy = readyGapCopy(diagnosis, locale);
+    const en = locale === 'en';
+    const command = diagnosis.nextCommand
+        ? `<p class="muted">${escapeHtml(en ? 'Next command' : '下一步命令')}：<code>${escapeHtml(diagnosis.nextCommand)}</code></p>`
+        : '';
+    const reason = diagnosis.failureReason
+        ? `<p class="job-fail">${escapeHtml(diagnosis.failureReason)}</p>`
+        : '';
+    return `<section class="gap-panel">
+        <div class="run-panel-title">${escapeHtml(en ? 'READY status' : 'READY 状态')}</div>
+        <p><strong>${escapeHtml(copy.title)}</strong></p>
+        <p class="muted">${escapeHtml(copy.detail)}</p>
+        ${reason}
+        ${command}
+    </section>`;
+}
+
+function renderJobPanel(job: HostJobStatus, locale: string): string {
+    if (job.state === 'idle') {
+        return '';
     }
-    return undefined;
+    const en = locale === 'en';
+    const stateLabel = job.state === 'running'
+        ? (en ? 'Running' : '进行中')
+        : job.state === 'failed'
+            ? (en ? 'Failed' : '失败')
+            : (en ? 'Completed' : '完成');
+    const reason = job.failureReason
+        ? `<p class="job-fail">${escapeHtml(job.failureReason)}</p>`
+        : '';
+    const progress = job.progressText
+        ? `<p class="muted">${escapeHtml(job.progressText)}</p>`
+        : '';
+    return `<section class="job-panel job-${job.state}">
+        <div class="run-panel-title">${escapeHtml(en ? 'Generate / CLI' : '生成 / 命令')}</div>
+        <p><strong>${escapeHtml(stateLabel)}</strong> · ${escapeHtml(job.title)}</p>
+        <p class="muted"><code>${escapeHtml(job.command)}</code></p>
+        ${progress}
+        ${reason}
+    </section>`;
+}
+
+function renderHostActions(diagnosis: ReadyGapDiagnosis, locale: string): string {
+    const en = locale === 'en';
+    const generateLabel = en ? 'Update Wiki' : '更新 Wiki';
+    const verifyLabel = en ? 'Verify' : '验证';
+    const publishLabel = en ? 'Publish READY' : '发布 READY';
+    const generateClass = diagnosis.nextAction === 'generate' || diagnosis.nextAction === 'none' ? 'primary' : '';
+    const verifyClass = diagnosis.nextAction === 'verify' ? 'primary' : '';
+    const publishClass = diagnosis.nextAction === 'publish' ? 'primary' : '';
+    return `
+        <div class="actions">
+            <button class="${generateClass}" data-command="update">${escapeHtml(generateLabel)}</button>
+            <button class="${verifyClass}" data-command="verify">${escapeHtml(verifyLabel)}</button>
+            <button class="icon" title="${escapeHtml(en ? 'Refresh' : '刷新')}" data-command="refresh">↻</button>
+        </div>
+        <div class="actions actions-secondary-row">
+            <button class="${publishClass}" data-command="publish">${escapeHtml(publishLabel)}</button>
+            <button data-command="sync">${escapeHtml(en ? 'Sync' : '同步')}</button>
+            <span></span>
+        </div>
+    `;
 }
 
 async function loadLlmDisplayInfo(workspaceRoot: string, secrets: vscode.SecretStorage): Promise<LlmDisplayInfo> {
@@ -860,10 +947,119 @@ function getGenerateCommand(): string {
 async function runUpdateWiki(secrets: vscode.SecretStorage): Promise<void> {
     try {
         const env = await buildLlmTerminalEnv(secrets);
-        runTerminalCommand('Repo Wiki Generate', getGenerateCommand(), env);
+        const secretValue = await secrets.get(SECRET_LLM_API_KEY);
+        const cfg = getConfiguredLlmValues();
+        await runTrackedCliCommand('Repo Wiki Generate', getGenerateCommand(), env, secretValue, cfg.apiKeyEnv);
     } catch (error) {
         vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
     }
+}
+
+function getRepoWikiOutput(): vscode.OutputChannel {
+    if (!repoWikiOutput) {
+        repoWikiOutput = vscode.window.createOutputChannel('Repo Wiki');
+    }
+    return repoWikiOutput;
+}
+
+async function runTrackedCliCommand(
+    title: string,
+    command: string,
+    env?: Record<string, string>,
+    secretValue?: string,
+    apiKeyEnv?: string,
+): Promise<void> {
+    try {
+        ensureWorkspaceTrusted();
+    } catch (error) {
+        vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+        return;
+    }
+    if (activeCli) {
+        vscode.window.showWarningMessage('A Repo Wiki command is already running.');
+        return;
+    }
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+        vscode.window.showWarningMessage('No workspace folder open');
+        return;
+    }
+
+    const channel = getRepoWikiOutput();
+    channel.appendLine(`$ ${command}`);
+    channel.show(true);
+    sidebarProvider?.setJobStatus({
+        state: 'running',
+        title,
+        command,
+        progressText: 'Starting…',
+    });
+
+    await vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title,
+            cancellable: true,
+        },
+        (progress, token) => new Promise<void>((resolve) => {
+            const child = childProcess.spawn(command, {
+                cwd: workspaceRoot,
+                env: { ...process.env, ...env },
+                shell: true,
+            });
+            activeCli = child;
+            let combined = '';
+            const onChunk = (chunk: Buffer) => {
+                const text = chunk.toString('utf8');
+                combined += text;
+                channel.append(redactDiagnostics(text, secretValue, apiKeyEnv));
+                const summary = summarizeCliOutput(combined, null);
+                progress.report({ message: summary.progressText || 'running' });
+                sidebarProvider?.setJobStatus({
+                    state: 'running',
+                    title,
+                    command,
+                    progressText: summary.progressText,
+                }, false);
+            };
+            child.stdout?.on('data', onChunk);
+            child.stderr?.on('data', onChunk);
+            token.onCancellationRequested(() => {
+                child.kill();
+            });
+            child.on('close', (code) => {
+                activeCli = undefined;
+                const summary = summarizeCliOutput(combined, code ?? 1);
+                const failed = code !== 0;
+                sidebarProvider?.setJobStatus({
+                    state: failed ? 'failed' : 'succeeded',
+                    title,
+                    command,
+                    progressText: summary.progressText,
+                    failureReason: failed ? summary.failureReason : undefined,
+                    exitCode: code ?? undefined,
+                });
+                if (failed) {
+                    vscode.window.showErrorMessage(`${title} failed: ${summary.failureReason ?? `exit ${code}`}`);
+                } else {
+                    vscode.window.showInformationMessage(`${title} completed.`);
+                }
+                resolve();
+            });
+            child.on('error', (error) => {
+                activeCli = undefined;
+                const message = error instanceof Error ? error.message : String(error);
+                sidebarProvider?.setJobStatus({
+                    state: 'failed',
+                    title,
+                    command,
+                    failureReason: message,
+                });
+                vscode.window.showErrorMessage(`${title} failed: ${message}`);
+                resolve();
+            });
+        }),
+    );
 }
 
 function getWorkspaceRoot(): string | undefined {
@@ -1729,6 +1925,27 @@ function baseHtml(body: string): string {
         }
         .notice.stale p {
             color: var(--vscode-editorWarning-foreground, var(--vscode-sideBar-foreground));
+        }
+        .gap-panel, .job-panel {
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 12px;
+            margin-bottom: 12px;
+        }
+        .job-fail {
+            color: var(--vscode-errorForeground, #f14c4c);
+            margin: 6px 0 0;
+            line-height: 1.4;
+        }
+        .job-running {
+            border-left: 3px solid var(--button);
+            padding-left: 8px;
+        }
+        .job-failed {
+            border-left: 3px solid var(--vscode-errorForeground, #f14c4c);
+            padding-left: 8px;
+        }
+        .actions-secondary-row {
+            margin-top: 8px;
         }
         .actions {
             display: grid;

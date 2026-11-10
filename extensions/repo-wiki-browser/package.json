@@ -20,6 +20,7 @@
     "onCommand:repoWikiBrowser.refreshTree",
     "onCommand:repoWikiBrowser.runVerify",
     "onCommand:repoWikiBrowser.updateWiki",
+    "onCommand:repoWikiBrowser.releasePublish",
     "onCommand:repoWikiBrowser.syncWiki",
     "onCommand:repoWikiBrowser.openPage",
     "onCommand:repoWikiBrowser.openSourceCitation",
@@ -55,6 +56,11 @@
       {
         "command": "repoWikiBrowser.updateWiki",
         "title": "Update Wiki",
+        "category": "Repo Wiki"
+      },
+      {
+        "command": "repoWikiBrowser.releasePublish",
+        "title": "Release Publish READY",
         "category": "Repo Wiki"
       },
       {
@@ -112,8 +118,8 @@
       "properties": {
         "repoWikiBrowser.generateCommand": {
           "type": "string",
-          "default": "uv run repo-wiki generate --profile qoder-like",
-          "description": "Shell command sent to the integrated terminal for Update Wiki. Default expects `uv` on PATH and a workspace where `repo-wiki` resolves (e.g. via project pyproject). Override if you use pipx, conda, or `python -m repo_wiki`. The extension does not embed the Python CLI."
+          "default": "uv run repo-wiki generate --profile qoder-like --output .repo-agent-eval",
+          "description": "Shell command run for Update Wiki. Default expects `uv` on PATH and writes the isolated qoder-like output to `.repo-agent-eval`. Override if you use pipx, conda, or `python -m repo_wiki`. Progress and failure reason appear in the sidebar and the Repo Wiki output channel. The extension does not embed the Python CLI."
         },
         "repoWikiBrowser.llm.source": {
           "type": "string",
@@ -157,7 +163,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
-    "test": "node --check ./out/extension.js"
+    "test": "npm run compile && node --check ./out/extension.js && node ./test/hostLoop.test.js"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
