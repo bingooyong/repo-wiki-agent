@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "description": "Read-only external Qoder reference baselines used for gap analysis. Never fed to planner/composer.",
+  "hash_algorithm": "sha256(relpath_posix + NUL + file_bytes + NUL), files sorted by relpath",
+  "contract_doc": "docs/specs/qoder-knowledge-card-baseline-contract.md",
+  "baselines": [
+    {
+      "id": "ai-testing-knowledge-zh",
+      "kind": "knowledge_cards",
+      "source_repository": "ai-testing",
+      "source_repo_root": "/Users/bingooyong/Code/01Code/github.com/bingooyong/ai-testing",
+      "source_path": ".qoder/repowiki/knowledge/zh",
+      "commit": "99e14d049fc3b7e0ea2e3d08e29dfd2eb4700b5a",
+      "branch": "main",
+      "exported_at": "2026-11-22T06:14:22Z",
+      "read_only": true,
+      "content_hash": "10908d78bbef67c721192112c9b7d93cf72c241788dfdda66877c355f51aa71e",
+      "file_count": 88,
+      "stats": {
+        "schema_version": 1,
+        "locale": "zh-CN",
+        "commit": "99e14d049fc3b7e0ea2e3d08e29dfd2eb4700b5a",
+        "branch": "main",
+        "exported_at": "2026-11-22T06:14:22Z",
+        "module_count": 15,
+        "module_yaml_count": 15,
+        "markdown_file_count": 72,
+        "card_type_counts": {
+          "architecture_design": 15,
+          "build_system": 1,
+          "coding_conventions": 15,
+          "configuration_system": 1,
+          "dependency_management": 1,
+          "error_handling": 1,
+          "logging_system": 1,
+          "overview": 15,
+          "tech_stack": 15,
+          "unique_setup_and_commands": 7
+        },
+        "module_card_counts": {
+          "architecture_design": 15,
+          "coding_conventions": 15,
+          "overview": 15,
+          "tech_stack": 15,
+          "unique_setup_and_commands": 7
+        },
+        "repo_card_counts": {
+          "build_system": 1,
+          "configuration_system": 1,
+          "dependency_management": 1,
+          "error_handling": 1,
+          "logging_system": 1
+        },
+        "relation_counts": {
+          "depends_on": 0,
+          "related_to": 6,
+          "version_of": 1
+        },
+        "relation_reason_coverage": 1.0,
+        "evidence": {
+          "file_ref_count": 175,
+          "total_chars": 44563,
+          "refs_per_1k_chars": 3.927
+        },
+        "missing_module_yaml": [],
+        "missing_card_files": []
+      },
+      "compare_support": {
+        "repo_wiki_compare": false,
+        "reason": "compare_command has no knowledge/ parsing or card metrics; knowledge-card export belongs to task 11-22-knowledge-card-contract."
+      }
+    },
+    {
+      "id": "ai-testing-longform-zh",
+      "kind": "long_form_wiki",
+      "source_repository": "ai-testing",
+      "source_repo_root": "/Users/bingooyong/Code/01Code/github.com/bingooyong/ai-testing",
+      "source_path": ".qoder/repowiki/zh",
+      "commit": "99e14d049fc3b7e0ea2e3d08e29dfd2eb4700b5a",
+      "branch": "main",
+      "exported_at": "2026-11-22T06:48:57Z",
+      "read_only": true,
+      "content_hash": "04889c476170bc011c5f65d58cebaedde54c68878e1090a20cf0744450c0ff20",
+      "file_count": 71,
+      "stats": {
+        "page_count": 70,
+        "catalog_count": 70,
+        "root_catalog_count": 13,
+        "wiki_item_count": 70,
+        "knowledge_relation_count": 57,
+        "progress_status": "completed",
+        "present_status": "COMPLETED",
+        "commit": "99e14d049fc3b7e0ea2e3d08e29dfd2eb4700b5a",
+        "top_level_entries": [
+          "Silver Needle 集成.md",
+          "交互式界面",
+          "产品包系统",
+          "快速开始.md",
+          "执行引擎",
+          "扩展开发指南",
+          "数据模型和契约.md",
+          "智能体系统",
+          "架构设计",
+          "测试策略.md",
+          "质量门禁系统",
+          "部署和运维.md",
+          "项目概述.md"
+        ],
+        "mermaid_coverage": 1.0,
+        "cite_block_coverage": 1.0,
+        "line_anchor_coverage": 0.9857,
+        "page_chars": {
+          "min": 9675,
+          "median": 17287,
+          "max": 30988,
+          "total": 1252399
+        }
+      },
+      "compare_support": {
+        "repo_wiki_compare": false,
+        "reason": "Shape is compatible, but register_single_qoder_baseline forces baseline == <target repo>/.qoder/repowiki/zh, so a cross-repo ai-testing baseline cannot be consumed without writing generated output into ai-testing (forbidden)."
+      }
+    }
+  ]
+}

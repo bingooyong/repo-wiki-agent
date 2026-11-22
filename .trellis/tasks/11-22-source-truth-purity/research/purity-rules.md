@@ -6,6 +6,18 @@
 - `docs/03-module-map.md`：模块职责为 "Handles API routes /path"、"Handles models instanceof, in"；模块文档链接写成 `../docs/modules/...`（应为 `modules/...`）。
 - `docs/01-architecture.md`：残留 `${incremental_governance}`；技术栈误写 Javascript/Express，实际为 Python + Typer CLI。
 
+## 事实修正（2026-11-22 实测，任务 1 采集）
+
+`ai/source-of-truth/` **当前已净化**：`data-models.yaml` 41 个模型、0 条 `node_modules`/`tests/` 污染，`module-index.yaml` 职责为真实描述（无 "Handles API routes"），`api-index.yaml` 为 `endpoints: []`。
+
+因此本任务的重心不是"重新净化扫描器输出"，而是：
+
+1. 上述污染仍活在**生成文档** `docs/0*.md` 里 → 必须走重生成链路修复，并加回归防止复发；
+2. 扫描/评分规则仍需合同测试锁死，避免下一次 index 把污染带回来；
+3. 验收以"重生成后的 docs"为准，不能只看 YAML 干净就宣布完成。
+
+证据见 `docs/eval/2026-11-22-ai-testing-baseline-gap-report.md` §0、§2。
+
 ## 净化规则
 
 1. 默认排除 `node_modules`、`.venv`、`dist`、`build`、`.mypy_cache`、`.ruff_cache` 及生成目录；排除规则必须有回归测试。

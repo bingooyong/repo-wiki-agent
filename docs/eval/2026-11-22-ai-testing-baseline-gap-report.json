@@ -1,0 +1,282 @@
+{
+  "task": "11-22-baseline-ai-testing-wiki",
+  "date": "2026-11-22",
+  "registry": "ai/baselines/registry.json",
+  "registry_status": "PASS",
+  "hash_algorithm": "sha256(relpath_posix + NUL + file_bytes + NUL), files sorted by relpath",
+  "baseline_commit": "99e14d049fc3b7e0ea2e3d08e29dfd2eb4700b5a",
+  "baselines": {
+    "ai-testing-knowledge-zh": {
+      "content_hash": "10908d78bbef67c721192112c9b7d93cf72c241788dfdda66877c355f51aa71e",
+      "file_count": 88,
+      "stats": {
+        "schema_version": 1,
+        "locale": "zh-CN",
+        "commit": "99e14d049fc3b7e0ea2e3d08e29dfd2eb4700b5a",
+        "branch": "main",
+        "exported_at": "2026-11-22T06:14:22Z",
+        "module_count": 15,
+        "module_yaml_count": 15,
+        "markdown_file_count": 72,
+        "card_type_counts": {
+          "architecture_design": 15,
+          "build_system": 1,
+          "coding_conventions": 15,
+          "configuration_system": 1,
+          "dependency_management": 1,
+          "error_handling": 1,
+          "logging_system": 1,
+          "overview": 15,
+          "tech_stack": 15,
+          "unique_setup_and_commands": 7
+        },
+        "module_card_counts": {
+          "architecture_design": 15,
+          "coding_conventions": 15,
+          "overview": 15,
+          "tech_stack": 15,
+          "unique_setup_and_commands": 7
+        },
+        "repo_card_counts": {
+          "build_system": 1,
+          "configuration_system": 1,
+          "dependency_management": 1,
+          "error_handling": 1,
+          "logging_system": 1
+        },
+        "relation_counts": {
+          "depends_on": 0,
+          "related_to": 6,
+          "version_of": 1
+        },
+        "relation_reason_coverage": 1.0,
+        "evidence": {
+          "file_ref_count": 175,
+          "total_chars": 44563,
+          "refs_per_1k_chars": 3.927
+        },
+        "missing_module_yaml": [],
+        "missing_card_files": []
+      }
+    },
+    "ai-testing-longform-zh": {
+      "content_hash": "04889c476170bc011c5f65d58cebaedde54c68878e1090a20cf0744450c0ff20",
+      "file_count": 71,
+      "stats": {
+        "page_count": 70,
+        "catalog_count": 70,
+        "root_catalog_count": 13,
+        "wiki_item_count": 70,
+        "knowledge_relation_count": 57,
+        "progress_status": "completed",
+        "present_status": "COMPLETED",
+        "commit": "99e14d049fc3b7e0ea2e3d08e29dfd2eb4700b5a",
+        "top_level_entries": [
+          "Silver Needle 集成.md",
+          "交互式界面",
+          "产品包系统",
+          "快速开始.md",
+          "执行引擎",
+          "扩展开发指南",
+          "数据模型和契约.md",
+          "智能体系统",
+          "架构设计",
+          "测试策略.md",
+          "质量门禁系统",
+          "部署和运维.md",
+          "项目概述.md"
+        ],
+        "mermaid_coverage": 1.0,
+        "cite_block_coverage": 1.0,
+        "line_anchor_coverage": 0.9857,
+        "page_chars": {
+          "min": 9675,
+          "median": 17287,
+          "max": 30988,
+          "total": 1252399
+        }
+      }
+    }
+  },
+  "repo_wiki_current": {
+    "ready_release_present": false,
+    "knowledge_export_present": false,
+    "reference_run": ".repo-agent-eval/dogfood-fix-smoke",
+    "page_count": 8,
+    "top_level_entries": 2,
+    "mermaid_coverage": 0.375,
+    "cite_block_coverage": 1.0,
+    "line_anchor_coverage": 0.0,
+    "page_chars_median": 2440
+  },
+  "source_of_truth_state": {
+    "model_count": 41,
+    "polluted_model_count": 0,
+    "api_endpoints": 0
+  },
+  "generated_docs_evidence": {
+    "docs/01-architecture.md": {
+      "placeholder_lines": [
+        171
+      ],
+      "wrong_stack_line": 211
+    },
+    "docs/03-module-map.md": {
+      "generic_responsibility_lines": [
+        22,
+        28,
+        34,
+        43,
+        44
+      ]
+    },
+    "docs/05-data-model.md": {
+      "node_modules_entity_lines": [
+        14,
+        54,
+        274,
+        275
+      ],
+      "test_fixture_table_lines": [
+        211,
+        273
+      ]
+    }
+  },
+  "gaps": [
+    {
+      "id": "G1",
+      "form": "knowledge_cards",
+      "metric": "module_and_card_export",
+      "baseline": 15,
+      "repo_wiki": 0,
+      "owner_task": "4 knowledge-card-contract"
+    },
+    {
+      "id": "G2",
+      "form": "knowledge_cards",
+      "metric": "relation_reason_coverage",
+      "baseline": 1.0,
+      "repo_wiki": null,
+      "owner_task": "4 knowledge-card-contract (depends on 3)"
+    },
+    {
+      "id": "G3",
+      "form": "knowledge_cards",
+      "metric": "evidence_refs_per_1k_chars",
+      "baseline": 3.927,
+      "repo_wiki": null,
+      "owner_task": "3 + 4"
+    },
+    {
+      "id": "G4",
+      "form": "knowledge_cards",
+      "metric": "conditional_unique_setup_cards",
+      "baseline": "7/15",
+      "repo_wiki": null,
+      "owner_task": "4 knowledge-card-contract"
+    },
+    {
+      "id": "G5",
+      "form": "long_form",
+      "metric": "page_count",
+      "baseline": 70,
+      "repo_wiki": 8,
+      "owner_task": "5 ia-page-quality"
+    },
+    {
+      "id": "G6",
+      "form": "long_form",
+      "metric": "top_level_ia_entries",
+      "baseline": 13,
+      "repo_wiki": 2,
+      "owner_task": "5 ia-page-quality"
+    },
+    {
+      "id": "G7",
+      "form": "long_form",
+      "metric": "page_chars_median",
+      "baseline": 17287,
+      "repo_wiki": 2440,
+      "owner_task": "5 ia-page-quality"
+    },
+    {
+      "id": "G8",
+      "form": "long_form",
+      "metric": "mermaid_coverage",
+      "baseline": 1.0,
+      "repo_wiki": 0.375,
+      "owner_task": "5 ia-page-quality"
+    },
+    {
+      "id": "G9",
+      "form": "long_form",
+      "metric": "line_anchor_coverage",
+      "baseline": 0.9857,
+      "repo_wiki": 0.0,
+      "owner_task": "3 evidence-citation-gate"
+    },
+    {
+      "id": "G10",
+      "form": "long_form",
+      "metric": "cite_block_coverage",
+      "baseline": 1.0,
+      "repo_wiki": 1.0,
+      "owner_task": "3 evidence-citation-gate"
+    },
+    {
+      "id": "G11",
+      "form": "release",
+      "metric": "ready_release_present",
+      "baseline": "COMPLETED",
+      "repo_wiki": false,
+      "owner_task": "6 ide-release-ux"
+    },
+    {
+      "id": "G12",
+      "form": "purity",
+      "metric": "generated_docs_pollution",
+      "baseline": "clean",
+      "repo_wiki": "present",
+      "owner_task": "2 source-truth-purity"
+    },
+    {
+      "id": "G13",
+      "form": "purity",
+      "metric": "module_responsibility_expression",
+      "baseline": "specific",
+      "repo_wiki": "generic_template",
+      "owner_task": "2 + 5"
+    },
+    {
+      "id": "G14",
+      "form": "tooling",
+      "metric": "compare_consumes_baseline",
+      "baseline": "both_forms",
+      "repo_wiki": "unsupported",
+      "owner_task": "4 + 8"
+    }
+  ],
+  "compare_support": {
+    "ai-testing-knowledge-zh": {
+      "repo_wiki_compare": false,
+      "reason": "compare_command has no knowledge/ parsing or card metrics; knowledge-card export belongs to task 11-22-knowledge-card-contract."
+    },
+    "ai-testing-longform-zh": {
+      "repo_wiki_compare": false,
+      "reason": "Shape is compatible, but register_single_qoder_baseline forces baseline == <target repo>/.qoder/repowiki/zh, so a cross-repo ai-testing baseline cannot be consumed without writing generated output into ai-testing (forbidden)."
+    }
+  },
+  "limitations": [
+    "ai-testing .qoder/ is untracked in its own repo; freeze authority is this registry content_hash.",
+    "ai-testing worktree had pre-existing unrelated modifications; this task performed read-only access and two identical fingerprint reads.",
+    "No READY release exists in repo-agent; run metrics are process artifacts, not product claims.",
+    "Baseline line_anchor_coverage is 0.9857, so task 3 should calibrate rather than demand 100%.",
+    "ruff is not installed in .venv; lint was not run this round."
+  ],
+  "reproduce": [
+    "python scripts/verify_baseline_registry.py --update",
+    "python scripts/verify_baseline_registry.py --json .repo-agent-eval/baseline-registry-verify.json",
+    ".venv/bin/python -m pytest tests/test_external_baseline_registry.py -q"
+  ]
+}

@@ -67,6 +67,17 @@ These guides help you **ask the right questions before coding**.
 
 ---
 
+### When Planning Against Reference Artifacts (baselines, exports, generated docs)
+
+- [ ] Does the artifact actually exist on disk, and is it complete? Measure it — don't trust a PRD or a screenshot
+- [ ] Is the "pollution" in the source of truth, or only in stale generated output? They need different fixes
+- [ ] Is the reference repo writable for this task? If read-only, which comparisons are impossible?
+- [ ] Are the numbers in your report measured by a script, or typed by hand?
+
+→ Read [Baseline Registry Code Spec](../backend/baseline-registry.md)
+
+---
+
 ## Pre-Modification Rule (CRITICAL)
 
 > **Before changing ANY value, ALWAYS search first!**

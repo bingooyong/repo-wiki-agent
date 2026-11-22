@@ -4,6 +4,10 @@
 
 消除扫描与生成链路中的伪事实，保证 `ai/source-of-truth/` 与自生成 docs 只描述产品真实结构。
 
+## 事实修正（2026-11-22）
+
+任务 1 实测：`ai/source-of-truth/` 已净化（41 模型、0 污染、职责描述真实）。污染残留在生成文档 `docs/01/03/05`。本任务重心相应调整为**重生成 + 规则合同测试防复发**，而非重新净化事实源。详见 `research/purity-rules.md` 与 `docs/eval/2026-11-22-ai-testing-baseline-gap-report.md`。
+
 ## Requirements
 
 - 扫描净化（`repo_wiki/scanner/`）：

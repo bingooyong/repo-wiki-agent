@@ -19,9 +19,9 @@
    - 模块卡：`概述.md`(overview)、`架构设计.md`(architecture_design)、`技术栈.md`(tech_stack)、`编码规范.md`(coding_conventions)，root 另有 `特殊配置与命令.md`(unique_setup_and_commands)。
    - 仓库横切卡（`kk_repo_cards`）：`build_system`、`configuration_system`、`dependency_management`、`error_handling`、`logging_system`。
    - 卡片是精炼段落（概述卡一句话、架构卡一段讲清模块编排与契约），不是长列表。
-2. **长文 Wiki**（截图，生成中 61/70，commit `99e14d0`）：按子系统组织——项目概述/快速开始/架构设计（智能体系统架构、状态机与生命周期管理、数据契约与产物管理）/智能体系统（BaseAgent 基类、内置智能体详解、Worker 适配器系统、Prompt 管理系统、自定义智能体开发指南）/执行引擎/质量门禁系统。页面标题采用"中文名 + 英文类名 + 职责"。该形态本机尚未落盘，需后续补齐导出。
+2. **长文 Wiki**（**已落盘且已完成**：70 页、13 个顶层 IA 条目、`progress_status=completed`，commit `99e14d0`）：按子系统组织——项目概述/快速开始/架构设计/智能体系统/执行引擎/质量门禁系统/产品包系统/交互式界面/数据模型和契约/Silver Needle 集成/扩展开发指南/测试策略/部署和运维。页面标题采用"中文名 + 英文类名 + 职责"，每页带 `<cite>` 引用块，mermaid 覆盖 100%、`#L` 行号锚点覆盖 98.57%。早期"仅截图 61/70、尚未落盘"的判断已被任务 1 实测推翻。
 
-repo-agent 目前只有 qoder-like 长文 Wiki（`repowiki/zh/{content,meta,manifest.json}`），**没有知识卡导出契约**，这是本轮迭代最重要的新方向。
+repo-agent 当前**没有 READY release**（`.repo-agent-eval/repowiki/zh/` 不存在，最好的 run 只有 8 页），也**没有知识卡导出契约**，这是本轮迭代最重要的新方向。另需注意：`ai/source-of-truth/` 已净化，伪实体污染残留在生成文档 `docs/01/03/05`，任务 2 以重生成与防复发合同测试为主。基线实测与差距清单见 `docs/eval/2026-11-22-ai-testing-baseline-gap-report.md`。
 
 ## Goal
 
