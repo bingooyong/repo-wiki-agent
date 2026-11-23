@@ -12,6 +12,7 @@
 - Citation 点击跳源码：解析引用元数据，`vscode.open` 跳转，Markdown Preview 提供 fallback，引用失效给 warning。
 - 术语统一：README、`docs/00-overview.md` 等明确 run（过程产物）/ strict verify（候选判定）/ release（稳定发布面）/ plugin（只读 `.repo-agent-eval/repowiki/zh/manifest.json`）。
 - 若知识卡导出落地，插件提供知识卡与长文两种浏览入口，默认仍读 READY release。
+- **（2026-11-23 自对标新增）** 徽标数据契约依赖 manifest `page_registry[*].generation_mode`（llm/rule/fallback）与引用元数据；当前 manifest 缺这些字段（见任务 `11-23-llm-preflight-fallback-gate`），本任务消费前先校验字段存在，缺失时显示"未知"而非假造 LLM 标记。
 
 ## Out of Scope
 

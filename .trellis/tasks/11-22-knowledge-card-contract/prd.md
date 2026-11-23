@@ -21,8 +21,8 @@
 - `_index.yaml` 字段对齐基线：`schema_version`、`locale`、`commit`、`branch`、`exported_at`、`modules{dir_name,title,scope,source_files,children,depends_on,related_to,version_of}`。
 - `_module.yaml` 字段对齐：`module_path`、`title`、`scope`、`depends_on`、`related_to`、`kk_module_id`、`kk_cards`、`kk_repo_cards`；ID 用确定性 UUID（如同输入同 ID），不依赖外部服务。
 - 卡片生成规则：
-  - 模块卡：`overview`、`architecture_design`、`tech_stack`、`coding_conventions` 为默认卡；`unique_setup_and_commands` 仅在有证据时生成。
-  - 仓库横切卡（`kk_repo_cards`）：`build_system`、`configuration_system`、`dependency_management`、`error_handling`、`logging_system`，仅在有证据时生成。
+  - 模块卡：`overview`、`architecture_design` 为每模块必有；`tech_stack`、`coding_conventions`、`unique_setup_and_commands` 为**条件卡**（2026-11-23 repo-agent 基线实测 37/40、37/40、13/40，缺席模块如 `scanner`/`adapter_qoder`），证据不足则不生成。
+  - 仓库横切卡（`kk_repo_cards`）：已知集合 `build_system`、`configuration_system`、`dependency_management`、`error_handling`、`logging_system`，仅在有证据时生成；**类型集合不封闭**——repo-agent 基线新增 `frontend_style`（英文文件名、挂 root），schema 校验须接受并记录未知横切类型，不得硬失败或丢弃。
   - 卡片为精炼 prose（对标基线：概述一句话、架构一段讲清编排与契约），不是字段清单；证据不足则不生成该卡，而不是编造。
 - 模块关系：`depends_on`/`related_to` 必须带 `reason`，且 reason 引用具体文件/符号/调用关系（对标 `run_petclinic_pilot.py` 示例）；`version_of` 用于平行变体。
 - 复用任务 2 的净化事实源与任务 3 的证据门禁；提供 CLI 入口（profile 或子命令）与 manifest 关联。
@@ -41,6 +41,7 @@
 
 ## References
 
-- 基线：`ai-testing/.qoder/repowiki/knowledge/zh/_index.yaml`、`.../AI Test OS 多子模块编排仓库/_module.yaml`
+- 基线：`ai-testing/.qoder/repowiki/knowledge/zh/_index.yaml`、`.../AI Test OS 多子模块编排仓库/_module.yaml`；**第二基线**：本仓 `.qoder/repowiki/knowledge/zh`（40 模块 / 173 卡，registry id `repo-agent-knowledge-zh`，hash `61bb4c50…da3a`）
+- 契约：`docs/specs/qoder-knowledge-card-baseline-contract.md`（2026-11-23 已按双基线修订条件卡与横切类型集合）
 - 代码：`repo_wiki/scanner/knowledge_model_v3.py`、`repo_wiki/ia/taxonomy_compiler.py`、`repo_wiki/knowledge_plan/`、`repo_wiki/orchestration/eval_layout.py`
 - 依赖：任务 1（契约文档）、2（事实纯度）、3（证据门禁）

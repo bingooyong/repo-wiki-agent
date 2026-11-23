@@ -71,6 +71,74 @@
       }
     },
     {
+      "id": "repo-agent-knowledge-zh",
+      "kind": "knowledge_cards",
+      "source_repository": "repo-agent",
+      "source_repo_root": "/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent",
+      "source_path": ".qoder/repowiki/knowledge/zh",
+      "commit": "1de0d96907ff1bdf1dc991b34ef2542144a33a07",
+      "branch": "task/11-22-source-truth-purity",
+      "exported_at": "2026-11-23T04:05:16Z",
+      "read_only": true,
+      "content_hash": "61bb4c50dc98494033f2e7393cbbc3dafa49773470de87c3f59c5f571830da3a",
+      "file_count": 214,
+      "stats": {
+        "schema_version": 1,
+        "locale": "zh-CN",
+        "commit": "1de0d96907ff1bdf1dc991b34ef2542144a33a07",
+        "branch": "task/11-22-source-truth-purity",
+        "exported_at": "2026-11-23T04:05:16Z",
+        "module_count": 40,
+        "module_yaml_count": 40,
+        "markdown_file_count": 173,
+        "card_type_counts": {
+          "architecture_design": 40,
+          "build_system": 1,
+          "coding_conventions": 37,
+          "configuration_system": 1,
+          "dependency_management": 1,
+          "error_handling": 1,
+          "frontend_style": 1,
+          "logging_system": 1,
+          "overview": 40,
+          "tech_stack": 37,
+          "unique_setup_and_commands": 13
+        },
+        "module_card_counts": {
+          "architecture_design": 40,
+          "coding_conventions": 37,
+          "frontend_style": 1,
+          "overview": 40,
+          "tech_stack": 37,
+          "unique_setup_and_commands": 13
+        },
+        "repo_card_counts": {
+          "build_system": 1,
+          "configuration_system": 1,
+          "dependency_management": 1,
+          "error_handling": 1,
+          "logging_system": 1
+        },
+        "relation_counts": {
+          "depends_on": 0,
+          "related_to": 17,
+          "version_of": 0
+        },
+        "relation_reason_coverage": 1.0,
+        "evidence": {
+          "file_ref_count": 394,
+          "total_chars": 86722,
+          "refs_per_1k_chars": 4.5433
+        },
+        "missing_module_yaml": [],
+        "missing_card_files": []
+      },
+      "compare_support": {
+        "repo_wiki_compare": false,
+        "reason": "Knowledge-card dimension is not parsed by compare_command; export contract belongs to task 11-22-knowledge-card-contract."
+      }
+    },
+    {
       "id": "ai-testing-longform-zh",
       "kind": "long_form_wiki",
       "source_repository": "ai-testing",

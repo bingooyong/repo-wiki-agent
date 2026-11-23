@@ -54,20 +54,23 @@ knowledge/zh/
 
 ## 4. 卡片类型与文件名映射
 
-| type | 文件名 | 基线数量 | 备注 |
-|------|--------|----------|------|
-| `overview` | `概述.md` | 15 | 每模块必有；基线为一句话 |
-| `architecture_design` | `架构设计.md` | 15 | 每模块必有；一段讲清编排与契约 |
-| `tech_stack` | `技术栈.md` | 15 | 每模块必有 |
-| `coding_conventions` | `编码规范.md` | 15 | 每模块必有 |
-| `unique_setup_and_commands` | `特殊配置与命令.md` | 7 | **条件卡**：仅当模块有独特配置/命令证据 |
-| `build_system` | `build_system.md` | 1 | 仓库横切卡，挂 root |
-| `configuration_system` | `configuration_system.md` | 1 | 同上 |
-| `dependency_management` | `dependency_management.md` | 1 | 同上 |
-| `error_handling` | `error_handling.md` | 1 | 同上 |
-| `logging_system` | `logging_system.md` | 1 | 同上 |
+| type | 文件名 | ai-testing | repo-agent | 备注 |
+|------|--------|-----------|------------|------|
+| `overview` | `概述.md` | 15 | 40 | 每模块必有；基线为一句话 |
+| `architecture_design` | `架构设计.md` | 15 | 40 | 每模块必有；一段讲清编排与契约 |
+| `tech_stack` | `技术栈.md` | 15 | 37 | **条件卡**：repo-agent 中 `adapter_qoder`/`generator`/`scanner` 缺失 |
+| `coding_conventions` | `编码规范.md` | 15 | 37 | **条件卡**：repo-agent 中 `adapter_qoder`/`ai_source_of_truth`/`scanner` 缺失 |
+| `unique_setup_and_commands` | `特殊配置与命令.md` | 7 | 13 | **条件卡**：仅当模块有独特配置/命令证据 |
+| `build_system` | `build_system.md` | 1 | 1 | 仓库横切卡，挂 root |
+| `configuration_system` | `configuration_system.md` | 1 | 1 | 同上 |
+| `dependency_management` | `dependency_management.md` | 1 | 1 | 同上 |
+| `error_handling` | `error_handling.md` | 1 | 1 | 同上 |
+| `logging_system` | `logging_system.md` | 1 | 1 | 同上 |
+| `frontend_style` | `frontend_style.md` | 0 | 1 | **新增横切卡类型**（2026-11-23 repo-agent 导出观察到），英文文件名，挂 root |
 
-合计 72 个 markdown（67 模块卡 + 5 仓库卡），15 个 `_module.yaml`，1 个 `_index.yaml` = 88 文件。
+合计：ai-testing 72 个 markdown（67 模块卡 + 5 仓库卡）/ 88 文件；repo-agent 173 个 markdown / 214 文件（40 模块）。
+
+**卡片存在性是证据条件的，不是模板全量补齐。** 早期"tech_stack/coding_conventions 每模块必有"的判断只适用于 ai-testing 那次导出；repo-agent 导出证明它们会按证据缺席。任务 4 的导出契约必须允许条件缺席，且不得为凑覆盖率编造卡片。横切卡类型集合也不封闭（`frontend_style` 为新增），schema 校验应接受已知集合之外的横切类型并记录，而不是硬失败。
 
 **卡片是精炼段落，不是长列表。** 基线全部卡片合计 44563 字符，平均每卡约 619 字符。
 

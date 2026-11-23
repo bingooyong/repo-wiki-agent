@@ -26,7 +26,8 @@
     "11-22-ia-page-quality",
     "11-22-ide-release-ux",
     "11-22-incremental-llm-cache",
-    "11-22-multi-repo-acceptance"
+    "11-22-multi-repo-acceptance",
+    "11-23-llm-preflight-fallback-gate"
   ],
   "parent": null,
   "relatedFiles": [],

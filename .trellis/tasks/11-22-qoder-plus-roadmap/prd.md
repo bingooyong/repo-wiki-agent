@@ -46,6 +46,7 @@ repo-agent 当前**没有 READY release**（`.repo-agent-eval/repowiki/zh/` 不�
 | 6 | `11-22-ide-release-ux` READY 发布与 IDE 浏览闭环 | P1 | 5 |
 | 7 | `11-22-incremental-llm-cache` 页面级增量与 LLM 缓存降本 | P2 | 5 |
 | 8 | `11-22-multi-repo-acceptance` 真实 LLM 多仓库验收与 GO 卷宗 | P2 | 4、5、6、7 |
+| 9 | `11-23-llm-preflight-fallback-gate` LLM 协议/凭据预检与 fallback 不得 READY | P0 | 无（阻塞 3、5、6、8 的真实 LLM 运行） |
 
 约束：
 
@@ -56,7 +57,7 @@ repo-agent 当前**没有 READY release**（`.repo-agent-eval/repowiki/zh/` 不�
 
 ## Acceptance Criteria
 
-- [ ] 八个子任务全部 archive，各自验收命令有记录。
+- [ ] 九个子任务全部 archive，各自验收命令有记录。
 - [ ] 本仓执行 `repo-wiki index` 后，`ai/source-of-truth/` 不再出现 `node_modules` 路径与未标注的测试夹具实体。
 - [ ] 本仓 qoder-like 全链路 `generate → verify --profile qoder-like --ci → release-publish` 通过，`docs/01-architecture.md` 无 `${...}` 占位符、技术栈与 `pyproject.toml` 一致。
 - [ ] 知识卡导出通过 schema 校验，并与 ai-testing baseline 输出对比报告（模块覆盖、卡片类型覆盖、关系 reason 覆盖）。

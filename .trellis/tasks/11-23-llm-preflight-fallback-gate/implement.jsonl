@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/11-23-llm-preflight-fallback-gate/research/llm-preflight-evidence.md", "reason": "404/401 探针证据、熔断日志、manifest 字段缺口与代码集成点"}
+{"file": "docs/specs/vscode-llm-configuration-spec.md", "reason": "LLM_* 环境变量映射与密钥禁止落盘约束，预检不得违反"}

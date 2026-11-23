@@ -1,0 +1,286 @@
+{
+  "date": "2026-11-23",
+  "title": "repo-agent self-baseline gap report: repo-wiki vs QoderCN",
+  "qoder_longform_snapshot": {
+    "path": ".repo-agent-eval/baselines/repo-agent-qoder-zh",
+    "content_sha256": "964f6beaaa79e63fa0f9bb6ceb1899e905d9c01efaafaf3040c597a958c545bb",
+    "file_count": 71,
+    "provenance": "list_wiki enumerated 71 pages; read_wiki blocked by run_active (incr run 9200a38f); bodies read read-only from plugin SQLite published snapshot 828bbdfa; line counts match list_wiki; working snapshot 12dcc886 byte-identical",
+    "metrics": {
+      "provenance": {
+        "generator": "QoderCN knowledge-center Repo Wiki",
+        "project_path": "/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent",
+        "language": "zh",
+        "source": "plugin SQLite store, published snapshot (read-only)",
+        "snapshot_id": "828bbdfa-4686-492e-bd2d-e51387a429eb",
+        "baseline_commit": "665408a99c59bd399fea9e308f5ead00b1ddd81b",
+        "note": "MCP list_wiki inventory and line counts match this export exactly; MCP read_wiki returned run_active (incremental run in progress), so bodies were read from the same store read-only. Working snapshot 12dcc886 is byte-identical for all 71 pages."
+      },
+      "page_count": 71,
+      "top_level_entry_count": 18,
+      "section_count": 11,
+      "leaf_document_count": 53,
+      "top_level_document_count": 7,
+      "mermaid_coverage": {
+        "pages": 71,
+        "total": 71,
+        "ratio": 1.0
+      },
+      "cite_block_coverage": {
+        "pages": 71,
+        "total": 71,
+        "ratio": 1.0
+      },
+      "line_anchor_coverage": {
+        "pages": 71,
+        "total": 71,
+        "ratio": 1.0
+      },
+      "section_source_coverage": {
+        "pages": 52,
+        "total": 71,
+        "ratio": 0.7324
+      },
+      "diagram_source_coverage": {
+        "pages": 45,
+        "total": 71,
+        "ratio": 0.6338
+      },
+      "toc_coverage": {
+        "pages": 71,
+        "total": 71,
+        "ratio": 1.0
+      },
+      "page_chars": {
+        "min": 13561,
+        "median": 22984,
+        "max": 37715,
+        "total": 1658957,
+        "mean": 23365.6
+      },
+      "page_lines": {
+        "min": 399,
+        "median": 615,
+        "max": 1068,
+        "total": 44971,
+        "mean": 633.4
+      },
+      "prose_density_proxy": {
+        "definition": "per-page fraction of non-empty lines that are not list/table/heading/code-fence lines, averaged over pages",
+        "mean": 0.3659,
+        "median": 0.3675,
+        "min": 0.2236,
+        "max": 0.5513,
+        "mean_excluding_fenced_code_bodies": 0.1467
+      },
+      "file_citation_links_total": 4934,
+      "distinct_cited_files": 233,
+      "mermaid_blocks_total": 479,
+      "pages_without_mermaid": [],
+      "pages_without_line_anchor": [],
+      "pages_without_toc": [],
+      "pages_without_diagram_source": [
+        "/系统架构与设计总览",
+        "/仓库扫描与源事实建模/文档扫描与数据库迁移识别",
+        "/仓库扫描与源事实建模/源码行号溯源与冲突解析",
+        "/语义索引与全文搜索/向量存储与 Embedding 客户端",
+        "/语义索引与全文搜索/FTS5 全文索引与文本分块策略",
+        "/文档生成引擎与模板系统/LLM 页面 Composer 流水线",
+        "/文档生成引擎与模板系统/上下文构建与 A/B/C 上下文策略",
+        "/文档生成引擎与模板系统/IO 读写与产物落盘",
+        "/文档生成引擎与模板系统/自定义模板与新章节类型扩展指南",
+        "/主题规划与知识计划/API 主题规划器",
+        "/主题规划与知识计划/规划持久化与身份管理",
+        "/主题规划与知识计划/知识工作计划生成",
+        "/质量验证与质量门禁/严格验证流程与质量门禁总控",
+        "/质量验证与质量门禁/评审矩阵、盲审矩阵与 Qoder 对齐度量",
+        "/LLM 提供商适配与成本治理",
+        "/LLM 提供商适配与成本治理/内置 LLM 提供商实现",
+        "/LLM 提供商适配与成本治理/LLM 预算控制与调用缓存",
+        "/LLM 提供商适配与成本治理/重试、诊断与配置",
+        "/编排系统与运行时存储/质量趋势看板与诊断聚合",
+        "/VS Code / Cursor 浏览器扩展",
+        "/VS Code / Cursor 浏览器扩展/开发环境与扩展打包",
+        "/Codex 插件与 Skills",
+        "/数据模型与源事实契约/知识计划、主题分类与 Taxonomy 契约",
+        "/部署、CI 与运维/运行环境与安装配置",
+        "/部署、CI 与运维/CI 流程与质量门禁",
+        "/故障排查与 FAQ"
+      ],
+      "citation_validity_check": {
+        "file_citation_links_total": 4934,
+        "links_to_missing_files": 10,
+        "line_anchored_links_on_existing_files": 4248,
+        "out_of_bounds_line_anchors": 1,
+        "out_of_bounds_rate": 0.0002,
+        "pages_with_out_of_bounds_anchors": 1
+      },
+      "source_label_normalization": {
+        "section_source_coverage_normalized": {
+          "pages": 68,
+          "total": 71,
+          "ratio": 0.9577
+        },
+        "diagram_source_coverage_normalized": {
+          "pages": 69,
+          "total": 71,
+          "ratio": 0.9718
+        },
+        "diagram_source_blocks_total": 427,
+        "mermaid_blocks_total": 479,
+        "diagram_source_blocks_per_mermaid_block": 0.8914,
+        "pages_with_untranslated_english_source_labels": [
+          "/仓库扫描与源事实建模/文档扫描与数据库迁移识别",
+          "/文档生成引擎与模板系统/LLM 页面 Composer 流水线",
+          "/Codex 插件与 Skills/Skills 能力说明与使用示例",
+          "/部署、CI 与运维/CI 流程与质量门禁"
+        ],
+        "source_label_variants": {
+          "章节来源": 810,
+          "图表来源": 256,
+          "图示来源": 159,
+          "本节来源": 82,
+          "Section sources": 76,
+          "分节来源": 66,
+          "节内来源": 36,
+          "小节来源": 30,
+          "节内引用来源": 15,
+          "部分来源": 13,
+          "Diagram sources": 7
+        }
+      }
+    }
+  },
+  "qoder_knowledge_baseline": {
+    "registry_id": "repo-agent-knowledge-zh",
+    "modules": 40,
+    "cards": 173,
+    "relation_reason_coverage": 1.0
+  },
+  "repo_wiki_run": {
+    "run_id": "self-compare-20261123",
+    "profile": "qoder-like",
+    "generation": "fallback-only (LLM circuit-broken after 3 consecutive tokens=0 rejects)",
+    "llm_probe": {
+      "configured_base": "https://api.minimaxi.com/anthropic",
+      "openai_protocol_result": "HTTP 404",
+      "minimax_v1_result": "HTTP 401 invalid api key",
+      "key_env": "ANTHROPIC_AUTH_TOKEN"
+    },
+    "manifest_readiness_state": "READY (defect)",
+    "metrics": {
+      "page_count": 80,
+      "mermaid_coverage": 0.4125,
+      "cite_block_coverage": 1.0,
+      "line_anchor_coverage": 0.0,
+      "toc_coverage": 1.0,
+      "section_source_coverage_normalized": 0.0,
+      "diagram_source_coverage_normalized": 0.0,
+      "prose_density_excl_code_median": 0.4259,
+      "file_citation_links": 0,
+      "page_lines_median": 82,
+      "page_chars_median": 2904
+    }
+  },
+  "same_caliber_comparison": {
+    "qoder": {
+      "page_count": 71,
+      "mermaid_coverage": 1.0,
+      "cite_block_coverage": 1.0,
+      "line_anchor_coverage": 1.0,
+      "toc_coverage": 1.0,
+      "section_source_coverage_normalized": 0.9155,
+      "diagram_source_coverage_normalized": 1.0,
+      "prose_density_excl_code_median": 0.0875,
+      "file_citation_links": 4931,
+      "page_lines_median": 615,
+      "page_chars_median": 22984
+    },
+    "repo_wiki_fallback": {
+      "page_count": 80,
+      "mermaid_coverage": 0.4125,
+      "cite_block_coverage": 1.0,
+      "line_anchor_coverage": 0.0,
+      "toc_coverage": 1.0,
+      "section_source_coverage_normalized": 0.0,
+      "diagram_source_coverage_normalized": 0.0,
+      "prose_density_excl_code_median": 0.4259,
+      "file_citation_links": 0,
+      "page_lines_median": 82,
+      "page_chars_median": 2904
+    }
+  },
+  "qoder_baseline_defects": [
+    "10 broken citation targets and 1 out-of-bounds anchor (tests/test_codex_plugin_smoke.py#L65-L98, file has 25 lines)",
+    "character corruption: \"repo_wiki/or orchestration\", \"kimestamp/io.py\", label api_topic_planner.py vs href plancer",
+    "source label drift: strict 章节来源/图表来源 73%/63%, normalized 92%/100%; 4 pages untranslated Section sources/Diagram sources; 427 source blocks for 479 mermaid blocks",
+    "diagram-heavy prose-light: prose excl code median 0.0875; one page with 14 diagrams"
+  ],
+  "gaps": [
+    {
+      "id": "G1",
+      "description": "knowledge_card_export_missing",
+      "owner_task": "4"
+    },
+    {
+      "id": "G2",
+      "description": "line_anchor_coverage 0 vs 1.0",
+      "owner_task": "3"
+    },
+    {
+      "id": "G3",
+      "description": "section/diagram source blocks 0 vs 0.92/1.0",
+      "owner_task": "3"
+    },
+    {
+      "id": "G4",
+      "description": "file:// links 0 vs 4931",
+      "owner_task": "3+6"
+    },
+    {
+      "id": "G5",
+      "description": "mermaid 0.4125 vs 1.0",
+      "owner_task": "5"
+    },
+    {
+      "id": "G6",
+      "description": "page volume 82 vs 615 lines",
+      "owner_task": "5+9"
+    },
+    {
+      "id": "G7",
+      "description": "IA dir/file collision and degraded slugs",
+      "owner_task": "5"
+    },
+    {
+      "id": "G8",
+      "description": "fallback-only run marked READY, no generation_mode",
+      "owner_task": "9"
+    },
+    {
+      "id": "G9",
+      "description": "no LLM protocol/credential preflight (404/401)",
+      "owner_task": "9"
+    },
+    {
+      "id": "G10",
+      "description": "prose metric must exclude fenced code",
+      "owner_task": "5"
+    },
+    {
+      "id": "G11",
+      "description": "citation integrity gates stricter than Qoder",
+      "owner_task": "3"
+    },
+    {
+      "id": "G12",
+      "description": "conditional cards + open cross-cutting type set",
+      "owner_task": "4"
+    }
+  ],
+  "limitations": [
+    "repo-wiki side is fallback-only; not a fair real-LLM quality verdict; rerun in task 8 after credential fix",
+    "snapshot lives in gitignored eval dir and is NOT registered as canonical baseline; freeze authority is content_sha256 above",
+    "prose density excludes fenced code bodies on both sides"
+  ]
+}
