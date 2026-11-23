@@ -49,3 +49,25 @@ Task 11-22-source-truth-purity: fixed live generation defects rather than re-cle
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: LLM preflight and fallback/mock READY gate; first in-repo Qoder compare
+<!-- trellis-session: v=2 fp=14a45c8f79929226 -->
+
+**Date**: 2026-11-23
+**Task**: LLM preflight and fallback/mock READY gate; first in-repo Qoder compare
+**Branch**: `task/11-23-llm-preflight-fallback-gate`
+
+### Summary
+
+Task 11-23-llm-preflight-fallback-gate: preflight classifies endpoint protocol mismatch, invalid credentials, unreachable provider and httpx client-init crashes (ambient NO_PROXY bare IPv6) before compose; generate aborts with zero pages on bad config. Per-page generation_mode/rejection_reason and provider/preflight metadata added; mock, circuit-broken and low-LLM-share runs are NOT_READY via new configurable min_llm_success_ratio; no strict threshold weakened; 44 gate tests, full suite only 4 known environmental failures. Real-LLM self run (80/80 pages, ~203k tokens) proved the quality gap is composer-side: 70-line pages, no file:// links, no #L anchors, no section/diagram sources, and a cite pointing at .omx/tmp scratch. QoderCN exported .qoder/repowiki/zh (71 pages) enabling the first in-repo compare: parity presence metrics 11/11 pass 0.97 while granularity is zero - task 3 must add granularity gates and scratch-dir exclusion. Reference interface fixture calibrated to both IA families; baseline registry refreshed to 4 entries after Qoder re-export.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fa0f6e6` | feat: preflight LLM config and gate fallback/mock runs out of READY |
+
+### Status
+
+[OK] **Completed**
