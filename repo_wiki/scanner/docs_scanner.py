@@ -369,6 +369,33 @@ def is_init_generated_doc(rel: str, text: str) -> bool:
     return False
 
 
+_AGENT_INSTRUCTION_NAMES = frozenset({"AGENTS.md", "CLAUDE.md", "GEMINI.md"})
+_EVAL_REPORT_NAME_RE = re.compile(r"^round\d+-report\.md$", re.IGNORECASE)
+
+
+def is_eval_or_agent_instruction_doc(rel: str) -> bool:
+    """Return True for agent instruction files and eval reports, not product docs."""
+    rel_n = _normalize_rel_path(rel)
+    if not rel_n:
+        return False
+    parts = Path(rel_n).parts
+    if any(part == ".repo-agent-eval" for part in parts):
+        return True
+    name = Path(rel_n).name
+    if name in _AGENT_INSTRUCTION_NAMES:
+        return True
+    return _EVAL_REPORT_NAME_RE.fullmatch(name) is not None
+
+
+def is_product_citation_source(rel: str, text: str = "") -> bool:
+    """Return whether a doc may be used as product identity or citation evidence."""
+    if is_eval_or_agent_instruction_doc(rel):
+        return False
+    if text and is_init_generated_doc(rel, text):
+        return False
+    return True
+
+
 @dataclass
 class _DocScanRecord:
     path: str
@@ -439,12 +466,16 @@ class DocumentationScanner:
                 if self._is_skipped_path(p):
                     continue
                 rel = str(p.relative_to(self.repo_root)).replace("\\", "/")
+                if is_eval_or_agent_instruction_doc(rel):
+                    continue
                 if docs_filter is None or docs_filter.allows(rel):
                     out[rel] = p
         for p in self.repo_root.rglob("README*"):
             if self._is_skipped_path(p) or not p.is_file():
                 continue
             rel = str(p.relative_to(self.repo_root)).replace("\\", "/")
+            if is_eval_or_agent_instruction_doc(rel):
+                continue
             if docs_filter is None or docs_filter.allows(rel):
                 out[rel] = p
 
@@ -461,6 +492,8 @@ class DocumentationScanner:
                     ):
                         continue
                     rel = str(p.relative_to(self.repo_root)).replace("\\", "/")
+                    if is_eval_or_agent_instruction_doc(rel):
+                        continue
                     if docs_filter.allows(rel):
                         out[rel] = p
         return [out[key] for key in sorted(out)]

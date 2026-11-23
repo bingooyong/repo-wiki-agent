@@ -11,11 +11,100 @@ Paths are kept workspace-relative for maximum portability.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from repo_wiki.evidence.ranking import EvidenceCandidate, PageEvidenceBinding
 from repo_wiki.orchestration.runtime_store import EvidenceSpanRecord
+
+# Writers/LLMs sometimes emit scheme prefixes. Verifier looks up the literal
+# path, so file:README.rst is treated as a missing file even when README.rst exists.
+_DROP_CITATION_SCHEMES = ("file:", "path:", "relpath:")
+_PLACEHOLDER_CITE_BODY = "start-end"
+_CITE_BLOCK_RE = re.compile(r"(<cite>\s*)([^<]+?)(\s*</cite>)")
+_BRACKET_CITE_RE = re.compile(r"(\[cite:\s*)([^\]]+?)(\])")
+_CITE_PATH_SUFFIX_RE = re.compile(r"^(.+?)(:\d+(?:-\d+)?(?:\s*\([^)]+\))?)$")
+_ROOT_README_MD = "README.md"
+_ROOT_README_FALLBACKS = ("README.rst", "README.txt", "README")
+_ROOT_README_NAMES = (_ROOT_README_MD, *_ROOT_README_FALLBACKS)
+
+
+def unique_root_readme_name(workspace_root: str | Path | None) -> str | None:
+    """Return the only root README filename, or None if missing or ambiguous."""
+    if workspace_root is None:
+        return None
+    root = Path(workspace_root)
+    found = [name for name in _ROOT_README_NAMES if (root / name).is_file()]
+    if len(found) == 1:
+        return found[0]
+    return None
+
+
+def _remap_missing_readme_md(value: str, workspace_root: str | Path | None) -> str:
+    """Map a missing root README.md cite to the one real root readme, if unique."""
+    if workspace_root is None:
+        return value
+    root = Path(workspace_root)
+    prefix = ""
+    body = value
+    if body.lower().startswith("source:"):
+        prefix = "source:"
+        body = body[len("source:") :].lstrip()
+    match = _CITE_PATH_SUFFIX_RE.fullmatch(body)
+    if match:
+        path_text, suffix = match.group(1), match.group(2)
+    else:
+        path_text, suffix = body, ""
+    if path_text.replace("\\", "/") != _ROOT_README_MD:
+        return value
+    if (root / _ROOT_README_MD).is_file():
+        return value
+    found = [name for name in _ROOT_README_FALLBACKS if (root / name).is_file()]
+    if len(found) != 1:
+        return value
+    return f"{prefix}{found[0]}{suffix}"
+
+
+def normalize_citation_ref(raw: str, workspace_root: str | Path | None = None) -> str:
+    """Return a citation target the verifier can resolve.
+
+    Drops ``file:`` / ``path:`` / ``relpath:`` prefixes. Keeps ``source:`` and
+    bare repo-relative paths, which already pass. Does not rewrite ``file://`` URIs.
+    When ``README.md`` is missing and exactly one of ``README.rst`` / ``README.txt``
+    / ``README`` exists at the repo root, remaps the cite to that file.
+    """
+    value = raw.strip()
+    lowered = value.lower()
+    if lowered.startswith("file://"):
+        return value
+    for scheme in _DROP_CITATION_SCHEMES:
+        if lowered.startswith(scheme):
+            value = value[len(scheme) :].lstrip()
+            break
+    return _remap_missing_readme_md(value, workspace_root)
+
+
+def is_placeholder_citation_ref(raw: str) -> bool:
+    """True for prompt-template leftovers such as ``relpath:start-end``."""
+    value = normalize_citation_ref(raw).strip()
+    if value.lower().startswith("source:"):
+        value = value[len("source:") :].lstrip()
+    return value.lower() == _PLACEHOLDER_CITE_BODY
+
+
+def normalize_citation_markup(text: str, workspace_root: str | Path | None = None) -> str:
+    """Rewrite cite blocks/brackets so they do not emit file:/path:/relpath: prefixes."""
+
+    def _rewrite(match: re.Match[str]) -> str:
+        ref = match.group(2)
+        if is_placeholder_citation_ref(ref):
+            return ""
+        return f"{match.group(1)}{normalize_citation_ref(ref, workspace_root)}{match.group(3)}"
+
+    rewritten = _CITE_BLOCK_RE.sub(_rewrite, text)
+    return _BRACKET_CITE_RE.sub(_rewrite, rewritten)
+
 
 # ============================================================================
 # Citation Block Types

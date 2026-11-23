@@ -7,7 +7,7 @@
 **run id：** `run-1786634426299`  
 **verify JSON：** `docs/eval/2026-08-13-fastapi-realworld-round3-verify.json`
 
-第二轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round2.md`。
+第二轮评测见 `docs/eval/2026-08-13-fastapi-realworld-round2.md`。第四轮评测见 `docs/eval/2026-08-14-fastapi-realworld-round4.md`。
 
 ## 生成
 

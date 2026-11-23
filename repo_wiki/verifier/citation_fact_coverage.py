@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from repo_wiki.evidence.citation_renderer import is_placeholder_citation_ref
+
 CITATION_PATTERN = re.compile(r"<cite>\s*([^<]+?)\s*</cite>|\[cite:\s*([^\]]+?)\]")
 CODE_FENCE_PATTERN = re.compile(r"^\s*(```|~~~)")
 SOURCE_LOOKING_URL_PATTERN = re.compile(
@@ -53,7 +55,7 @@ def extract_citation_refs_with_lines(markdown: str) -> list[CitationRef]:
         for match in CITATION_PATTERN.finditer(line):
             raw = match.group(1) or match.group(2) or ""
             raw = raw.strip()
-            if raw:
+            if raw and not is_placeholder_citation_ref(raw):
                 refs.append(CitationRef(raw=raw, line=line_no))
     return refs
 

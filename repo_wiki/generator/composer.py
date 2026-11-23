@@ -23,7 +23,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from repo_wiki.evidence.citation_renderer import CitationRenderer
+from repo_wiki.evidence.citation_renderer import (
+    CitationRenderer,
+    normalize_citation_markup,
+    unique_root_readme_name,
+)
 from repo_wiki.evidence.ranking import PageEvidenceBinding
 from repo_wiki.llm.config import LLMProviderConfig
 from repo_wiki.llm.models import ChatMessage, ChatRequest, ChatResponse, LLMProvider
@@ -62,6 +66,7 @@ class ComposerContext:
     models: list[dict[str, Any]] = field(default_factory=list)
     commands: dict[str, str] = field(default_factory=dict)
     domain_groups_markdown: str = ""
+    product_description: str | None = None
 
 
 @dataclass
@@ -225,6 +230,26 @@ class HeadingPreservationValidator:
 # LLM PAGE COMPOSER
 # =============================================================================
 
+_CLOSED_THINK_DUMP_RE = re.compile(
+    r"<think(?:ing)?>.*?</think(?:ing)?>",
+    re.IGNORECASE | re.DOTALL,
+)
+_UNCLOSED_THINK_PREFIX_RE = re.compile(
+    r"\A\s*<think(?:ing)?>.*?(?=(?:\r?\n)[ \t]*#)",
+    re.IGNORECASE | re.DOTALL,
+)
+_LEADING_THINK_TAG_RE = re.compile(r"\A<think(?:ing)?>", re.IGNORECASE)
+
+
+def _strip_leaked_think_dumps(content: str) -> str:
+    """Drop leaked model <think>/<thinking> dumps so they never reach disk."""
+    text = _CLOSED_THINK_DUMP_RE.sub("", content)
+    text = _UNCLOSED_THINK_PREFIX_RE.sub("", text)
+    text = text.strip()
+    if _LEADING_THINK_TAG_RE.match(text):
+        return ""
+    return text
+
 
 class LLMPageComposer:
     """Composes Qoder-style Markdown articles from page plans and evidence.
@@ -384,6 +409,23 @@ class LLMPageComposer:
                 uncertainty_reasons=[],
             )
 
+    def _resolve_product_description(self, input: ComposerInput) -> str:
+        """Prefer explicit context, then repository identity.description."""
+        explicit = (input.context.product_description or "").strip()
+        if explicit:
+            return explicit
+        root = input.context.repository_root or (
+            str(self.workspace_root) if self.workspace_root else ""
+        )
+        if not root:
+            return ""
+        # Lazy import: planner.identity -> planner package init -> evidence ->
+        # orchestration.service -> this module.
+        from repo_wiki.planner.identity import resolve_repository_identity
+
+        identity = resolve_repository_identity(Path(root))
+        return (identity.description or "").strip()
+
     def _build_context(self, input: ComposerInput) -> dict[str, Any]:
         """Build prompt context from input."""
         page = input.page_plan
@@ -392,6 +434,8 @@ class LLMPageComposer:
             "title": page.title,
             "category": page.category.value,
             "generation_mode": page.generation_mode.value,
+            "repository_name": input.context.repository_name,
+            "product_description": self._resolve_product_description(input),
         }
 
         # Add source requirements
@@ -427,6 +471,18 @@ class LLMPageComposer:
         raw = os.environ.get("REPO_WIKI_COMPACT_LLM_PROMPT", "1").strip().lower()
         return raw not in {"0", "false", "no", "off"}
 
+    def _root_readme_cite_rule(self) -> str:
+        name = unique_root_readme_name(self.workspace_root)
+        if name and name != "README.md":
+            return (
+                f"- 本仓库根 README 是 `{name}`。引用时写 `<cite>{name}:1-3</cite>`，"
+                "不要写不存在的 README.md。"
+            )
+        return (
+            "- 引用仓库根 README 时必须使用仓库中实际存在的文件名"
+            "（README.md / README.rst / README.txt / README），不要引用不存在的文件。"
+        )
+
     def _build_compact_prompt(self, input: ComposerInput, context: dict[str, Any]) -> str:
         page = input.page_plan
         required_headings = [
@@ -441,6 +497,8 @@ class LLMPageComposer:
         modules = context.get("modules") or "未指定"
         endpoints = context.get("endpoints") or "未指定"
         data_models = context.get("data_models") or "未指定"
+        product_description = context.get("product_description") or "（未解析到产品描述）"
+        repository_name = context.get("repository_name") or input.context.repository_name
         api_quality_rules = ""
         if page.category.value == "api_reference":
             api_quality_rules = (
@@ -455,6 +513,9 @@ class LLMPageComposer:
 页面标题：{page.title}
 页面类型：{page.category.value}
 页面 ID：{page.page_id}
+仓库名称：{repository_name}
+产品身份（必须写入简介，优先于仓库 slug 或通用 api-server/core-platform 表述）：
+{product_description}
 相关模块：{modules}
 相关 API：{endpoints}
 相关数据模型：{data_models}
@@ -464,9 +525,11 @@ class LLMPageComposer:
 - 必须以 `# {page.title}` 开头。
 - 正文控制在 900 到 1400 个中文字符之间，避免长篇泛化。
 - 必须使用下面的源码证据，不允许编造不存在的模块、API 或版本。
-- 至少保留 3 个 `<cite>file:start-end</cite>` 引用。
+- 至少保留 3 个 `<cite>` 引用，格式为仓库相对路径加行号范围，例如 `<cite>src/app.py:1-10</cite>`。
+{self._root_readme_cite_rule()}
 - 使用段落解释为主，列表只用于核心组件或检查项。
 - 如果证据不足，明确写”当前证据显示”，不要过度推断。
+- 简介必须使用上面的产品身份描述，不要只写包名 slug 或运行时角色。
 {api_quality_rules}
 
 {self._build_low_confidence_guidance(input)}
@@ -634,12 +697,12 @@ class LLMPageComposer:
 
     def _normalize_markdown_response(self, content: str, title: str) -> str:
         """Ensure provider output is a readable Markdown page."""
-        stripped = content.strip()
+        stripped = _strip_leaked_think_dumps(content).strip()
         if not stripped:
             return f"# {title}\n\nLLM composer did not return content."
-        if stripped.startswith("#"):
-            return stripped
-        return f"# {title}\n\n{stripped}"
+        if not stripped.startswith("#"):
+            stripped = f"# {title}\n\n{stripped}"
+        return normalize_citation_markup(stripped, self.workspace_root)
 
     @property
     def provider_name(self) -> str:

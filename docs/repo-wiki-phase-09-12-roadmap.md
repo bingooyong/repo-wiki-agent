@@ -1,5 +1,7 @@
 # Repo-Wiki Phase 09-12 Roadmap
 
+现行周期见 `docs/plans/current-roadmap.md`。本文是中期 Phase 09–12（输出 contract、叙事聚合、验收 baseline、SQLite 本地知识运行时），用来把底座推进到可替代 Qoder Repo Wiki。本文不包含对接 RAGFlow、知识卡片、团队/多项目云共享；那些等单库 Wiki 可信后再单独立项。
+
 文档属性：后续阶段规划  
 规划目标：把 repo-agent 从“可生成 repo-wiki 底座”推进到“可替代 qoder repo-wiki 的本地优先产品能力”
 

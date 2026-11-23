@@ -13,7 +13,8 @@ LANGUAGE_EXTENSIONS: dict[str, tuple[str, ...]] = {
     "typescript": (".ts", ".tsx", ".js", ".jsx"),
     "sql": (".sql",),
     "yaml": (".yaml", ".yml"),
-    "markdown": (".md",),
+    "markdown": (".md", ".markdown"),
+    "rst": (".rst",),
 }
 
 # Reverse lookup: extension -> language
@@ -453,6 +454,65 @@ def _extract_markdown(file_path: Path, content: str) -> list[SourceSpan]:
     return spans
 
 
+_RST_UNDERLINE_RE = re.compile(r"^[=\-`:.'\"~^_*+#]{3,}\s*$")
+
+
+def _extract_rst(file_path: Path, content: str) -> list[SourceSpan]:
+    """Extract section spans from reStructuredText, including underline titles."""
+    atx_spans = _extract_markdown(file_path, content)
+    lines = content.splitlines()
+    headings: list[tuple[int, str]] = []
+    idx = 0
+    while idx < len(lines):
+        stripped = lines[idx].strip()
+        next_line = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
+        if (
+            _RST_UNDERLINE_RE.fullmatch(stripped)
+            and next_line
+            and not _RST_UNDERLINE_RE.fullmatch(next_line)
+        ):
+            third = lines[idx + 2].strip() if idx + 2 < len(lines) else ""
+            if _RST_UNDERLINE_RE.fullmatch(third):
+                headings.append((idx + 2, next_line))
+                idx += 3
+                continue
+        if stripped and _RST_UNDERLINE_RE.fullmatch(next_line):
+            headings.append((idx + 1, stripped))
+            idx += 2
+            continue
+        idx += 1
+
+    if not headings:
+        if atx_spans:
+            return atx_spans
+        first = next((line.strip() for line in lines if line.strip()), file_path.stem)
+        return [
+            SourceSpan(
+                file=file_path.as_posix(),
+                symbol=first[:80],
+                line_start=1,
+                line_end=max(len(lines), 1),
+                language="rst",
+                summary=f"reStructuredText document '{first[:80]}'",
+            )
+        ]
+
+    spans: list[SourceSpan] = []
+    for heading_idx, (start, title) in enumerate(headings):
+        end = headings[heading_idx + 1][0] - 1 if heading_idx + 1 < len(headings) else len(lines)
+        spans.append(
+            SourceSpan(
+                file=file_path.as_posix(),
+                symbol=title,
+                line_start=start,
+                line_end=max(end, start),
+                language="rst",
+                summary=f"reStructuredText section '{title}'",
+            )
+        )
+    return spans or atx_spans
+
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -464,6 +524,7 @@ _EXTRACTORS: dict[str, Callable[[Path, str], list[SourceSpan]]] = {
     "sql": _extract_sql,
     "yaml": _extract_yaml,
     "markdown": _extract_markdown,
+    "rst": _extract_rst,
 }
 
 

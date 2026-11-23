@@ -10,6 +10,7 @@ from hashlib import sha256
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from repo_wiki.evidence.citation_renderer import normalize_citation_ref
 from repo_wiki.orchestration.release_meta_schema import (
     SCHEMA_VERSION_DOCS_INVENTORY,
     SCHEMA_VERSION_EVIDENCE_INDEX,
@@ -271,7 +272,7 @@ def build_evidence_index(
 
 
 def _parse_repository_citation(raw: str) -> tuple[str, int, int] | None:
-    value = raw.strip()
+    value = normalize_citation_ref(raw)
     if value.startswith("source:"):
         value = value[len("source:") :].strip()
     match = _CITE_TARGET_PATTERN.fullmatch(value)

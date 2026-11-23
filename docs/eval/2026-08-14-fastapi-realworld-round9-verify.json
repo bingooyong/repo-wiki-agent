@@ -1,0 +1,20 @@
+{
+  "run_id": "run-1786712557785",
+  "cli": "repo-wiki 0.1.0 @ 395e4c4ecee45ebc9ea98125a3223d3216686b3b",
+  "prs_included": ["#59", "#61", "#63", "#64"],
+  "grade": "FAIL",
+  "hard_fail": 13,
+  "soft_fail": 0,
+  "pages": {"planned": 81, "written": 81, "pass": 67, "degraded": 14, "fallback": 14},
+  "think_pages": 0,
+  "relpath_leftover": 0,
+  "file_colon": 0,
+  "invalid_citations": 1,
+  "owner_missing_api": 0,
+  "owner_missing_models": 9,
+  "tests_md": false,
+  "empty_taxonomy_pages": false,
+  "overview_conduit": true,
+  "claim_coverage_percent": "49.93%",
+  "note": "#59 #61 #63 #64 HIT. Gates not relaxed. Prose FAIL x2 this run."
+}

@@ -8,6 +8,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from repo_wiki.evidence.citation_renderer import (
+    is_placeholder_citation_ref,
+    normalize_citation_ref,
+)
 from repo_wiki.verifier.service import CheckResult, GateType, SeverityThreshold, VerifierService
 
 
@@ -1530,7 +1534,7 @@ class QoderLikeVerifierService(VerifierService):
         """Require every important inventory item to map to an owner page or UNIDENTIFIED warning."""
         from repo_wiki.verifier.ownership_coverage import (
             collect_owner_inventory_items,
-            page_has_owner_or_warning,
+            item_owner_coverage,
         )
 
         if not self._is_release_candidate_root():
@@ -1564,13 +1568,7 @@ class QoderLikeVerifierService(VerifierService):
         warnings = self._load_structured_unidentified_warnings(meta_root)
         missing: list[dict[str, str]] = []
         for item in items:
-            covered = (item.kind, item.identifier) in warnings or item.identifier in warnings
-            reason = "structured unidentified warning"
-            if not covered:
-                for page_text in pages:
-                    covered, reason = page_has_owner_or_warning(page_text, item.identifier)
-                    if covered:
-                        break
+            covered, reason = item_owner_coverage(item, pages, warnings)
             if not covered:
                 missing.append(
                     {
@@ -1931,8 +1929,12 @@ class QoderLikeVerifierService(VerifierService):
     def _extract_citation_refs(self, text: str) -> list[str]:
         refs: list[str] = []
         for raw in re.findall(r"<cite>\s*([^<]+?)\s*</cite>", text):
+            if is_placeholder_citation_ref(raw):
+                continue
             refs.append(raw.strip())
         for raw in re.findall(r"\[cite:\s*([^\]]+?)\]", text):
+            if is_placeholder_citation_ref(raw):
+                continue
             refs.append(raw.strip())
         return refs
 
@@ -1942,7 +1944,7 @@ class QoderLikeVerifierService(VerifierService):
             is_source_looking_url,
         )
 
-        raw = citation.strip()
+        raw = normalize_citation_ref(citation, self._source_root_for_citations())
         if is_source_looking_url(raw):
             return "source-looking external URL cannot validate repository lines"
         if is_external_url(raw):

@@ -248,10 +248,10 @@ class TestRuleFirstPlanner:
         planner = RuleFirstPlanner(sample_identity, sample_snapshot)
         manifest = planner.generate()
 
-        # reference-repo should have substantial documentation
-        # With 3 modules, 3 endpoints, 3 data models, should generate 80+ pages
-        assert manifest.page_count() >= 80, (
-            f"Expected at least 80 pages, got {manifest.page_count()}"
+        # reference-repo should have substantial documentation from real inventory.
+        # Empty taxonomy slots (frontend / gateway / agent / mesh) no longer pad the count.
+        assert manifest.page_count() >= 70, (
+            f"Expected at least 70 pages, got {manifest.page_count()}"
         )
 
 

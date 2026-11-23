@@ -1,0 +1,29 @@
+{
+  "run_id": "run-1786694659163",
+  "cli": "repo-wiki 0.1.0 @ 05bb3b8c98d4e1634f5b227922b1952977c81b17",
+  "prs_included": ["#48", "#49", "#50", "#51", "#52", "#54", "#55", "#56", "#57", "#58"],
+  "profile": "qoder-like",
+  "ci_mode": true,
+  "strict_mode": true,
+  "grade": "FAIL",
+  "status": "NOT_READY",
+  "exit_code": 1,
+  "hard_fail": 12,
+  "soft_fail": 0,
+  "pages": {"total": 89, "pass": 89, "degraded": 0, "fallback": 0, "empty_llm_shells": 0, "llm_pass": 89},
+  "claim_coverage": {"covered": 1885, "total": 4458, "percent": "42.28%", "r7_percent": "17.75%"},
+  "citations": {
+    "invalid_count": 108,
+    "file_colon_prefix": 0,
+    "wiki_cite_blocks": 2680,
+    "wiki_bare_readme_rst_cites": 962,
+    "literal_relpath_placeholder": 83,
+    "relpath_prefixed_real_paths": 15
+  },
+  "overview_conduit": true,
+  "post_api_users_login": true,
+  "circuit_break_tripped": false,
+  "http_529": 0,
+  "owner_missing": 29,
+  "note": "#58 HIT (file: = 0). New residue is literal relpath: template. Do not claim gates relaxed. Coverage recovery is MiniMax health, not #58."
+}

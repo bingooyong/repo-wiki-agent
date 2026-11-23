@@ -8,6 +8,8 @@ Output: deterministic page IDs, paths, parent links, and order.
 
 from __future__ import annotations
 
+import re
+
 from repo_wiki.core.contracts import Module, RepositorySnapshot
 from repo_wiki.planner.schema import (
     DEFAULT_CHINESE_TAXONOMY,
@@ -20,6 +22,7 @@ from repo_wiki.planner.schema import (
     WikiTaxonomyCategory,
     current_schema_version,
 )
+from repo_wiki.scanner.artifacts import is_product_source_path, is_product_wiki_module
 
 # Category ordering for navigation
 _CATEGORY_ORDER = {
@@ -361,25 +364,27 @@ class RuleFirstPlanner:
             tags=["data-flow", "pipeline"],
         )
 
-        # API gateway
-        self._add_page(
-            page_id=self._make_page_id("api-gateway", WikiTaxonomyCategory.ARCHITECTURE_DESIGN),
-            title="API网关",
-            category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
-            parent="architecture-overview",
-            sort_order=4,
-            tags=["api-gateway", "router"],
-        )
+        if self._has_surface_token("gateway"):
+            self._add_page(
+                page_id=self._make_page_id("api-gateway", WikiTaxonomyCategory.ARCHITECTURE_DESIGN),
+                title="API网关",
+                category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+                parent="architecture-overview",
+                sort_order=4,
+                tags=["api-gateway", "router"],
+            )
 
-        # Service mesh
-        self._add_page(
-            page_id=self._make_page_id("service-mesh", WikiTaxonomyCategory.ARCHITECTURE_DESIGN),
-            title="服务网格",
-            category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
-            parent="architecture-overview",
-            sort_order=5,
-            tags=["mesh", "microservices"],
-        )
+        if self._has_surface_token("mesh", "istio", "linkerd"):
+            self._add_page(
+                page_id=self._make_page_id(
+                    "service-mesh", WikiTaxonomyCategory.ARCHITECTURE_DESIGN
+                ),
+                title="服务网格",
+                category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+                parent="architecture-overview",
+                sort_order=5,
+                tags=["mesh", "microservices"],
+            )
 
         # Event driven architecture
         self._add_page(
@@ -393,27 +398,48 @@ class RuleFirstPlanner:
             tags=["events", "messaging"],
         )
 
-        # Microservices pattern
-        self._add_page(
-            page_id=self._make_page_id(
-                "microservices-pattern", WikiTaxonomyCategory.ARCHITECTURE_DESIGN
-            ),
-            title="微服务模式",
-            category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
-            parent="architecture-overview",
-            sort_order=7,
-            tags=["microservices", "patterns"],
+        if self._has_surface_token("microservice"):
+            self._add_page(
+                page_id=self._make_page_id(
+                    "microservices-pattern", WikiTaxonomyCategory.ARCHITECTURE_DESIGN
+                ),
+                title="微服务模式",
+                category=WikiTaxonomyCategory.ARCHITECTURE_DESIGN,
+                parent="architecture-overview",
+                sort_order=7,
+                tags=["microservices", "patterns"],
+            )
+
+    def _is_product_module(self, module: Module) -> bool:
+        return is_product_wiki_module(
+            module.path,
+            name=module.name,
+            domain=module.domain,
+            runtime_role=module.runtime_role,
         )
+
+    def _product_modules(self) -> list[Module]:
+        return [module for module in self.snapshot.modules if self._is_product_module(module)]
+
+    def _has_surface_token(self, *tokens: str) -> bool:
+        needles = tuple(token.lower() for token in tokens if token)
+        if not needles:
+            return False
+        for module in self._product_modules():
+            blob = f"{module.name} {module.path}".lower()
+            if any(token in blob for token in needles):
+                return True
+        for endpoint in self.snapshot.endpoints:
+            if endpoint.file_path and not is_product_source_path(endpoint.file_path):
+                continue
+            blob = f"{endpoint.module} {endpoint.path}".lower()
+            if any(token in blob for token in needles):
+                return True
+        return False
 
     def _generate_module_pages(self) -> None:
         """Generate module category pages."""
-        # Group modules by domain
-        modules_by_domain: dict[str, list[Module]] = {}
-        for module in self.snapshot.modules:
-            domain = module.domain or "unknown"
-            if domain not in modules_by_domain:
-                modules_by_domain[domain] = []
-            modules_by_domain[domain].append(module)
+        product_modules = self._product_modules()
 
         # Core services index
         self._add_page(
@@ -422,14 +448,14 @@ class RuleFirstPlanner:
             category=WikiTaxonomyCategory.CORE_SERVICES,
             parent=None,
             source_requirements=SourceRequirement(
-                modules=[m.name for m in self.snapshot.modules if m.domain == "core-platform"]
+                modules=[m.name for m in product_modules if m.domain == "core-platform"]
             ),
             sort_order=0,
             tags=["index", "services"],
         )
 
         # AI services index
-        ai_modules = [m for m in self.snapshot.modules if m.domain == "ai-services"]
+        ai_modules = [m for m in product_modules if m.domain == "ai-services"]
         if ai_modules:
             self._add_page(
                 page_id=self._make_page_id("ai-services-index", WikiTaxonomyCategory.CORE_SERVICES),
@@ -442,7 +468,7 @@ class RuleFirstPlanner:
             )
 
         # Individual module pages
-        for idx, module in enumerate(sorted(self.snapshot.modules, key=lambda m: m.path)):
+        for idx, module in enumerate(sorted(product_modules, key=lambda m: m.path)):
             module_page_id = self._make_page_id(module.name, WikiTaxonomyCategory.CORE_SERVICES)
             self._add_page(
                 page_id=module_page_id,
@@ -489,6 +515,13 @@ class RuleFirstPlanner:
 
         by_module: dict[str, list] = {}
         for ep in self.snapshot.endpoints:
+            if ep.file_path and not is_product_source_path(ep.file_path):
+                continue
+            module = self._module_by_name(ep.module)
+            if module is not None and not self._is_product_module(module):
+                continue
+            if module is None and not is_product_wiki_module(ep.module or "", name=ep.module):
+                continue
             if ep.module not in by_module:
                 by_module[ep.module] = []
             by_module[ep.module].append(ep)
@@ -539,11 +572,7 @@ class RuleFirstPlanner:
                 if predicate(module_name, endpoints):
                     grouped_modules.append(module_name)
                     grouped_endpoints.extend(f"{e.method} {e.path}" for e in endpoints)
-            if not grouped_modules and page_id_base not in {
-                "api-gateway-api",
-                "agent-proxy-api",
-                "frontend-application-api",
-            }:
+            if not grouped_modules:
                 continue
             self._add_page(
                 page_id=self._make_page_id(page_id_base, WikiTaxonomyCategory.API_REFERENCE),
@@ -1278,9 +1307,6 @@ class RuleFirstPlanner:
             if found:
                 return found
         return None
-
-
-import re
 
 
 def plan_pages_from_snapshot(
