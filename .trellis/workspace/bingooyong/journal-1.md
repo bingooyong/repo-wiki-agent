@@ -27,3 +27,25 @@ Task 11-22-baseline-ai-testing-wiki: added read-only external baseline registry 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: Purge stale facts from generated docs and protect curated content
+<!-- trellis-session: v=2 fp=86721c07e4a2d9df -->
+
+**Date**: 2026-11-23
+**Task**: Purge stale facts from generated docs and protect curated content
+**Branch**: `task/11-22-source-truth-purity`
+
+### Summary
+
+Task 11-22-source-truth-purity: fixed live generation defects rather than re-cleaning an already-clean fact layer. Template rendering now raises on unresolved placeholders and enforces required_keys; cache key includes template bytes so template fixes take effect; core-entity scoring uses word-boundary matching, dedupes reasons and excludes dependency/test sources; language/framework detection prefers package config. Closed two clobbering paths found in review: the task-catalog contract wrote a curated fact file, and generate replaced the human-authored docs/00-overview.md with an init stub. Added HARD unresolved-placeholders gate and 27 contract tests; 438 targeted regressions pass; default verify --ci has zero hard failures. Regenerated docs now show Python/typer-cli with no node_modules pseudo-entities. qoder-like full-chain acceptance transferred to task 6 because no READY release exists (reproduces on base 665408a). Four full-suite failures are pre-existing/environmental. Spec captured in .trellis/spec/backend/docs-generation-purity.md.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a5abb35` | fix: keep generated docs factual and protect curated content |
+
+### Status
+
+[OK] **Completed**
