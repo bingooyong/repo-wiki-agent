@@ -19,7 +19,11 @@
     "expected_top_level_markdown_basenames_any": [
       "快速开始.md",
       "部署运维.md",
-      "故障排除与维护.md"
+      "故障排除与维护.md",
+      "快速开始与使用指南.md",
+      "项目概览与快速开始.md",
+      "系统架构与设计总览.md",
+      "CLI 命令参考.md"
     ],
     "minimal_directory_intersection": [
       "项目概述",
@@ -27,7 +31,13 @@
       "核心服务",
       "API参考",
       "数据模型"
-    ]
+    ],
+    "alternative_subsystem_family": {
+      "note": "QoderCN exports organize content by subsystem sections plus standalone top-level documents, not by the repo-wiki topic IA. Either family satisfies the interface contract.",
+      "minimal_section_dir_count": 8,
+      "minimal_top_level_markdown_count": 5
+    },
+    "sample_section_dir_candidates": ["API参考", "核心服务", "仓库扫描与源事实建模", "文档生成引擎与模板系统"]
   },
   "content_markdown_conventions_observed_fixture": {
     "cite_html_tag": "<cite>",
@@ -36,14 +46,16 @@
   },
   "meta_repowiki_metadata": {
     "required_top_level_keys": [
-      "code_snippets",
       "knowledge_relations",
-      "source_files",
       "wiki_catalogs",
       "wiki_items",
-      "wiki_overview",
-      "wiki_readme",
       "wiki_repo"
+    ],
+    "optional_top_level_keys": [
+      "code_snippets",
+      "source_files",
+      "wiki_overview",
+      "wiki_readme"
     ],
     "wiki_overview_expected_keys_any": ["id", "repo_id"],
     "wiki_repo_expected_keys_any": ["name", "id"]

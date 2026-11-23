@@ -80,3 +80,44 @@
 .venv/bin/python scripts/verify_baseline_registry.py
 .venv/bin/python .repo-agent-eval/baselines/repo-agent-qoder-zh/export_and_measure.py   # 重新度量快照
 ```
+
+---
+
+## 7. 真实 LLM 复跑（self-real2-20261123，取代 §1 的 fallback 终判）
+
+用户提供可用凭据后复跑：`LLM_PROVIDER=openai`、`LLM_BASE_URL=https://api.minimaxi.com/v1`、`LLM_MODEL=MiniMax-M2.7`，key 走临时环境变量（**已在对话中暴露，须轮换**）。另需临时 sanitize `NO_PROXY`（见 §7.2）。
+
+结果：**80/80 页 LLM 成功、0 reject**，合计约 19.1 万 tokens（中位 2531/页）。
+
+| 指标 | QoderCN | 真实 LLM run | fallback run |
+|------|---------|--------------|--------------|
+| 页面行数 median | 615 | **70** | 82 |
+| 页面字符 median | 22984 | **2894** | 2904 |
+| mermaid 覆盖 | 1.0 | 0.40 | 0.4125 |
+| `#L` 行号锚点 | 1.0 | **0.0** | 0.0 |
+| 章节/图表来源（归一） | 0.92 / 1.0 | **0 / 0** | 0 / 0 |
+| `file://` 链接 | 4931 | **0** | 0 |
+| prose（排除代码） | 0.0875 | 0.2529 | 0.4259 |
+| readiness | COMPLETED | NOT_READY（仅 `target_dirty=true`） | READY（缺陷） |
+
+### 7.1 结论修正
+
+差距**不在 LLM 接入**，而在 composer/引用渲染/页面合同：真实 LLM 也产不出行号来源、`file://` 链接与足够体量。且真实 run 仅因工作树脏被拦——**没有任何体量或引用深度门禁能拦住 70 行的页**，这是任务 5 必须补的 HARD 判据。
+
+引用形态需精确表述：我们**有**纯文本 `<cite>path:line-range</cite>`（presence 类指标因此给 1.0），但**没有** `file://` 链接、`#L` 锚点与章节/图表级来源块。Qoder 三者俱全。
+
+### 7.4 仓内 compare 首跑：parity 门禁对粒度盲（2026-11-23）
+
+QoderCN 长文落盘后（`.qoder/repowiki/zh`，72 文件，registry `repo-agent-longform-zh`，hash `af53be0c…a845`），`compare --target self-real2-20261123 --baseline .qoder/repowiki/zh` 首次跑通：`baseline_read_only_verified=true`，parity **11/11 pass、overall 0.97**，`citation_coverage=1.0`、`file_line_reference_coverage=1.0`。
+
+但同 run 实测：`file://` 链接 0、`#L` 锚点 0、章节/图表来源 0。原因：`cli.py:1496-1509` 与 `qoder_parity_metrics.py:157-166` 只测"存在任一引用标记"，不测粒度/链接形态/章节归属。**parity 全绿与真实粒度差距并存**，任务 3 必须新增粒度指标并让旧 presence 指标不再单独代表引用质量。
+
+另发现引用归属缺陷：`API参考.md` 的 cite 指向 `.omx/tmp/openai-plugins/.../config_preflight.py:265-266`——agent 临时 scratch 文件被当作产品 API 页证据。任务 3 的白名单/归属校验必须排除 `.omx/`、`.repo-agent-eval/`、`tmp/` 等过程目录。
+
+### 7.2 复跑途中发现的第三个 P0 缺陷
+
+凭据与端点均正确时仍全 fallback：`NO_PROXY` 含裸 `[::1]`/`::1`，httpx 在 `AsyncClient` 构造期把它当 URL 解析 → `Invalid port: ':1]'`（`adapters.py:62`），被 composer 宽泛 `except Exception` 吞成 `Composition error` 后熔断。已归入任务 9（`LLM_CLIENT_INIT_FAILED`）。
+
+### 7.3 成本证据（供任务 8 卷宗）
+
+80 页 ≈ 191k tokens（MiniMax-M2.7，含重试 attempt≤6）；单页中位 2531 tokens。Qoder 同仓 71 页正文合计 165.9 万字符——我们单页产出字符数约为其 1/8，成本却已实付，**降本前提是先把页面合同与引用渲染做对**，否则缓存与增量（任务 7）只会缓存低质量产物。

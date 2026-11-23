@@ -17,6 +17,7 @@ from repo_wiki.llm.models import (
     ProviderCapabilities,
     RetryableError,
 )
+from repo_wiki.llm.preflight import create_async_client
 
 
 class OpenAICompatibleProvider(LLMProvider):
@@ -59,9 +60,12 @@ class OpenAICompatibleProvider(LLMProvider):
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
 
-            self._client = httpx.AsyncClient(
-                base_url=self._config.base_url or "https://api.openai.com/v1",
-                timeout=httpx.Timeout(self._config.timeout),
+            # Construction reads ambient proxy env (trust_env). A malformed NO_PROXY
+            # entry raises here, before any request; surface an actionable, secret-free
+            # error instead of letting the composer swallow it as "Composition error".
+            self._client = create_async_client(
+                self._config,
+                default_base_url="https://api.openai.com/v1",
                 headers=headers,
             )
         return self._client

@@ -279,8 +279,38 @@
     }
   ],
   "limitations": [
-    "repo-wiki side is fallback-only; not a fair real-LLM quality verdict; rerun in task 8 after credential fix",
+    "Superseded: real-LLM run self-real2-20261123 completed 80/80 pages (0 rejects); see repo_wiki_real_run. Fallback run retained as evidence for task 9.",
     "snapshot lives in gitignored eval dir and is NOT registered as canonical baseline; freeze authority is content_sha256 above",
     "prose density excludes fenced code bodies on both sides"
-  ]
+  ],
+  "repo_wiki_real_run": {
+    "run_id": "self-real2-20261123",
+    "profile": "qoder-like",
+    "provider": "openai",
+    "model": "MiniMax-M2.7",
+    "base_url": "https://api.minimaxi.com/v1",
+    "llm_pages": 80,
+    "rejected_pages": 0,
+    "total_tokens": 203333,
+    "median_tokens_per_page": 2531,
+    "env_caveat": "NO_PROXY sanitized to localhost,127.0.0.1 for this run; ambient NO_PROXY with bare [::1] crashes httpx client init (task 9)",
+    "readiness_state": "NOT_READY",
+    "readiness_reasons": [
+      "target_dirty=true"
+    ],
+    "metrics": {
+      "page_count": 80,
+      "mermaid_coverage": 0.4,
+      "cite_block_coverage": 1.0,
+      "line_anchor_coverage": 0.0,
+      "toc_coverage": 1.0,
+      "section_source_coverage_normalized": 0.0,
+      "diagram_source_coverage_normalized": 0.0,
+      "prose_density_excl_code_median": 0.2529,
+      "file_citation_links": 0,
+      "page_lines_median": 70,
+      "page_chars_median": 2894
+    },
+    "conclusion": "With real LLM the gap is composer-side: page volume, line-anchored section/diagram sources and file:// links are absent regardless of credentials. Readiness blocked only by target_dirty, i.e. no volume/citation-depth gate catches 70-line pages."
+  }
 }

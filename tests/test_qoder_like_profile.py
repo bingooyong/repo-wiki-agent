@@ -81,3 +81,11 @@ def test_qoder_like_generate_writes_only_eval_run(tmp_path):
     assert all(
         (content_dir / entry["path"]).exists() for entry in manifest_payload["page_registry"]
     )
+    # Mock pilots are synthetic: they must never be publishable as READY (task 11-23).
+    assert manifest_payload["readiness_state"] == "NOT_READY"
+    assert "MOCK_LLM_RUN" in manifest_payload["readiness_reasons"]
+    assert manifest_payload["metadata"]["is_mock_run"] is True
+    assert manifest_payload["metadata"]["preflight_status"] == "skipped_mock"
+    assert manifest_payload["metadata"]["effective_provider"] == "mock"
+    assert manifest_payload["metadata"]["llm_success_ratio"] == 0.0
+    assert {entry["generation_mode"] for entry in manifest_payload["page_registry"]} == {"mock"}

@@ -43,6 +43,21 @@ def _clear_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(key, raising=False)
 
 
+def _normalize_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep ambient proxy config out of config diagnostics.
+
+    Preflight constructs an httpx client offline, and httpx parses NO_PROXY at
+    construction time. A developer machine whose NO_PROXY contains bare IPv6/CIDR
+    entries (e.g. ``[::1]``, ``127.0.0.0/8``) makes every client construction raise
+    ``InvalidURL`` — a real defect covered by test_llm_preflight_gate.py, not something
+    these env-only config tests should inherit.
+    """
+    for key in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(key, "localhost,127.0.0.1")
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(key, raising=False)
+
+
 def _ignore_repo_config(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise_no_config(*_args: object, **_kwargs: object) -> None:
         raise FileNotFoundError("ignore repo config for env-only CLI test")
@@ -62,6 +77,7 @@ class TestConfigCommandCI:
     ) -> None:
         """`repo-wiki config --ci` must stay parseable even when it exits nonzero."""
         _clear_llm_env(monkeypatch)
+        _normalize_proxy_env(monkeypatch)
         _ignore_repo_config(monkeypatch)
         missing_env = "REPO_WIKI_TEST_MISSING_LLM_KEY"
         raw_secret = _fake_secret()
@@ -93,6 +109,7 @@ class TestConfigCommandCI:
     ) -> None:
         """VS Code can pass non-secret config in env and keep the secret in its named env var."""
         _clear_llm_env(monkeypatch)
+        _normalize_proxy_env(monkeypatch)
         _ignore_repo_config(monkeypatch)
         key_env = "REPO_WIKI_TEST_EXTENSION_LLM_KEY"
         raw_secret = _fake_secret()

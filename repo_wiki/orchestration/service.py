@@ -409,6 +409,10 @@ class RepoWikiService:
                 {"root": str(self.root)},
             )
 
+        # Preflight before scan/plan/compose: a bad endpoint, credential or proxy env
+        # must abort here, not after every page has been written as fallback.
+        llm_bundle, preflight = self._preflight_qoder_like_llm()
+
         target_head_before = get_git_commit_full(self.root)
         target_git_commit, target_revision_source = resolve_revision_with_fallback(self.root)
         target_dirty = is_git_dirty(self.root)
@@ -455,6 +459,8 @@ class RepoWikiService:
                 evidence_bindings=evidence_bindings,
                 snapshot=snapshot,
                 output_dir=output_dir,
+                llm_bundle=llm_bundle,
+                preflight=preflight,
             )
         )
         stage.stop("compose")
@@ -489,7 +495,11 @@ class RepoWikiService:
             selected_source_paths=selected_paths,
         )
         navigation_tree = build_navigation_tree(written_content, content_dir)
-        page_registry = writer.build_page_registry(written_content)
+        page_registry = self._attach_page_generation_modes(
+            writer.build_page_registry(written_content),
+            composition=composition,
+            content_stats=content_stats,
+        )
         stage.stop("content")
         info(
             f"stage content completed files={len(written_content)} elapsed={stage.timings.get('content')}s"
@@ -567,7 +577,16 @@ class RepoWikiService:
                 "repository_identity": plan.repository_identity.model_dump()
                 if plan.repository_identity
                 else None,
+                "effective_provider": composition["llm"].get("effective_provider"),
+                "llm_mode": composition["llm"].get("mode"),
+                "mock_reason": composition["llm"].get("mock_reason"),
+                "is_mock_run": composition["llm"].get("mode") == "mock",
+                "preflight_status": preflight.status,
+                "preflight_reason_code": preflight.reason_code,
+                "llm_success_ratio": composition["llm"].get("llm_success_ratio"),
+                "min_llm_success_ratio": self._resolve_min_llm_success_ratio(),
             },
+            min_llm_success_ratio=self._resolve_min_llm_success_ratio(),
             navigation_tree=navigation_tree,
             page_registry=page_registry,
             target_git_commit=target_git_commit,
@@ -846,6 +865,20 @@ class RepoWikiService:
                 pass
         return self._clamp_qoder_page_budget(self.config.qoder_like.max_pages)
 
+    def _resolve_min_llm_success_ratio(self) -> float:
+        """READY gate floor for real-LLM page share. Env overrides YAML ``qoder_like``."""
+        import os
+
+        raw = os.environ.get("REPO_WIKI_QODER_LIKE_MIN_LLM_SUCCESS_RATIO")
+        if raw:
+            try:
+                value = float(raw)
+            except ValueError:
+                value = self.config.qoder_like.min_llm_success_ratio
+            if 0.0 <= value <= 1.0:
+                return value
+        return self.config.qoder_like.min_llm_success_ratio
+
     def _qoder_output_path_for(self, category: Any, page_id: str) -> str:
         from repo_wiki.planner.schema import WikiTaxonomyCategory
 
@@ -1031,12 +1064,96 @@ class RepoWikiService:
             force_mock_llm_config=bool(self.config.llm.force_mock_llm),
         )
 
+    @staticmethod
+    def _attach_page_generation_modes(
+        page_registry: list[dict[str, Any]],
+        *,
+        composition: dict[str, Any],
+        content_stats: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Join composer per-page mode/reason onto manifest ``page_registry`` entries.
+
+        Downstream badges and release gates need to tell LLM prose from rule/fallback
+        prose per page, not just per run. ``cited_files`` / ``line_anchor_count`` /
+        ``section_source_count`` are reserved for the evidence-citation gate (task 3)
+        and stay empty/0 until that task fills them.
+        """
+        meta_by_source = {
+            str(item.get("source_path")): item
+            for item in composition.get("page_metadata", [])
+            if isinstance(item, dict)
+        }
+        meta_by_relative: dict[str, dict[str, Any]] = {}
+        for mapping in content_stats.get("path_mappings", []):
+            if not isinstance(mapping, dict):
+                continue
+            meta = meta_by_source.get(str(mapping.get("source_path")))
+            if meta is not None:
+                meta_by_relative[str(mapping.get("relative_path"))] = meta
+        for entry in page_registry:
+            meta = meta_by_relative.get(str(entry.get("path")))
+            entry["generation_mode"] = (
+                str(meta.get("generation_mode") or "UNIDENTIFIED") if meta else "UNIDENTIFIED"
+            )
+            entry["rejection_reason"] = (meta or {}).get("rejection_reason") or None
+            entry["cited_files"] = []
+            entry["line_anchor_count"] = 0
+            entry["section_source_count"] = 0
+        return page_registry
+
+    def _preflight_qoder_like_llm(self) -> tuple[tuple[Any, LLMProviderConfig, dict[str, Any]], Any]:
+        """Resolve the LLM bundle and preflight it *before* any compose work.
+
+        A protocol/credential/client-init failure aborts the run instead of burning
+        every page into fallback. Mock-forced runs are exempt from the probe.
+
+        Returns:
+            ``((provider, llm_config, llm_summary), PreflightResult)``
+
+        Raises:
+            RepoWikiError: CONFIG category, with a classified, secret-free reason.
+        """
+        from repo_wiki.llm.preflight import run_preflight
+
+        bundle = self._resolve_qoder_like_llm()
+        _provider, llm_config, llm_summary = bundle
+        force_mock = llm_summary.get("mode") == "mock"
+        result = run_preflight(llm_config, force_mock=force_mock, probe=True)
+        info(
+            "llm preflight "
+            f"status={result.status} reason_code={result.reason_code or 'none'} "
+            f"effective_provider={result.effective_provider} probe={result.probe_attempted} "
+            f"http_status={result.http_status or 'n/a'}"
+        )
+        for warning in result.warnings:
+            info(f"llm preflight warning: {warning}")
+        if result.failed:
+            raise RepoWikiError(
+                f"LLM preflight failed ({result.reason_code}): {result.message}",
+                ErrorCategory.CONFIG,
+                {
+                    "reason_code": result.reason_code,
+                    "preflight_status": result.status,
+                    "effective_provider": result.effective_provider,
+                    "api_key_env": llm_config.api_key_env,
+                    "base_url": llm_config.base_url,
+                    "provider": llm_config.provider,
+                    "model": llm_config.model,
+                    "http_status": result.http_status,
+                    "hint": result.hint,
+                    "message": result.message,
+                },
+            )
+        return bundle, result
+
     async def _compose_qoder_like_pages(
         self,
         plan: Any,
         evidence_bindings: dict[str, PageEvidenceBinding],
         snapshot: Any,
         output_dir: Path,
+        llm_bundle: tuple[Any, LLMProviderConfig, dict[str, Any]] | None = None,
+        preflight: Any | None = None,
     ) -> dict[str, Any]:
         from repo_wiki.generator.composer import (
             ComposerContext,
@@ -1049,7 +1166,10 @@ class RepoWikiService:
             estimate_cost_from_tokens,
         )
 
-        provider, llm_config, llm_summary = self._resolve_qoder_like_llm()
+        provider, llm_config, llm_summary = llm_bundle or self._resolve_qoder_like_llm()
+        if preflight is not None:
+            llm_summary["preflight_status"] = preflight.status
+            llm_summary["preflight_reason_code"] = preflight.reason_code
         composer = create_composer(
             provider=provider,
             llm_config=llm_config,
@@ -1130,6 +1250,7 @@ class RepoWikiService:
                 "page_id": page.page_id,
                 "source_path": page.output_path,
                 "generation_mode": "fallback",
+                "rejection_reason": reason,
                 "quality_state": "DEGRADED",
                 "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
                 "reasons": [reason],
@@ -1246,7 +1367,12 @@ class RepoWikiService:
                 cost_usd=estimate_cost_from_tokens(output.tokens_used, llm_config.model),
             )
             page_results[page_idx] = (page.output_path, enriched)
-            effective_mode = "llm" if llm_summary.get("mode") == "real" else "rule"
+            if llm_summary.get("mode") == "real":
+                effective_mode = "llm"
+            elif llm_summary.get("mode") == "mock":
+                effective_mode = "mock"
+            else:
+                effective_mode = "rule"
             reasons = []
             if llm_summary.get("mode") == "mock":
                 reasons.append(f"mock_llm:{llm_summary.get('mock_reason') or 'forced'}")
@@ -1254,6 +1380,7 @@ class RepoWikiService:
                 "page_id": page.page_id,
                 "source_path": page.output_path,
                 "generation_mode": effective_mode,
+                "rejection_reason": None,
                 "quality_state": "READY" if effective_mode == "llm" else "PASS",
                 "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
                 "reasons": reasons,
@@ -1288,6 +1415,7 @@ class RepoWikiService:
                     "page_id": page.page_id,
                     "source_path": page.output_path,
                     "generation_mode": "llm",
+                    "rejection_reason": None,
                     "quality_state": "PASS",
                     "evidence_count": int(getattr(binding, "bound_count", 0) or 0),
                     "reasons": ["cache_hit"],
@@ -1410,6 +1538,13 @@ class RepoWikiService:
 
         cache_stats = cache.stats()
 
+        llm_success_page_count = sum(
+            1 for meta in page_metadata if meta.get("generation_mode") == "llm"
+        )
+        llm_success_ratio = (
+            round(llm_success_page_count / len(page_metadata), 4) if page_metadata else 0.0
+        )
+
         llm_summary.update(
             {
                 "estimated_tokens": estimated_tokens,
@@ -1434,6 +1569,8 @@ class RepoWikiService:
                 "composer_cache_path": str(cache_path),
                 "page_limit": page_limit,
                 "composed_page_count": len(pages),
+                "llm_success_page_count": llm_success_page_count,
+                "llm_success_ratio": llm_success_ratio,
                 "quality_warning_count": len(quality_warnings),
             }
         )

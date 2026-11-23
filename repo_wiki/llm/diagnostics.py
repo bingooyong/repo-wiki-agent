@@ -12,6 +12,7 @@ from repo_wiki.llm import (
     ValidationReason,
     get_api_key_from_env,
 )
+from repo_wiki.llm.preflight import run_preflight
 
 
 def create_provider_from_config(
@@ -34,12 +35,23 @@ def create_provider_from_config(
 def run_llm_diagnostics(
     config: LLMProviderConfig | None = None,
     json_output: bool = False,
+    *,
+    probe: bool = False,
+    force_mock: bool = False,
 ) -> dict[str, Any]:
     """Run LLM configuration diagnostics.
+
+    Field/format validations always run. Preflight always runs its **offline** stage
+    (provider/base_url protocol consistency + HTTP client construction, which is where
+    ambient ``NO_PROXY``/``HTTP(S)_PROXY`` breakage surfaces). The live credential probe
+    is opt-in via ``probe=True`` (CLI ``config --probe``) so that routine ``config --ci``
+    stays fast and network-free; ``generate`` always probes before composing.
 
     Args:
         config: Optional LLM config to diagnose
         json_output: Whether to return JSON format
+        probe: Send one minimal ``max_tokens=8`` request to classify 401/404/network errors
+        force_mock: Mock LLM forced; preflight is skipped (``skipped_mock``)
 
     Returns:
         Diagnostics results dict
@@ -63,6 +75,7 @@ def run_llm_diagnostics(
         "max_retries": config.max_retries,
         "validations": [],
         "issues": [],
+        "warnings": [],
         "summary": "OK",
     }
 
@@ -89,6 +102,19 @@ def run_llm_diagnostics(
         ):
             diagnostics["issues"].append(f"{key}: {reason}")
             diagnostics["summary"] = "FAIL"
+
+    # Preflight: protocol consistency + client construction (offline), optional probe.
+    # A misconfigured endpoint/credential must FAIL here instead of burning a whole
+    # generate run into fallback pages.
+    preflight = run_preflight(config, force_mock=force_mock, probe=probe)
+    diagnostics["effective_provider"] = preflight.effective_provider
+    diagnostics["preflight"] = preflight.to_dict()
+    diagnostics["preflight_status"] = preflight.status
+    diagnostics["preflight_reason_code"] = preflight.reason_code
+    diagnostics["warnings"].extend(preflight.warnings)
+    if preflight.failed:
+        diagnostics["issues"].append(f"preflight: {preflight.reason_code}")
+        diagnostics["summary"] = "FAIL"
 
     # Add provider-specific capabilities
     caps = provider.capabilities
@@ -159,6 +185,26 @@ def format_diagnostics_text(diagnostics: dict[str, Any]) -> str:
             f"    Max Context: {display_data['capabilities']['max_context_tokens']} tokens",
         ]
     )
+
+    preflight = display_data.get("preflight") or {}
+    if preflight:
+        lines.extend(
+            [
+                "",
+                "  Preflight:",
+                f"    Status: {preflight.get('status')}",
+                f"    Effective Provider: {preflight.get('effective_provider')}",
+                f"    Reason Code: {preflight.get('reason_code') or '(none)'}",
+                f"    Probe Attempted: {preflight.get('probe_attempted')}",
+                f"    HTTP Status: {preflight.get('http_status') or '(n/a)'}",
+            ]
+        )
+        if preflight.get("message"):
+            lines.append(f"    Message: {preflight['message']}")
+        if preflight.get("hint"):
+            lines.append(f"    Hint: {preflight['hint']}")
+        for warning in preflight.get("warnings") or []:
+            lines.append(f"    Warning: {warning}")
 
     if display_data["issues"]:
         lines.extend(["", "  Issues:"])

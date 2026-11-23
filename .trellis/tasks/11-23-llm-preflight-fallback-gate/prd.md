@@ -23,6 +23,8 @@
 - READY 门禁：全页 fallback 或 LLM 成功页占比低于阈值（建议 <0.5，可配置）时禁止 READY；不得通过放宽既有 prose/citation 阈值实现。
 - 插件/ viewer 消费 `generation_mode` 展示徽标的数据契约同步定义（实现归任务 6）。
 
+> 实现注记（2026-11-23）：`page_registry[*].cited_files`/`line_anchor_count`/`section_source_count` 本轮按设计预留为空数组/0（composer 尚无该元数据），由任务 3（证据门禁）补齐。
+
 ## Out of Scope
 
 - 不替用户选择或写入真实 API Key；不修改 `.env`。

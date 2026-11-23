@@ -80,37 +80,37 @@
       "branch": "task/11-22-source-truth-purity",
       "exported_at": "2026-11-23T04:05:16Z",
       "read_only": true,
-      "content_hash": "61bb4c50dc98494033f2e7393cbbc3dafa49773470de87c3f59c5f571830da3a",
-      "file_count": 214,
+      "content_hash": "a0d527868b3d05831dffb5610706570f00b32042678a8e1522b139acb1227a70",
+      "file_count": 217,
       "stats": {
         "schema_version": 1,
         "locale": "zh-CN",
-        "commit": "1de0d96907ff1bdf1dc991b34ef2542144a33a07",
+        "commit": "5f4c0d198ebcfb539b69915b2f2c7e7ffa519ea6",
         "branch": "task/11-22-source-truth-purity",
-        "exported_at": "2026-11-23T04:05:16Z",
+        "exported_at": "2026-11-23T05:05:59Z",
         "module_count": 40,
         "module_yaml_count": 40,
-        "markdown_file_count": 173,
+        "markdown_file_count": 176,
         "card_type_counts": {
           "architecture_design": 40,
           "build_system": 1,
-          "coding_conventions": 37,
+          "coding_conventions": 38,
           "configuration_system": 1,
           "dependency_management": 1,
           "error_handling": 1,
           "frontend_style": 1,
           "logging_system": 1,
           "overview": 40,
-          "tech_stack": 37,
-          "unique_setup_and_commands": 13
+          "tech_stack": 38,
+          "unique_setup_and_commands": 14
         },
         "module_card_counts": {
           "architecture_design": 40,
-          "coding_conventions": 37,
+          "coding_conventions": 38,
           "frontend_style": 1,
           "overview": 40,
-          "tech_stack": 37,
-          "unique_setup_and_commands": 13
+          "tech_stack": 38,
+          "unique_setup_and_commands": 14
         },
         "repo_card_counts": {
           "build_system": 1,
@@ -121,14 +121,14 @@
         },
         "relation_counts": {
           "depends_on": 0,
-          "related_to": 17,
-          "version_of": 0
+          "related_to": 16,
+          "version_of": 1
         },
         "relation_reason_coverage": 1.0,
         "evidence": {
-          "file_ref_count": 394,
-          "total_chars": 86722,
-          "refs_per_1k_chars": 4.5433
+          "file_ref_count": 415,
+          "total_chars": 96909,
+          "refs_per_1k_chars": 4.2824
         },
         "missing_module_yaml": [],
         "missing_card_files": []
@@ -187,6 +187,62 @@
       "compare_support": {
         "repo_wiki_compare": false,
         "reason": "Shape is compatible, but register_single_qoder_baseline forces baseline == <target repo>/.qoder/repowiki/zh, so a cross-repo ai-testing baseline cannot be consumed without writing generated output into ai-testing (forbidden)."
+      }
+    },
+    {
+      "id": "repo-agent-longform-zh",
+      "kind": "long_form_wiki",
+      "source_repository": "repo-agent",
+      "source_repo_root": "/Users/bingooyong/Code/01Code/github.com/bingooyong/repo-agent",
+      "source_path": ".qoder/repowiki/zh",
+      "commit": "5f4c0d198ebcfb539b69915b2f2c7e7ffa519ea6",
+      "branch": "task/11-23-llm-preflight-fallback-gate",
+      "exported_at": "2026-11-23T05:57:15Z",
+      "read_only": true,
+      "content_hash": "af53be0c1eadab2417f171cbc76d0097d8e0c6174b51f8910acff4441d93a845",
+      "file_count": 72,
+      "stats": {
+        "page_count": 71,
+        "catalog_count": 71,
+        "root_catalog_count": 18,
+        "wiki_item_count": 71,
+        "knowledge_relation_count": 53,
+        "progress_status": "completed",
+        "present_status": "COMPLETED",
+        "commit": "5f4c0d198ebcfb539b69915b2f2c7e7ffa519ea6",
+        "top_level_entries": [
+          "CLI 命令参考.md",
+          "Codex 插件与 Skills",
+          "LLM 提供商适配与成本治理",
+          "VS Code _ Cursor 浏览器扩展",
+          "主题规划与知识计划",
+          "仓库扫描与源事实建模",
+          "开发与贡献指南.md",
+          "快速开始与使用指南.md",
+          "故障排查与 FAQ.md",
+          "数据模型与源事实契约",
+          "文档生成引擎与模板系统",
+          "系统架构与设计总览.md",
+          "编排系统与运行时存储",
+          "语义索引与全文搜索",
+          "质量验证与质量门禁",
+          "部署、CI 与运维",
+          "配置系统与 LLM 集成.md",
+          "项目概览与快速开始.md"
+        ],
+        "mermaid_coverage": 1.0,
+        "cite_block_coverage": 1.0,
+        "line_anchor_coverage": 1.0,
+        "page_chars": {
+          "min": 14354,
+          "median": 23311,
+          "max": 52053,
+          "total": 1788121
+        }
+      },
+      "compare_support": {
+        "repo_wiki_compare": true,
+        "reason": "Canonical in-repo .qoder/repowiki/zh now exists (QoderCN export), so compare_command can consume it for this repo."
       }
     }
   ]

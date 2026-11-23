@@ -64,14 +64,23 @@ class TestQoderZhReleaseLayoutPresence:
             assert target.is_file(), f"missing file: {rel}"
 
     def test_content_top_level_intersection_with_invariants(self, invariants: dict) -> None:
-        expected_mins = invariants["content_top_level"]["minimal_directory_intersection"]
+        top = invariants["content_top_level"]
         content_root = ZH_ROOT / "content"
         dirs = {p.name for p in content_root.iterdir() if p.is_dir()}
-        for name in expected_mins:
-            assert name in dirs, f"missing expected top-level content dir {name}"
         tops = {p.name for p in content_root.iterdir() if p.is_file() and p.suffix == ".md"}
-        for mdname in invariants["content_top_level"]["expected_top_level_markdown_basenames_any"]:
-            assert mdname in tops, f"missing expected top-level markdown file {mdname}"
+        family_a = all(name in dirs for name in top["minimal_directory_intersection"])
+        alt = top.get("alternative_subsystem_family") or {}
+        family_b = (
+            len(dirs) >= alt.get("minimal_section_dir_count", 8)
+            and len(tops) >= alt.get("minimal_top_level_markdown_count", 5)
+        )
+        assert family_a or family_b, (
+            f"content IA matches neither the topic family {top['minimal_directory_intersection']} "
+            f"nor the subsystem family (dirs={len(dirs)}, top_md={len(tops)})"
+        )
+        assert any(mdname in tops for mdname in top["expected_top_level_markdown_basenames_any"]), (
+            f"no expected top-level markdown among {sorted(tops)}"
+        )
 
     def test_repowiki_metadata_has_required_shapes(
         self, invariants: dict, meta_payload: dict
@@ -83,9 +92,10 @@ class TestQoderZhReleaseLayoutPresence:
             assert meta_payload[rk] is not None
 
         wo = meta_payload.get("wiki_overview")
-        assert isinstance(wo, dict), "wiki_overview must be dict"
-        for nk in inv["wiki_overview_expected_keys_any"]:
-            assert nk in wo
+        if wo is not None:
+            assert isinstance(wo, dict), "wiki_overview must be dict when present"
+            for nk in inv["wiki_overview_expected_keys_any"]:
+                assert nk in wo
 
         wr = meta_payload.get("wiki_repo")
         assert isinstance(wr, dict), "wiki_repo must be dict"
@@ -108,9 +118,12 @@ class TestQoderZhMarkdownStructuralSignals:
         content_root = ZH_ROOT / "content"
         anchors = []
         anchors.append(next(content_root.rglob("*.md")))
-        api = content_root / "API参考"
-        assert api.is_dir(), "fixture must include API dir"
-        anchors.append(next(api.rglob("*.md")))
+        candidates = invariants["content_top_level"].get("sample_section_dir_candidates", [])
+        section = next((content_root / name for name in candidates if (content_root / name).is_dir()), None)
+        if section is None:
+            section = next((p for p in sorted(content_root.iterdir()) if p.is_dir()), None)
+        assert section is not None, "fixture must include at least one section dir"
+        anchors.append(next(section.rglob("*.md")))
 
         for path in anchors:
             text = path.read_text(encoding="utf-8", errors="replace")

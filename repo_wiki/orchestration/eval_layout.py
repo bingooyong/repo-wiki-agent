@@ -323,6 +323,62 @@ def guess_content_type(path: Path) -> str:
     return type_map.get(suffix, "application/octet-stream")
 
 
+def _llm_readiness_reasons(
+    stats: dict[str, Any] | None,
+    page_registry: list[dict[str, Any]] | None,
+    min_llm_success_ratio: float,
+) -> list[str]:
+    """Deterministic NOT_READY reasons from how the run's pages were actually produced.
+
+    A run whose pages are all rule/fallback prose (or whose provider circuit-broke, or
+    which used the mock LLM) must never be published as READY. Runs without LLM compose
+    stats (e.g. the rule-first ``default`` profile) are not gated here.
+    """
+    llm_stats = (stats or {}).get("llm")
+    if not isinstance(llm_stats, dict) or not llm_stats:
+        return []
+
+    reasons: list[str] = []
+    ratio = _resolve_llm_success_ratio(llm_stats, page_registry)
+
+    if llm_stats.get("mode") == "mock":
+        reasons.append("MOCK_LLM_RUN")
+    if llm_stats.get("provider_disabled_after_failures"):
+        reasons.append("LLM_PROVIDER_DISABLED")
+    if ratio is not None and ratio < min_llm_success_ratio:
+        reasons.append("FALLBACK_ONLY_RUN" if ratio <= 0 else "LLM_SUCCESS_RATIO_BELOW_MIN")
+    return reasons
+
+
+def _resolve_llm_success_ratio(
+    llm_stats: dict[str, Any],
+    page_registry: list[dict[str, Any]] | None,
+) -> float | None:
+    """Share of pages composed by a real LLM, or None when the run reports no evidence.
+
+    Priority: explicit composer ratio → per-page ``generation_mode`` → composed vs
+    fallback page counts. Returning None (instead of 0.0) keeps manifests that carry
+    no generation evidence at all from being falsely branded FALLBACK_ONLY_RUN.
+    """
+    ratio = llm_stats.get("llm_success_ratio")
+    if isinstance(ratio, (int, float)):
+        return float(ratio)
+
+    modes = [
+        str(entry.get("generation_mode") or "")
+        for entry in (page_registry or [])
+        if isinstance(entry, dict) and entry.get("generation_mode")
+    ]
+    if modes:
+        return sum(1 for mode in modes if mode == "llm") / len(modes)
+
+    composed = llm_stats.get("composed_page_count")
+    fallback = llm_stats.get("fallback_page_count")
+    if isinstance(composed, int) and composed > 0 and isinstance(fallback, int):
+        return max(0.0, (composed - fallback) / composed)
+    return None
+
+
 def generate_manifest(
     run_id: str,
     profile: EvalOutputProfile,
@@ -342,6 +398,7 @@ def generate_manifest(
     wiki_revision_source: str = "git",
     content_root: str | None = None,
     runtime_root: str | None = None,
+    min_llm_success_ratio: float = 0.5,
 ) -> EvalManifest:
     """Generate an eval manifest by scanning the output directory.
 
@@ -359,6 +416,8 @@ def generate_manifest(
         wiki_git_commit: Optional git commit hash of wiki content
         content_root: Optional content root directory path
         runtime_root: Optional runtime root directory path
+        min_llm_success_ratio: Minimum real-LLM page share required for READY; below it
+            (or on provider circuit-break / mock LLM) the run is NOT_READY
 
     Returns:
         Populated EvalManifest instance
@@ -431,8 +490,10 @@ def generate_manifest(
         readiness_reasons.append("missing_candidate_content_root")
     if not candidate_meta_root.exists():
         readiness_reasons.append("missing_candidate_meta_root")
+    llm_reasons = _llm_readiness_reasons(stats, page_registry, min_llm_success_ratio)
+    readiness_reasons.extend(llm_reasons)
 
-    if target_dirty or not git_fresh:
+    if target_dirty or not git_fresh or llm_reasons:
         readiness_state = "NOT_READY"
     elif readiness_reasons:
         readiness_state = "REVIEW_ONLY"

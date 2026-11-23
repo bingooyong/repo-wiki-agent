@@ -17,6 +17,7 @@ from repo_wiki.llm.models import (
     ProviderCapabilities,
     RetryableError,
 )
+from repo_wiki.llm.preflight import create_async_client
 
 
 class MinimaxProvider(LLMProvider):
@@ -59,9 +60,11 @@ class MinimaxProvider(LLMProvider):
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
 
-            self._client = httpx.AsyncClient(
-                base_url=self._config.base_url or "https://api.minimax.chat/v1",
-                timeout=httpx.Timeout(self._config.timeout),
+            # Construction reads ambient proxy env (trust_env); a malformed NO_PROXY
+            # entry raises here. Surface an actionable, secret-free error.
+            self._client = create_async_client(
+                self._config,
+                default_base_url="https://api.minimax.chat/v1",
                 headers=headers,
             )
         return self._client

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 from repo_wiki.core.config import RepoWikiConfig
+from repo_wiki.llm.config import LLMProviderConfig
+from repo_wiki.llm.models import ChatRequest, ChatResponse, LLMProvider, ProviderCapabilities
 from repo_wiki.orchestration.eval_layout import EvalOutputProfile
 from repo_wiki.orchestration.quality_artifacts import build_evidence_index
 from repo_wiki.orchestration.service import RepoWikiService
@@ -42,6 +44,38 @@ def _service(root: Path) -> RepoWikiService:
     return RepoWikiService(cfg)
 
 
+class _NeverCalledProvider(LLMProvider):
+    """Real-mode provider stand-in; the zero call budget must prevent any chat call.
+
+    Keeps the test hermetic: ambient LLM_* env (possibly a mismatched endpoint) must
+    not decide whether this run reaches compose, and no network may be touched. The
+    absent api_key_env makes preflight skip the credential probe (offline OK).
+    """
+
+    def __init__(self) -> None:
+        self._config = LLMProviderConfig(
+            provider="openai",
+            model="fake-model",
+            api_key_env="REPO_WIKI_TEST_ABSENT_LLM_KEY",
+            timeout=5.0,
+            max_retries=0,
+        )
+
+    @property
+    def name(self) -> str:
+        return "fake-real"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities()
+
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        raise AssertionError("chat must not be called with REPO_WIKI_LLM_REAL_MAX_CALLS=0")
+
+    def validate_config(self) -> list[tuple[str, str | None, str]]:
+        return []
+
+
 def test_qoder_like_generation_emits_quality_registry_and_conflict_artifacts(
     tmp_path: Path,
     monkeypatch,
@@ -53,6 +87,24 @@ def test_qoder_like_generation_emits_quality_registry_and_conflict_artifacts(
     monkeypatch.setenv("REPO_WIKI_LLM_PAGE_LIMIT", "3")
     monkeypatch.setenv("REPO_WIKI_LLM_REAL_MAX_CALLS", "0")
     monkeypatch.setenv("REPO_WIKI_LLM_PRIORITY", "plan")
+    monkeypatch.delenv("REPO_WIKI_TEST_ABSENT_LLM_KEY", raising=False)
+    # Offline preflight constructs an httpx client; ambient bare-IPv6 NO_PROXY
+    # entries would (correctly) abort it. Keep this artifacts test env-neutral.
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
+    monkeypatch.setenv("no_proxy", "localhost,127.0.0.1")
+
+    provider = _NeverCalledProvider()
+    summary = {
+        "effective_provider": provider.name,
+        "model": provider._config.model,
+        "mode": "real",
+        "mock_reason": None,
+        "fallback_warning": None,
+    }
+    service = _service(repo)
+    monkeypatch.setattr(
+        service, "_resolve_qoder_like_llm", lambda: (provider, provider._config, summary)
+    )
 
     profile = EvalOutputProfile(
         name="qoder-like",
@@ -60,7 +112,7 @@ def test_qoder_like_generation_emits_quality_registry_and_conflict_artifacts(
         create_subdirs=True,
         content_subdir="repowiki/zh/content",
     )
-    result = _service(repo).generate(eval_profile=profile, run_id="run-g005")
+    result = service.generate(eval_profile=profile, run_id="run-g005")
 
     run_dir = Path(result["manifest_path"]).parent
     content_dir = run_dir / "repowiki" / "zh" / "content"

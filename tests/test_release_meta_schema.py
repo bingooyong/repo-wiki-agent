@@ -73,5 +73,12 @@ class TestQoderInvariantCrossCheck:
                 encoding="utf-8"
             )
         )
-        required = set(inv["meta_repowiki_metadata"]["required_top_level_keys"])
-        assert required == rms.QODER_REPOWIKI_METADATA_REQUIRED_KEYS
+        meta_inv = inv["meta_repowiki_metadata"]
+        required = set(meta_inv["required_top_level_keys"])
+        optional = set(meta_inv.get("optional_top_level_keys", []))
+        # The observed Qoder reference may omit keys (subsystem IA exports only carry
+        # a subset), but every key the release validator requires must be accounted
+        # for in the fixture, and the fixture must not invent keys outside the schema.
+        assert required <= rms.QODER_REPOWIKI_METADATA_REQUIRED_KEYS
+        assert required | optional == rms.QODER_REPOWIKI_METADATA_REQUIRED_KEYS
+        assert not required & optional

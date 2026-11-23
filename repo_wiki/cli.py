@@ -870,10 +870,18 @@ def config_command(
     max_retries: int = typer.Option(None, "--max-retries", help="Max retry attempts"),
     ci: bool = typer.Option(False, "--ci", help="Machine-readable JSON output"),
     config: Path | None = typer.Option(None, "--config", help="Config file path"),
+    probe: bool = typer.Option(
+        False,
+        "--probe/--no-probe",
+        help="Send one minimal max_tokens=8 request to classify credential/endpoint errors",
+    ),
 ) -> None:
     """Run LLM configuration diagnostics.
 
     Validates provider/model/base_url/api_key_env/budget fields and outputs reason codes.
+    Preflight always checks protocol consistency and HTTP client construction offline
+    (LLM_ENDPOINT_MISMATCH / LLM_CLIENT_INIT_FAILED); --probe additionally verifies the
+    credential against the endpoint (LLM_AUTH_INVALID / LLM_UNREACHABLE).
     All secrets are redacted in terminal and JSON outputs.
     """
     # Build overrides from CLI flags
@@ -896,9 +904,11 @@ def config_command(
         cli_overrides["max_retries"] = max_retries
 
     # Load base config
+    force_mock_llm_config = False
     try:
         base_cfg = load_config(config)
         llm_config_dict = base_cfg.llm.model_dump() if hasattr(base_cfg, "llm") else {}
+        force_mock_llm_config = bool(getattr(base_cfg.llm, "force_mock_llm", False))
     except Exception:
         llm_config_dict = {}
 
@@ -907,8 +917,15 @@ def config_command(
         config=llm_config_dict, cli_overrides=cli_overrides
     )
 
+    from repo_wiki.llm.qoder_like_provider import env_force_mock_llm
+
     # Run diagnostics
-    diagnostics = run_llm_diagnostics(config=resolved_config, json_output=ci)
+    diagnostics = run_llm_diagnostics(
+        config=resolved_config,
+        json_output=ci,
+        probe=probe,
+        force_mock=env_force_mock_llm() or force_mock_llm_config,
+    )
 
     if ci:
         print(format_diagnostics_json(diagnostics))

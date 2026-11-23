@@ -77,6 +77,16 @@ class QoderLikeConfig(BaseModel):
         le=2000,
         description="Upper bound on planned pages for qoder-like curation (env may override).",
     )
+    min_llm_success_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum share of pages composed by a real LLM for a run to be READY. "
+            "Below it the run is NOT_READY (FALLBACK_ONLY_RUN). Env "
+            "REPO_WIKI_QODER_LIKE_MIN_LLM_SUCCESS_RATIO overrides YAML."
+        ),
+    )
 
 
 class SecurityConfig(BaseModel):

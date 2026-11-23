@@ -21,6 +21,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
 | [Baseline Registry](./baseline-registry.md) | Read-only external Qoder baselines: registry format, fingerprint algorithm, metrics, compare limits | Active |
 | [Docs Generation Purity](./docs-generation-purity.md) | Template/context contract, cache invalidation, curated-content protection, core-entity scoring, placeholder gate | Active |
+| [LLM Preflight & Fallback Gate](./llm-preflight-gate.md) | Preflight reason codes, client-init failure classification, mock/fallback readiness, per-page generation_mode | Active |
 
 ---
 

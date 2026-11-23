@@ -31,7 +31,10 @@ def test_qoder_like_manifest_references_materialized_content(tmp_path):
                 "root": str(repo_root),
                 "include": ["**/*"],
                 "exclude": [".repo-agent-eval/**", ".qoder/**", ".repo-wiki/**"],
-            }
+            },
+            # Deterministic CI path: developers may have OPENAI_API_KEY; tests must not
+            # hit the network (preflight would otherwise probe the configured endpoint).
+            "llm": {"force_mock_llm": True},
         }
     )
     profile = EvalOutputProfile(
@@ -64,6 +67,14 @@ def test_qoder_like_manifest_references_materialized_content(tmp_path):
     assert manifest["candidate_meta_root"].endswith("/repowiki/zh/meta")
     # Existing qoder-like content path remains usable; readiness contract tracks candidate runs path separately.
     assert manifest["readiness_state"] != "READY"
+    # Mock pilot + legacy flat content layout: never READY (task 11-23 fallback/mock gate).
+    assert manifest["readiness_state"] == "NOT_READY"
+    assert "MOCK_LLM_RUN" in manifest["readiness_reasons"]
+    assert "missing_candidate_content_root" in manifest["readiness_reasons"]
+    assert manifest["metadata"]["preflight_status"] == "skipped_mock"
+    for page in manifest["page_registry"]:
+        assert page["generation_mode"] == "mock"
+        assert "rejection_reason" in page
 
     for page in manifest["page_registry"]:
         assert (content_root / page["path"]).exists()

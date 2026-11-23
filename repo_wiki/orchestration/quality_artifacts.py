@@ -74,7 +74,7 @@ def _quality_state_for(meta: dict[str, Any], llm_summary: dict[str, Any]) -> tup
     mode = str(meta.get("generation_mode") or "").lower()
     if mode == "fallback":
         return "DEGRADED", reasons or ["fallback_generation"]
-    if mode == "rule":
+    if mode in ("rule", "mock"):
         if llm_summary.get("mock_reason") == "missing_api_key":
             return "DEGRADED", reasons + ["mock_llm_missing_api_key"]
         return "PASS", reasons or ["rule_or_mock_generated"]
