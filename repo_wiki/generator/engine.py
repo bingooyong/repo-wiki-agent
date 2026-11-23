@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -997,6 +998,9 @@ class DataModel:
     canonical_name: str = ""  # The canonical name this model resolves to
     is_canonical: bool = False  # Whether this is the canonical representation
     projections: list[str] = field(default_factory=list)  # Other names this entity is known by
+    # Source purity (D3): product | dependency | test-harness.
+    # Non-product models stay in the index table but never become core entities.
+    source_role: str = "product"
 
     def __post_init__(self):
         if self.ownership_modules is None:
@@ -1037,6 +1041,21 @@ class DatabaseSchema:
     migration_table: str | None = None
 
 
+# Source purity (D3): models extracted from these trees are not product facts.
+_DEPENDENCY_SOURCE_DIRS = {"node_modules", ".venv", "venv", "dist", "build"}
+_TEST_SOURCE_DIRS = {"tests", "test", "fixtures", "fixture"}
+
+
+def _model_source_role(file_path: str) -> str:
+    """Classify a model's source tree as product, dependency, or test-harness."""
+    parts = {part.lower() for part in Path(file_path).parts}
+    if parts & _DEPENDENCY_SOURCE_DIRS:
+        return "dependency"
+    if parts & _TEST_SOURCE_DIRS:
+        return "test-harness"
+    return "product"
+
+
 class DataModelAggregator:
     """Aggregates data models into core/service/infrastructure groups with narrative.
 
@@ -1070,6 +1089,7 @@ class DataModelAggregator:
                 file_path=m.get("file_path", ""),
                 domain=module.get("domain", "unknown"),
                 service_family=module.get("service_family", "unknown"),
+                source_role=_model_source_role(m.get("file_path", "")),
             )
             self.data_models.append(model)
 
@@ -1081,27 +1101,48 @@ class DataModelAggregator:
         2. Referenced by API endpoints (parameter types)
         3. Used by infrastructure modules (persistence, core-platform)
         4. Ownership spans multiple service families
+
+        Purity rules (D3):
+        - Models sourced from dependency dirs or test harnesses never become core.
+        - Handler matching uses word boundaries, never bare substring containment.
+        - Names shorter than 3 chars cannot earn the API signal.
+        - Each reason is recorded once; scores never stack per endpoint.
         """
+        product_models = [m for m in self.data_models if m.source_role == "product"]
+
         # Build reference graph: model name -> modules that reference it
         model_references: dict[str, set[str]] = {}
-        for m in self.data_models:
+        for m in product_models:
             model_references[m.name] = model_references.get(m.name, set())
             model_references[m.name].add(m.module)
 
-        # Check endpoint parameter types for model references
-        if self.endpoints:
-            for ep in self.endpoints:
-                # Look for model names in handler
-                handler = ep.get("handler", "")
-                # Extract potential model names from handler (simplified heuristic)
-                for m in self.data_models:
-                    if m.name.lower() in handler.lower():
-                        model_references[m.name].add(ep.get("module", "unknown"))
+        # Check endpoint parameter types for model references (word-boundary match)
+        api_referenced: dict[str, set[str]] = {}
+        for ep in self.endpoints:
+            handler = str(ep.get("handler", "")).lower()
+            ep_module = ep.get("module", "unknown")
+            for m in product_models:
+                if len(m.name) < 3:
+                    continue
+                if re.search(rf"\b{re.escape(m.name.lower())}\b", handler):
+                    model_references[m.name].add(ep_module)
+                    api_referenced.setdefault(m.name, set()).add(ep_module)
 
         # Score each model as potential core entity
         for model in self.data_models:
+            if model.source_role != "product":
+                model.core_score = 0.0
+                model.is_core_entity = False
+                model.core_reason = (
+                    "依赖目录来源，不参与核心评分"
+                    if model.source_role == "dependency"
+                    else "测试夹具来源，不参与核心评分"
+                )
+                model.ownership_modules = [model.module]
+                continue
+
             score = 0.0
-            reasons = []
+            reasons: list[str] = []
 
             # Signal 1: Multiple modules reference this model
             ref_count = len(model_references.get(model.name, {model.module}))
@@ -1120,18 +1161,13 @@ class DataModelAggregator:
                 score += 1.5
                 reasons.append("名称暗示基础实体")
 
-            # Signal 4: Referenced by API (in parameter types)
-            # This is a simplified check - in real implementation would parse function signatures
-            for ep in self.endpoints:
-                ep_module = ep.get("module", "")
-                ep_handler = ep.get("handler", "").lower()
-                # If handler contains model name, it's likely used as parameter
-                if model.name.lower() in ep_handler:
-                    score += 1.0
-                    reasons.append("API 参数类型")
+            # Signal 4: Referenced by API (word-boundary match, counted once)
+            if model.name in api_referenced:
+                score += 1.0
+                reasons.append("API 参数类型")
 
             model.core_score = score
-            model.core_reason = " + ".join(reasons) if reasons else "单一模块实体"
+            model.core_reason = " + ".join(dict.fromkeys(reasons)) if reasons else "单一模块实体"
             model.is_core_entity = score >= 3.0
 
             # Track ownership modules
@@ -2101,11 +2137,11 @@ class GenerationEngine:
         # Layer 1: Core overview documents (existing MVP)
         for contract in CORE_DOCUMENT_CONTRACTS:
             content, cached = self._render_with_cache(
-                contract.name, contract.template_path, core_context
+                contract.name, contract.template_path, core_context, contract.required_keys
             )
             target = self.root / contract.output_path
-            write_text(target, content)
-            written.append(contract.output_path)
+            if self._write_doc(target, contract.output_path, content):
+                written.append(contract.output_path)
             hits += 1 if cached else 0
             misses += 0 if cached else 1
 
@@ -2697,12 +2733,15 @@ class GenerationEngine:
             for sec_contract in all_section_contracts():
                 if sec_contract.name == f"section:{section_slug}":
                     content, cached = self._render_with_cache(
-                        sec_contract.name, sec_contract.template_path, section_context
+                        sec_contract.name,
+                        sec_contract.template_path,
+                        section_context,
+                        sec_contract.required_keys,
                     )
                     target = self.root / sec_contract.output_path
                     ensure_dir(target.parent)
-                    write_text(target, content)
-                    files.append(sec_contract.output_path)
+                    if self._write_doc(target, sec_contract.output_path, content):
+                        files.append(sec_contract.output_path)
                     hits += 1 if cached else 0
                     misses += 0 if cached else 1
                     break
@@ -2817,7 +2856,7 @@ class GenerationEngine:
             for contract in phase_contracts:
                 if contract.name == f"phase:{phase_slug}":
                     content, cached = self._render_with_cache(
-                        contract.name, contract.template_path, phase_context
+                        contract.name, contract.template_path, phase_context, contract.required_keys
                     )
                     target = self.root / contract.output_path
                     ensure_dir(target.parent)
@@ -2975,7 +3014,7 @@ class GenerationEngine:
             }
 
             content, cached = self._render_with_cache(
-                contract.name, contract.template_path, module_context
+                contract.name, contract.template_path, module_context, contract.required_keys
             )
             target = self.root / contract.output_path
             write_text(target, content)
@@ -2992,7 +3031,7 @@ class GenerationEngine:
         misses = 0
         for contract in PROMPT_FRAGMENT_CONTRACTS:
             content, cached = self._render_with_cache(
-                contract.name, contract.template_path, core_context
+                contract.name, contract.template_path, core_context, contract.required_keys
             )
             write_text(self.root / contract.output_path, content)
             files.append(contract.output_path)
@@ -3011,7 +3050,10 @@ class GenerationEngine:
         }
         context = {"task_catalog_json": self._json_text(payload)}
         content, cached = self._render_with_cache(
-            TASK_CATALOG_CONTRACT.name, TASK_CATALOG_CONTRACT.template_path, context
+            TASK_CATALOG_CONTRACT.name,
+            TASK_CATALOG_CONTRACT.template_path,
+            context,
+            TASK_CATALOG_CONTRACT.required_keys,
         )
         write_text(self.root / TASK_CATALOG_CONTRACT.output_path, content)
         # Also keep a deterministic parseable export.
@@ -3089,88 +3131,153 @@ class GenerationEngine:
         def command(name: str, fallback: str) -> str:
             return commands.get(name, fallback)
 
-        return [
-            {
-                "name": "config-check",
-                "description": "Validate non-secret LLM and output configuration before generation.",
-                "commands": [command("config", "repo-wiki config --ci")],
-                "verifies": ["CLI configuration resolves without exposing API keys."],
-            },
-            {
-                "name": "generate-qoder-like",
-                "description": "Generate a qoder-like run under the isolated eval layout.",
-                "commands": [command("generate", "repo-wiki generate")],
-                "outputs": [
-                    ".repo-agent-eval/runs/<run-id>/manifest.json",
-                    ".repo-agent-eval/runs/<run-id>/repowiki/zh/content",
-                ],
-                "verifies": ["Run manifest records readiness fields and navigation_tree."],
-            },
-            {
-                "name": "verify-qoder-like",
-                "description": "Run strict qoder-like verification against a run or release candidate.",
-                "commands": [command("verify", "repo-wiki verify --ci")],
-                "verifies": ["PASS/READY run can proceed to compare and release checks."],
-            },
-            {
-                "name": "compare-qoder-baseline",
-                "description": "Compare generated content against a Qoder baseline and emit readiness evidence.",
-                "commands": [command("compare", "repo-wiki compare --ci")],
-                "outputs": ["qoder-comparison-report.json", "qoder-comparison-report.md"],
-                "verifies": ["Comparison status is READY before release publication."],
-            },
-            {
-                "name": "inspect-eval-layout",
-                "description": "Diagnose canonical versus legacy qoder-like run layouts before publishing.",
-                "commands": [command("eval_layout_report", "repo-wiki eval-layout-report")],
-                "verifies": ["Canonical content root is repowiki/zh/content under each run."],
-            },
-            {
-                "name": "publish-ready-release",
-                "description": (
-                    "Atomically publish a READY qoder-like run to the stable release path "
-                    "consumed by viewers and the extension."
-                ),
-                "commands": [command("release_publish", "repo-wiki release-publish")],
-                "outputs": [
-                    ".repo-agent-eval/repowiki/zh/manifest.json",
-                    ".repo-agent-eval/repowiki/zh/content",
-                    ".repo-agent-eval/repowiki/zh/meta/release.json",
-                    ".repo-agent-eval/release-history.json",
-                ],
-                "readiness_symbols": [
-                    "READY",
-                    "release_status",
-                    "readiness",
-                    "readiness_state",
-                    "navigation_tree",
-                ],
-                "verifies": [
-                    "Release manifest exposes release_status/readiness READY and navigation_tree."
-                ],
-            },
-            {
-                "name": "extension-browse-ready-release",
-                "description": "Browse the stable READY release from VS Code/Cursor.",
-                "commands": [
-                    "repoWikiBrowser.openViewer",
-                    "repoWikiBrowser.refreshTree",
-                    "repoWikiBrowser.runVerify",
-                    "repoWikiBrowser.updateWiki",
-                    "repoWikiBrowser.syncWiki",
-                ],
-                "inputs": [".repo-agent-eval/repowiki/zh/manifest.json"],
-                "verifies": [
-                    "Sidebar reads the fixed release manifest and does not fall back to run directories.",
-                    "Update Wiki sends the configured repoWikiBrowser.generateCommand in an integrated terminal.",
-                ],
-            },
-        ]
+        tasks: list[dict[str, Any]] = []
+        # Evidence-based: only index the Codex plugin validation task when the
+        # skills-only plugin package actually exists in this repository.
+        if (self.root / "plugins" / "repo-wiki" / ".codex-plugin" / "plugin.json").exists():
+            tasks.append(
+                {
+                    "name": "validate-codex-plugin",
+                    "description": (
+                        "Validate the skills-only Codex plugin package and its repository "
+                        "marketplace contract before local installation."
+                    ),
+                    "commands": [
+                        "python ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/repo-wiki",
+                        "python scripts/smoke_codex_plugin.py",
+                    ],
+                    "inputs": [
+                        "plugins/repo-wiki/.codex-plugin/plugin.json",
+                        ".agents/plugins/marketplace.json",
+                    ],
+                    "verifies": [
+                        "Plugin has no MCP or app capability in v1.",
+                        "Marketplace resolves the plugin from ./plugins/repo-wiki.",
+                        "Runner uses the current Python executable and does not persist API keys.",
+                    ],
+                }
+            )
+        tasks.extend(
+            [
+                {
+                    "name": "config-check",
+                    "description": "Validate non-secret LLM and output configuration before generation.",
+                    "commands": [command("config", "repo-wiki config --ci")],
+                    "verifies": ["CLI configuration resolves without exposing API keys."],
+                },
+                {
+                    "name": "generate-qoder-like",
+                    "description": "Generate a qoder-like run under the isolated eval layout.",
+                    "commands": [command("generate", "repo-wiki generate")],
+                    "outputs": [
+                        ".repo-agent-eval/runs/<run-id>/manifest.json",
+                        ".repo-agent-eval/runs/<run-id>/repowiki/zh/content",
+                    ],
+                    "verifies": ["Run manifest records readiness fields and navigation_tree."],
+                },
+                {
+                    "name": "verify-qoder-like",
+                    "description": "Run strict qoder-like verification against a run or release candidate.",
+                    "commands": [command("verify", "repo-wiki verify --ci")],
+                    "verifies": ["PASS/READY run can proceed to compare and release checks."],
+                },
+                {
+                    "name": "compare-qoder-baseline",
+                    "description": "Compare generated content against a Qoder baseline and emit readiness evidence.",
+                    "commands": [command("compare", "repo-wiki compare --ci")],
+                    "outputs": ["qoder-comparison-report.json", "qoder-comparison-report.md"],
+                    "verifies": ["Comparison status is READY before release publication."],
+                },
+                {
+                    "name": "inspect-eval-layout",
+                    "description": "Diagnose canonical versus legacy qoder-like run layouts before publishing.",
+                    "commands": [command("eval_layout_report", "repo-wiki eval-layout-report")],
+                    "verifies": ["Canonical content root is repowiki/zh/content under each run."],
+                },
+                {
+                    "name": "publish-ready-release",
+                    "description": (
+                        "Atomically publish a READY qoder-like run to the stable release path "
+                        "consumed by viewers and the extension."
+                    ),
+                    "commands": [command("release_publish", "repo-wiki release-publish")],
+                    "outputs": [
+                        ".repo-agent-eval/repowiki/zh/manifest.json",
+                        ".repo-agent-eval/repowiki/zh/content",
+                        ".repo-agent-eval/repowiki/zh/meta/release.json",
+                        ".repo-agent-eval/release-history.json",
+                    ],
+                    "readiness_symbols": [
+                        "READY",
+                        "release_status",
+                        "readiness",
+                        "readiness_state",
+                        "navigation_tree",
+                    ],
+                    "verifies": [
+                        "Release manifest exposes release_status/readiness READY and navigation_tree."
+                    ],
+                },
+                {
+                    "name": "extension-browse-ready-release",
+                    "description": "Browse the stable READY release from VS Code/Cursor.",
+                    "commands": [
+                        "repoWikiBrowser.openViewer",
+                        "repoWikiBrowser.refreshTree",
+                        "repoWikiBrowser.runVerify",
+                        "repoWikiBrowser.updateWiki",
+                        "repoWikiBrowser.syncWiki",
+                    ],
+                    "inputs": [".repo-agent-eval/repowiki/zh/manifest.json"],
+                    "verifies": [
+                        "Sidebar reads the fixed release manifest and does not fall back to run directories.",
+                        "Update Wiki sends the configured repoWikiBrowser.generateCommand in an integrated terminal.",
+                    ],
+                },
+            ]
+        )
+        return tasks
+
+    def _write_doc(self, target: Path, rel_path: str, content: str) -> bool:
+        # An init stub must never replace a human-authored doc (e.g. curated 00-overview.md).
+        from repo_wiki.scanner.docs_scanner import is_init_generated_doc
+
+        if target.exists():
+            existing = target.read_text(encoding="utf-8")
+            if is_init_generated_doc(rel_path, content) and not is_init_generated_doc(
+                rel_path, existing
+            ):
+                return False
+        write_text(target, content)
+        return True
 
     def _render_with_cache(
-        self, cache_key_prefix: str, template_path: str, context: dict[str, Any]
+        self,
+        cache_key_prefix: str,
+        template_path: str,
+        context: dict[str, Any],
+        required_keys: tuple[str, ...] = (),
     ) -> tuple[str, bool]:
-        key = stable_hash({"k": cache_key_prefix, "tpl": template_path, "ctx": context})
+        # Contract enforcement happens before any cache lookup so stale cache
+        # entries cannot bypass required_keys validation (D2).
+        missing = [key for key in required_keys if key not in context]
+        if missing:
+            raise ValueError(
+                f"Contract '{cache_key_prefix}' missing required context keys: "
+                + ", ".join(sorted(missing))
+            )
+        # Include template bytes in the cache key so editing a template
+        # invalidates cached renders automatically (D6).
+        template_bytes = (self.template_root / template_path).read_bytes()
+        template_digest = hashlib.sha256(template_bytes).hexdigest()
+        key = stable_hash(
+            {
+                "k": cache_key_prefix,
+                "tpl": template_path,
+                "tpl_sha256": template_digest,
+                "ctx": context,
+            }
+        )
         cached = self.cache.get(key)
         if cached is not None:
             return cached, True

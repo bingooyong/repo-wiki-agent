@@ -1,2 +1,3 @@
 {"file": ".trellis/tasks/11-22-source-truth-purity/research/purity-rules.md", "reason": "净化规则、冲突优先级与代码集成点"}
 {"file": "docs/05-data-model.md", "reason": "伪核心实体证据：node_modules 与测试 SQL 被计入"}
+{"file": "docs/eval/2026-11-22-ai-testing-baseline-gap-report.md", "reason": "任务1实测：事实源已净化、污染只在生成文档，含逐行证据与差距归属"}

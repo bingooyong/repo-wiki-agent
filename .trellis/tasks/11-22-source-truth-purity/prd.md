@@ -28,10 +28,15 @@
 
 ## Acceptance Criteria
 
-- [ ] `repo-wiki index` 后，`ai/source-of-truth/` 全文检索不到 `node_modules`，核心实体列表无未标注的测试夹具条目。
-- [ ] 新增扫描/评分合同测试：以本仓与 ai-testing 为夹具，伪事实用例必须被判负。
-- [ ] 重生成后 `docs/01-architecture.md` 无 `${...}` 残留，语言/框架与 `pyproject.toml`（Python、Typer CLI）一致。
-- [ ] `repo-wiki verify --profile qoder-like --ci` 通过，且新增"未解析占位符"检查能对 `${...}` 判 FAIL。
+- [x] `repo-wiki index` 后，`ai/source-of-truth/` 全文检索不到 `node_modules`，核心实体列表无未标注的测试夹具条目（41 个产品模型，`tests` 在诊断中标为 test-harness）。
+- [x] 新增扫描/评分合同测试：`tests/test_source_truth_purity.py` 27 项通过，伪事实用例（`in`/`instanceof`/`dm_sales_facts`）判负。
+- [x] 重生成后 `docs/01-architecture.md` 无 `${...}` 残留，语言/框架为 Python / typer-cli，与 `pyproject.toml` 一致。
+- [x] `repo-wiki verify --ci`（默认 profile）零 hard 失败（WARN，`acceptance_blocked=false`），新增 `unresolved-placeholders` HARD 检查对注入的 `${...}` 判 FAIL。
+- [ ] **移交任务 6**：qoder-like 全链路 `generate → verify --profile qoder-like --ci → release-publish` 通过。
+
+### 验收移交说明（2026-11-23）
+
+原第 4 条要求 qoder-like strict verify 通过，但本仓不存在 READY release（`QODER_META_ROOT_MISSING`）。检查代理在 base commit `665408a` 上复现了同样的 NOT_READY 与相同 reason codes，证明该失败非本任务引入，而是任务 6 的交付缺口（差距报告 G11）。因此本任务以"默认 verify 零 hard 失败 + 新占位符门禁生效"收口，qoder-like 全链路验收由任务 6 承担。未放宽任何既有 strict 阈值。
 
 ## References
 

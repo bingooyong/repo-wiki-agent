@@ -1,6 +1,8 @@
-# repo-wiki - 系统架构
+# repo-wiki-agent - 系统架构
 
-repo-wiki 采用三层架构设计，将运行时存储层、结构化事实层和文档中心层分离。这种设计确保了知识的持久化、可追溯性和可读性的平衡。
+<cite>repo_wiki/cli.py:1</cite>
+
+repo-wiki-agent 采用三层架构设计，将运行时存储层、结构化事实层和文档中心层分离。这种设计确保了知识的持久化、可追溯性和可读性的平衡。
 
 ## 系统分层
 
@@ -71,11 +73,11 @@ graph TB
 
 ## 服务协作关系
 
-系统包含以下核心服务组件：
-- **extensions** (API 服务器): Handles models instanceof, in.
-- **repo_wiki** (API 服务器): Handles API routes /path.
-- **scripts** (API 服务器): Handles exports AcceptanceEvidence, BaselineComparatorConfig.
-- **tests** (API 服务器): Handles API routes /users, /users.
+系统服务组件包括：
+- **Scanner**: 扫描和解析源代码
+- **Indexer**: 构建索引和图谱
+- **Generator**: 生成文档内容
+- **Verifier**: 验证输出质量
 
 ### 服务交互流程
 
@@ -104,8 +106,8 @@ sequenceDiagram
 
 ## 核心链路
 
-**代码扫描**：Scanner 遍历源代码，发现 4 个模块
-**信息提取**：Indexer 从代码中提取 10 个 API 端点、44 个数据模型
+**代码扫描**：Scanner 遍历源代码，发现 8 个模块
+**信息提取**：Indexer 从代码中提取 41 个数据模型
 **状态持久化**：索引状态、图谱关系、向量嵌入分别存储
 **文档生成**：Generator 根据模板和事实数据生成 Markdown
 **质量验证**：Verifier 检查文档结构和引用的有效性
@@ -168,7 +170,13 @@ flowchart TD
 
 ## 增量更新与治理闭环
 
-${incremental_governance}
+系统通过以下机制确保文档与代码的持续同步：
+
+**变更驱动的增量更新**：系统检测代码变更，只重新生成受影响模块的文档，而非全量重建，保证响应速度。
+
+**质量门禁验证**：每次生成后自动执行结构验证，确保文档不仅存在，而且满足最小质量标准（prose 长度、引用完整性、导航有效性）。
+
+**双向追溯能力**：文档中记录了对应的源代码位置，同时源代码注释引用文档路径，形成完整的知识闭环。
 
 ### 增量更新流程
 
@@ -199,16 +207,20 @@ flowchart TD
 
 ## 模块概览
 
-| extensions | core-platform | api-server | Handles models instanceof, in.... |
-| repo_wiki | core-platform | api-server | Handles API routes /path.... |
-| scripts | core-platform | api-server | Handles exports AcceptanceEvidence, BaselineCompar... |
-| tests | core-platform | api-server | Handles API routes /users, /users.... |
+| ai/source-of-truth | source-of-truth | N/A | Curated YAML contracts for repository map, module ... |
+| extensions/repo-wiki-browser | editor-integration | N/A | VS Code/Cursor sidebar and viewer for published RE... |
+| plugins/repo-wiki | agent-integration | N/A | Skills-only Codex plugin that routes repository Wi... |
+| repo_wiki | cli-core | N/A | Typer CLI entry point, configuration loading, orch... |
+| repo_wiki.orchestration | generation-and-release | N/A | Generate qoder-like eval runs, write manifests, di... |
+| repo_wiki.verifier | quality-gates | N/A | Strict qoder-like verification, path comparison, b... |
+| repo_wiki.viewer | ready-release-viewing | N/A | Static viewer and release viewer configuration for... |
+| tests | verification | N/A | Python unit and contract tests for CLI behavior, g... |
 
 ## 技术栈
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
-| 语言 | Javascript | 主要实现语言 |
-| 框架 | express | Web/应用框架 |
+| 语言 | Python | 主要实现语言 |
+| 框架 | typer-cli | Web/应用框架 |
 | 存储 | SQLite | 状态和缓存存储 |
 | 向量 | Chroma | 语义检索向量数据库 |

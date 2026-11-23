@@ -108,8 +108,7 @@ CORE_DOCUMENT_CONTRACTS: tuple[DocumentContract, ...] = (
             "core_data_flow",
             "storage_retrieval_design",
             "incremental_update_governance",
-            "three_layer_diagram",
-            "layer_descriptions",
+            "three_layer_overview",
         ),
         DocumentLayer.OVERVIEW,
     ),
@@ -349,7 +348,7 @@ PROMPT_FRAGMENT_CONTRACTS: tuple[DocumentContract, ...] = (
 TASK_CATALOG_CONTRACT = DocumentContract(
     "task_catalog",
     "task-catalog.yaml.j2",
-    "ai/source-of-truth/task-catalog.yaml",
+    "ai/source-of-truth/task-catalog.generated.yaml",
     ("task_catalog_json",),
 )
 

@@ -1,6 +1,8 @@
 # Project Overview and Getting Started
 
-本节涵盖 core-platform 等 4 个模块的内容。
+<!-- repo-wiki-init-stub -->
+
+本节涵盖 cli-core、generation-and-release、quality-gates 等 3 个模块的内容。
 
 ---
 
@@ -10,55 +12,41 @@
 
 本节介绍 Project Overview and Getting Started 的相关内容。以下模块和组件共同构成了系统的 Project Overview and Getting Started 能力，了解它们有助于深入理解系统设计和实现细节。
 
-- **extensions**: Handles models instanceof, in.
-- **repo_wiki**: Handles API routes /path.
-- **scripts**: Handles exports AcceptanceEvidence, BaselineComparatorConfig.
-- **tests**: Handles API routes /users, /users.
+- **repo_wiki**: Typer CLI entry point, configuration loading, orchestration facade, and public repo-wiki command surface.
+- **repo_wiki.orchestration**: Generate qoder-like eval runs, write manifests, diagnose eval layouts, select latest runs, and publish READY releases.
+- **repo_wiki.verifier**: Strict qoder-like verification, path comparison, baseline registry, parity metrics, and readiness evidence.
 
 ## 模块列表
 
-- **extensions** `extensions`
-  - Handles models instanceof, in.
-  - 域: core-platform
 - **repo_wiki** `repo_wiki`
-  - Handles API routes /path.
-  - 域: core-platform
-- **scripts** `scripts`
-  - Handles exports AcceptanceEvidence, BaselineComparatorConfig.
-  - 域: core-platform
-- **tests** `tests`
-  - Handles API routes /users, /users.
-  - 域: core-platform
+  - Typer CLI entry point, configuration loading, orchestration facade, and public repo-wiki command surface.
+  - 域: cli-core
+- **repo_wiki.orchestration** `repo_wiki/orchestration`
+  - Generate qoder-like eval runs, write manifests, diagnose eval layouts, select latest runs, and publish READY releases.
+  - 域: generation-and-release
+- **repo_wiki.verifier** `repo_wiki/verifier`
+  - Strict qoder-like verification, path comparison, baseline registry, parity metrics, and readiness evidence.
+  - 域: quality-gates
 
 ## API 端点
 
-- **GET** `/path`
-  - repo_wiki.__init__
-- **GET** `/health`
-  - tests.test_endpoint_inherits_module_service_family
-- **GET** `/items`
-  - tests.test_endpoint_inherits_module_service_family
-- **POST** `/items`
-  - tests.test_endpoint_inherits_module_service_family
-- **GET** `/ready`
-  - tests.test_endpoint_inherits_module_service_family
-- **GET** `/status`
-  - tests.test_endpoint_inherits_module_service_family
-- **GET** `/users`
-  - tests.test_endpoint_inherits_module_service_family
-- **GET** `/users`
-  - tests.test_scanner_and_source_of_truth_outputs
-- **POST** `/users`
-  - tests.test_endpoint_inherits_module_service_family
-- **POST** `/webhook/github`
-  - tests.test_endpoint_inherits_module_service_family
+- 暂无 API 端点
 
 ## 相关命令
 
-- `build`: `npm run build`
-- `lint`: `npm run lint`
-- `start`: `npm run start`
-- `test`: `npm run test`
+- `compare_qoder_like`: `repo-wiki compare --target <target-content-dir> --baseline <qoder-baseline-dir> --output <report-dir> --ci`
+- `config`: `repo-wiki config --ci`
+- `cost_estimate`: `repo-wiki cost-estimate`
+- `eval_layout_report`: `repo-wiki eval-layout-report --output .repo-agent-eval`
+- `generate_qoder_like`: `repo-wiki generate --profile qoder-like --output .repo-agent-eval`
+- `graph`: `repo-wiki graph <module>`
+- `index`: `repo-wiki index`
+- `init`: `repo-wiki init`
+- `release_publish`: `repo-wiki release-publish --output .repo-agent-eval`
+- `search`: `repo-wiki search <query>`
+- `sync`: `repo-wiki sync`
+- `update`: `repo-wiki update`
+- `verify_qoder_like`: `repo-wiki verify --profile qoder-like --ci --output .repo-agent-eval`
 
 ---
 

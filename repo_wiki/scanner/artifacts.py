@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from repo_wiki.core.contracts import RepositorySnapshot
-from repo_wiki.generator.io import ensure_dir, write_yamlish
+from repo_wiki.generator.io import ensure_dir, read_yamlish, write_yamlish
 
 _EXCLUDED_SOURCE_OF_TRUTH_PATH_PARTS = {
     "node_modules",
@@ -98,6 +98,13 @@ def write_source_of_truth(root: Path, snapshot: RepositorySnapshot) -> dict[str,
     _validate_snapshot(snapshot)
     ai_dir = root / "ai" / "source-of-truth"
     ensure_dir(ai_dir / "prompt-fragments")
+
+    # GEN-001 (minimal): when the fact layer declares itself curated-current,
+    # scanner conclusions must not silently overwrite curated values. Keep the
+    # curated files and surface disagreements as `source-conflict` diagnostics.
+    existing_repo_map = read_yamlish(ai_dir / "repo-map.yaml", {})
+    curated = _is_curated_repo_map(existing_repo_map)
+    source_conflicts = _curated_source_conflicts(existing_repo_map, snapshot) if curated else []
 
     repo_map = {
         "repository": {
@@ -200,6 +207,11 @@ def write_source_of_truth(root: Path, snapshot: RepositorySnapshot) -> dict[str,
     paths: dict[str, Path] = {}
     for name, payload in outputs.items():
         path = ai_dir / name
+        if curated and name in _CURATED_FACT_FILES and path.exists():
+            # Keep the curated fact file byte-for-byte; conflicts are reported
+            # through classification-diagnostics.json instead of overwriting.
+            paths[name] = path
+            continue
         write_yamlish(path, payload)
         paths[name] = path
 
@@ -217,10 +229,60 @@ def write_source_of_truth(root: Path, snapshot: RepositorySnapshot) -> dict[str,
     paths["prompt-architecture"] = architecture_path
 
     # Generate classification diagnostics
-    diagnostics_path = write_diagnostics_report(root, snapshot)
+    diagnostics_path = write_diagnostics_report(root, snapshot, source_conflicts=source_conflicts)
     paths["classification-diagnostics"] = diagnostics_path
 
     return paths
+
+
+# Fact files protected from scanner overwrite while the fact layer is curated.
+_CURATED_FACT_FILES = {
+    "repo-map.yaml",
+    "module-index.yaml",
+    "api-index.yaml",
+    "data-models.yaml",
+    "task-catalog.yaml",
+}
+
+# Repository fields compared between scanner conclusions and curated values.
+_CURATED_CONFLICT_FIELDS = (
+    ("name", "name"),
+    ("primary_language", "language"),
+    ("framework", "framework"),
+    ("package_manager", "package_manager"),
+)
+
+
+def _is_curated_repo_map(repo_map: Any) -> bool:
+    if not isinstance(repo_map, dict):
+        return False
+    repository = repo_map.get("repository", {})
+    if not isinstance(repository, dict):
+        return False
+    status = str(repository.get("source_of_truth_status", ""))
+    return status.startswith("curated")
+
+
+def _curated_source_conflicts(
+    repo_map: dict[str, Any], snapshot: RepositorySnapshot
+) -> list[dict[str, Any]]:
+    """Record scanner-vs-curated disagreements without overwriting curated values."""
+    repository = repo_map.get("repository", {})
+    conflicts: list[dict[str, Any]] = []
+    for curated_field, scanned_attr in _CURATED_CONFLICT_FIELDS:
+        curated_value = str(repository.get(curated_field, "") or "")
+        scanned_value = str(getattr(snapshot.repository, scanned_attr, "") or "")
+        if curated_value and scanned_value and curated_value != scanned_value:
+            conflicts.append(
+                {
+                    "label": "source-conflict",
+                    "field": f"repository.{curated_field}",
+                    "curated_value": curated_value,
+                    "scanned_value": scanned_value,
+                    "resolution": "kept-curated",
+                }
+            )
+    return conflicts
 
 
 def _validate_snapshot(snapshot: RepositorySnapshot) -> None:
@@ -248,11 +310,16 @@ _LOW_CONFIDENCE_THRESHOLD = 0.3
 _FALLBACK_DIAGNOSTIC_TYPES = ("unknown", "core-platform")
 
 
-def emit_classification_diagnostics(snapshot: RepositorySnapshot) -> dict[str, Any]:
+def emit_classification_diagnostics(
+    snapshot: RepositorySnapshot,
+    source_conflicts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Emit diagnostics for low-confidence or fallback classifications.
 
     Returns a dictionary with diagnostic information about modules that have
-    low confidence scores or are using fallback classifications.
+    low confidence scores or are using fallback classifications. When the fact
+    layer is curated, ``source_conflicts`` carries GEN-001 `source-conflict`
+    records for scanner conclusions that disagree with curated values.
     """
     diagnostics: dict[str, Any] = {
         "total_modules": len(snapshot.modules),
@@ -260,10 +327,12 @@ def emit_classification_diagnostics(snapshot: RepositorySnapshot) -> dict[str, A
         "fallback_classifications": [],
         "service_family_coverage": {},
         "runtime_role_coverage": {},
+        "source_conflicts": list(source_conflicts or []),
         "summary": {
             "high_confidence_count": 0,
             "low_confidence_count": 0,
             "fallback_count": 0,
+            "source_conflict_count": len(source_conflicts or []),
         },
     }
 
@@ -340,12 +409,16 @@ def _get_fallback_suggestion(module: Any) -> str:
     return "|".join(suggestions) if suggestions else "no-obvious-signals"
 
 
-def write_diagnostics_report(root: Path, snapshot: RepositorySnapshot) -> Path:
+def write_diagnostics_report(
+    root: Path,
+    snapshot: RepositorySnapshot,
+    source_conflicts: list[dict[str, Any]] | None = None,
+) -> Path:
     """Write a diagnostics report for classification analysis.
 
     Returns the path to the written diagnostics file.
     """
-    diagnostics = emit_classification_diagnostics(snapshot)
+    diagnostics = emit_classification_diagnostics(snapshot, source_conflicts=source_conflicts)
     ai_dir = root / "ai" / "source-of-truth"
     ensure_dir(ai_dir)
 

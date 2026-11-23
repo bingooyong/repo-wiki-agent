@@ -320,7 +320,7 @@ class RepositoryScanner:
         if name == "auto":
             name = self.root.name
         language = self._detect_language(scanned_files)
-        framework = self._detect_framework(scanned_files)
+        framework = self._detect_framework(scanned_files, language)
         package_manager = self._detect_package_manager()
         entry_points = self._detect_entry_points(scanned_files, commands)
         key_directories = sorted(
@@ -341,6 +341,21 @@ class RepositoryScanner:
         )
 
     def _detect_language(self, files: list[ScannedFile]) -> str:
+        """Detect the primary language, package config first (GEN-001 / D4).
+
+        Root-level package manifests outrank extension counting so a polyglot
+        repo is labeled by its declared package config, not by file volume.
+        """
+        root_names = {f.path.name for f in files if len(f.path.parts) == 1}
+        if "go.mod" in root_names:
+            return "go"
+        if "pyproject.toml" in root_names or "setup.py" in root_names:
+            return "python"
+        if "package.json" in root_names:
+            return "typescript" if "tsconfig.json" in root_names else "javascript"
+        if "requirements.txt" in root_names:
+            return "python"
+
         counters = {"python": 0, "typescript": 0, "javascript": 0, "go": 0}
         for file in files:
             suffix = file.path.suffix.lower()
@@ -355,23 +370,82 @@ class RepositoryScanner:
         language, count = max(counters.items(), key=lambda item: item[1])
         return language if count > 0 else "unknown"
 
-    def _detect_framework(self, files: list[ScannedFile]) -> str:
-        content = "\n".join(
-            f.text
+    # Manifest trees that must never decide product language/framework facts.
+    _NON_PRODUCT_MANIFEST_DIRS = {
+        "node_modules",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        "tests",
+        "test",
+        "fixtures",
+        "fixture",
+        "examples",
+        "example",
+    }
+
+    def _product_manifests(self, files: list[ScannedFile], names: set[str]) -> list[ScannedFile]:
+        """Manifest files from product trees; root-level manifests win if present."""
+        candidates = [
+            f
             for f in files
-            if f.path.name in {"package.json", "pyproject.toml", "requirements.txt", "go.mod"}
-        )
-        framework_signals = {
-            "nestjs": ("@nestjs",),
-            "express": ("express",),
-            "fastify": ("fastify",),
-            "fastapi": ("fastapi",),
-            "flask": ("flask",),
-            "gin": ("gin-gonic/gin",),
-            "fiber": ("gofiber/fiber",),
-        }
+            if f.path.name in names
+            and not (set(f.path.parts) & self._NON_PRODUCT_MANIFEST_DIRS)
+        ]
+        root_level = [f for f in candidates if len(f.path.parts) == 1]
+        return root_level or candidates
+
+    def _detect_framework(self, files: list[ScannedFile], language: str) -> str:
+        """Detect the framework from manifests scoped to the primary language (D4).
+
+        Cross-language manifests must never decide the framework: an `express`
+        devDependency in package.json cannot label a Python repo as express.
+        Test-fixture manifests are excluded so fixture deps (e.g. fastapi in
+        tests/fixtures) cannot label the product framework.
+        """
+        if language == "python":
+            content = "\n".join(
+                f.text
+                for f in self._product_manifests(files, {"pyproject.toml", "requirements.txt"})
+            ).lower()
+            framework_signals = {
+                "fastapi": ("fastapi",),
+                "flask": ("flask",),
+                "django": ("django",),
+                "typer": ("typer",),
+            }
+        elif language in {"javascript", "typescript"}:
+            # Only runtime dependencies declare the application framework;
+            # devDependencies (tooling, test servers) are not framework facts.
+            dependency_names: list[str] = []
+            for f in self._product_manifests(files, {"package.json"}):
+                try:
+                    data = json.loads(f.text)
+                except json.JSONDecodeError:
+                    continue
+                deps = data.get("dependencies", {})
+                if isinstance(deps, dict):
+                    dependency_names.extend(str(name).lower() for name in deps)
+            content = "\n".join(dependency_names)
+            framework_signals = {
+                "nestjs": ("@nestjs",),
+                "express": ("express",),
+                "fastify": ("fastify",),
+            }
+        elif language == "go":
+            content = "\n".join(
+                f.text for f in self._product_manifests(files, {"go.mod"})
+            ).lower()
+            framework_signals = {
+                "gin": ("gin-gonic/gin",),
+                "fiber": ("gofiber/fiber",),
+            }
+        else:
+            return "unknown"
+
         for framework, hints in framework_signals.items():
-            if any(hint in content.lower() for hint in hints):
+            if any(hint in content for hint in hints):
                 return framework
         return "unknown"
 

@@ -23,6 +23,7 @@
 - [ ] manifest 状态面板与页面徽标数据来自真实 manifest，不编造字段。
 - [ ] 引用跳转到正确文件与行号；失效引用有提示。
 - [ ] README 与文档术语一致；Cursor 兼容性冒烟通过。
+- [ ] **（由任务 2 移交，2026-11-23）** 本仓 qoder-like 全链路 `generate --profile qoder-like → verify --profile qoder-like --ci → release-publish` 通过，`.repo-agent-eval/repowiki/zh/manifest.json` 存在且为 READY，关闭差距报告 G11（`QODER_META_ROOT_MISSING`）。任务 2 已证明该失败在 base commit `665408a` 同样存在，非事实源净化引入。
 
 ## References
 

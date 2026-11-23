@@ -20,6 +20,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
 | [Baseline Registry](./baseline-registry.md) | Read-only external Qoder baselines: registry format, fingerprint algorithm, metrics, compare limits | Active |
+| [Docs Generation Purity](./docs-generation-purity.md) | Template/context contract, cache invalidation, curated-content protection, core-entity scoring, placeholder gate | Active |
 
 ---
 

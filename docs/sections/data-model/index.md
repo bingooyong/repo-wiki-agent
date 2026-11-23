@@ -1,6 +1,8 @@
 # Data Models and Persistence
 
-本节涵盖 core-platform 等 3 个模块的内容。
+<!-- repo-wiki-init-stub -->
+
+本节涵盖 cli-core、generation-and-release、quality-gates 等 3 个模块的内容。
 
 ---
 
@@ -10,57 +12,39 @@
 
 本节介绍系统的数据模型设计。数据模型是系统状态管理的核心，定义了实体结构、关系约束和数据访问模式。良好的数据模型设计能够提高系统的一致性和可维护性。
 
-**核心模型**: 核心模型是系统的基础数据结构，定义跨模块共享的实体类型。
-
-**识别出 44 个核心实体**：
-
-- **in** (ts_definition)
-  - 所属模块: repo_wiki, tests, extensions
-  - 核心评分: 18.0 (被 3 个模块共享 + 核心域 core-platform + API 参数类型 + API 参数类型 + API 参数类型 + API 参数...
-
 **服务模型**: 本节涵盖 3 个服务模块的数据模型。
 
 ## 模块列表
 
-- **extensions** `extensions`
-  - Handles models instanceof, in.
-  - 域: core-platform
 - **repo_wiki** `repo_wiki`
-  - Handles API routes /path.
-  - 域: core-platform
-- **scripts** `scripts`
-  - Handles exports AcceptanceEvidence, BaselineComparatorConfig.
-  - 域: core-platform
+  - Typer CLI entry point, configuration loading, orchestration facade, and public repo-wiki command surface.
+  - 域: cli-core
+- **repo_wiki.orchestration** `repo_wiki/orchestration`
+  - Generate qoder-like eval runs, write manifests, diagnose eval layouts, select latest runs, and publish READY releases.
+  - 域: generation-and-release
+- **repo_wiki.verifier** `repo_wiki/verifier`
+  - Strict qoder-like verification, path comparison, baseline registry, parity metrics, and readiness evidence.
+  - 域: quality-gates
 
 ## API 端点
 
-- **GET** `/path`
-  - repo_wiki.__init__
-- **GET** `/health`
-  - tests.test_endpoint_inherits_module_service_family
-- **GET** `/items`
-  - tests.test_endpoint_inherits_module_service_family
-- **POST** `/items`
-  - tests.test_endpoint_inherits_module_service_family
-- **GET** `/ready`
-  - tests.test_endpoint_inherits_module_service_family
-- **GET** `/status`
-  - tests.test_endpoint_inherits_module_service_family
-- **GET** `/users`
-  - tests.test_endpoint_inherits_module_service_family
-- **GET** `/users`
-  - tests.test_scanner_and_source_of_truth_outputs
-- **POST** `/users`
-  - tests.test_endpoint_inherits_module_service_family
-- **POST** `/webhook/github`
-  - tests.test_endpoint_inherits_module_service_family
+- 暂无 API 端点
 
 ## 相关命令
 
-- `build`: `npm run build`
-- `lint`: `npm run lint`
-- `start`: `npm run start`
-- `test`: `npm run test`
+- `compare_qoder_like`: `repo-wiki compare --target <target-content-dir> --baseline <qoder-baseline-dir> --output <report-dir> --ci`
+- `config`: `repo-wiki config --ci`
+- `cost_estimate`: `repo-wiki cost-estimate`
+- `eval_layout_report`: `repo-wiki eval-layout-report --output .repo-agent-eval`
+- `generate_qoder_like`: `repo-wiki generate --profile qoder-like --output .repo-agent-eval`
+- `graph`: `repo-wiki graph <module>`
+- `index`: `repo-wiki index`
+- `init`: `repo-wiki init`
+- `release_publish`: `repo-wiki release-publish --output .repo-agent-eval`
+- `search`: `repo-wiki search <query>`
+- `sync`: `repo-wiki sync`
+- `update`: `repo-wiki update`
+- `verify_qoder_like`: `repo-wiki verify --profile qoder-like --ci --output .repo-agent-eval`
 
 ---
 

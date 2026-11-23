@@ -48,6 +48,7 @@ class SeverityThreshold:
             "STRUCT_NAV_BAD_DEPTH",
             "STRUCT_NAV_TARGET_MISSING",
             "CONTENT_EMPTY",
+            "CONTENT_UNRESOLVED_PLACEHOLDER",  # Unresolved ${...} placeholders are hard gate
             "CITATION_SOURCE_EMPTY",  # Empty source blocks are hard gate
         }
         # Default SOFT gate codes: quality issues
@@ -139,6 +140,9 @@ class ReasonCode:
     CONTENT_LIST_ONLY = "CONTENT_LIST_ONLY"  # 1002: Document is primarily list/table, no prose
     CONTENT_TOO_SHORT = "CONTENT_TOO_SHORT"  # 1003: Document below minimum prose length
     CONTENT_MISSING_SECTIONS = "CONTENT_MISSING_SECTIONS"  # 1004: Missing required sections
+    CONTENT_UNRESOLVED_PLACEHOLDER = (
+        "CONTENT_UNRESOLVED_PLACEHOLDER"  # 1005: Generated doc still contains ${...}
+    )
 
     # Structure quality codes (2xxx)
     STRUCT_MISSING_SECTIONS = (
@@ -222,6 +226,7 @@ class VerifierService:
         checks.append(self._check_api_module_cross_refs())
         checks.append(self._check_data_model_refs())
         checks.append(self._check_stale_docs())
+        checks.append(self._check_unresolved_placeholders())
         checks.append(self._check_adapter_paths())
 
         # Phase 08: Content quality checks
@@ -497,6 +502,55 @@ class VerifierService:
             message="No stale docs detected.",
             details={},
             gate_type=GateType.SOFT,
+        )
+
+    # Unresolved template placeholders (${...}) must never reach generated docs.
+    PLACEHOLDER_PATTERN = re.compile(r"\$\{[^{}\n]+\}")
+    _FENCED_CODE_BLOCK = re.compile(r"```.*?```", re.DOTALL)
+    _INLINE_CODE = re.compile(r"`[^`\n]*`")
+
+    def _check_unresolved_placeholders(self) -> CheckResult:
+        """HARD gate: generated docs must not contain unresolved ${...} placeholders."""
+        docs_dir = self.root / "docs"
+        targets: list[Path] = []
+        if docs_dir.exists():
+            targets.extend(sorted(docs_dir.glob("0*.md")))
+            targets.extend(sorted((docs_dir / "modules").glob("*.md")))
+            targets.extend(sorted((docs_dir / "sections").glob("*/index.md")))
+
+        unresolved: list[dict[str, Any]] = []
+        for path in targets:
+            text = read_text(path)
+            # Blank out fenced code blocks (preserving line numbers) and inline
+            # code so legitimate shell/code samples are not flagged.
+            scannable = self._FENCED_CODE_BLOCK.sub(
+                lambda m: "\n" * m.group(0).count("\n"), text
+            )
+            scannable = self._INLINE_CODE.sub("", scannable)
+            for match in self.PLACEHOLDER_PATTERN.finditer(scannable):
+                unresolved.append(
+                    {
+                        "path": path.relative_to(self.root).as_posix(),
+                        "line": scannable[: match.start()].count("\n") + 1,
+                        "placeholder": match.group(0),
+                    }
+                )
+
+        if unresolved:
+            return CheckResult(
+                name="unresolved-placeholders",
+                status="FAIL",
+                message="Generated docs contain unresolved template placeholders.",
+                details={"unresolved_placeholders": unresolved},
+                reason_code=ReasonCode.CONTENT_UNRESOLVED_PLACEHOLDER,
+                gate_type=GateType.HARD,
+            )
+        return CheckResult(
+            name="unresolved-placeholders",
+            status="PASS",
+            message="No unresolved template placeholders in generated docs.",
+            details={"scanned_files": len(targets)},
+            gate_type=GateType.HARD,
         )
 
     def _check_adapter_paths(self) -> CheckResult:
